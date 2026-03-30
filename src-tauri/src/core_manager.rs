@@ -993,6 +993,7 @@ fn get_machine_key() -> Vec<u8> {
     // Collect system machine ID
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         if let Ok(hklm) = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
             .open_subkey("SOFTWARE\\Microsoft\\Cryptography") {
             if let Ok(guid) = hklm.get_value::<String, _>("MachineGuid") {
@@ -1003,6 +1004,7 @@ fn get_machine_key() -> Vec<u8> {
         // This adds another factor that changes if the system is cloned
         if let Ok(output) = std::process::Command::new("cmd")
             .args(&["/C", "vol C:"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output() 
         {
             let vol_output = String::from_utf8_lossy(&output.stdout);
