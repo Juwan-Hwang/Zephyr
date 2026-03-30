@@ -182,6 +182,8 @@ export const translations = {
         profilesImported: "Successfully imported {count} profile(s)",
         cannotDeleteActive: "Cannot delete the active configuration",
         confirmDelete: "Are you sure you want to delete this configuration?",
+        githubHomepage: "GitHub Homepage",
+        githubHomepageDesc: "Star & Contribute",
     },
     zh: {
         home: "首页",
@@ -366,5 +368,7 @@ export const translations = {
         profilesImported: "成功导入 {count} 个配置文件",
         cannotDeleteActive: "无法删除当前使用的配置文件",
         confirmDelete: "确定要删除此配置文件吗？",
+        githubHomepage: "GitHub 主页",
+        githubHomepageDesc: "Star 与贡献",
     }
 };

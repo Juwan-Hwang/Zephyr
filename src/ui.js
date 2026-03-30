@@ -1752,6 +1752,13 @@ export async function initSettings() {
         };
     }
 
+    const gotoGithubBtn = document.getElementById('btn-goto-github');
+    if (gotoGithubBtn) {
+        gotoGithubBtn.onclick = () => {
+            window.__TAURI__.opener.openUrl('https://github.com/Juwan-Hwang/Zephyr');
+        };
+    }
+
     if (backSettingsBtn) {
         backSettingsBtn.onclick = () => {
             switchPage('settings');
