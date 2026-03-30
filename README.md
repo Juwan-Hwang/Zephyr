@@ -17,29 +17,11 @@
 
 ---
 
-<!--
-========================================
- 📸 SCREENSHOTS SECTION
- Add your screenshots here!
-========================================
--->
-
 ## 📸 Screenshots
 
-<!--
-Replace the placeholders below with your actual screenshots.
-Recommended format: PNG or WebP, 1280x720 or similar resolution.
-
-| Light Mode | Dark Mode |
-|:----------:|:---------:|
-| ![Light Mode](screenshots/light.png) | ![Dark Mode](screenshots/dark.png) |
-
-| Home Page | Proxy Selection | Settings |
-|:---------:|:---------------:|:--------:|
-| ![Home](screenshots/home.png) | ![Proxies](screenshots/proxies.png) | ![Settings](screenshots/settings.png) |
--->
-
-> **Note:** Add your screenshots to a `screenshots/` folder and update the image paths above.
+| 主页 | 设置 | 深色模式 |
+|:---:|:---:|:---:|
+| ![Home](assets/screenshot-home.png) | ![Settings](assets/screenshot-settings.png) | ![Dark](assets/screenshot-dark.png) |
 
 ---
 
