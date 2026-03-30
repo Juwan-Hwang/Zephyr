@@ -1,0 +1,53 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Core data (contains credentials, configs, binaries, cache)
+core/
+# Runtime generated
+run_config.yaml
+*.db
+# Environment
+.env
+.env.local
+
+# Rust build artifacts
+target/
+
+# OS specific files
+Thumbs.db
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+
+# Tauri build output
+src-tauri/target/
+
+# Installer files (should not be in repo)
+rustup-init.exe
+
+# Qoder/CatPaw IDE settings
+.qoder/

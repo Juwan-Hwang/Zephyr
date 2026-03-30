@@ -1,0 +1,297 @@
+/* 隐藏滚动条 */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  scrollbar-width: none;
+}
+
+@import "tailwindcss";
+
+@config "../tailwind.config.js";
+
+/* 极简滚动动画 */
+@keyframes text-scroll {
+    0% { transform: translateX(0); }
+    15% { transform: translateX(0); }
+    85% { transform: translateX(calc(-100% + 120px)); }
+    100% { transform: translateX(calc(-100% + 120px)); }
+}
+
+button, 
+[role="button"], 
+input[type="checkbox"], 
+input[type="range"],
+.cursor-pointer {
+    cursor: pointer !important;
+}
+
+.scrolling-text-container {
+    overflow: hidden;
+    mask-image: linear-gradient(to right, black 80%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+}
+
+.scrolling-text {
+    display: inline-block;
+    white-space: nowrap;
+    padding-right: 20px;
+}
+
+.group:hover .scrolling-text {
+    animation: text-scroll 4s linear infinite alternate;
+}
+
+@theme {
+  --color-accent: var(--accent-primary);
+  --color-accent-glow: var(--accent-glow);
+}
+
+:root {
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #0a0a0a;
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --border-primary: rgba(255, 255, 255, 0.08); /* 更柔和的边框 */
+  --app-opacity: 0.6; /* Main window background opacity (0.0 - 1.0) */
+  --accent-primary: #8b5cf6;
+  --accent-glow: rgba(139, 92, 246, 0.2);
+  --transition-fast: 0.4s cubic-bezier(0.16, 1, 0.3, 1); /* 苹果经典的 spring 曲线替代品 */
+  --radius-lg: 24px; /* 更圆润的苹果风格卡片圆角 */
+}
+
+/* 隐藏数字输入框默认的上下箭头 */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield; /* Firefox */
+}
+body.theme-blue { --color-accent: #0A84FF; --color-accent-glow: rgba(10, 132, 255, 0.2); }
+body.theme-green { --color-accent: #34C759; --color-accent-glow: rgba(52, 199, 89, 0.2); }
+body.theme-orange { --color-accent: #FF9500; --color-accent-glow: rgba(255, 149, 0, 0.2); }
+body.theme-pink { --color-accent: #FF2D55; --color-accent-glow: rgba(255, 45, 85, 0.2); }
+body.theme-purple { --color-accent: #8b5cf6; --color-accent-glow: rgba(139, 92, 246, 0.2); }
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 24px -8px rgba(0, 0, 0, 0.2);
+  transition: all var(--transition-fast);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px); /* 轻微浮动增加物理感 */
+}
+
+.movie-card-base {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+  will-change: transform;
+}
+
+/* iOS Switch Component */
+.ios-switch { 
+    position: relative; 
+    display: inline-block; 
+    flex-shrink: 0;
+} 
+.ios-switch input { 
+    opacity: 0; 
+    width: 0; 
+    height: 0; 
+} 
+.switch-slider { 
+    position: absolute; 
+    cursor: pointer; 
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    bottom: 0; 
+    background-color: rgba(120, 120, 128, 0.36); 
+    transition: .4s cubic-bezier(0.2, 0.8, 0.2, 1); 
+    border-radius: 9999px; 
+} 
+.switch-slider:before { 
+    position: absolute; 
+    content: ""; 
+    background-color: white; 
+    transition: .4s cubic-bezier(0.2, 0.8, 0.2, 1); 
+    border-radius: 50%; 
+    box-shadow: 0px 1px 3px rgba(0,0,0,0.2), 0px 1px 2px rgba(0,0,0,0.1); 
+} 
+input:checked + .switch-slider { 
+    background-color: var(--color-accent); 
+} 
+
+/* Default/Medium size (like the original settings switch: w-10 h-5.5) */
+.ios-switch {
+    width: 40px; 
+    height: 22px; 
+}
+.switch-slider:before {
+    height: 18px; 
+    width: 18px; 
+    left: 2px; 
+    bottom: 2px; 
+}
+input:checked + .switch-slider:before { 
+    transform: translateX(18px); 
+}
+
+/* Large size (like the original proxy status switch: w-12 h-6.5) */
+.ios-switch.switch-lg {
+    width: 48px;
+    height: 26px;
+}
+.ios-switch.switch-lg .switch-slider:before {
+    height: 22px;
+    width: 22px;
+    left: 2px;
+    bottom: 2px;
+}
+.ios-switch.switch-lg input:checked + .switch-slider:before {
+    transform: translateX(22px);
+}
+
+/* Small size (if needed) */
+.ios-switch.switch-sm {
+    width: 32px;
+    height: 18px;
+}
+.ios-switch.switch-sm .switch-slider:before {
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+}
+.ios-switch.switch-sm input:checked + .switch-slider:before {
+    transform: translateX(14px);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Main container background driven by theme + opacity variable */
+#app-main-container {
+  background-color: rgb(255 255 255 / var(--app-opacity, 0.6));
+}
+
+html.dark #app-main-container {
+  background-color: rgb(9 9 11 / var(--app-opacity, 0.6));
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+html.dark #app-main-container > div:first-child {
+  background: linear-gradient(180deg, rgba(24, 24, 28, 0.7), rgba(15, 15, 18, 0.78)) !important;
+  border-right-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark [data-tauri-drag-region] {
+  background: linear-gradient(180deg, rgba(36, 36, 42, 0.52), rgba(19, 19, 23, 0.42)) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .glass-card {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+html.dark .glass-card:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* Left-top title icon: keep original colors (we swap src in JS) */
+#app-title-icon {
+  filter: drop-shadow(0 0 8px var(--color-accent-glow));
+}
+
+html:not(.dark) #app-main-container {
+  background-color: rgb(248 250 252 / var(--app-opacity, 0.4));
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
+}
+
+html:not(.dark) .glass-card {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 16px -4px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+html:not(.dark) .glass-card:hover {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html:not(.dark) .bg-black\/20,
+html:not(.dark) .bg-black\/40,
+html:not(.dark) .bg-white\/5,
+html:not(.dark) .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+
+html:not(.dark) .border-white\/5,
+html:not(.dark) .border-white\/10 {
+  border-color: rgba(30, 41, 59, 0.14) !important;
+}
+
+html:not(.dark) .ring-white\/20 {
+  --tw-ring-color: rgba(30, 41, 59, 0.2) !important;
+}
+
+/* Explicit text color overrides for Light Mode */
+html:not(.dark) .text-white {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-zinc-100 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-zinc-200 {
+  color: #1e293b !important;
+}
+
+html:not(.dark) .text-zinc-300 {
+  color: #334155 !important;
+}
+
+html:not(.dark) .text-zinc-400 {
+  color: #475569 !important;
+}
+
+html:not(.dark) .text-zinc-500 {
+  color: #64748b !important;
+}
+
+html:not(.dark) .text-zinc-600 {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) #setting-lang-menu {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(30, 41, 59, 0.16) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}

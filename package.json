@@ -1,0 +1,23 @@
+{
+  "name": "Zephyr",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "build:css": "tailwindcss -i src/styles.css -o src/tailwind.css --minify",
+    "dev:css": "tailwindcss -i src/styles.css -o src/tailwind.css --watch",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.2.2",
+    "@tauri-apps/cli": "2.10.1",
+    "eslint": "^10.1.0",
+    "tailwindcss": "4.2.2",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-autostart": "2.5.1"
+  }
+}

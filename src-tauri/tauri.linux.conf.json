@@ -1,0 +1,11 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "decorations": true,
+        "transparent": false
+      }
+    ]
+  }
+}

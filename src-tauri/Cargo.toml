@@ -1,0 +1,49 @@
+[package]
+name = "Zephyr"
+version = "0.1.0"
+description = "A modern Mihomo GUI client"
+authors = ["Zephyr Team"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "my_clash_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate", "blocking"] }
+zip = "2.2"
+flate2 = "1"
+tar = "0.4"
+futures-util = "0.3"
+tempfile = "3"
+rand = "0.8"
+base64 = "0.22"
+serde_yaml = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+tauri-plugin-dialog = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_NetworkManagement_IpHelper", "Win32_System_Registry", "Win32_Networking_WinHttp", "Win32_Networking_WinInet"] }
+winreg = "0.52"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS specific dependencies will be added as needed
+# Currently using only std::process::Command for networksetup
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux specific dependencies will be added as needed
+# Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE

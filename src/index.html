@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="bg-transparent h-screen w-screen overflow-hidden">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zephyr</title>
+    <link rel="stylesheet" href="tailwind.css" />
+    <script defer src="js-yaml.min.js"></script>
+    <script type="module" src="main.js" defer></script>
+</head>
+<body class="bg-transparent h-screen w-screen overflow-hidden select-none">
+    <div id="core-loading-overlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-transparent opacity-0 pointer-events-none transition-all duration-500 pt-8 mt-12">
+        <div id="core-loading-panel" class="relative w-[min(560px,calc(100vw-48px))] rounded-[32px] border border-white/15 bg-black/60 px-8 py-9 shadow-[0_30px_120px_rgba(0,0,0,0.35)] ring-1 ring-white/10 backdrop-blur-3xl transition-all duration-500">
+            <div class="mb-8 flex items-center justify-between gap-4">
+                <div>
+                    <span id="core-loading-badge" class="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold tracking-[0.3em] text-zinc-300 uppercase" data-i18n="coreInitBadge">核心初始化中</span>
+                    <h1 class="mt-4 text-3xl font-light tracking-tight text-white" data-i18n="coreInitTitle">Zephyr 正在准备 Mihomo 核心</h1>
+                    <p class="mt-2 text-sm leading-6 text-zinc-300/85" data-i18n="coreInitDesc">首次启动将自动完成检测、下载、解压与初始化，稍候即可进入主界面。</p>
+                </div>
+                <div class="relative flex h-20 w-20 shrink-0 items-center justify-center">
+                    <div class="absolute inset-0 rounded-full border border-white/10 bg-white/5 shadow-inner"></div>
+                    <div class="absolute inset-2 rounded-full border border-white/10 border-t-white/80 animate-spin"></div>
+                    <img src="app-icon.png" alt="Zephyr" id="core-loading-icon" class="relative h-10 w-10 rounded-2xl object-cover opacity-95 drop-shadow-[0_0_18px_rgba(255,255,255,0.28)]">
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div class="flex items-center justify-between gap-4">
+                    <p id="core-loading-status" class="text-sm font-medium tracking-wide text-zinc-100">正在准备核心...</p>
+                    <span id="core-loading-percent" class="text-sm font-semibold tabular-nums text-white">0%</span>
+                </div>
+                <div class="relative h-3 overflow-hidden rounded-full border border-white/10 bg-black/25">
+                    <div class="absolute inset-0 bg-gradient-to-r from-white/5 via-white/10 to-white/5"></div>
+                    <div id="core-loading-progress" class="absolute left-0 top-0 h-full w-0 rounded-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 shadow-[0_0_24px_rgba(168,85,247,0.45)] transition-all duration-500 ease-out"></div>
+                    <div id="core-loading-progress-glow" class="absolute top-1/2 h-6 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/35 blur-2xl transition-all duration-500 ease-out"></div>
+                </div>
+                <div class="flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-zinc-400">
+                    <span data-i18n="mirrorFallback">Mirror Fallback</span>
+                    <span data-i18n="autoBootstrap">Auto Bootstrap</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="app-main-container" class="w-full h-full bg-transparent flex overflow-hidden border border-white/10 ring-1 ring-black/20 transition-all duration-300">
+        <!-- Sidebar -->
+        <div class="w-20 flex flex-col items-center py-8 bg-black/20 border-r border-white/5 gap-8">
+            <div data-nav="home" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 bg-white/10 text-white shadow-lg ring-1 ring-white/20" title="Home">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                <span class="sr-only" data-i18n="home">Home</span>
+            </div>
+            <div data-nav="proxies" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Proxies">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <span class="sr-only" data-i18n="proxies">Proxies</span>
+            </div>
+            <div data-nav="subscriptions" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Subscriptions">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></svg>
+                <span class="sr-only" data-i18n="subscriptions">Subscriptions</span>
+            </div>
+            <div data-nav="rules" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Rules">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h10"/></svg>
+                <span class="sr-only" data-i18n="rules">Rules</span>
+            </div>
+            <div class="flex-1"></div>
+            <div data-nav="settings" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Settings">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span class="sr-only" data-i18n="settings">Settings</span>
+            </div>
+        </div>
+
+        <!-- Main Area -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <!-- Title Bar -->
+            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-4 select-none cursor-grab active:cursor-grabbing border-b border-white/5 bg-white/5">
+                <div class="flex items-center gap-2 pointer-events-none">
+                    <img src="app-icon.png" id="app-title-icon" alt="Icon" class="w-5 h-5 opacity-90 filter drop-shadow-[0_0_8px_var(--color-accent-glow)] transition-all duration-300">
+                    <span class="text-xs font-semibold text-zinc-300 tracking-wide">Zephyr</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="close-btn" class="group flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57]/80 transition-all shadow-sm">
+                        <svg class="opacity-0 group-hover:opacity-100 w-2 h-2 text-black/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div data-page="home" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar relative">
+                <!-- Background Glow -->
+                <div class="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full"></div>
+                
+                <div class="flex flex-col items-center justify-center py-12 relative z-10">
+                    <!-- Current Node Display (Interactive Wheel) -->
+                    <div id="node-wheel-container" class="absolute top-0 left-0 right-0 flex justify-center z-50 perspective-1000 h-8 mt-2">
+                        <div id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 flex items-center gap-2 backdrop-blur-md cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:bg-white/10 hover:shadow-[0_4px_20px_rgba(0,0,0,0.2)] z-20">
+                            <div class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_var(--color-accent-glow)]"></div>
+                            <span id="current-node-name" class="text-xs text-zinc-200 font-semibold tracking-wide truncate max-w-[180px]">Loading...</span>
+                        </div>
+                        
+                        <!-- Wheel Dropdown -->
+                        <div id="node-wheel-dropdown" class="absolute top-[14px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                            <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto custom-scrollbar" style="scroll-snap-type: y mandatory; scroll-behavior: smooth;">
+                                <div id="node-wheel-padding-top" style="height: 56px;"></div>
+                                <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
+                                    <!-- Node capsules will be inserted here -->
+                                </div>
+                                <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-24 mb-4">
+                        <!-- Downstream -->
+                        <div class="flex flex-col items-center group cursor-default w-[160px]">
+                            <span class="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] mb-3 group-hover:text-accent transition-colors" data-i18n="downstream">Downstream</span>
+                            <div class="flex items-baseline justify-center w-full gap-1.5">
+                                <span id="speed-down-val" class="text-[64px] font-extralight text-zinc-100 tabular-nums tracking-tighter leading-none">0.00</span>
+                                <span id="speed-down-unit" class="text-xs font-semibold text-zinc-500 whitespace-nowrap uppercase tracking-widest">KB/s</span>
+                            </div>
+                        </div>
+
+                        <!-- Divider -->
+                        <div class="w-px h-16 bg-gradient-to-b from-transparent via-white/10 to-transparent"></div>
+
+                        <!-- Upstream -->
+                        <div class="flex flex-col items-center group cursor-default w-[160px]">
+                            <span class="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] mb-3 group-hover:text-accent transition-colors" data-i18n="upstream">Upstream</span>
+                            <div class="flex items-baseline justify-center w-full gap-1.5">
+                                <span id="speed-up-val" class="text-[64px] font-extralight text-zinc-100 tabular-nums tracking-tighter leading-none">0.00</span>
+                                <span id="speed-up-unit" class="text-xs font-semibold text-zinc-500 whitespace-nowrap uppercase tracking-widest">KB/s</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- System Proxy Toggle -->
+                <div class="glass-card p-5 flex items-center justify-between mb-2 relative z-10 group hover:translate-y-[-2px] transition-all duration-300">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-[18px] bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-inner">
+                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-sm font-bold text-zinc-100 tracking-tight" data-i18n="sysProxy">System Proxy Control</h3>
+                            </div>
+                            <p class="text-[11px] text-zinc-500 font-medium" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
+                        </div>
+                    </div>
+                    <label class="ios-switch switch-lg">
+    <input type="checkbox" id="sys-proxy-toggle">
+    <span class="switch-slider"></span>
+</label>
+                </div>
+
+                <!-- Removed DNS Rewrite from here -->
+
+                <!-- Detailed System Proxy Settings (Removed as requested) -->
+
+                <div class="grid grid-cols-2 gap-2 pb-2">
+                    <!-- Proxy Mode Selector -->
+                    <div class="glass-card p-4 relative z-10 group hover:translate-y-[-2px] transition-all duration-300">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="w-8 h-8 rounded-[12px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            </div>
+                            <h3 class="text-xs font-bold text-zinc-100 tracking-tight" data-i18n="mode">Proxy Mode</h3>
+                        </div>
+                        <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/40 rounded-xl border border-white/5 h-9 transition-all duration-300">
+                            <div id="mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-white/10 backdrop-blur-md rounded-lg shadow-sm border border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
+                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="rule">Rule</button>
+                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="global">Global</button>
+                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="direct">Direct</button>
+                        </div>
+                    </div>
+
+                    <!-- TUN Mode Toggle -->
+                    <div class="glass-card p-4 flex flex-col justify-between relative z-10 group hover:translate-y-[-2px] transition-all duration-300">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-[12px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                </div>
+                                <h3 class="text-xs font-bold text-zinc-100 tracking-tight" data-i18n="tunMode">TUN Mode</h3>
+                            </div>
+                            <label class="ios-switch">
+    <input type="checkbox" id="tun-proxy-toggle">
+    <span class="switch-slider"></span>
+</label>
+                        </div>
+                        <div class="mt-auto pl-1 flex items-center gap-2">
+                            <div id="tun-spinner" class="hidden w-2.5 h-2.5 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
+                            <p class="text-[10px] text-zinc-500 font-medium transition-colors" id="tun-status-text" data-i18n="virtualAdapter">Virtual Adapter</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex-1 relative glass-card p-6 overflow-hidden min-h-[160px] flex flex-col">
+                    <div class="flex items-center justify-between mb-4 shrink-0">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full bg-accent animate-pulse"></div>
+                            <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest" data-i18n="traffic">Real-time Traffic</span>
+                        </div>
+                        
+                        <!-- Legend -->
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-sm bg-purple-500/80"></div>
+                                <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="downstream">Down</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-sm bg-blue-500/80"></div>
+                                <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="upstream">Up</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-1 relative w-full">
+                        <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subscriptions Page -->
+            <div data-page="subscriptions" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
+                
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div>
+                        <h2 class="text-2xl font-light text-zinc-100" data-i18n="subscriptions">Subscriptions</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button id="update-all-sub-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 hover:text-white transition-all uppercase tracking-wider" title="Update All">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                            <span data-i18n="updateAll">Update All</span>
+                        </button>
+                        <button id="add-sub-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent hover:bg-accent/20 transition-all uppercase tracking-wider">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            <span data-i18n="add">Add</span>
+                        </button>
+                    </div>
+                </header>
+
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pr-2 pt-2 -mt-2 custom-scrollbar relative z-10">
+                    <!-- Subscriptions will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Proxies Page -->
+            <div data-page="proxies" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
+                
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div>
+                        <h2 class="text-2xl font-light text-zinc-100" data-i18n="proxiesTitle">Proxy Nodes</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <!-- Sort Button -->
+                        <div class="relative group">
+                            <button id="sort-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:text-white hover:bg-white/10 transition-all uppercase tracking-wider">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
+                                <span id="sort-label" data-i18n="sortDefault">Default</span>
+                            </button>
+                        </div>
+                        <!-- Latency Test Button -->
+                        <button id="test-all-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent hover:bg-accent/20 transition-all uppercase tracking-wider">
+                            <svg id="test-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span data-i18n="testLatency">Test Latency</span>
+                        </button>
+                    </div>
+                </header>
+                <!-- Container added p-4 to prevent 3D scale clipping -->
+                <div id="proxies-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -m-4 custom-scrollbar relative z-10">
+                    <!-- Cards will be injected here -->
+                </div>
+            </div>
+
+            <!-- Custom Rules Page -->
+            <div data-page="rules" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+                <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500"></div>
+                
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div>
+                        <h2 class="text-2xl font-light text-zinc-100" data-i18n="rulesTitle">Custom Rules</h2>
+                    </div>
+                    
+                    <div class="flex items-center gap-4">
+                        <!-- Search Box (Journal Style) -->
+                        <div class="relative group flex items-center">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <input type="text" id="rules-search-input" placeholder="Search rules..." data-i18n-placeholder="searchRules" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-48 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
+                        </div>
+
+                        <div class="flex items-center gap-3">
+                            <button id="add-rule-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent hover:bg-accent/20 transition-all uppercase tracking-wider">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span data-i18n="addRule">Add Rule</span>
+                            </button>
+                            <button id="save-rules-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-green-500/10 border border-green-500/20 text-[10px] font-bold text-green-500 hover:bg-green-500/20 transition-all uppercase tracking-wider">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span data-i18n="saveRules">Save & Apply</span>
+                            </button>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="glass-card p-4 relative z-10 flex items-center gap-3 shrink-0">
+                    <div class="flex-1 relative group">
+                        <div class="absolute inset-y-0 left-3 flex items-center text-zinc-500 group-focus-within:text-accent transition-colors">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </div>
+                        <input id="import-sr-input" type="text" class="w-full bg-black/40 border border-white/5 rounded-xl py-2 pl-9 pr-4 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all" placeholder="Paste Shadowrocket Rule URL here..." data-i18n-placeholder="srPlaceholder">
+                    </div>
+                    <button id="import-sr-btn" class="px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-400 hover:bg-white/10 hover:text-white transition-all uppercase tracking-wider" data-i18n="importSR">Import SR</button>
+                </div>
+
+                <!-- Custom Add Rule Form -->
+                <div id="add-rule-form" class="hidden glass-card p-4 mb-4 border border-accent/20 relative z-10">
+                    <div class="grid grid-cols-3 gap-3 mb-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[9px] text-zinc-500 font-bold uppercase tracking-wider" data-i18n="type">Type</label>
+                            <select id="new-rule-type" class="bg-black/30 border border-white/5 rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-accent/50">
+                                <option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option>
+                                <option value="DOMAIN">DOMAIN</option>
+                                <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option>
+                                <option value="IP-CIDR">IP-CIDR</option>
+                                <option value="GEOIP">GEOIP</option>
+                                <option value="MATCH">MATCH</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[9px] text-zinc-500 font-bold uppercase tracking-wider" data-i18n="value">Value</label>
+                            <input type="text" id="new-rule-value" placeholder="e.g. google.com" data-i18n-placeholder="ruleValuePlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-accent/50 placeholder:text-zinc-600">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[9px] text-zinc-500 font-bold uppercase tracking-wider" data-i18n="policy">Policy</label>
+                            <select id="new-rule-policy" class="bg-black/30 border border-white/5 rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-accent/50">
+                                <option value="Proxy">Proxy</option>
+                                <option value="DIRECT">DIRECT</option>
+                                <option value="REJECT">REJECT</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button id="cancel-add-rule-btn" class="px-3 py-1.5 rounded-lg bg-white/5 text-[10px] font-bold text-zinc-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-wider" data-i18n="cancel">Cancel</button>
+                        <button id="confirm-add-rule-btn" class="px-3 py-1.5 rounded-lg bg-accent/20 text-[10px] font-bold text-accent hover:bg-accent/30 transition-all uppercase tracking-wider" data-i18n="confirmAdd">Confirm Add</button>
+                    </div>
+                </div>
+
+                <div id="rules-list" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 space-y-2 relative z-10">
+                    <!-- Rules will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
+                <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500 z-0"></div>
+                
+                <h2 class="text-2xl font-light text-zinc-100 mb-8 relative z-10" data-i18n="settingsTitle">Settings</h2>
+                
+                <div class="space-y-6 relative z-10">
+                    <!-- General Settings -->
+                    <section>
+                        <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-4 ml-1" data-i18n="general">General</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Language Switching -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="language">Language</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="languageDesc">Choose your interface language</p>
+                                    </div>
+                                </div>
+                                <div id="setting-lang-wrap" class="relative w-40">
+                                    <button id="setting-lang-trigger" type="button" class="w-full bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-purple-500/50 transition-all cursor-pointer flex items-center justify-between">
+                                        <span id="setting-lang-label">English</span>
+                                        <svg id="setting-lang-arrow" class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="m6 9 6 6 6-6"></path>
+                                        </svg>
+                                    </button>
+                                    <div id="setting-lang-menu" class="hidden absolute right-0 top-[calc(100%+8px)] w-full rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30">
+                                        <button type="button" data-lang-value="en" class="setting-lang-option w-full text-left px-3 py-2 rounded-lg text-[11px] text-zinc-200 hover:bg-white/10 transition-all">English</button>
+                                        <button type="button" data-lang-value="zh" class="setting-lang-option w-full text-left px-3 py-2 rounded-lg text-[11px] text-zinc-200 hover:bg-white/10 transition-all">简体中文</button>
+                                    </div>
+                                    <select id="setting-lang" class="hidden">
+                                        <option value="en">English</option>
+                                        <option value="zh">简体中文</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Theme Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="theme">Theme</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="themeDesc">Auto / Light / Dark appearance</p>
+                                    </div>
+                                </div>
+                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/40 rounded-xl border border-white/5 h-9 transition-all duration-300 w-[180px]">
+                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-white/10 backdrop-blur-md rounded-lg shadow-sm border border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
+                                    <button data-theme-mode="light" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="themeLight">Light</button>
+                                    <button data-theme-mode="auto" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-100 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="themeAuto">Auto</button>
+                                    <button data-theme-mode="dark" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-[9px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-[0.14em]" data-i18n="themeDark">Dark</button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Close Behavior -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="minToTray">Hide on Close</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="minToTrayDesc">Hide to tray instead of quitting when closing window</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-close-tray">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+                            
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- DNS Rewrite -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="dnsRewrite">DNS Rewrite</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="dnsRewriteDesc">Force standard DNS settings to prevent leaks</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="dns-rewrite-toggle">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="nodeScrolling">Node Name Scroll</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="nodeScrollingDesc">Enable scrolling for long node names</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-node-scroll">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+                            
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Autostart -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="autostart">Launch at Login</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="autostartDesc">Start the application automatically when you sign in</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-autostart">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Theme Selection -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2v20"/><path d="M12 12l4.6-4.6"/><path d="M12 12l4.6 4.6"/><path d="M12 12l-4.6-4.6"/><path d="M12 12l-4.6 4.6"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="themeColor">Theme Color</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="themeColorDesc">Customize the interface accent color</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div data-theme="purple" class="w-6 h-6 rounded-full bg-[#8b5cf6] cursor-pointer ring-2 ring-transparent hover:ring-white/50 transition-all border-2 border-zinc-900 shadow-lg active:scale-90"></div>
+                                    <div data-theme="blue" class="w-6 h-6 rounded-full bg-[#0A84FF] cursor-pointer ring-2 ring-transparent hover:ring-white/50 transition-all border-2 border-zinc-900 shadow-lg active:scale-90"></div>
+                                    <div data-theme="green" class="w-6 h-6 rounded-full bg-[#34C759] cursor-pointer ring-2 ring-transparent hover:ring-white/50 transition-all border-2 border-zinc-900 shadow-lg active:scale-90"></div>
+                                    <div data-theme="orange" class="w-6 h-6 rounded-full bg-[#FF9500] cursor-pointer ring-2 ring-transparent hover:ring-white/50 transition-all border-2 border-zinc-900 shadow-lg active:scale-90"></div>
+                                    <div data-theme="pink" class="w-6 h-6 rounded-full bg-[#FF2D55] cursor-pointer ring-2 ring-transparent hover:ring-white/50 transition-all border-2 border-zinc-900 shadow-lg active:scale-90"></div>
+                                    <div class="relative group">
+                                        <input type="color" id="custom-theme-color" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
+                                        <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 via-blue-500 to-pink-500 border-2 border-zinc-900 shadow-lg group-hover:ring-2 ring-white/50 transition-all"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Transparency Adjustment -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 4.2c1.44 1.06 2.34 2.76 2.34 4.61v6.5c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-6.5c0-1.85.9-3.55 2.34-4.61L12 2.69z"/><path d="M12 22v-6"/><path d="M8 22v-3"/><path d="M16 22v-3"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="appOpacity">App Transparency</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="appOpacityDesc">Adjust main window background opacity</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-[10px] text-zinc-400 w-6" id="opacity-val-text">100%</span>
+                                    <input type="range" id="setting-opacity" min="10" max="100" value="100" class="w-24 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-accent">
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Restore Defaults -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="restoreDefaults">Restore Defaults</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="restoreDefaultsDesc">Reset all settings to default values</p>
+                                    </div>
+                                </div>
+                                <button id="btn-restore-defaults" class="px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-rose-400 hover:bg-rose-500/10 transition-all uppercase tracking-wider" data-i18n="restoreDefaults">
+                                    Restore Defaults
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Removed Subscriptions from Settings -->
+
+                    <!-- Network & Routing Settings -->
+                    <section>
+                        <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-4 ml-1" data-i18n="networkRouting">Network & Routing</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Unified Delay -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="unifiedDelay">Unified Delay</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="unifiedDelayDesc">Use uniform delay testing strategy</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-unified-delay" checked>
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+                            
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- IPv6 -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="ipv6Support">IPv6 Support</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="ipv6SupportDesc">Enable IPv6 routing and connections</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-ipv6">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Allow LAN -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="allowLan">Allow LAN</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="allowLanDesc">Allow local network devices to connect</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-allow-lan">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- GeoData Update -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="geoData">Geo Databases</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="geoDataDesc">Update GeoIP and GeoSite routing databases</p>
+                                    </div>
+                                </div>
+                                <button id="update-geo-btn" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 transition-all uppercase tracking-wider">
+                                    <svg id="geo-spinner" class="hidden w-3 h-3 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin"></svg>
+                                    <span data-i18n="updateNow">Update Now</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Core Settings -->
+                    <section>
+                        <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-4 ml-1" data-i18n="core">Mihomo Core</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-semibold text-zinc-200" data-i18n="curVersion">Current Version</p>
+                                    <p class="text-[10px] text-zinc-500" id="core-version-text">Checking...</p>
+                                </div>
+                                <button id="check-update-btn" class="px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 transition-all uppercase tracking-wider" data-i18n="checkUpdate">
+                                    Check for Updates
+                                </button>
+                            </div>
+                            <div class="h-px bg-white/5"></div>
+                            
+                            <!-- Auto Update -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="autoCheckUpdate">Auto Check Updates</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="autoCheckUpdateDesc">Automatically check for core updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+                            
+                            <div class="h-px bg-white/5"></div>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="configFolder">Config Folder</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="configFolderDesc">Open the YAML directory for drag-and-drop imports</p>
+                                    </div>
+                                </div>
+                                <button id="open-config-folder-btn" class="px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 transition-all uppercase tracking-wider" data-i18n="openFolder">
+                                    Open Folder
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- System Utilities -->
+                    <section>
+                        <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-4 ml-1" data-i18n="utilities">System Utilities</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <div id="uwp-loopback-item">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="uwpLoopback">UWP Loopback Exemption</p>
+                                            <p class="text-[10px] text-zinc-500" data-i18n="uwpLoopbackDesc">Allow Windows Store apps to use local proxy</p>
+                                        </div>
+                                    </div>
+                                    <button id="exempt-uwp-btn" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 transition-all uppercase tracking-wider group">
+                                        <svg id="uwp-spinner" class="hidden w-3 h-3 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin"></svg>
+                                        <span data-i18n="exemptUwp">Exempt All UWP</span>
+                                    </button>
+                                </div>
+                                <div class="h-px bg-white/5 my-4"></div>
+                            </div>
+
+                            <!-- Subscription Fake Client -->
+                            <div class="flex items-start justify-between flex-col gap-3">
+                                <div class="flex items-center justify-between w-full">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 7.1"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="fakeClient">Subscription Fake Client</p>
+                                            <p class="text-[10px] text-zinc-500" data-i18n="fakeClientDesc">Bypass UA sniffing when downloading subscriptions</p>
+                                        </div>
+                                    </div>
+                                    <label class="ios-switch">
+    <input type="checkbox" id="setting-fake-client">
+    <span class="switch-slider"></span>
+</label>
+                                </div>
+                                
+                                <div id="fake-client-options" class="w-full pl-9 pr-2 overflow-hidden transition-all duration-300 max-h-0 opacity-0">
+                                    <div class="flex items-center gap-2 mt-2">
+                                        <select id="fake-client-select" class="flex-1 bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all cursor-pointer">
+                                            <option value="clash-verge/1.6.0">Clash Verge Rev</option>
+                                            <option value="mihomo-party/1.0.0">mihomo-party</option>
+                                            <option value="Flclash/1.0.0">Flclash</option>
+                                            <option value="Shadowrocket/3.0.0">Shadowrocket</option>
+                                            <option value="custom" data-i18n="custom">Custom...</option>
+                                        </select>
+                                        <svg id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                    </div>
+                                    <div id="fake-client-custom-container" class="mt-2 hidden">
+                                        <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="w-full bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Port Forwarding (Tunnels) -->
+                    <section>
+                        <div class="flex items-center justify-between mb-4 ml-1">
+                            <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]" data-i18n="tunnels">Port Forwarding</h3>
+                            <button id="add-tunnel-btn" class="text-[10px] font-bold text-accent hover:text-accent/80 transition-colors uppercase tracking-wider" data-i18n="add">Add</button>
+                        </div>
+                        <div class="glass-card p-5 space-y-4">
+                            <div id="tunnels-list" class="space-y-3">
+                                <!-- Dynamic Tunnels Rendered Here -->
+                                <div class="text-center text-xs text-zinc-600 py-4" id="tunnels-empty" data-i18n="noTunnels">No port forwarding rules configured</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Settings Sub-menus -->
+                    <section>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div id="btn-goto-advanced" class="glass-card p-5 cursor-pointer group hover:translate-y-[-2px] transition-all duration-300 hover:border-accent/30">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-all">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="advancedTitle">Advanced Settings</p>
+                                        <p class="text-[10px] text-zinc-500" data-i18n="advancedSubtitle">Dynamic Config Engine</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                </div>
+            </div>
+
+            <!-- Advanced Page -->
+            <div data-page="advanced" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
+                <div class="absolute top-[-10%] right-1/2 translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full"></div>
+                
+                <header class="flex items-center justify-between relative z-10">
+                    <div class="flex items-center gap-4">
+                        <button id="btn-back-settings" class="w-10 h-10 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center text-zinc-400 hover:bg-white/10 hover:text-white transition-all">
+                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+                        </button>
+                        <div>
+                            <h1 class="text-2xl font-bold text-zinc-100 tracking-tight" data-i18n="advancedTitle">Advanced Settings</h1>
+                            <p class="text-[11px] text-zinc-500 font-medium tracking-wide uppercase mt-1" data-i18n="advancedSubtitle">Dynamic Config Engine</p>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Custom Startup Arguments (Moved here) -->
+                <section class="relative z-10">
+                    <div class="glass-card p-5 space-y-4">
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]" data-i18n="customArgs">Custom Startup Arguments</h3>
+                                <p class="text-[9px] text-zinc-600 italic" data-i18n="customArgsDesc">Extra CLI flags for Mihomo (one per line)</p>
+                            </div>
+                            <textarea id="custom-args-input" class="w-full h-24 bg-black/40 border border-white/5 rounded-xl p-3 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all placeholder:text-zinc-700 font-mono" placeholder="--ext-ui ui&#10;--another-flag"></textarea>
+                            <button id="apply-args-btn" class="w-full py-2.5 rounded-xl bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent hover:bg-accent/20 transition-all uppercase tracking-widest" data-i18n="applyAndRestart">Apply & Restart Core</button>
+                        </div>
+                    </div>
+                </section>
+
+                <div id="advanced-settings-container" class="space-y-6 relative z-10 pb-12">
+                    <!-- Dynamic settings will be rendered here -->
+                    <div class="flex flex-col items-center justify-center py-20">
+                        <div class="w-12 h-12 border-4 border-accent/20 border-t-accent rounded-full animate-spin"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications Container -->
+    <div id="notif-container" class="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none items-end"></div>
+
+    <!-- Modal Background -->
+    <div id="modal-bg" class="fixed inset-0 bg-black/40 backdrop-blur-md z-[110] hidden flex items-center justify-center transition-all duration-300 opacity-0 pointer-events-auto">
+        <div id="modal-container" class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-300">
+            <h3 id="modal-title" class="text-xl font-light text-zinc-100 mb-6">Subscription Name</h3>
+            <div class="space-y-6">
+                <div id="modal-content-area">
+                    <!-- Default Input -->
+                    <input type="text" id="modal-input" placeholder="Name..." data-i18n-placeholder="modalInputPlaceholder" class="w-full bg-black/40 border border-white/5 rounded-2xl px-6 py-4 text-sm text-zinc-200 focus:outline-none focus:border-accent/50 transition-all tracking-wider font-light">
+                </div>
+                <div class="flex gap-3 justify-end">
+                    <button id="modal-cancel" class="px-6 py-2.5 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-[0.2em]" data-i18n="cancel">Cancel</button>
+                    <button id="modal-confirm" class="px-8 py-2.5 rounded-xl bg-accent text-white text-[10px] font-bold hover:bg-accent/80 transition-all shadow-lg shadow-accent/20 uppercase tracking-[0.2em]" data-i18n="confirm">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
