@@ -4,126 +4,29 @@
 
 # Zephyr
 
-**A modern, lightweight, and secure Mihomo GUI client**
+**一款现代化、轻量级、安全的 Mihomo GUI 客户端**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
 
-[English](#-english) | [简体中文](#-简体中文) | [日本語](#-日本語) | [한국어](#-한국어)
+[简体中文](#-简体中文) | [English](#-english) | [日本語](#-日本語) | [한국어](#-한국어)
 
 </div>
 
 ---
 
-## 📸 Screenshots
+## 📸 应用截图
 
-![Home](assets/screenshot-home.png)
+![主页](assets/screenshot-home.png)
 
 <details>
-<summary>📷 More Screenshots</summary>
+<summary>📷 更多截图</summary>
 
 | 设置 | 深色模式 |
 |:---:|:---:|
-| ![Settings](assets/screenshot-settings.png) | ![Dark](assets/screenshot-dark.png) |
-
-</details>
-
----
-
-<!--
-========================================
- 🇺🇸 ENGLISH VERSION
-========================================
--->
-
-## 🇺🇸 English
-
-### Overview
-
-Zephyr is a modern, high-performance GUI client for the Mihomo core, built with Tauri and native web technologies. It focuses on delivering a clean, efficient, and secure user experience for managing proxy networks with minimal resource footprint.
-
-### Features
-
-#### 🚀 Core Capabilities
-- **Real-time Traffic Monitoring** — Live upstream/downstream speed visualization with animated charts
-- **Smart Node Selection** — Multi-column adaptive layout for high-resolution displays with latency-based sorting
-- **Fast Latency Testing** — Parallel latency checks with optimistic UI updates and background refresh
-- **Multiple Running Modes** — Rule-based routing, Global proxy, and Direct connection modes
-- **TUN Virtual Adapter** — System-wide transparent proxy with automatic route configuration
-
-#### 🔒 Security First
-- **SSRF Protection** — DNS resolution validation for subscription URLs, preventing internal network attacks
-- **Supply Chain Security** — SHA256 integrity verification for all core and GeoIP updates
-- **Secure Credential Storage** — Machine-bound encryption for subscription URLs and metadata
-- **Path Traversal Prevention** — Comprehensive input validation for all file operations
-
-#### 🖥️ Cross-Platform
-- **Windows** — Full support with UWP loopback exemption utility
-- **macOS** — Native support for both Intel and Apple Silicon (Universal Binary)
-- **Linux** — Support for GNOME, KDE, and XFCE desktop environments
-
-#### 📡 Subscription Management
-- **Multi-format Support** — Compatible with Clash YAML, Base64-encoded subscriptions
-- **Fake Client UA** — Spoof User-Agent to bypass provider sniffing
-- **Batch Update** — Update all subscriptions with a single click
-- **Drag & Drop Import** — Import YAML configs by dragging files into the window
-
-#### ⚙️ Advanced Features
-- **Custom Rules Editor** — Visual rule management with Shadowrocket rule import support
-- **Port Forwarding** — TCP/UDP tunnel configuration with custom target addresses
-- **DNS Rewrite** — Built-in anti-leak and Fake-IP DNS configuration
-- **Auto-start** — Launch at login with system tray integration
-- **Hot Reload** — Apply configuration changes without restarting the core
-
-### Installation
-
-Download the latest release from [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases):
-
-#### Which version should I download?
-
-| Version | File Pattern | Description |
-|---------|--------------|-------------|
-| **Full** | `*-setup-full.exe` / `*-full.dmg` / `*-full.AppImage` | Includes Mihomo core and GeoIP/GeoSite data. **Recommended for first-time users.** |
-| **Lite** | `*-setup-lite.exe` / `*-lite.dmg` / `*-lite.AppImage` | Smaller size, no bundled core. For users who already have the core installed (e.g., updating). |
-
-#### Download Links
-
-| Platform | Full Version | Lite Version |
-|----------|--------------|--------------|
-| **Windows** | `Zephyr_x.x.x_x64-setup-full.exe` | `Zephyr_x.x.x_x64-setup-lite.exe` |
-| **macOS (Intel)** | `Zephyr_x.x.x_x64-full.dmg` | `Zephyr_x.x.x_x64-lite.dmg` |
-| **macOS (Apple Silicon)** | `Zephyr_x.x.x_aarch64-full.dmg` | `Zephyr_x.x.x_aarch64-lite.dmg` |
-| **Linux** | `Zephyr_x.x.x_amd64-full.AppImage` | `Zephyr_x.x.x_amd64-lite.AppImage` |
-
-### Build from Source
-
-<details>
-<summary>Click to expand build instructions</summary>
-
-#### Prerequisites
-
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later
-- [Node.js](https://nodejs.org/) 18 or later
-- Platform-specific dependencies (see [Tauri Prerequisites](https://tauri.app/v2/guides/prerequisites/))
-
-#### Build Steps
-
-```bash
-# Clone the repository
-git clone https://github.com/Juwan-Hwang/Zephyr.git
-cd Zephyr
-
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run tauri dev
-
-# Build for production
-npm run tauri build
-```
+| ![设置](assets/screenshot-settings.png) | ![深色模式](assets/screenshot-dark.png) |
 
 </details>
 
@@ -219,6 +122,103 @@ npm install
 npm run tauri dev
 
 # 生产构建
+npm run tauri build
+```
+
+</details>
+
+---
+
+<!--
+========================================
+ 🇺🇸 ENGLISH VERSION
+========================================
+-->
+
+## 🇺🇸 English
+
+### Overview
+
+Zephyr is a modern, high-performance GUI client for the Mihomo core, built with Tauri and native web technologies. It focuses on delivering a clean, efficient, and secure user experience for managing proxy networks with minimal resource footprint.
+
+### Features
+
+#### 🚀 Core Capabilities
+- **Real-time Traffic Monitoring** — Live upstream/downstream speed visualization with animated charts
+- **Smart Node Selection** — Multi-column adaptive layout for high-resolution displays with latency-based sorting
+- **Fast Latency Testing** — Parallel latency checks with optimistic UI updates and background refresh
+- **Multiple Running Modes** — Rule-based routing, Global proxy, and Direct connection modes
+- **TUN Virtual Adapter** — System-wide transparent proxy with automatic route configuration
+
+#### 🔒 Security First
+- **SSRF Protection** — DNS resolution validation for subscription URLs, preventing internal network attacks
+- **Supply Chain Security** — SHA256 integrity verification for all core and GeoIP updates
+- **Secure Credential Storage** — Machine-bound encryption for subscription URLs and metadata
+- **Path Traversal Prevention** — Comprehensive input validation for all file operations
+
+#### 🖥️ Cross-Platform
+- **Windows** — Full support with UWP loopback exemption utility
+- **macOS** — Native support for both Intel and Apple Silicon (Universal Binary)
+- **Linux** — Support for GNOME, KDE, and XFCE desktop environments
+
+#### 📡 Subscription Management
+- **Multi-format Support** — Compatible with Clash YAML, Base64-encoded subscriptions
+- **Fake Client UA** — Spoof User-Agent to bypass provider sniffing
+- **Batch Update** — Update all subscriptions with a single click
+- **Drag & Drop Import** — Import YAML configs by dragging files into the window
+
+#### ⚙️ Advanced Features
+- **Custom Rules Editor** — Visual rule management with Shadowrocket rule import support
+- **Port Forwarding** — TCP/UDP tunnel configuration with custom target addresses
+- **DNS Rewrite** — Built-in anti-leak and Fake-IP DNS configuration
+- **Auto-start** — Launch at login with system tray integration
+- **Hot Reload** — Apply configuration changes without restarting the core
+
+### Installation
+
+Download the latest release from [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases):
+
+#### Which version should I download?
+
+| Version | File Pattern | Description |
+|---------|--------------|-------------|
+| **Full** | `*-setup-full.exe` / `*-full.dmg` / `*-full.AppImage` | Includes Mihomo core and GeoIP/GeoSite data. **Recommended for first-time users.** |
+| **Lite** | `*-setup-lite.exe` / `*-lite.dmg` / `*-lite.AppImage` | Smaller size, no bundled core. For users who already have the core installed (e.g., updating). |
+
+#### Download Links
+
+| Platform | Full Version | Lite Version |
+|----------|--------------|--------------|
+| **Windows** | `Zephyr_x.x.x_x64-setup-full.exe` | `Zephyr_x.x.x_x64-setup-lite.exe` |
+| **macOS (Intel)** | `Zephyr_x.x.x_x64-full.dmg` | `Zephyr_x.x.x_x64-lite.dmg` |
+| **macOS (Apple Silicon)** | `Zephyr_x.x.x_aarch64-full.dmg` | `Zephyr_x.x.x_aarch64-lite.dmg` |
+| **Linux** | `Zephyr_x.x.x_amd64-full.AppImage` | `Zephyr_x.x.x_amd64-lite.AppImage` |
+
+### Build from Source
+
+<details>
+<summary>Click to expand build instructions</summary>
+
+#### Prerequisites
+
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later
+- [Node.js](https://nodejs.org/) 18 or later
+- Platform-specific dependencies (see [Tauri Prerequisites](https://tauri.app/v2/guides/prerequisites/))
+
+#### Build Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/Juwan-Hwang/Zephyr.git
+cd Zephyr
+
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run tauri dev
+
+# Build for production
 npm run tauri build
 ```
 
@@ -470,6 +470,6 @@ SOFTWARE.
 
 **Made with ❤️ by Zephyr Team**
 
-[⬆ Back to Top](#zephyr)
+[⬆ 回到顶部](#zephyr)
 
 </div>
