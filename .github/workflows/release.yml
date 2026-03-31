@@ -45,14 +45,16 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
           
-          # Update tauri.conf.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
-          
-          # Update Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          
-          # Update package.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          # Use sed -i '' for macOS, sed -i for Linux/Windows
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+            sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+            sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          else
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          fi
           
           echo "Updated version to $VERSION"
         shell: bash
@@ -76,12 +78,22 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # Get latest mihomo release version
+      - name: Get latest mihomo version
+        id: mihomo_version
+        run: |
+          MIHOMO_VERSION=$(curl -sL "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "VERSION=$MIHOMO_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest mihomo version: $MIHOMO_VERSION"
+        shell: bash
+
       # Download mihomo core for full version
       - name: Download mihomo core (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
           mkdir -p src-tauri/bundled
-          curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-windows-amd64-compatible.zip"
+          MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
+          curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
           unzip mihomo.zip
           mv mihomo.exe src-tauri/bundled/mihomo.exe
           rm mihomo.zip
@@ -91,7 +103,8 @@ jobs:
         if: matrix.platform == 'macos-latest' && matrix.arch == 'arm64'
         run: |
           mkdir -p src-tauri/bundled
-          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-darwin-arm64.gz"
+          MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
@@ -101,7 +114,8 @@ jobs:
         if: matrix.platform == 'macos-latest' && matrix.arch == 'x64'
         run: |
           mkdir -p src-tauri/bundled
-          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-darwin-amd64.gz"
+          MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-${MIHOMO_VERSION}.gz"
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
@@ -111,7 +125,8 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           mkdir -p src-tauri/bundled
-          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64.gz"
+          MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
