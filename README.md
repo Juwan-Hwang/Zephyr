@@ -19,9 +19,16 @@
 
 ## 📸 Screenshots
 
-| 主页 | 设置 | 深色模式 |
-|:---:|:---:|:---:|
-| ![Home](assets/screenshot-home.png) | ![Settings](assets/screenshot-settings.png) | ![Dark](assets/screenshot-dark.png) |
+![Home](assets/screenshot-home.png)
+
+<details>
+<summary>📷 More Screenshots</summary>
+
+| 设置 | 深色模式 |
+|:---:|:---:|
+| ![Settings](assets/screenshot-settings.png) | ![Dark](assets/screenshot-dark.png) |
+
+</details>
 
 ---
 
