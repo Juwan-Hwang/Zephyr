@@ -11,8 +11,9 @@ export const translations = {
         traffic: "Real-time Traffic",
         proxiesTitle: "Proxy Nodes",
         sortDefault: "Default",
-        sortLatency: "Latency",
-        sortName: "Name",
+        sortLatency: "By Latency",
+        sortName: "By Name",
+        latency: "Latency",
         testLatency: "Test Latency",
         settingsTitle: "Settings",
         general: "General",
@@ -98,6 +99,8 @@ export const translations = {
         appOpacityDesc: "Adjust main window background opacity",
         restoreDefaults: "Restore Defaults",
         restoreDefaultsDesc: "Reset all settings to default values",
+        restoreDefaultsTitle: "Restore Defaults",
+        restoreDefaultsConfirm: "Are you sure you want to restore all settings to default values?",
         autostart: "Launch at Login",
         autostartDesc: "Start the application automatically when you sign in",
         configFolder: "Config Folder",
@@ -172,8 +175,18 @@ export const translations = {
         tunnelNetwork: "Listen Address",
         tunnelTarget: "Target Address",
         addPortForwarding: "Add Port Forwarding",
-                trayShow: "Show",
+                // Tray Menu
+        trayShow: "Show Zephyr",
         trayQuit: "Quit",
+        traySysProxy: "System Proxy",
+        trayTunMode: "TUN Mode",
+        trayProxyMode: "Proxy Mode",
+        traySubscriptions: "Subscriptions",
+        trayProxies: "Proxies",
+        
+        // Rule buttons
+        moveToTop: "Move to Top",
+        moveToBottom: "Move to Bottom",
         ruleValuePlaceholder: "e.g. google.com",
         fakeClientCustomPlaceholder: "e.g. MyClient/1.0",
         modalInputPlaceholder: "Name...",
@@ -184,6 +197,26 @@ export const translations = {
         confirmDelete: "Are you sure you want to delete this configuration?",
         githubHomepage: "GitHub Homepage",
         githubHomepageDesc: "Star & Contribute",
+        
+        // Error messages
+        connectionLost: "Lost connection to core traffic monitor. Click to reconnect.",
+        invalidJson: "Invalid JSON format",
+        jsYamlError: "js-yaml is not loaded. Check internet connection.",
+        jsYamlSaveError: "js-yaml is not loaded. Cannot save/load rules.",
+        settingsRestored: "Settings restored to default",
+        failedSaveSettings: "Failed to save settings to core",
+        partialRestore: "Some settings failed to restore",
+        restoreFailed: "Failed to restore defaults",
+        
+        // Storage
+        usedSpace: "used",
+        totalSpace: "total",
+        
+        // Tunnel
+        listen: "Listen",
+        
+        // Status
+        loading: "Loading...",
     },
     zh: {
         home: "首页",
@@ -197,8 +230,9 @@ export const translations = {
         traffic: "实时流量监控",
         proxiesTitle: "节点选择",
         sortDefault: "默认排序",
-        sortLatency: "延迟优先",
-        sortName: "名称排序",
+        sortLatency: "按延迟",
+        sortName: "按名称",
+        latency: "延迟",
         testLatency: "测试延迟",
         settingsTitle: "设置",
         general: "常规设置",
@@ -284,6 +318,8 @@ export const translations = {
         appOpacityDesc: "调整主窗口的背景不透明度",
         restoreDefaults: "恢复默认设置",
         restoreDefaultsDesc: "将所有设置重置为默认值",
+        restoreDefaultsTitle: "恢复默认设置",
+        restoreDefaultsConfirm: "确定要将所有设置恢复为默认值吗？",
         autostart: "开机自启动",
         autostartDesc: "在您登录系统时自动启动应用",
         configFolder: "配置文件夹",
@@ -358,8 +394,18 @@ export const translations = {
         tunnelNetwork: "监听地址",
         tunnelTarget: "目标地址",
         addPortForwarding: "添加端口转发",
+        // Tray Menu
         trayShow: "显示主界面",
         trayQuit: "退出应用",
+        traySysProxy: "系统代理",
+        trayTunMode: "TUN 模式",
+        trayProxyMode: "代理模式",
+        traySubscriptions: "订阅选择",
+        trayProxies: "节点选择",
+        
+        // Rule buttons
+        moveToTop: "移至顶部",
+        moveToBottom: "移至底部",
         ruleValuePlaceholder: "例如：google.com",
         fakeClientCustomPlaceholder: "例如：MyClient/1.0",
         modalInputPlaceholder: "名称...",
@@ -370,5 +416,25 @@ export const translations = {
         confirmDelete: "确定要删除此配置文件吗？",
         githubHomepage: "GitHub 主页",
         githubHomepageDesc: "Star 与贡献",
+        
+        // Error messages
+        connectionLost: "核心流量监控连接丢失，点击重连。",
+        invalidJson: "JSON 格式无效",
+        jsYamlError: "js-yaml 未加载，请检查网络连接。",
+        jsYamlSaveError: "js-yaml 未加载，无法保存/加载规则。",
+        settingsRestored: "设置已恢复为默认值",
+        failedSaveSettings: "保存设置到核心失败",
+        partialRestore: "部分设置恢复失败",
+        restoreFailed: "恢复默认设置失败",
+        
+        // Storage
+        usedSpace: "已用",
+        totalSpace: "总计",
+        
+        // Tunnel
+        listen: "监听",
+        
+        // Status
+        loading: "加载中...",
     }
 };

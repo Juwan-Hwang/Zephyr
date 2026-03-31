@@ -27,8 +27,6 @@ pub struct CoreData {
     pub last_config_path: Option<String>,
     pub last_custom_args: Option<Vec<String>>,
     pub last_port: Option<u16>,
-    /// Handle for the thread that waits for the child process to exit
-    pub join_handle: Option<std::thread::JoinHandle<()>>,
 }
 pub struct MihomoState(pub Mutex<CoreData>);
 
@@ -99,7 +97,63 @@ fn legacy_core_candidates() -> Result<Vec<PathBuf>, String> {
     Ok(candidates)
 }
 
-fn migrate_legacy_assets(paths: &AppPaths) -> Result<(), String> {
+/// Get bundled resource directory (for full installer)
+fn get_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let bundled_dir = resource_dir.join("bundled");
+    if bundled_dir.exists() {
+        Some(bundled_dir)
+    } else {
+        None
+    }
+}
+
+fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
+    // First, check bundled resources (for full installer)
+    if let Some(bundled_dir) = get_bundled_dir(app) {
+        if bundled_dir != paths.core_dir && bundled_dir.exists() {
+            let entries = match fs::read_dir(&bundled_dir) {
+                Ok(entries) => entries,
+                Err(_) => return Ok(()),
+            };
+
+            for entry in entries.flatten() {
+                let source = entry.path();
+                if !source.is_file() {
+                    continue;
+                }
+
+                let file_name = match source.file_name().and_then(|name| name.to_str()) {
+                    Some(name) => name,
+                    None => continue,
+                };
+
+                // Skip run_config.yaml
+                if file_name.eq_ignore_ascii_case("run_config.yaml") {
+                    continue;
+                }
+
+                let target = paths.core_dir.join(file_name);
+
+                // Only copy if target doesn't exist
+                if !target.exists() {
+                    if let Err(e) = fs::copy(&source, &target) {
+                        eprintln!("Warning: Failed to copy bundled file {}: {}", file_name, e);
+                    } else {
+                        // Set executable permission on Unix
+                        #[cfg(any(target_os = "macos", target_os = "linux"))]
+                        {
+                            if file_name == core_binary_name() || file_name == "mihomo" {
+                                let _ = ensure_executable(&target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Then, check legacy core directories (for development)
     for candidate in legacy_core_candidates()? {
         if candidate == paths.core_dir || !candidate.exists() {
             continue;
@@ -177,7 +231,7 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
         }
     }
     
-    migrate_legacy_assets(&paths)?;
+    migrate_legacy_assets(app, &paths)?;
     Ok(paths)
 }
 
@@ -336,7 +390,57 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
         return Ok((fallback_name, fallback));
     }
 
-    Err(format!("Config file {:?} not found", resolved_path))
+    // No config file found - create a default one
+    let default_path = paths.profiles_dir.join("config.yaml");
+    create_default_config(&default_path)?;
+    Ok(("config.yaml".to_string(), default_path))
+}
+
+/// Create a minimal default configuration file for first-time users
+fn create_default_config(path: &PathBuf) -> Result<(), String> {
+    let default_config = r#"# Zephyr Default Configuration
+# This is a minimal config file created for first-time setup.
+# Please add your proxy nodes or import a subscription.
+
+port: 7890
+socks-port: 7891
+mixed-port: 7892
+allow-lan: false
+bind-address: '*'
+mode: rule
+log-level: info
+ipv6: false
+external-controller: 127.0.0.1:9090
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - localhost.ptlogin2.qq.com
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - tls://8.8.8.8:853
+    - tls://1.1.1.1:853
+
+proxies: []
+
+proxy-groups: []
+
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,DIRECT
+"#;
+    
+    fs::write(path, default_config)
+        .map_err(|e| format!("Failed to create default config: {}", e))?;
+    
+    println!("Created default config at {:?}", path);
+    Ok(())
 }
 
 fn first_available_profile(paths: &AppPaths) -> Result<Option<PathBuf>, String> {
@@ -754,10 +858,14 @@ pub async fn start_core(
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
     let paths = ensure_app_storage(&app)?;
+    
     let exe_path = get_core_exe_path(&app)?;
+    
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     ensure_executable(&exe_path)?;
+    
     let (resolved_config_name, resolved_config_path) = resolve_profile_path(&paths, &config_path)?;
+    
     let safe_custom_args = validate_custom_args(&custom_args)?;
 
     if test {
@@ -902,32 +1010,36 @@ pub async fn start_core(
 
 #[tauri::command]
 pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
-    // Take both the child process and the previous join handle
-    let (child, prev_handle) = {
+    // Take the child process
+    let child = {
         let mut lock = state.0.lock().map_err(|_| "Failed to lock state".to_string())?;
         lock.last_port = None;
-        (lock.process.take(), lock.join_handle.take())
+        lock.process.take()
     };
     
-    // Wait for previous join handle if it exists (ensures clean shutdown)
-    if let Some(handle) = prev_handle {
-        let _ = handle.join();
-    }
-    
     if let Some(mut child) = child {
-        if let Err(e) = child.kill() {
-            println!("Warning: Failed to kill core process: {}", e);
+        // Try graceful shutdown first (on Unix, send SIGTERM; on Windows, just kill)
+        #[cfg(unix)]
+        {
+            use std::signal::Signal;
+            use std::os::unix::process::Signal;
+            let _ = child.send_signal(Signal::SIGTERM);
         }
-        // Store the join handle so we can wait for it on next stop_core call
-        let handle = std::thread::spawn(move || {
-            if let Err(e) = child.wait() {
-                println!("Warning: Failed to wait for core process: {}", e);
-            }
-        });
         
-        // Store the join handle for later cleanup
-        if let Ok(mut lock) = state.0.lock() {
-            lock.join_handle = Some(handle);
+        // Wait a bit for graceful shutdown
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        
+        // Force kill if still running
+        match child.try_wait() {
+            Ok(Some(_status)) => {}
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
     }
     

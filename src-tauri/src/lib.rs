@@ -3,15 +3,16 @@ pub mod updater;
 pub mod sys_proxy;
 pub mod uwp_loopback;
 pub mod config_manager;
+pub mod tray;
 
 use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text};
-use updater::{bootstrap_core, get_latest_version, update_core, update_geo_data, get_latest_client_versions};
+use updater::{get_latest_version, update_core, update_geo_data, get_latest_client_versions};
 use sys_proxy::{enable_sysproxy, disable_sysproxy, get_sys_proxy, clear_sys_proxy};
 use config_manager::{read_config, update_config};
 use uwp_loopback::exempt_uwp_apps;
+use tray::{init_tray, TrayState, change_tray_icon, update_tray_full_menu};
 use std::sync::{Mutex, Arc};
-use tauri::{Manager, menu::{Menu, MenuItem}, tray::TrayIconBuilder};
-use tauri::image::Image;
+use tauri::Manager;
 use serde::{Deserialize, Serialize};
 use std::fs;
 #[cfg(desktop)]
@@ -61,27 +62,6 @@ fn show_main_window(window: tauri::Window) {
     let _ = window.set_focus();
 }
 
-#[tauri::command]
-fn change_tray_icon(app: tauri::AppHandle, mode: String) -> Result<(), String> {
-    let tray = app
-        .tray_by_id("main")
-        .ok_or_else(|| "Tray icon with id 'main' not found".to_string())?;
-
-    let icon_bytes: &[u8] = match mode.as_str() {
-        "tun" => include_bytes!("../icons/red-icon.png"),
-        "sysproxy" => include_bytes!("../icons/yellow-icon.png"),
-        _ => include_bytes!("../icons/icon.png"),
-    };
-
-    let image = Image::from_bytes(icon_bytes)
-        .map_err(|e| format!("Failed to load tray icon image bytes: {}", e))?;
-
-    tray.set_icon(Some(image))
-        .map_err(|e| format!("Failed to set tray icon: {}", e))?;
-
-    Ok(())
-}
-
 /// Get current system proxy and core status for tray state determination
 #[tauri::command]
 fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
@@ -98,36 +78,22 @@ fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
     
     // Check system proxy status using existing function
     let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
+    
+    // Check TUN status from tray state
+    let tun_enabled = app.state::<TrayState>()
+        .0.lock()
+        .map(|guard| guard.tun_enabled)
+        .unwrap_or(false);
+    
+    if tun_enabled {
+        return Ok("tun".to_string());
+    }
+    
     if sys_proxy_enabled {
         return Ok("sysproxy".to_string());
     }
     
     Ok("default".to_string())
-}
-
-#[tauri::command]
-fn update_tray_menu(app: tauri::AppHandle, show_text: String, quit_text: String) -> Result<(), String> {
-    if let Some(tray) = app.tray_by_id("main") {
-        if let (Ok(show_i), Ok(quit_i)) = (
-            tauri::menu::MenuItem::with_id(&app, "show", &show_text, true, None::<&str>),
-            tauri::menu::MenuItem::with_id(&app, "quit", &quit_text, true, None::<&str>)
-        ) {
-            if let Ok(menu) = tauri::menu::Menu::with_items(&app, &[&show_i, &quit_i]) {
-                let _ = tray.set_menu(Some(menu));
-            }
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn is_first_run(app: tauri::AppHandle) -> Result<bool, String> {
-    let config_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    let core_dir = config_dir.join("core");
-    let core_exe = core_dir.join(core_manager::core_binary_name());
-    
-    // 如果核心可执行文件不存在，大概率是第一次运行，需要展示进度条
-    Ok(!core_exe.exists())
 }
 
 #[cfg(test)]
@@ -151,8 +117,8 @@ pub fn run() {
             last_config_path: None,
             last_custom_args: None,
             last_port: None,
-            join_handle: None,
         })))
+        .manage(TrayState::default())
         .setup(|app| {
             ensure_app_storage(app.handle()).map_err(|e| e.to_string())?;
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -172,46 +138,8 @@ pub fn run() {
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings.clone()))));
 
-            // Init Tray
-            let show_i = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-
-            let mut tray_builder = TrayIconBuilder::with_id("main")
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        let state = app.state::<MihomoState>();
-                        let _ = stop_core(app.clone(), state);
-                        let _ = clear_sys_proxy();
-                        app.cleanup_before_exit();
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { button, .. } = event {
-                        if button == tauri::tray::MouseButton::Left {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
-                });
-
-            if let Some(default_icon) = app.default_window_icon() {
-                tray_builder = tray_builder.icon(default_icon.clone());
-            }
-
-            let _tray = tray_builder.build(app)?;
+            // Init Tray using the new tray module
+            init_tray(app.handle()).map_err(|e| e.to_string())?;
 
             Ok(())
         })
@@ -270,7 +198,6 @@ pub fn run() {
             download_sub,
             delete_config,
             get_latest_version,
-            bootstrap_core,
             update_core,
             enable_sysproxy,
             disable_sysproxy,
@@ -285,13 +212,17 @@ pub fn run() {
             show_main_window,
             change_tray_icon,
             get_tray_status,
-            update_tray_menu,
+            update_tray_full_menu,
             read_config,
             update_config,
             update_geo_data,
             get_latest_client_versions,
-            is_first_run,
             fetch_text,
+            // Re-export tray commands
+            tray::get_tray_menu_state,
+            tray::set_tray_menu_state,
+            tray::get_tray_proxy_status,
+            tray::update_tray_toggle_states,
         ]);
 
     builder

@@ -1,0 +1,2 @@
+# This directory is for bundled resources (core binary and geo data files)
+# Files will be added during GitHub Actions build for the "full" installer

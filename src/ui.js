@@ -2,6 +2,10 @@ import { translations } from './i18n.js';
 import { getProxies, switchProxy, getConfig, patchConfig, testProxy, abortLatencyTests, setSecret, closeAllConnections, reloadConfig, enableAutoStart, disableAutoStart, isAutoStartEnabled, openConfigFolder, setBaseUrl, restartCore } from './api.js';
 import { setWsSecret, setWsBaseUrl } from './websocket.js';
 import { fetchAndConvertSRRules } from './rules.js';
+import { initChart, updateTrafficData, clearTrafficHistory } from './modules/traffic-chart.js';
+
+// Re-export traffic chart functions for external use
+export { initChart, updateTrafficData, clearTrafficHistory };
 
 export function switchPage(pageId) {
     const pages = document.querySelectorAll('[data-page]');
@@ -208,6 +212,11 @@ export function applyTranslations() {
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
         const key = el.getAttribute('data-i18n-placeholder');
         if (t[key]) el.placeholder = t[key];
+    });
+    
+    // Update dynamic elements that don't have data-i18n attributes
+    document.querySelectorAll('[data-latency-label]').forEach(el => {
+        el.textContent = t.latency || "Latency";
     });
     
     // Update Tray Menu
@@ -530,159 +539,6 @@ export function setup3DEffect(input) {
     });
 }
 
-// --- Traffic Chart Logic ---
-let trafficHistory = [];
-const MAX_DATA_POINTS = 60; // 1 minute of data if 1s interval
-const canvas = document.getElementById('trafficChart');
-const ctx = canvas?.getContext('2d');
-let _chartResizeHandler = null;
-let _chartResizeObserver = null;
-let _chartFrameId = null;
-let _chartResizeDebounce = null;
-
-export function initChart() {
-    if (!canvas || !ctx) return;
-    
-    if (_chartResizeHandler) {
-        window.removeEventListener('resize', _chartResizeHandler);
-    }
-    if (_chartResizeObserver) {
-        _chartResizeObserver.disconnect();
-    }
-    
-    const resize = () => {
-        // Clear any pending resize
-        if (_chartResizeDebounce) {
-            clearTimeout(_chartResizeDebounce);
-        }
-        
-        // Debounce resize to prevent performance issues during window resize
-        _chartResizeDebounce = setTimeout(() => {
-            const dpr = window.devicePixelRatio || 1;
-            const rect = canvas.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return;
-            
-            canvas.width = rect.width * dpr;
-            canvas.height = rect.height * dpr;
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.scale(dpr, dpr);
-            renderChart();
-        }, 100); // 100ms debounce
-    };
-    
-    _chartResizeHandler = resize;
-    window.addEventListener('resize', resize);
-    
-    _chartResizeObserver = new ResizeObserver(resize);
-    _chartResizeObserver.observe(canvas.parentElement || canvas);
-    
-    resize();
-}
-
-export function updateTrafficData(data) {
-    trafficHistory.push({
-        up: data.raw.up,
-        down: data.raw.down,
-        time: Date.now()
-    });
-    
-    if (trafficHistory.length > MAX_DATA_POINTS) {
-        trafficHistory.shift();
-    }
-    
-    if (_chartFrameId !== null) {
-        cancelAnimationFrame(_chartFrameId);
-    }
-    _chartFrameId = requestAnimationFrame(() => {
-        _chartFrameId = null;
-        renderChart();
-    });
-    
-    // Update text display
-    const upValEl = document.getElementById('speed-up-val');
-    const upUnitEl = document.getElementById('speed-up-unit');
-    const downValEl = document.getElementById('speed-down-val');
-    const downUnitEl = document.getElementById('speed-down-unit');
-    
-    if (upValEl && upUnitEl) {
-        const [val, unit] = data.up.split(' ');
-        upValEl.textContent = val;
-        upUnitEl.textContent = unit;
-    }
-    if (downValEl && downUnitEl) {
-        const [val, unit] = data.down.split(' ');
-        downValEl.textContent = val;
-        downUnitEl.textContent = unit;
-    }
-}
-
-function renderChart() {
-    if (!canvas || !ctx) return;
-    
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    
-    ctx.clearRect(0, 0, width, height);
-    
-    if (trafficHistory.length < 2) return;
-    
-    // Ensure we handle non-numeric values gracefully
-    const validData = trafficHistory.filter(d => !isNaN(d.up) && !isNaN(d.down));
-    if (validData.length < 2) return;
-
-    // Use a minimum scale of 10KB/s
-    let maxVal = Math.max(...validData.map(d => Math.max(d.up, d.down)));
-    maxVal = Math.max(maxVal, 1024 * 10); 
-    
-    const getX = (index) => (index / (MAX_DATA_POINTS - 1)) * width;
-    const getY = (val) => height - (val / maxVal) * (height - 20) - 10;
-
-    // Draw Downstream (Purple Gradient)
-    drawArea(trafficHistory.map(d => d.down || 0), 'rgba(139, 92, 246, 0.3)', 'rgba(139, 92, 246, 0.8)', getY);
-    
-    // Draw Upstream (Blue Gradient)
-    drawArea(trafficHistory.map(d => d.up || 0), 'rgba(59, 130, 246, 0.3)', 'rgba(59, 130, 246, 0.8)', getY);
-}
-
-function drawArea(data, fillStart, strokeColor, getY) {
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    const getX = (index) => (index / (MAX_DATA_POINTS - 1)) * width;
-    
-    ctx.beginPath();
-    ctx.moveTo(getX(0), getY(data[0]));
-    
-    for (let i = 1; i < data.length; i++) {
-        const x1 = getX(i - 1);
-        const y1 = getY(data[i - 1]);
-        const x2 = getX(i);
-        const y2 = getY(data[i]);
-        
-        // Quadratic curve for smoothness
-        const xc = (x1 + x2) / 2;
-        const yc = (y1 + y2) / 2;
-        ctx.quadraticCurveTo(x1, y1, xc, yc);
-    }
-    
-    // Line style
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    
-    // Fill style
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, fillStart);
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    
-    ctx.lineTo(getX(data.length - 1), height);
-    ctx.lineTo(getX(0), height);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
-}
-
 // --- Navigation Logic ---
 export function initNavigation() {
     const navItems = document.querySelectorAll('[data-nav]');
@@ -757,16 +613,10 @@ export async function renderAdvancedSettings() {
 
         const fragment = document.createDocumentFragment();
         
-        // Render root categories as cards
+        // Render root categories as collapsible cards
         for (const [key, value] of Object.entries(config)) {
-            if (value && typeof value === 'object' && !Array.isArray(value)) {
-                const card = renderDynamicCard(key, value, '');
-                fragment.appendChild(card);
-            } else if (value !== null && !Array.isArray(value)) {
-                // Primitive at root
-                const item = renderDynamicItem(key, value, '');
-                if (item) fragment.appendChild(item);
-            }
+            const card = renderConfigSection(key, value, key);
+            fragment.appendChild(card);
         }
 
         container.innerHTML = '';
@@ -779,6 +629,478 @@ export async function renderAdvancedSettings() {
         errDiv.textContent = err.message;
         container.appendChild(errDiv);
     }
+}
+
+// Render a config section (object) as a collapsible card
+function renderConfigSection(title, obj, fullKey, depth = 0) {
+    const card = document.createElement('div');
+    card.className = "glass-card overflow-hidden";
+    card.dataset.key = fullKey;
+    
+    // Header with collapse toggle
+    const header = document.createElement('div');
+    header.className = "flex items-center justify-between p-4 cursor-pointer hover:bg-white/[0.03] active:bg-white/[0.06] transition-all duration-200 select-none";
+    header.innerHTML = `
+        <div class="flex items-center gap-2.5">
+            <svg class="w-3 h-3 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+            </svg>
+            <h3 class="text-xs font-semibold text-zinc-200 tracking-wide">${title}</h3>
+            ${typeof obj === 'object' && obj !== null && !Array.isArray(obj) ? `<span class="text-[9px] text-zinc-600 font-mono">${Object.keys(obj).length}</span>` : ''}
+        </div>
+        <span class="text-[9px] text-zinc-600 font-mono opacity-60">${fullKey}</span>
+    `;
+    
+    // Content wrapper for smooth animation
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = "collapse-content-wrapper";
+    contentWrapper.style.cssText = `
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+    `;
+    
+    const contentInner = document.createElement('div');
+    contentInner.className = "overflow-hidden";
+    contentInner.style.cssText = `min-height: 0;`;
+    
+    const content = document.createElement('div');
+    content.className = "border-t border-white/5 space-y-1 p-3";
+    content.style.cssText = `
+        transform: translateY(-8px);
+        opacity: 0;
+        transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.25s ease;
+    `;
+    
+    contentInner.appendChild(content);
+    contentWrapper.appendChild(contentInner);
+    
+    // Collapse state management
+    let isCollapsed = depth > 0;
+    const arrow = header.querySelector('.collapse-arrow');
+    
+    const updateCollapse = (animate = false) => {
+        if (isCollapsed) {
+            contentWrapper.style.gridTemplateRows = '0fr';
+            content.style.transform = 'translateY(-8px)';
+            content.style.opacity = '0';
+            arrow.style.transform = 'rotate(-90deg)';
+        } else {
+            contentWrapper.style.gridTemplateRows = '1fr';
+            content.style.transform = 'translateY(0)';
+            content.style.opacity = '1';
+            arrow.style.transform = 'rotate(0deg)';
+        }
+    };
+    
+    // Initial state without animation
+    if (isCollapsed) {
+        arrow.style.transform = 'rotate(-90deg)';
+        contentWrapper.style.gridTemplateRows = '0fr';
+    } else {
+        contentWrapper.style.gridTemplateRows = '1fr';
+        content.style.transform = 'translateY(0)';
+        content.style.opacity = '1';
+    }
+    
+    header.onclick = () => {
+        isCollapsed = !isCollapsed;
+        updateCollapse(true);
+    };
+    
+    // Render content based on type
+    if (typeof obj === 'object' && obj !== null) {
+        if (Array.isArray(obj)) {
+            renderArrayContent(content, obj, fullKey, depth);
+        } else {
+            renderObjectContent(content, obj, fullKey, depth);
+        }
+    } else {
+        const item = renderConfigItem(title, obj, fullKey);
+        content.appendChild(item);
+    }
+    
+    card.appendChild(header);
+    card.appendChild(contentWrapper);
+    return card;
+}
+
+// Render object content (nested key-value pairs)
+function renderObjectContent(container, obj, parentKey, depth) {
+    for (const [key, value] of Object.entries(obj)) {
+        const currentKey = `${parentKey}.${key}`;
+        
+        if (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length > 0) {
+            // Nested object - render as sub-section
+            const subSection = renderConfigSection(key, value, currentKey, depth + 1);
+            container.appendChild(subSection);
+        } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+            // Array of objects - render as special section
+            const arraySection = renderArraySection(key, value, currentKey, depth + 1);
+            container.appendChild(arraySection);
+        } else {
+            // Primitive or simple array
+            const item = renderConfigItem(key, value, currentKey);
+            container.appendChild(item);
+        }
+    }
+}
+
+// Render array content
+function renderArrayContent(container, arr, parentKey, depth) {
+    if (arr.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = "text-xs text-zinc-500 italic";
+        empty.textContent = "(empty array)";
+        container.appendChild(empty);
+        return;
+    }
+    
+    // Check if array of objects
+    if (typeof arr[0] === 'object' && arr[0] !== null) {
+        // Render each object as a mini-card
+        arr.forEach((item, index) => {
+            const itemCard = document.createElement('div');
+            itemCard.className = "bg-black/20 rounded-lg p-3 space-y-2";
+            
+            // Index header
+            const idxHeader = document.createElement('div');
+            idxHeader.className = "text-[10px] text-zinc-500 font-mono mb-2";
+            idxHeader.textContent = `[${index}]`;
+            itemCard.appendChild(idxHeader);
+            
+            // Render object properties
+            if (typeof item === 'object' && !Array.isArray(item)) {
+                for (const [k, v] of Object.entries(item)) {
+                    const itemRow = renderConfigItem(k, v, `${parentKey}[${index}].${k}`);
+                    itemCard.appendChild(itemRow);
+                }
+            } else {
+                // Array or primitive
+                const itemRow = renderConfigItem('', item, `${parentKey}[${index}]`);
+                itemCard.appendChild(itemRow);
+            }
+            
+            container.appendChild(itemCard);
+        });
+    } else {
+        // Simple array (strings, numbers, etc.)
+        renderSimpleArrayEditor(container, arr, parentKey);
+    }
+}
+
+// Render array section (for arrays of objects at section level)
+function renderArraySection(title, arr, fullKey, depth) {
+    const card = document.createElement('div');
+    card.className = "bg-black/20 rounded-xl overflow-hidden";
+    
+    // Header
+    const header = document.createElement('div');
+    header.className = "flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.03] active:bg-white/[0.06] transition-all duration-200 select-none";
+    header.innerHTML = `
+        <div class="flex items-center gap-2">
+            <svg class="w-2.5 h-2.5 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+            </svg>
+            <span class="text-[11px] font-medium text-zinc-300">${title}</span>
+            <span class="text-[9px] text-zinc-600 font-mono">${arr.length}</span>
+        </div>
+    `;
+    
+    // Content wrapper for smooth animation
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = "collapse-content-wrapper";
+    contentWrapper.style.cssText = `
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+    `;
+    
+    const contentInner = document.createElement('div');
+    contentInner.className = "overflow-hidden";
+    contentInner.style.cssText = `min-height: 0;`;
+    
+    const content = document.createElement('div');
+    content.className = "border-t border-white/5 space-y-2 p-3";
+    content.style.cssText = `
+        transform: translateY(-8px);
+        opacity: 0;
+        transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.25s ease;
+    `;
+    
+    contentInner.appendChild(content);
+    contentWrapper.appendChild(contentInner);
+    
+    let isCollapsed = true;
+    const arrow = header.querySelector('.collapse-arrow');
+    
+    // Set initial state
+    arrow.style.transform = 'rotate(-90deg)';
+    
+    const updateCollapse = () => {
+        if (isCollapsed) {
+            contentWrapper.style.gridTemplateRows = '0fr';
+            content.style.transform = 'translateY(-8px)';
+            content.style.opacity = '0';
+            arrow.style.transform = 'rotate(-90deg)';
+        } else {
+            contentWrapper.style.gridTemplateRows = '1fr';
+            content.style.transform = 'translateY(0)';
+            content.style.opacity = '1';
+            arrow.style.transform = 'rotate(0deg)';
+        }
+    };
+    
+    header.onclick = () => {
+        isCollapsed = !isCollapsed;
+        updateCollapse();
+    };
+    
+    // Render array items
+    renderArrayContent(content, arr, fullKey, depth);
+    
+    card.appendChild(header);
+    card.appendChild(contentWrapper);
+    return card;
+}
+
+// Simple array editor (strings, numbers)
+function renderSimpleArrayEditor(container, arr, fullKey) {
+    const wrapper = document.createElement('div');
+    wrapper.className = "space-y-1";
+    
+    const textarea = document.createElement('textarea');
+    textarea.className = "w-full min-h-[60px] bg-black/40 border border-white/5 rounded-lg px-3 py-2 text-[10px] text-zinc-300 focus:outline-none focus:border-accent/50 transition-all font-mono resize-y";
+    textarea.value = arr.join('\n');
+    textarea.rows = Math.min(arr.length, 10);
+    
+    textarea.onchange = () => {
+        const newValue = textarea.value.split('\n').filter(line => line.trim() !== '');
+        handleConfigUpdate(fullKey, newValue);
+    };
+    
+    wrapper.appendChild(textarea);
+    container.appendChild(wrapper);
+}
+
+// Render a single config item (key-value pair)
+function renderConfigItem(key, value, fullKey) {
+    const row = document.createElement('div');
+    row.className = "flex items-center justify-between w-full gap-4 py-1";
+    row.dataset.fullKey = fullKey;
+
+    // Label
+    const labelContainer = document.createElement('div');
+    labelContainer.className = "shrink-0 min-w-0";
+    
+    if (key) {
+        const label = document.createElement('p');
+        label.className = "text-xs font-medium text-zinc-300 capitalize truncate";
+        label.textContent = key.replace(/-/g, ' ');
+        labelContainer.appendChild(label);
+    }
+    
+    const subLabel = document.createElement('p');
+    subLabel.className = "text-[9px] text-zinc-600 font-mono truncate";
+    subLabel.textContent = fullKey.split('.').pop();
+    labelContainer.appendChild(subLabel);
+    
+    row.appendChild(labelContainer);
+
+    // Value container
+    const valueContainer = document.createElement('div');
+    valueContainer.className = "flex-1 max-w-[200px] flex justify-end";
+    
+    if (typeof value === 'boolean') {
+        // Boolean toggle
+        const toggleLabel = document.createElement('label');
+        toggleLabel.className = "ios-switch";
+        
+        const input = document.createElement('input');
+        input.type = "checkbox";
+        input.checked = value;
+        input.onchange = () => handleConfigUpdate(fullKey, input.checked);
+        
+        const slider = document.createElement('span');
+        slider.className = "switch-slider";
+        
+        toggleLabel.appendChild(input);
+        toggleLabel.appendChild(slider);
+        valueContainer.appendChild(toggleLabel);
+    } else if (typeof value === 'number') {
+        // Number input
+        const input = document.createElement('input');
+        input.type = "number";
+        input.value = value;
+        input.className = "w-full max-w-[100px] bg-black/40 border border-white/5 rounded-lg px-3 py-1 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
+        input.onchange = () => handleConfigUpdate(fullKey, Number(input.value));
+        valueContainer.appendChild(input);
+    } else if (typeof value === 'string') {
+        // String input
+        const input = document.createElement('input');
+        input.type = "text";
+        input.value = value;
+        input.className = "w-full bg-black/40 border border-white/5 rounded-lg px-3 py-1 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
+        input.onchange = () => handleConfigUpdate(fullKey, input.value);
+        valueContainer.appendChild(input);
+    } else if (Array.isArray(value)) {
+        // Array indicator - show type preview
+        const wrapper = document.createElement('div');
+        wrapper.className = "flex items-center gap-1.5";
+        
+        const badge = document.createElement('span');
+        badge.className = "text-[10px] text-zinc-400 px-2 py-0.5 bg-black/30 rounded-md";
+        badge.textContent = value.length === 1 ? `1 item` : `${value.length} items`;
+        wrapper.appendChild(badge);
+        
+        // Show preview of first item if simple type
+        if (value.length > 0 && typeof value[0] !== 'object') {
+            const preview = document.createElement('span');
+            preview.className = "text-[9px] text-zinc-600 font-mono truncate max-w-[80px]";
+            preview.textContent = String(value[0]);
+            wrapper.appendChild(preview);
+        }
+        
+        valueContainer.appendChild(wrapper);
+    } else if (typeof value === 'object' && value !== null) {
+        // Object indicator
+        const badge = document.createElement('span');
+        badge.className = "text-[10px] text-zinc-400 px-2 py-0.5 bg-black/30 rounded-md";
+        const keyCount = Object.keys(value).length;
+        badge.textContent = keyCount === 1 ? `1 field` : `${keyCount} fields`;
+        valueContainer.appendChild(badge);
+    } else if (value === null || value === undefined) {
+        // Null/undefined value - allow setting a value
+        const wrapper = document.createElement('div');
+        wrapper.className = "flex items-center gap-1";
+        
+        const badge = document.createElement('span');
+        badge.className = "text-[10px] text-zinc-600 italic px-2 py-0.5 bg-black/30 rounded";
+        badge.textContent = value === null ? "null" : "undefined";
+        wrapper.appendChild(badge);
+        
+        // Add button to set value
+        const setBtn = document.createElement('button');
+        setBtn.className = "text-[10px] text-accent hover:text-accent/80 px-1.5 py-0.5 rounded transition-colors";
+        setBtn.title = "Set value";
+        setBtn.innerHTML = `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14"/></svg>`;
+        setBtn.onclick = (e) => {
+            e.stopPropagation();
+            const input = document.createElement('input');
+            input.type = "text";
+            input.className = "w-full max-w-[120px] bg-black/40 border border-accent/50 rounded-lg px-2 py-1 text-xs text-zinc-300 focus:outline-none font-mono";
+            input.placeholder = "value...";
+            input.onkeydown = (ev) => {
+                if (ev.key === 'Enter') {
+                    const val = input.value.trim();
+                    // Try to parse as number, boolean, or keep as string
+                    let parsed = val;
+                    if (val === 'true') parsed = true;
+                    else if (val === 'false') parsed = false;
+                    else if (val !== '' && !isNaN(Number(val))) parsed = Number(val);
+                    else if (val.startsWith('{') || val.startsWith('[')) {
+                        try { parsed = JSON.parse(val); } catch {}
+                    }
+                    handleConfigUpdate(fullKey, parsed);
+                } else if (ev.key === 'Escape') {
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(badge);
+                    wrapper.appendChild(setBtn);
+                }
+            };
+            wrapper.innerHTML = '';
+            wrapper.appendChild(input);
+            input.focus();
+        };
+        wrapper.appendChild(setBtn);
+        valueContainer.appendChild(wrapper);
+    }
+    
+    row.appendChild(valueContainer);
+    return row;
+}
+
+// Handle config update - save to core and persist to file
+async function handleConfigUpdate(path, value) {
+    // Parse path to handle nested objects and array indices
+    // Examples: "dns.enable" -> {dns: {enable: value}}
+    //           "proxies[0].name" -> {proxies: [{name: value}]}
+    
+    const payload = buildNestedPayload(path, value);
+    
+    try {
+        // 1. Patch config to running core (hot reload)
+        await patchConfig(payload);
+        
+        // 2. Persist changes to config file
+        await persistConfigChanges(payload);
+        
+        // 3. Show success notification
+        showNotification(translations[currentLang].configSuccess || 'Configuration saved', 'success');
+        
+        // 4. Sync UI with core state after a short delay
+        setTimeout(syncCoreConfig, 500);
+    } catch (err) {
+        console.error('Failed to update config:', err);
+        showNotification(`${translations[currentLang].errorPrefix || 'Error'}: ${err.message || err}`, 'error');
+        
+        // Refresh UI to show current state
+        renderAdvancedSettings();
+    }
+}
+
+// Build nested payload from path string (supports array indices)
+function buildNestedPayload(path, value) {
+    const result = {};
+    let current = result;
+    
+    // Parse path segments (handle both dots and array indices)
+    // e.g., "proxies[0].name" -> [{type:'key', value:'proxies'}, {type:'index', value:0}, {type:'key', value:'name'}]
+    const segments = [];
+    const regex = /([^.\[\]]+)|\[(\d+)\]/g;
+    let match;
+    while ((match = regex.exec(path)) !== null) {
+        if (match[1] !== undefined) {
+            segments.push({ type: 'key', value: match[1] });
+        } else if (match[2] !== undefined) {
+            segments.push({ type: 'index', value: parseInt(match[2]) });
+        }
+    }
+    
+    // Build nested structure
+    for (let i = 0; i < segments.length - 1; i++) {
+        const seg = segments[i];
+        const nextSeg = segments[i + 1];
+        
+        if (seg.type === 'key') {
+            // Determine if next segment is array or object
+            if (nextSeg.type === 'index') {
+                current[seg.value] = [];
+            } else {
+                current[seg.value] = {};
+            }
+            current = current[seg.value];
+        } else {
+            // Array index - need to fill array with placeholders
+            while (current.length <= seg.value) {
+                current.push(nextSeg.type === 'index' ? [] : {});
+            }
+            current = current[seg.value];
+        }
+    }
+    
+    // Set final value
+    const lastSeg = segments[segments.length - 1];
+    if (lastSeg.type === 'key') {
+        current[lastSeg.value] = value;
+    } else {
+        while (current.length <= lastSeg.value) {
+            current.push(null);
+        }
+        current[lastSeg.value] = value;
+    }
+    
+    return result;
 }
 
 let currentConfigRules = [];
@@ -938,10 +1260,10 @@ function renderRulesList(searchQuery = '') {
             <div class="flex items-center gap-2">
                 <div class="text-[10px] font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
                 
-                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="Move to Top">
+                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${translations[currentLang].moveToTop || 'Move to Top'}">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                 </button>
-                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="Move to Bottom">
+                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${translations[currentLang].moveToBottom || 'Move to Bottom'}">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
                 </button>
                 <button class="btn-delete-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-rose-500 hover:bg-rose-500/10 transition-all">
@@ -1090,129 +1412,6 @@ function updateSaveRulesBtnVisibility() {
     }
 }
 
-function renderDynamicCard(title, obj, parentKey) {
-    const card = document.createElement('div');
-    card.className = "glass-card p-5 space-y-4 group";
-    
-    const header = document.createElement('h3');
-    header.className = "text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-4 border-b border-white/5 pb-2";
-    header.textContent = title;
-    card.appendChild(header);
-
-    const body = document.createElement('div');
-    body.className = "space-y-4";
-    
-    for (const [key, value] of Object.entries(obj)) {
-        const currentKey = parentKey ? `${parentKey}.${title}.${key}` : `${title}.${key}`;
-        const item = renderDynamicItem(key, value, currentKey);
-        if (item) body.appendChild(item);
-    }
-    
-    card.appendChild(body);
-    return card;
-}
-
-function renderDynamicItem(key, value, fullKey) {
-    const row = document.createElement('div');
-    row.className = "flex items-start justify-between w-full gap-4";
-
-    const labelContainer = document.createElement('div');
-    labelContainer.className = "shrink-0 mt-1.5";
-    const label = document.createElement('p');
-    label.className = "text-sm font-semibold text-zinc-200 capitalize";
-    label.textContent = key.replace(/-/g, ' ');
-    labelContainer.appendChild(label);
-    
-    const subLabel = document.createElement('p');
-    subLabel.className = "text-[9px] text-zinc-500 font-mono";
-    subLabel.textContent = fullKey || key;
-    labelContainer.appendChild(subLabel);
-    
-    row.appendChild(labelContainer);
-
-    const valueContainer = document.createElement('div');
-    valueContainer.className = "w-full max-w-xs flex justify-end";
-    
-    if (typeof value === 'boolean') {
-        const toggleLabel = document.createElement('label');
-        toggleLabel.className = "relative inline-flex items-center cursor-pointer";
-        
-        const input = document.createElement('input');
-        input.type = "checkbox";
-        input.className = "sr-only peer";
-        input.checked = value;
-        input.onchange = () => handleConfigUpdate(fullKey || key, input.checked);
-        
-        const slider = document.createElement('div');
-        slider.className = "w-10 h-5.5 bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-accent after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-4.5 after:w-4.5 after:transition-all";
-        
-        toggleLabel.appendChild(input);
-        toggleLabel.appendChild(slider);
-        valueContainer.appendChild(toggleLabel);
-    } else if (typeof value === 'number') {
-        const input = document.createElement('input');
-        input.type = "number";
-        input.value = value;
-        input.className = "w-full max-w-[120px] bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
-        input.onchange = () => handleConfigUpdate(fullKey || key, Number(input.value));
-        valueContainer.appendChild(input);
-    } else if (typeof value === 'string') {
-        const input = document.createElement('input');
-        input.type = "text";
-        input.value = value;
-        input.className = "w-full bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
-        input.onchange = () => handleConfigUpdate(fullKey || key, input.value);
-        valueContainer.appendChild(input);
-    } else if (typeof value === 'object' && value !== null) {
-        // Handle arrays and nested objects as textareas containing JSON
-        const textarea = document.createElement('textarea');
-        textarea.value = JSON.stringify(value, null, 2);
-        textarea.className = "w-full min-h-[80px] bg-black/40 border border-white/5 rounded-lg px-3 py-2 text-[10px] text-zinc-300 focus:outline-none focus:border-accent/50 transition-all font-mono resize-y whitespace-pre";
-        textarea.onchange = () => {
-            try {
-                const parsed = JSON.parse(textarea.value);
-                handleConfigUpdate(fullKey || key, parsed);
-                textarea.classList.remove('border-rose-500/50');
-            } catch (e) {
-                textarea.classList.add('border-rose-500/50');
-                const t = translations[currentLang];
-            showNotification(t.invalidJson || 'Invalid JSON format', 'error');
-            }
-        };
-        valueContainer.appendChild(textarea);
-        valueContainer.classList.remove('justify-end');
-        valueContainer.classList.add('flex-col');
-    }
-    
-    row.appendChild(valueContainer);
-    return row;
-}
-
-async function handleConfigUpdate(path, value) {
-    // Build nested payload from dot notation
-    const keys = path.split('.');
-    const payload = {};
-    let current = payload;
-    
-    for (let i = 0; i < keys.length - 1; i++) {
-        current[keys[i]] = {};
-        current = current[keys[i]];
-    }
-    current[keys[keys.length - 1]] = value;
-    
-    try {
-        await patchConfig(payload);
-        await persistConfigChanges(payload);
-        showNotification(translations[currentLang].configSuccess, 'success');
-        
-        // Refresh after a small delay to ensure core applied changes
-        setTimeout(syncCoreConfig, 500);
-    } catch (err) {
-        console.error('Failed to patch config:', err);
-        showNotification(`${translations[currentLang].errorPrefix || 'Error'}: ${err.message || err}`, 'error');
-        renderAdvancedSettings(); // Revert UI
-    }
-}
 let currentSortMode = localStorage.getItem('sortMode') || 'default'; // 'default', 'name', 'latency'
 
 export function initProxyControls() {
@@ -1542,7 +1741,8 @@ async function renderProxies() {
         right.className = "flex flex-col items-end";
         const latLabel = document.createElement('span');
         latLabel.className = "text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-0.5";
-        latLabel.textContent = "Latency";
+        latLabel.setAttribute('data-latency-label', 'true');
+        latLabel.textContent = translations[currentLang].latency || "Latency";
         const latVal = document.createElement('span');
         latVal.id = `latency-${CSS.escape(name)}`;
         if (pendingFromWrapper === '1') {
@@ -1887,48 +2087,103 @@ export async function initSettings() {
 
     if (restoreDefaultsBtn) {
         restoreDefaultsBtn.onclick = async () => {
+            const t = translations[currentLang];
+
+            // Show confirmation dialog first
+            const confirmed = await showConfirmModal(
+                t.restoreDefaultsTitle || "Restore Defaults",
+                t.restoreDefaultsConfirm || "Are you sure you want to restore all settings to default values?"
+            );
+            if (!confirmed) return;
+
+            const errors = [];
+            const successItems = [];
+
+            // Helper function to track operation result
+            const trackResult = async (name, operation) => {
+                try {
+                    await operation();
+                    successItems.push(name);
+                    return true;
+                } catch (err) {
+                    console.error(`Failed to reset ${name}:`, err);
+                    errors.push(`${name}: ${err.message || err}`);
+                    return false;
+                }
+            };
+
             try {
-                if (closeTrayToggle) closeTrayToggle.checked = true;
-                if (autoUpdateToggle) autoUpdateToggle.checked = false;
-                if (autostartToggle) {
-                    autostartToggle.checked = false;
-                    await disableAutoStart().catch(e => console.warn('Ignored disableAutoStart error:', e));
+                // 1. Reset UI-only settings (localStorage)
+                if (closeTrayToggle) {
+                    closeTrayToggle.checked = true;
+                    settings.close_to_tray = true;
+                }
+                if (autoUpdateToggle) {
+                    autoUpdateToggle.checked = false;
+                    settings.auto_update = false;
                 }
                 if (nodeScrollToggle) {
                     nodeScrollToggle.checked = false;
                     localStorage.setItem('nodeScroll', 'false');
+                    successItems.push('nodeScroll');
                 }
                 if (customArgsInput) {
                     customArgsInput.value = '';
+                    settings.custom_args = [];
                 }
-                if (unifiedDelayToggle) unifiedDelayToggle.checked = false;
+
+                // 2. Reset autostart (requires system integration)
+                if (autostartToggle) {
+                    autostartToggle.checked = false;
+                    settings.autostart = false;
+                    await trackResult('autostart', async () => {
+                        await disableAutoStart();
+                    });
+                }
+
+                // 3. Reset core settings (unified-delay, ipv6, allow-lan)
+                if (unifiedDelayToggle) unifiedDelayToggle.checked = true;
                 if (ipv6Toggle) ipv6Toggle.checked = false;
                 if (allowLanToggle) allowLanToggle.checked = false;
 
+                // 4. Reset DNS rewrite
                 const dnsToggle = document.getElementById('dns-rewrite-toggle');
                 if (dnsToggle) {
                     dnsToggle.checked = true;
                     localStorage.setItem('dnsRewrite', 'true');
-                    await applyDnsRewrite();
+                    await trackResult('dnsRewrite', async () => {
+                        await applyDnsRewrite();
+                    });
                 }
 
+                // 5. Reset opacity
                 if (opacitySlider) {
                     opacitySlider.value = '100';
                     localStorage.setItem('appOpacity', '100');
                     if (opacityValText) opacityValText.textContent = '100%';
                     document.documentElement.style.setProperty('--app-opacity', 1);
                     if (appMainContainer) appMainContainer.style.backgroundColor = '';
+                    successItems.push('opacity');
                 }
 
+                // 6. Clear tunnels
                 currentTunnels = [];
                 renderTunnels();
-                await saveConfigToCore({
-                    'unified-delay': false,
-                    ipv6: false,
-                    'allow-lan': false,
-                    tunnels: []
+
+                // 7. Save core config (unified-delay, ipv6, allow-lan, tunnels)
+                await trackResult('coreConfig', async () => {
+                    const result = await saveConfigToCore({
+                        'unified-delay': true,
+                        ipv6: false,
+                        'allow-lan': false,
+                        tunnels: []
+                    });
+                    if (!result) {
+                        throw new Error(t.failedSaveSettings || 'Failed to save core settings');
+                    }
                 });
 
+                // 8. Reset fake client
                 const fakeClientToggle = document.getElementById('setting-fake-client');
                 if (fakeClientToggle) {
                     fakeClientToggle.checked = true;
@@ -1942,18 +2197,20 @@ export async function initSettings() {
                         optionsContainer.classList.remove('max-h-0', 'opacity-0');
                         optionsContainer.classList.add('max-h-40', 'opacity-100');
                     }
+                    successItems.push('fakeClient');
                 }
 
-                settings.close_to_tray = true;
-                settings.auto_update = false;
-                settings.autostart = false;
-                settings.custom_args = [];
-                await window.__TAURI__.core.invoke('save_settings', { settings });
-                
+                // 9. Save app settings to disk
+                await trackResult('appSettings', async () => {
+                    await window.__TAURI__.core.invoke('save_settings', { settings });
+                });
+
+                // 10. Reset theme mode
                 localStorage.setItem('themeMode', 'auto');
                 setThemeMode('auto', false);
-                
-                // Reset Theme Color
+                successItems.push('themeMode');
+
+                // 11. Reset theme color
                 localStorage.removeItem('appTheme');
                 currentTheme = 'zinc';
                 applyTheme('zinc');
@@ -1962,11 +2219,16 @@ export async function initSettings() {
                 if (defaultThemeBtn) {
                     defaultThemeBtn.classList.add('ring-2', 'ring-offset-2', 'ring-offset-zinc-900', `ring-zinc-500`);
                 }
+                successItems.push('themeColor');
 
-                const t = translations[currentLang];
-                showNotification(t.restoreDefaultsDesc || "Settings restored to default", "success");
+                // Show result notification
+                if (errors.length === 0) {
+                    showNotification(t.settingsRestored || t.restoreDefaultsDesc || "Settings restored to default", "success");
+                } else {
+                    showNotification(`${t.partialRestore || 'Some settings failed to restore'}: ${errors.join(', ')}`, "warning");
+                }
             } catch (err) {
-                showNotification(err.toString(), 'error');
+                showNotification(`${t.restoreFailed || 'Failed to restore defaults'}: ${err.message || err}`, 'error');
             }
         };
     }
@@ -2111,7 +2373,8 @@ export async function initSettings() {
             return true;
         } catch (err) {
             console.error('Failed to save config to core:', err);
-            showNotification(err.toString() || 'Failed to save settings to core', 'error');
+            const t = translations[currentLang];
+            showNotification(err.toString() || t.failedSaveSettings || 'Failed to save settings to core', 'error');
             return false;
         }
     };
@@ -2196,7 +2459,8 @@ export async function initSettings() {
             
             const listen = document.createElement('span');
             listen.className = 'text-[10px] text-zinc-500 font-mono';
-            listen.textContent = `Listen: ${tunnel.address}`;
+            const t = translations[currentLang];
+            listen.textContent = `${t.listen || 'Listen'}: ${tunnel.address}`;
             
             info.appendChild(topRow);
             info.appendChild(listen);
@@ -2235,7 +2499,7 @@ export async function initSettings() {
             </div>
         `;
 
-        const contentArea = await showModal("Add Port Forwarding", "", "", true, customHtml);
+        const contentArea = await showModal(t.addPortForwarding || "Add Port Forwarding", "", "", true, customHtml);
         if (!contentArea) return; // Cancelled
 
         const protocolStr = contentArea.querySelector('#tunnel-protocol-input').value;
@@ -2546,8 +2810,7 @@ export async function initSettings() {
                 try {
                     await window.__TAURI__.core.invoke('delete_config', { name });
                     showNotification(t.notifDeleteSuccess, 'success');
-                    // Force refresh the config list
-                    setTimeout(() => renderConfigs(), 100);
+                    renderConfigs(); // Immediate refresh, no delay needed
                 } catch (err) {
                     showNotification(`${t.notifDeleteFailed}: ${err}`, 'error');
                 }
@@ -2647,7 +2910,8 @@ export async function initSettings() {
                     
                     const textRow = document.createElement('div');
                     textRow.className = 'flex justify-between text-[9px] text-zinc-500 mb-1.5 px-0.5 uppercase tracking-wider font-bold';
-                    textRow.innerHTML = `<span>${formatBytes(used)} used</span><span>${formatBytes(total)} total</span>`;
+                    const t = translations[currentLang];
+                    textRow.innerHTML = `<span>${formatBytes(used)} ${t.usedSpace || 'used'}</span><span>${formatBytes(total)} ${t.totalSpace || 'total'}</span>`;
                     
                     const barBg = document.createElement('div');
                     barBg.className = 'h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5';
@@ -2880,6 +3144,7 @@ export function initWindowControls() {
 
 // --- System Proxy Logic ---
 let _traySyncInterval = null;
+let _trayEventListener = null;
 
 export async function updateTrayStatus() {
     const tunToggle = document.getElementById('tun-proxy-toggle');
@@ -2892,6 +3157,207 @@ export async function updateTrayStatus() {
     } catch (err) {
         console.error('Failed to update tray icon:', err);
     }
+}
+
+/// Update the full tray menu with current state
+export async function updateTrayMenu() {
+    console.log('[Tray] updateTrayMenu called');
+    const t = translations[currentLang];
+    const tunToggle = document.getElementById('tun-proxy-toggle');
+    const sysProxyToggle = document.getElementById('sys-proxy-toggle');
+    
+    const sysProxyEnabled = sysProxyToggle?.checked || false;
+    const tunEnabled = tunToggle?.checked || false;
+    
+    console.log('[Tray] sysProxyEnabled:', sysProxyEnabled, 'tunEnabled:', tunEnabled);
+    
+    // Get current mode
+    const config = await getConfig();
+    const currentMode = config?.mode || 'rule';
+    console.log('[Tray] currentMode:', currentMode);
+    
+    // Get subscription list
+    let configs = [];
+    try {
+        configs = await window.__TAURI__.core.invoke('list_configs');
+        const settings = await window.__TAURI__.core.invoke('get_settings');
+        const activeConfig = settings.last_config || 'config.yaml';
+        configs = configs.map(c => ({
+            name: c.name,
+            is_active: c.name === activeConfig
+        }));
+        console.log('[Tray] configs:', configs);
+    } catch (e) {
+        console.warn('Failed to get configs for tray menu:', e);
+    }
+    
+    // Get proxy groups
+    let proxyGroups = [];
+    try {
+        const data = await getProxies();
+        if (data && data.proxies) {
+            // Find selector/select type groups
+            const groupNames = Object.keys(data.proxies).filter(name => {
+                const type = data.proxies[name].type?.toLowerCase() || '';
+                return type === 'selector' || type === 'select';
+            });
+            
+            proxyGroups = groupNames.slice(0, 5).map(groupName => {
+                const group = data.proxies[groupName];
+                return {
+                    name: groupName,
+                    type: group.type,  // Use 'type' to match Rust struct
+                    now: group.now || '',
+                    proxies: (group.all || []).slice(0, 20).map(proxyName => ({
+                        name: proxyName,
+                        alive: data.proxies[proxyName]?.alive
+                    }))
+                };
+            });
+            console.log('[Tray] proxyGroups:', proxyGroups);
+        }
+    } catch (e) {
+        console.warn('Failed to get proxy groups for tray menu:', e);
+    }
+    
+    try {
+        console.log('[Tray] Calling update_tray_full_menu...');
+        await window.__TAURI__.core.invoke('update_tray_full_menu', {
+            showText: t.trayShow || "Show Zephyr",
+            quitText: t.trayQuit || "Quit",
+            sysProxyText: t.traySysProxy || "System Proxy",
+            tunText: t.trayTunMode || "TUN Mode",
+            ruleText: t.rule || "Rule",
+            globalText: t.global || "Global",
+            directText: t.direct || "Direct",
+            subscriptionsText: t.traySubscriptions || "Subscriptions",
+            proxiesText: t.trayProxies || "Proxies",
+            sysProxyEnabled,
+            tunEnabled,
+            configs,
+            proxyGroups,
+            currentMode
+        });
+        console.log('[Tray] update_tray_full_menu completed successfully');
+    } catch (err) {
+        console.error('Failed to update tray menu:', err);
+    }
+}
+
+/// Initialize tray event listeners
+export function initTrayEventListeners() {
+    if (_trayEventListener) return; // Already initialized
+    
+    const { listen } = window.__TAURI__.event;
+    
+    // Listen for sys proxy toggle from tray
+    listen('tray-sysproxy-changed', async (event) => {
+        const enabled = event.payload;
+        const toggle = document.getElementById('sys-proxy-toggle');
+        const statusText = document.getElementById('proxy-status-text');
+        
+        if (toggle) {
+            toggle.checked = enabled;
+        }
+        
+        try {
+            const currentConfig = await getConfig();
+            const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+            
+            if (enabled) {
+                await window.__TAURI__.core.invoke('enable_sysproxy', { 
+                    server: `127.0.0.1:${currentPort}`,
+                    bypass: null 
+                });
+            } else {
+                await window.__TAURI__.core.invoke('disable_sysproxy');
+            }
+            
+            updateSysProxyUI();
+            await updateTrayMenu();
+        } catch (err) {
+            console.error('Failed to toggle sys proxy from tray:', err);
+            if (toggle) toggle.checked = !enabled;
+        }
+    });
+    
+    // Listen for TUN toggle from tray
+    listen('tray-tun-changed', async (event) => {
+        const enabled = event.payload;
+        const toggle = document.getElementById('tun-proxy-toggle');
+        
+        if (toggle) {
+            toggle.checked = enabled;
+            // Trigger the change handler
+            toggle.dispatchEvent(new Event('change'));
+        }
+    });
+    
+    // Listen for mode change from tray
+    listen('tray-mode-changed', async (event) => {
+        const mode = event.payload;
+        const buttons = document.querySelectorAll('[data-mode]');
+        
+        buttons.forEach(btn => {
+            if (btn.getAttribute('data-mode') === mode) {
+                btn.click();
+            }
+        });
+    });
+    
+    // Listen for subscription change from tray
+    listen('tray-subscription-changed', async (event) => {
+        const subName = event.payload;
+        const t = translations[currentLang];
+        
+        try {
+            showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
+            
+            // Get current custom args
+            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const customArgs = settings.custom_args || [];
+            
+            // Restart core with new config
+            const coreResult = await restartCore(subName, customArgs);
+            if (coreResult && coreResult.secret) {
+                // Save last_config to settings
+                settings.last_config = subName;
+                await window.__TAURI__.core.invoke('save_settings', { settings });
+                
+                await new Promise(r => setTimeout(r, 500));
+                await syncCoreConfig();
+                await closeAllConnections();
+                await updateTrayMenu();
+            }
+        } catch (err) {
+            console.error('Failed to switch subscription from tray:', err);
+            showNotification(err.toString(), 'error');
+        }
+    });
+    
+    // Listen for proxy change from tray
+    listen('tray-proxy-changed', async (event) => {
+        const { group, proxy } = event.payload;
+        
+        try {
+            const success = await switchProxy(group, proxy);
+            if (success) {
+                await closeAllConnections();
+                await syncCoreConfig();
+                
+                const currentNodeEl = document.getElementById('current-node-name');
+                if (currentNodeEl) currentNodeEl.textContent = proxy;
+                
+                if (document.querySelector('[data-page="proxies"]').classList.contains('hidden') === false) {
+                    renderProxies();
+                }
+            }
+        } catch (err) {
+            console.error('Failed to switch proxy from tray:', err);
+        }
+    });
+    
+    _trayEventListener = true;
 }
 
 /// Start periodic tray status synchronization to ensure UI and tray stay in sync
@@ -2946,7 +3412,7 @@ export async function initProxyToggle() {
                     await updateTrayStatus();
                 }
             } catch(e) {}
-        }, 5000);
+        }, 10000); // Check every 10 seconds instead of 5
     } catch (err) {
         console.error('Failed to get initial sys proxy status:', err);
     }

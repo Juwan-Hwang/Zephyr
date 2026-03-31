@@ -29,7 +29,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* https://api.github.com https://raw.githubusercontent.com https://github.com https://objects.githubusercontent.com https://mirror.ghproxy.com"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* http://ipc.localhost https://api.github.com https://raw.githubusercontent.com https://github.com https://objects.githubusercontent.com"
     }
   },
   "bundle": {
@@ -41,6 +41,28 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [
+      "bundled/*"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "dmg": {
+        "background": "icons/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "icons/Sidebar.bmp",
+        "languages": ["SimpChinese", "English"]
+      },
+      "wix": {
+        "language": "zh-CN"
+      }
+    }
   }
 }

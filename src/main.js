@@ -1,11 +1,11 @@
-import { setSecret, setBaseUrl } from './api.js';
+import { setSecret, setBaseUrl, reloadConfig } from './api.js';
 import { setWsSecret, connectTraffic, setWsBaseUrl } from './websocket.js';
 import { 
   initChart, updateTrafficData, initNavigation, 
   initProxyToggle, initProxyControls, initSettings, 
   initWindowControls, applyTranslations, initModeSelector, initTunToggle,
   syncCoreConfig, initUwpExemption, initDnsRewriteToggle, initNodeWheel, updateTrayStatus,
-  initCoreLoadingOverlay, finishCoreLoadingOverlay, failCoreLoadingOverlay, startTraySync
+  startTraySync, initTrayEventListeners, updateTrayMenu
 } from './ui.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -25,14 +25,6 @@ async function initApp() {
   });
 
   applyTranslations();
-  try {
-    const isFirstRun = await window.__TAURI__.core.invoke('is_first_run').catch(() => false);
-    if (isFirstRun) {
-        await initCoreLoadingOverlay();
-    }
-  } catch (e) {
-      console.warn('Failed to check first run status:', e);
-  }
   initWindowControls();
 
   setTimeout(async () => {
@@ -48,7 +40,12 @@ async function initApp() {
     const settings = await invoke('get_settings');
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
-    const coreResult = await invoke('bootstrap_core', { configPath, customArgs });
+    const coreResult = await invoke('start_core', { 
+      configPath, 
+      test: false,
+      customArgs,
+      secret: null 
+    });
     secret = coreResult.secret;
     const port = coreResult.port;
     setBaseUrl(`http://127.0.0.1:${port}`);
@@ -56,14 +53,15 @@ async function initApp() {
     setSecret(secret);
     setWsSecret(secret);
   } catch (err) {
-    const message = err?.toString?.() || '核心启动失败';
-    failCoreLoadingOverlay(message);
-    console.error('[App] Failed to bootstrap core:', err);
+    const message = err?.toString?.() || 'Core start failed';
+    console.error('[App] Failed to start core:', err);
+    alert(message);
     return;
   }
 
   initNavigation();
   initChart();
+  initTrayEventListeners(); // Initialize tray event listeners
   await initProxyToggle();
   initDnsRewriteToggle();
   initModeSelector();
@@ -76,6 +74,7 @@ async function initApp() {
   try {
     await syncCoreConfig();
     await updateTrayStatus();
+    await updateTrayMenu(); // Initialize tray menu with current state
     startTraySync(); // Start periodic tray status synchronization
   } catch (err) {
     console.warn("Initial syncCoreConfig failed:", err);
@@ -84,8 +83,6 @@ async function initApp() {
   window._trafficWsHandle = connectTraffic((data) => {
     updateTrafficData(data);
   });
-
-  finishCoreLoadingOverlay();
 }
 
 window.addEventListener('DOMContentLoaded', () => {

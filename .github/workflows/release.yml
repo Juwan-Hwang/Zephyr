@@ -15,18 +15,47 @@ jobs:
         include:
           - platform: "macos-latest"
             args: "--target aarch64-apple-darwin"
+            target: "aarch64-apple-darwin"
+            arch: "arm64"
           - platform: "macos-latest"
             args: "--target x86_64-apple-darwin"
+            target: "x86_64-apple-darwin"
+            arch: "x64"
           - platform: "ubuntu-22.04"
             args: ""
+            target: ""
+            arch: "x64"
           - platform: "windows-latest"
             args: ""
+            target: ""
+            arch: "x64"
 
     runs-on: ${{ matrix.platform }}
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Update version in config files
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          
+          # Update tauri.conf.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          
+          # Update Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          
+          # Update package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          
+          echo "Updated version to $VERSION"
+        shell: bash
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -36,7 +65,6 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install dependencies (Ubuntu only)
@@ -48,7 +76,57 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri app
+      # Download mihomo core for full version
+      - name: Download mihomo core (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          mkdir -p src-tauri/bundled
+          curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-windows-amd64-compatible.zip"
+          unzip mihomo.zip
+          mv mihomo.exe src-tauri/bundled/mihomo.exe
+          rm mihomo.zip
+        shell: bash
+
+      - name: Download mihomo core (macOS arm64)
+        if: matrix.platform == 'macos-latest' && matrix.arch == 'arm64'
+        run: |
+          mkdir -p src-tauri/bundled
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-darwin-arm64.gz"
+          gunzip mihomo.gz
+          chmod +x mihomo
+          mv mihomo src-tauri/bundled/mihomo
+        shell: bash
+
+      - name: Download mihomo core (macOS x64)
+        if: matrix.platform == 'macos-latest' && matrix.arch == 'x64'
+        run: |
+          mkdir -p src-tauri/bundled
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-darwin-amd64.gz"
+          gunzip mihomo.gz
+          chmod +x mihomo
+          mv mihomo src-tauri/bundled/mihomo
+        shell: bash
+
+      - name: Download mihomo core (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          mkdir -p src-tauri/bundled
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64.gz"
+          gunzip mihomo.gz
+          chmod +x mihomo
+          mv mihomo src-tauri/bundled/mihomo
+        shell: bash
+
+      # Download geo data files for full version
+      - name: Download geo data files
+        run: |
+          mkdir -p src-tauri/bundled
+          curl -L -o src-tauri/bundled/geoip.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
+          curl -L -o src-tauri/bundled/geosite.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
+        shell: bash
+
+      # Build full version (with bundled core and geo)
+      - name: Build Tauri app (Full)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,3 +137,101 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Rename artifacts to distinguish full vs lite versions
+      - name: Rename Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        run: |
+          cd src-tauri/target/release/bundle
+          for f in nsis/*.exe; do
+            if [[ "$f" != *"-setup.exe" ]]; then continue; fi
+            newname="${f/-setup/-setup-full}"
+            mv "$f" "$newname"
+          done
+          for f in msi/*.msi; do
+            newname="${f/.msi/-full.msi}"
+            mv "$f" "$newname"
+          done
+        shell: bash
+
+      - name: Rename macOS artifacts
+        if: matrix.platform == 'macos-latest'
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle
+          for f in dmg/*.dmg; do
+            newname="${f/.dmg/-full.dmg}"
+            mv "$f" "$newname"
+          done
+        shell: bash
+
+      - name: Rename Linux artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          cd src-tauri/target/release/bundle
+          for f in deb/*.deb; do
+            newname="${f/.deb/-full.deb}"
+            mv "$f" "$newname"
+          done
+          for f in appimage/*.AppImage; do
+            newname="${f/.AppImage/-full.AppImage}"
+            mv "$f" "$newname"
+          done
+        shell: bash
+
+      # Remove bundled files for lite version
+      - name: Remove bundled files for lite version
+        run: |
+          rm -rf src-tauri/bundled/*
+        shell: bash
+
+      # Build lite version (without bundled core and geo)
+      - name: Build Tauri app (Lite)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Zephyr ${{ github.ref_name }}"
+          releaseBody: "See the assets to download and install this version."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Rename Windows lite artifacts
+        if: matrix.platform == 'windows-latest'
+        run: |
+          cd src-tauri/target/release/bundle
+          for f in nsis/*.exe; do
+            if [[ "$f" != *"-setup.exe" ]]; then continue; fi
+            newname="${f/-setup/-setup-lite}"
+            mv "$f" "$newname"
+          done
+          for f in msi/*.msi; do
+            newname="${f/.msi/-lite.msi}"
+            mv "$f" "$newname"
+          done
+        shell: bash
+
+      - name: Rename macOS lite artifacts
+        if: matrix.platform == 'macos-latest'
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle
+          for f in dmg/*.dmg; do
+            newname="${f/.dmg/-lite.dmg}"
+            mv "$f" "$newname"
+          done
+        shell: bash
+
+      - name: Rename Linux lite artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          cd src-tauri/target/release/bundle
+          for f in deb/*.deb; do
+            newname="${f/.deb/-lite.deb}"
+            mv "$f" "$newname"
+          done
+          for f in appimage/*.AppImage; do
+            newname="${f/.AppImage/-lite.AppImage}"
+            mv "$f" "$newname"
+          done
+        shell: bash

@@ -165,7 +165,8 @@ export function connectTraffic(callback) {
       
       // Notify about connection loss
       if (window.showNotification) {
-          window.showNotification('Lost connection to core traffic monitor. Click to reconnect. / 核心流量监控连接丢失，点击重连。', 'warning');
+          const t = window.translations?.[window.currentLang] || {};
+          window.showNotification(t.connectionLost || 'Lost connection to core traffic monitor. Click to reconnect.', 'warning');
       }
       
       // Call registered callback if any
