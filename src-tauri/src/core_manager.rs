@@ -204,7 +204,7 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
 pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
     let paths = resolve_app_paths(app)?;
     
-    let is_new = !paths.app_data_dir.exists();
+    let _is_new = !paths.app_data_dir.exists();
     
     fs::create_dir_all(&paths.app_data_dir).map_err(|e| format!("Failed to create app data dir: {}", e))?;
     fs::create_dir_all(&paths.core_dir).map_err(|e| format!("Failed to create core dir: {}", e))?;
@@ -212,7 +212,7 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
     
     #[cfg(target_os = "windows")]
     {
-        if is_new {
+        if _is_new {
             use std::process::Command;
             use std::os::windows::process::CommandExt;
             if let Ok(username) = std::env::var("USERNAME") {
@@ -1018,29 +1018,9 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
     };
     
     if let Some(mut child) = child {
-        // Try graceful shutdown first (on Unix, send SIGTERM; on Windows, just kill)
-        #[cfg(unix)]
-        {
-            use std::signal::Signal;
-            use std::os::unix::process::Signal;
-            let _ = child.send_signal(Signal::SIGTERM);
-        }
-        
-        // Wait a bit for graceful shutdown
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        
-        // Force kill if still running
-        match child.try_wait() {
-            Ok(Some(_status)) => {}
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
+        // Force kill the process (cross-platform safe)
+        let _ = child.kill();
+        let _ = child.wait();
     }
     
     if let Ok(paths) = ensure_app_storage(&app) {

@@ -78,16 +78,18 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      # Get latest mihomo release version
+      # Get latest mihomo release version (Added GITHUB_TOKEN to prevent API Rate Limit)
       - name: Get latest mihomo version
         id: mihomo_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MIHOMO_VERSION=$(curl -sL "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          MIHOMO_VERSION=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
           echo "VERSION=$MIHOMO_VERSION" >> $GITHUB_OUTPUT
           echo "Latest mihomo version: $MIHOMO_VERSION"
         shell: bash
 
-      # Download mihomo core for full version
+      # Download mihomo core for full version (Fixed extracted filename)
       - name: Download mihomo core (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
@@ -95,7 +97,7 @@ jobs:
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
           curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
           unzip mihomo.zip
-          mv mihomo.exe src-tauri/bundled/mihomo.exe
+          mv mihomo-windows-amd64-compatible.exe src-tauri/bundled/mihomo.exe
           rm mihomo.zip
         shell: bash
 

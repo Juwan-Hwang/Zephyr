@@ -1,3 +1,6 @@
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager};
