@@ -143,47 +143,52 @@ jobs:
         shell: bash
 
       # Build full version (with bundled core and geo)
-# 1. 编译 Full 版本 (改用原生命令，阻止自动上传)
+# 0. 准备存放所有产物的保险柜文件夹
+      - name: Create artifacts directory
+        run: mkdir -p dist-artifacts
+        shell: bash
+
+      # 1. 编译 Full 版本
       - name: Build Tauri app (Full)
         run: npx tauri build ${{ matrix.args }}
 
-      # 2. 本地重命名 Full 版本的安装包
-      - name: Rename Windows artifacts
+      # 2. 收集 Full 版本的安装包到保险柜
+      - name: Collect Windows Full artifacts
         if: matrix.platform == 'windows-latest'
         run: |
-          cd src-tauri/target/release/bundle
-          for f in nsis/*.exe; do
-            if [[ "$f" != *"-setup.exe" ]]; then continue; fi
-            newname="${f/-setup/-setup-full}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/nsis/*-setup.exe; do
+            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
           done
-          for f in msi/*.msi; do
-            newname="${f/.msi/-full.msi}"
-            mv "$f" "$newname"
+          for f in src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
           done
         shell: bash
 
-      - name: Rename macOS artifacts
+      - name: Collect macOS Full artifacts
         if: matrix.platform == 'macos-latest'
         run: |
-          cd src-tauri/target/${{ matrix.target }}/release/bundle
-          for f in dmg/*.dmg; do
-            newname="${f/.dmg/-full.dmg}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-full.dmg}")"
+          done
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-full.tar.gz}")"
           done
         shell: bash
 
-      - name: Rename Linux artifacts
+      - name: Collect Linux Full artifacts
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          cd src-tauri/target/release/bundle
-          for f in deb/*.deb; do
-            newname="${f/.deb/-full.deb}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist-artifacts/$(basename "${f/.deb/-full.deb}")"
           done
-          for f in appimage/*.AppImage; do
-            newname="${f/.AppImage/-full.AppImage}"
-            mv "$f" "$newname"
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-full.AppImage}")"
+          done
+          for f in src-tauri/target/release/bundle/rpm/*.rpm; do
+            cp "$f" "dist-artifacts/$(basename "${f/.rpm/-full.rpm}")"
           done
         shell: bash
 
@@ -193,51 +198,51 @@ jobs:
           rm -rf src-tauri/bundled/*
         shell: bash
 
-      # 4. 编译 Lite 版本
+      # 4. 编译 Lite 版本 (此时Tauri清理旧文件夹也不会影响我们已经拷走的文件了)
       - name: Build Tauri app (Lite)
         run: npx tauri build ${{ matrix.args }}
 
-      # 5. 本地重命名 Lite 版本的安装包
-      - name: Rename Windows lite artifacts
+      # 5. 收集 Lite 版本的安装包到保险柜
+      - name: Collect Windows Lite artifacts
         if: matrix.platform == 'windows-latest'
         run: |
-          cd src-tauri/target/release/bundle
-          for f in nsis/*.exe; do
-            if [[ "$f" != *"-setup.exe" ]]; then continue; fi
-            newname="${f/-setup/-setup-lite}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/nsis/*-setup.exe; do
+            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
           done
-          for f in msi/*.msi; do
-            newname="${f/.msi/-lite.msi}"
-            mv "$f" "$newname"
+          for f in src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
           done
         shell: bash
 
-      - name: Rename macOS lite artifacts
+      - name: Collect macOS Lite artifacts
         if: matrix.platform == 'macos-latest'
         run: |
-          cd src-tauri/target/${{ matrix.target }}/release/bundle
-          for f in dmg/*.dmg; do
-            newname="${f/.dmg/-lite.dmg}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-lite.dmg}")"
+          done
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-lite.tar.gz}")"
           done
         shell: bash
 
-      - name: Rename Linux lite artifacts
+      - name: Collect Linux Lite artifacts
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          cd src-tauri/target/release/bundle
-          for f in deb/*.deb; do
-            newname="${f/.deb/-lite.deb}"
-            mv "$f" "$newname"
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist-artifacts/$(basename "${f/.deb/-lite.deb}")"
           done
-          for f in appimage/*.AppImage; do
-            newname="${f/.AppImage/-lite.AppImage}"
-            mv "$f" "$newname"
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-lite.AppImage}")"
+          done
+          for f in src-tauri/target/release/bundle/rpm/*.rpm; do
+            cp "$f" "dist-artifacts/$(basename "${f/.rpm/-lite.rpm}")"
           done
         shell: bash
 
-      # 6. 在最后一步，将所有重命名好的文件统一上传到 GitHub Release！
+      # 6. 一键清空购物车！上传保险柜里的所有文件到 GitHub Release
       - name: Upload All Release Assets
         uses: softprops/action-gh-release@v2
         env:
@@ -248,11 +253,4 @@ jobs:
           body: "See the assets to download and install this version."
           draft: true
           prerelease: false
-          files: |
-            src-tauri/target/**/release/bundle/nsis/*.exe
-            src-tauri/target/**/release/bundle/msi/*.msi
-            src-tauri/target/**/release/bundle/dmg/*.dmg
-            src-tauri/target/**/release/bundle/deb/*.deb
-            src-tauri/target/**/release/bundle/appimage/*.AppImage
-            src-tauri/target/**/release/bundle/rpm/*.rpm
-            src-tauri/target/**/release/bundle/macos/*.tar.gz
+          files: dist-artifacts/*
