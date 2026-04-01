@@ -72,15 +72,25 @@ pub fn kill_mihomo() {
 /// This is required because creating /dev/utun devices needs root access
 #[cfg(target_os = "macos")]
 pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
-    // First, stop the current core
-    kill_mihomo();
-    
     // Get core path and config directory
     let paths = resolve_app_paths(app)?;
     let core_path = paths.core_dir.join("mihomo");
     
     // Ensure core is executable
     ensure_executable(&core_path)?;
+    
+    // Step 1: Record old process PIDs before starting new one
+    let old_pid_output = std::process::Command::new("pgrep")
+        .arg("mihomo")
+        .output()
+        .ok();
+    let old_pids: Vec<String> = old_pid_output
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default()
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     
     let core_path_str = core_path.to_string_lossy();
     let config_dir_str = paths.core_dir.to_string_lossy();
@@ -103,11 +113,24 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         let err = String::from_utf8_lossy(&output.stderr);
         eprintln!("[TUN DEBUG] osascript stderr: {}", err);
         eprintln!("[TUN DEBUG] script was: {}", script);
+        // Authorization failed/canceled: old core is still running, just return error
         if err.contains("canceled") || err.contains("User canceled") {
             return Err("canceled".to_string());
         }
         return Err(format!("Failed to restart core as root: {}", err));
     }
+    
+    // Step 2: Kill only old processes by PID (not the new root process)
+    for pid in &old_pids {
+        let _ = std::process::Command::new("kill")
+            .arg("-9")
+            .arg(pid)
+            .output();
+    }
+    
+    // Step 3: Wait for new process to bind port
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    
     Ok(())
 }
 
