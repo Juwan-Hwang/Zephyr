@@ -3945,7 +3945,7 @@ export function initTunToggle() {
                     console.log('[TUN] starting mac tun flow');
                     try {
                         console.log('[TUN] calling restart_core_as_root_cmd');
-                        await invoke('restart_core_as_root_cmd');
+                        await window.__TAURI__.core.invoke('restart_core_as_root_cmd');
                         console.log('[TUN] restart success');
                         // Wait for core to restart
                         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -3971,7 +3971,7 @@ export function initTunToggle() {
                 } else {
                     // Disable TUN: restart core normally (as regular user)
                     try {
-                        const settings = await invoke('get_settings');
+                        const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
                         await restartCore(currentConfig, customArgs);
