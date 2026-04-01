@@ -129,7 +129,10 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
         port
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .no_proxy() // Force direct connection to local core, bypass system proxy
+        .build()
+        .unwrap();
     // For Mihomo, /configs requires PATCH for partial updates.
     let url = format!("http://127.0.0.1:{}/configs?force=true", actual_port);
     let mut req = client.patch(&url).json(&patch_yaml);
