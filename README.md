@@ -486,7 +486,7 @@ SOFTWARE.
 
 <div align="center">
 
-**Made with ❤️ by Zephyr Team**
+**Made by Juwan**
 
 [⬆ 回到顶部](#zephyr)
 
