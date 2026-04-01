@@ -117,7 +117,8 @@ jobs:
         run: |
           mkdir -p src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
-          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-${MIHOMO_VERSION}.gz"
+          # 加上 -compatible
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
@@ -128,7 +129,8 @@ jobs:
         run: |
           mkdir -p src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
-          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
+          # 加上 -compatible
+          curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
