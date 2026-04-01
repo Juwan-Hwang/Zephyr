@@ -440,13 +440,13 @@ npm run tauri build
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This project is primarily developed for personal use, so most pull requests may not be merged.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+If you want to make changes for your own needs, you are welcome to fork the repository and maintain your own version.
+
+Bug reports, security reports, and other issues are always welcome. If you find a bug or a potential security problem, please open an issue first.
+
+For larger changes or feature suggestions, opening an issue for discussion before submitting a pull request is recommended.
 
 ## 📄 License
 
