@@ -15,6 +15,26 @@
 
 </div>
 
+> **⚠️ 免责声明 / Disclaimer**
+>
+> 本项目的开发起因很简单：目前我还没有找到符合自己审美的 Mihomo GUI，所以就自己 "vibe coding" 了一个。
+>
+> 由于项目中的所有内容（包括这段说明）都是由 AI 生成的，因此其安全性和性能目前均未经充分验证，请自行评估使用风险。
+>
+> 本项目主要用于个人自用，因此绝大多数 PR 可能不会合并；如果你有自己的需求，欢迎自行 Fork 并修改。
+>
+> 如果你发现了安全问题或 Bug，欢迎提交 Issue 反馈。
+>
+> ---
+>
+> The reason for developing this project is simple: I haven't found a Mihomo GUI that matches my aesthetic preferences, so I "vibe coded" one myself.
+>
+> Since all content in this project (including this disclaimer) is AI-generated, its security and performance have not been fully verified. Please evaluate the risks before using.
+>
+> This project is primarily for personal use, so most PRs may not be merged. If you have your own requirements, feel free to Fork and modify it yourself.
+>
+> If you discover security issues or bugs, you are welcome to submit an Issue.
+
 ---
 
 ## 📸 应用截图
