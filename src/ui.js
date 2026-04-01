@@ -3942,11 +3942,15 @@ export function initTunToggle() {
             if (isMac) {
                 if (enable) {
                     // Enable TUN: restart core with root
+                    console.log('[TUN] starting mac tun flow');
                     try {
+                        console.log('[TUN] calling restart_core_as_root_cmd');
                         await invoke('restart_core_as_root_cmd');
+                        console.log('[TUN] restart success');
                         // Wait for core to restart
                         await new Promise(resolve => setTimeout(resolve, 1500));
                     } catch (authErr) {
+                        console.error('[TUN] authErr:', authErr);
                         if (authErr === 'canceled') {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
                         } else {
