@@ -111,14 +111,10 @@ fn get_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
 fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
     // First, check bundled resources (for full installer)
     if let Some(bundled_dir) = get_bundled_dir(app) {
-        println!("Found bundled directory: {:?}", bundled_dir);
         if bundled_dir != paths.core_dir && bundled_dir.exists() {
             let entries = match fs::read_dir(&bundled_dir) {
                 Ok(entries) => entries,
-                Err(e) => {
-                    eprintln!("Failed to read bundled directory: {}", e);
-                    return Ok(());
-                }
+                Err(_) => return Ok(()),
             };
 
             for entry in entries.flatten() {
@@ -139,24 +135,19 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
 
                 let target = paths.core_dir.join(file_name);
 
-                // Copy if target doesn't exist
-                let should_copy = !target.exists();
-                if should_copy {
+                // Only copy if target doesn't exist
+                if !target.exists() {
                     if let Err(e) = fs::copy(&source, &target) {
                         eprintln!("Warning: Failed to copy bundled file {}: {}", file_name, e);
                     }
                 }
                 
-                // Always ensure executable permission on Unix (in case it was copied without it)
+                // Always ensure executable permission on Unix
                 #[cfg(any(target_os = "macos", target_os = "linux"))]
                 {
                     if file_name == core_binary_name() || file_name == "mihomo" {
                         if target.exists() {
-                            if let Err(e) = ensure_executable(&target) {
-                                eprintln!("Warning: Failed to set executable permission for {}: {}", file_name, e);
-                            } else {
-                                println!("Set executable permission for: {}", file_name);
-                            }
+                            let _ = ensure_executable(&target);
                         }
                     }
                 }
@@ -935,16 +926,7 @@ pub async fn start_core(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     
-    println!("Spawning core with exe: {:?}", exe_path);
-    println!("Working directory: {:?}", paths.core_dir);
-    println!("Args: {:?}", cmd.get_args());
-    println!("Config file exists: {}", run_config_path.exists());
-    
-    let mut child = cmd.spawn().map_err(|e| {
-        eprintln!("[ERROR] Failed to spawn mihomo: {}", e);
-        format!("Failed to spawn mihomo: {}", e)
-    })?;
-    eprintln!("[DEBUG] mihomo spawned successfully, pid: {:?}", child.id());
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
     let stdout = match child.stdout.take() {
         Some(s) => s,
