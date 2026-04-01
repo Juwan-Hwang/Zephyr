@@ -101,6 +101,8 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
     
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[TUN DEBUG] osascript stderr: {}", err);
+        eprintln!("[TUN DEBUG] script was: {}", script);
         if err.contains("canceled") || err.contains("User canceled") {
             return Err("canceled".to_string());
         }
