@@ -51,6 +51,70 @@ pub fn core_binary_name() -> &'static str {
     }
 }
 
+/// Kill all mihomo processes (cleanup function)
+pub fn kill_mihomo() {
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("killall")
+            .arg("-9")
+            .arg("mihomo")
+            .output();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "mihomo.exe"])
+            .output();
+    }
+}
+
+/// Restart mihomo core with root privileges on macOS for TUN mode
+/// This is required because creating /dev/utun devices needs root access
+#[cfg(target_os = "macos")]
+pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
+    // First, stop the current core
+    kill_mihomo();
+    
+    // Get core path and config directory
+    let paths = resolve_app_paths(app)?;
+    let core_path = paths.core_dir.join("mihomo");
+    
+    // Ensure core is executable
+    ensure_executable(&core_path)?;
+    
+    let core_path_str = core_path.to_string_lossy();
+    let config_dir_str = paths.core_dir.to_string_lossy();
+    
+    // Build the command to run mihomo with root in background
+    // -d specifies the directory, -f specifies the config file name
+    // Use subshell & to properly background the process
+    let script = format!(
+        r#"do shell script "('{}' -d '{}' -f 'run_config.yaml' &) > /dev/null 2>&1" with administrator privileges"#,
+        core_path_str, config_dir_str
+    );
+    
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+    
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        if err.contains("canceled") || err.contains("User canceled") {
+            return Err("canceled".to_string());
+        }
+        return Err(format!("Failed to restart core as root: {}", err));
+    }
+    Ok(())
+}
+
+/// On non-macOS platforms, this is a no-op
+#[cfg(not(target_os = "macos"))]
+pub fn restart_core_as_root(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn ensure_executable(path: &Path) -> Result<(), String> {
     let metadata = fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {}", e))?;
@@ -859,6 +923,9 @@ pub async fn start_core(
     custom_args: Vec<String>,
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
+    // Kill any existing mihomo processes before starting a new one
+    kill_mihomo();
+    
     let paths = ensure_app_storage(&app)?;
     
     let exe_path = get_core_exe_path(&app)?;
@@ -1652,6 +1719,12 @@ pub fn sanitize_config_file_name_public(config_path: &str) -> Result<String, Str
 #[cfg(test)]
 pub fn is_private_host_public(host: &str) -> bool {
     is_private_host(host)
+}
+
+/// Tauri command to restart mihomo core with root privileges on macOS for TUN mode
+#[tauri::command]
+pub fn restart_core_as_root_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    restart_core_as_root(&app)
 }
 
 #[cfg(test)]

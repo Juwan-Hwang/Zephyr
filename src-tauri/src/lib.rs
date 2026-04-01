@@ -5,7 +5,7 @@ pub mod uwp_loopback;
 pub mod config_manager;
 pub mod tray;
 
-use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text};
+use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text, kill_mihomo, restart_core_as_root_cmd};
 use updater::{get_latest_version, update_core, update_geo_data, get_latest_client_versions};
 use sys_proxy::{enable_sysproxy, disable_sysproxy, get_sys_proxy, clear_sys_proxy};
 use config_manager::{read_config, update_config};
@@ -155,10 +155,9 @@ pub fn run() {
                         api.prevent_close();
                         let _ = window.hide();
                     } else {
-                        let app = window.app_handle().clone();
-                        let state = window.state::<MihomoState>();
-                        let _ = stop_core(app.clone(), state);
+                        kill_mihomo();
                         let _ = clear_sys_proxy();
+                        let app = window.app_handle();
                         app.cleanup_before_exit();
                         app.exit(0);
                     }
@@ -218,6 +217,7 @@ pub fn run() {
             update_geo_data,
             get_latest_client_versions,
             fetch_text,
+            restart_core_as_root_cmd,
             // Re-export tray commands
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
@@ -225,7 +225,13 @@ pub fn run() {
             tray::update_tray_toggle_states,
         ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            kill_mihomo();
+        }
+    });
 }

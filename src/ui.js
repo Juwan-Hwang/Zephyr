@@ -3923,6 +3923,7 @@ export function initTunToggle() {
 
         const enable = toggle.checked;
         const t = translations[currentLang];
+        const isMac = navigator.platform.toLowerCase().includes('mac');
         isNetworkUpdating = true;
 
         // Show loading state
@@ -3933,12 +3934,52 @@ export function initTunToggle() {
         }
 
         try {
+            // First, update config to enable/disable TUN
             await patchConfig({ tun: { enable } });
             await persistConfigChanges({ tun: { enable } });
+
+            // On macOS, handle TUN mode with root privileges
+            if (isMac) {
+                if (enable) {
+                    // Enable TUN: restart core with root
+                    try {
+                        await invoke('restart_core_as_root_cmd');
+                        // Wait for core to restart
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                    } catch (authErr) {
+                        if (authErr === 'canceled') {
+                            showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+                        } else {
+                            showNotification(t.tunAuthFailed || 'Authorization failed', 'error');
+                        }
+                        toggle.checked = false;
+                        if (spinner) spinner.classList.add('hidden');
+                        if (statusText) {
+                            statusText.textContent = t.virtualAdapter;
+                            statusText.classList.remove('text-purple-400');
+                        }
+                        isNetworkUpdating = false;
+                        // Rollback config
+                        await patchConfig({ tun: { enable: false } });
+                        await persistConfigChanges({ tun: { enable: false } });
+                        return;
+                    }
+                } else {
+                    // Disable TUN: restart core normally (as regular user)
+                    try {
+                        const settings = await invoke('get_settings');
+                        const currentConfig = settings.last_config || 'config.yaml';
+                        const customArgs = settings.custom_args || [];
+                        await restartCore(currentConfig, customArgs);
+                    } catch (restartErr) {
+                        console.error('Failed to restart core:', restartErr);
+                    }
+                }
+            }
             
             // Verify actual state from core
-            const currentConfig = await getConfig();
-            if (currentConfig?.tun?.enable !== enable) {
+            const coreConfig = await getConfig();
+            if (coreConfig?.tun?.enable !== enable) {
                 throw new Error(t.tunRejected || "Core rejected TUN mode change (possible missing admin rights or driver issues)");
             }
 
@@ -3962,7 +4003,8 @@ export function initTunToggle() {
                 statusText.classList.remove('text-purple-400');
             }
             if (spinner) spinner.classList.add('hidden');
-            showNotification(t.tunFailed, 'error');
+            // Show platform-specific error message
+            showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             isNetworkUpdating = false;
             await updateTrayStatus();
         }
