@@ -167,28 +167,68 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     
     eprintln!("[TUN DEBUG] script: {}", script);
     
-    // Request authorization (old process still alive, cancel is safe)
-    let output = std::process::Command::new("osascript")
+    // Spawn osascript without waiting for it to complete
+    // The & at the end of the shell command makes mihomo run in background
+    // but osascript might still wait, so we use spawn() instead of output()
+    let mut child = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
-        .output()
-        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
     
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        eprintln!("[TUN DEBUG] osascript stderr: {}", err);
-        eprintln!("[TUN DEBUG] script was: {}", script);
-        // User canceled: old core is still running, just return error
-        if err.contains("canceled") || err.contains("User canceled") {
-            return Err("canceled".to_string());
+    eprintln!("[TUN DEBUG] osascript spawned, waiting for root mihomo...");
+    
+    // Wait a bit for osascript to potentially show errors (like user cancel)
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    
+    // Check if osascript exited quickly with an error (e.g., user canceled)
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            if !status.success() {
+                // Read stderr to get the error
+                let stderr = child.stderr.take();
+                if let Some(mut stderr) = stderr {
+                    let mut err = String::new();
+                    let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
+                    eprintln!("[TUN DEBUG] osascript failed: {}", err);
+                    if err.contains("canceled") || err.contains("User canceled") {
+                        return Err("canceled".to_string());
+                    }
+                    return Err(format!("osascript failed: {}", err));
+                }
+                return Err("osascript failed".to_string());
+            }
         }
-        return Err(format!("Failed to restart core as root: {}", err));
+        Ok(None) => {
+            // Still running, which is expected - password dialog is showing
+            eprintln!("[TUN DEBUG] osascript still running (password dialog likely showing)");
+        }
+        Err(e) => {
+            eprintln!("[TUN DEBUG] try_wait error: {}", e);
+        }
     }
     
-    // Wait for new process to bind port
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
+    let mut started = false;
+    for i in 0..60 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if has_root_mihomo() {
+            started = true;
+            eprintln!("[TUN DEBUG] root mihomo detected after {}ms", (i + 1) * 500);
+            break;
+        }
+    }
     
-    // Verify new process bound to port 9090
+    if !started {
+        // Kill osascript if still running
+        let _ = child.kill();
+        return Err("Root mihomo failed to start within 30 seconds".to_string());
+    }
+    
+    // Wait for port to be bound
     let mut bound = false;
     for _ in 0..10 {
         if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
