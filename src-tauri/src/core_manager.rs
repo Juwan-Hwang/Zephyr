@@ -79,6 +79,20 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
     // Ensure core is executable
     ensure_executable(&core_path)?;
     
+    // Step 1: Record old PIDs before starting new process
+    let old_pids: Vec<String> = std::process::Command::new("pgrep")
+        .arg("mihomo")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default()
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    eprintln!("[TUN] old PIDs to kill: {:?}", old_pids);
+    
     let core_path_str = core_path.to_string_lossy();
     let config_dir_str = paths.core_dir.to_string_lossy();
     
@@ -88,7 +102,7 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         core_path_str, config_dir_str
     );
     
-    // Step 1: Request authorization first (old process still alive, cancel is safe)
+    // Step 2: Request authorization (old process still alive, cancel is safe)
     let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -106,14 +120,19 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         return Err(format!("Failed to restart core as root: {}", err));
     }
     
-    // Step 2: Authorization succeeded, kill old process to release port
-    // New process may be waiting for port, or will retry after old exits
-    kill_mihomo();
+    // Step 3: Kill only old PIDs (not the new root process)
+    for pid in &old_pids {
+        eprintln!("[TUN] killing old pid: {}", pid);
+        let _ = std::process::Command::new("kill")
+            .arg("-9")
+            .arg(pid)
+            .output();
+    }
     
-    // Step 3: Wait for port release, give new process time to bind
+    // Step 4: Wait for new process to bind port
     std::thread::sleep(std::time::Duration::from_millis(500));
     
-    // Step 4: Verify new process bound to port 9090
+    // Step 5: Verify new process bound to port 9090
     let mut bound = false;
     for _ in 0..10 {
         if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
@@ -127,6 +146,7 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         return Err("root_start_failed".to_string());
     }
     
+    eprintln!("[TUN] root core started successfully");
     Ok(())
 }
 
