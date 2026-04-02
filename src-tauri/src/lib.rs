@@ -5,7 +5,7 @@ pub mod uwp_loopback;
 pub mod config_manager;
 pub mod tray;
 
-use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text, kill_mihomo, restart_core_as_root_cmd, set_tun_enabled};
+use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text, kill_mihomo, restart_core_as_root_cmd, set_tun_enabled, kill_all_mihomo_as_root_cmd, smart_kill_all_mihomo_as_root};
 use updater::{get_latest_version, update_core, update_geo_data, get_latest_client_versions};
 use sys_proxy::{enable_sysproxy, disable_sysproxy, get_sys_proxy, clear_sys_proxy};
 use config_manager::{read_config, update_config};
@@ -219,6 +219,7 @@ pub fn run() {
             fetch_text,
             restart_core_as_root_cmd,
             set_tun_enabled,
+            kill_all_mihomo_as_root_cmd,
             // Re-export tray commands
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
@@ -233,6 +234,8 @@ pub fn run() {
     app.run(|_handle, event| {
         if let tauri::RunEvent::Exit = event {
             kill_mihomo();
+            // Smart kill: only prompts for password if there's actually a root mihomo running
+            let _ = smart_kill_all_mihomo_as_root();
         }
     });
 }

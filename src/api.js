@@ -27,7 +27,6 @@ function isMissingAutostartEntryError(err) {
  * 设置 Secret
  */
 export function setSecret(s) {
-  console.log('[API] setSecret called with:', s ? `${s.substring(0, 8)}...` : '(empty)');
   _state.secret = s || '';
 }
 
@@ -40,8 +39,6 @@ function getHeaders() {
   };
   if (_state.secret) {
     headers['Authorization'] = `Bearer ${_state.secret}`;
-  } else {
-    console.warn('[API] getHeaders called with empty secret!');
   }
   return headers;
 }
@@ -80,9 +77,7 @@ export async function switchProxy(group, name) {
  */
 export async function getConfig() {
   try {
-    const headers = getHeaders();
-    console.log('[API] getConfig called, Authorization:', headers['Authorization'] ? 'Bearer ***' : 'MISSING');
-    const res = await fetch(`${BASE_URL}/configs`, { headers });
+    const res = await fetch(`${BASE_URL}/configs`, { headers: getHeaders() });
     if (!res.ok) {
       console.error('[API] getConfig failed with status:', res.status);
       return null;

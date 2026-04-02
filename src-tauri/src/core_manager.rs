@@ -154,9 +154,9 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    // Use cd to enter directory and ./mihomo to avoid path parsing issues
+    // Use nohup and redirect stdin to /dev/null for reliable backgrounding
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && nohup './mihomo' -d '.' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 < /dev/null &" with administrator privileges"#,
         config_dir_str
     );
     
@@ -203,6 +203,67 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
 #[cfg(not(target_os = "macos"))]
 pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
     Ok(String::new())
+}
+
+/// Check if there's a root-owned mihomo process running
+#[cfg(target_os = "macos")]
+fn has_root_mihomo() -> bool {
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "user,comm"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.lines().any(|line| line.trim_start().starts_with("root ") && line.contains("mihomo"))
+    } else {
+        false
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn has_root_mihomo() -> bool {
+    false
+}
+
+/// Kill all mihomo processes with root privileges (kills both root and user processes)
+#[cfg(target_os = "macos")]
+pub fn kill_all_mihomo_as_root() -> Result<(), String> {
+    let script = r#"do shell script "killall -9 mihomo 2>/dev/null" with administrator privileges"#;
+    let status = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .status()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("osascript exit code: {}", status));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn kill_all_mihomo_as_root() -> Result<(), String> {
+    Ok(())
+}
+
+/// Smart kill: only prompt for password if there's actually a root mihomo running
+/// Note: This kills ALL mihomo processes, not just root ones
+#[cfg(target_os = "macos")]
+pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
+    if !has_root_mihomo() {
+        return Ok(()); // No root mihomo, silently return
+    }
+    kill_all_mihomo_as_root()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
+    Ok(())
+}
+
+/// Tauri command to kill all mihomo with root privileges
+#[tauri::command]
+pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String> {
+    kill_all_mihomo_as_root()
 }
 
 /// Update TUN enable setting in run_config.yaml (without restarting core)

@@ -3977,12 +3977,14 @@ export function initTunToggle() {
                         return;
                     }
                 } else {
-                    // Disable TUN: write config then restart as regular user (no root needed)
+                    // Disable TUN: kill all mihomo (including root), update config, then restart as regular user
                     console.log('[TUN] disabling TUN on mac');
                     try {
-                        // Write TUN disabled to config file
+                        // 1. Kill all mihomo with root privileges
+                        await window.__TAURI__.core.invoke('kill_all_mihomo_as_root_cmd');
+                        // 2. Update config to disable TUN
                         await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
-                        // Restart as regular user
+                        // 3. Restart as regular user
                         const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
