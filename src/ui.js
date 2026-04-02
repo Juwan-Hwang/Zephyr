@@ -3981,16 +3981,21 @@ export function initTunToggle() {
                     console.log('[TUN] disabling TUN on mac');
                     try {
                         // 1. Kill all mihomo with root privileges
+                        console.log('[TUN] step 1: kill_all_mihomo_as_root_cmd');
                         await window.__TAURI__.core.invoke('kill_all_mihomo_as_root_cmd');
+                        console.log('[TUN] step 2: set_tun_enabled(false)');
                         // 2. Update config to disable TUN
                         await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
+                        console.log('[TUN] step 3: restartCore');
                         // 3. Restart as regular user
                         const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
-                        await restartCore(currentConfig, customArgs);
+                        const coreResult = await restartCore(currentConfig, customArgs);
+                        console.log('[TUN] restartCore result:', coreResult);
                     } catch (restartErr) {
                         console.error('[TUN] failed to disable TUN:', restartErr);
+                        // Don't re-throw: root mihomo is already killed, toggle rollback would be wrong
                     }
                 }
             } else {
