@@ -72,7 +72,7 @@ pub fn kill_mihomo() {
 /// This is required because creating /dev/utun devices needs root access
 /// Returns the secret for frontend to update
 #[cfg(target_os = "macos")]
-pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String, String> {
+pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String, String> {
     let paths = resolve_app_paths(app)?;
     let core_path = paths.core_dir.join("mihomo");
     ensure_executable(&core_path)?;
@@ -182,7 +182,7 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     eprintln!("[TUN DEBUG] osascript spawned, waiting for root mihomo...");
     
     // Wait a bit for osascript to potentially show errors (like user cancel)
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     
     // Check if osascript exited quickly with an error (e.g., user canceled)
     match child.try_wait() {
@@ -214,7 +214,16 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
     for i in 0..60 {
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        
+        // Check if user canceled (osascript exited with failure)
+        if let Ok(Some(status)) = child.try_wait() {
+            if !status.success() {
+                eprintln!("[TUN DEBUG] osascript exited with failure (likely user canceled)");
+                return Err("canceled".to_string());
+            }
+        }
+        
         if has_root_mihomo() {
             started = true;
             eprintln!("[TUN DEBUG] root mihomo detected after {}ms", (i + 1) * 500);
@@ -231,11 +240,11 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     // Wait for port to be bound
     let mut bound = false;
     for _ in 0..10 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
             bound = true;
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(300));
     }
     
     if !bound {
@@ -248,7 +257,7 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
 
 /// On non-macOS platforms, this is a no-op
 #[cfg(not(target_os = "macos"))]
-pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
+pub async fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
     Ok(String::new())
 }
 
@@ -1974,8 +1983,8 @@ pub fn is_private_host_public(host: &str) -> bool {
 /// Tauri command to restart mihomo core with root privileges on macOS for TUN mode
 /// Returns the secret for frontend to update
 #[tauri::command]
-pub fn restart_core_as_root_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<String, String> {
-    restart_core_as_root(&app, enable_tun)
+pub async fn restart_core_as_root_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<String, String> {
+    restart_core_as_root(&app, enable_tun).await
 }
 
 #[cfg(test)]
