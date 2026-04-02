@@ -87,6 +87,9 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         
+        eprintln!("[TUN DEBUG] config file exists, length: {}", content.len());
+        eprintln!("[TUN DEBUG] contains 'tun:': {}", content.contains("tun:"));
+        
         // Extract current secret from config
         for line in content.lines() {
             let trimmed = line.trim();
@@ -96,9 +99,12 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
             }
         }
         
+        eprintln!("[TUN DEBUG] extracted secret: {}", if secret.is_empty() { "(empty)" } else { &secret });
+        
         // If no secret found, generate a new one
         if secret.is_empty() {
             secret = generate_secret();
+            eprintln!("[TUN DEBUG] generated new secret: {}", secret);
         }
         
         // Update config: modify TUN and ensure secret is present
@@ -154,11 +160,12 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String,
     
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    // Use nohup and redirect stdin to /dev/null for reliable backgrounding
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && nohup './mihomo' -d '.' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 < /dev/null &" with administrator privileges"#,
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 &" with administrator privileges"#,
         config_dir_str
     );
+    
+    eprintln!("[TUN DEBUG] script: {}", script);
     
     // Request authorization (old process still alive, cancel is safe)
     let output = std::process::Command::new("osascript")
