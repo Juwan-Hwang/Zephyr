@@ -3997,14 +3997,14 @@ export function initTunToggle() {
                 // Non-macOS: use API to update config
                 await patchConfig({ tun: { enable } });
                 await persistConfigChanges({ tun: { enable } });
+                
+                // Verify actual state from core (only for non-macOS)
+                const coreConfig = await getConfig();
+                if (coreConfig?.tun?.enable !== enable) {
+                    throw new Error(t.tunRejected || "Core rejected TUN mode change (possible missing admin rights or driver issues)");
+                }
             }
             
-            // Verify actual state from core
-            const coreConfig = await getConfig();
-            if (coreConfig?.tun?.enable !== enable) {
-                throw new Error(t.tunRejected || "Core rejected TUN mode change (possible missing admin rights or driver issues)");
-            }
-
             await closeAllConnections(); // Flush connections on TUN switch
             
             showNotification(t.configSuccess, 'success');
