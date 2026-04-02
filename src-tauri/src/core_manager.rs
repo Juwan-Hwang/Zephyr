@@ -84,8 +84,9 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
     
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
+    // Log output to /tmp/mihomo-tun.log for debugging
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; ('{}' -d '{}' -f 'run_config.yaml' &) > /dev/null 2>&1" with administrator privileges"#,
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; '{}' -d '{}' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 &" with administrator privileges"#,
         core_path_str, config_dir_str
     );
     
