@@ -3934,18 +3934,14 @@ export function initTunToggle() {
         }
 
         try {
-            // First, update config to enable/disable TUN
-            await patchConfig({ tun: { enable } });
-            await persistConfigChanges({ tun: { enable } });
-
             // On macOS, handle TUN mode with root privileges
             if (isMac) {
                 if (enable) {
-                    // Enable TUN: restart core with root
+                    // Enable TUN: restart core with root (backend will update config)
                     console.log('[TUN] starting mac tun flow');
                     try {
-                        console.log('[TUN] calling restart_core_as_root_cmd');
-                        await window.__TAURI__.core.invoke('restart_core_as_root_cmd');
+                        console.log('[TUN] calling restart_core_as_root_cmd with enableTun=true');
+                        await window.__TAURI__.core.invoke('restart_core_as_root_cmd', { enableTun: true });
                         console.log('[TUN] restart success');
                     } catch (authErr) {
                         console.error('[TUN] authErr:', authErr);
@@ -3972,22 +3968,27 @@ export function initTunToggle() {
                             statusText.classList.remove('text-purple-400');
                         }
                         isNetworkUpdating = false;
-                        // Rollback config
-                        await patchConfig({ tun: { enable: false } });
-                        await persistConfigChanges({ tun: { enable: false } });
                         return;
                     }
                 } else {
-                    // Disable TUN: restart core normally (as regular user)
+                    // Disable TUN: write config then restart as regular user (no root needed)
+                    console.log('[TUN] disabling TUN on mac');
                     try {
+                        // Write TUN disabled to config file
+                        await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
+                        // Restart as regular user
                         const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
                         await restartCore(currentConfig, customArgs);
                     } catch (restartErr) {
-                        console.error('Failed to restart core:', restartErr);
+                        console.error('[TUN] failed to disable TUN:', restartErr);
                     }
                 }
+            } else {
+                // Non-macOS: use API to update config
+                await patchConfig({ tun: { enable } });
+                await persistConfigChanges({ tun: { enable } });
             }
             
             // Verify actual state from core
