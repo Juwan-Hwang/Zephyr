@@ -36,6 +36,7 @@ sha2 = "0.10"
 hex = "0.4"
 tauri-plugin-dialog = "2"
 regex = "1"
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_NetworkManagement_IpHelper", "Win32_System_Registry", "Win32_Networking_WinHttp", "Win32_Networking_WinInet"] }
