@@ -79,30 +79,16 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
     // Ensure core is executable
     ensure_executable(&core_path)?;
     
-    // Step 1: Record old process PIDs before starting new one
-    let old_pid_output = std::process::Command::new("pgrep")
-        .arg("mihomo")
-        .output()
-        .ok();
-    let old_pids: Vec<String> = old_pid_output
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default()
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    
     let core_path_str = core_path.to_string_lossy();
     let config_dir_str = paths.core_dir.to_string_lossy();
     
     // Build the command to run mihomo with root in background
-    // -d specifies the directory, -f specifies the config file name
-    // Use subshell & to properly background the process
     let script = format!(
         r#"do shell script "('{}' -d '{}' -f 'run_config.yaml' &) > /dev/null 2>&1" with administrator privileges"#,
         core_path_str, config_dir_str
     );
     
+    // Step 1: Request authorization first (old process still alive, cancel is safe)
     let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -113,23 +99,33 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         let err = String::from_utf8_lossy(&output.stderr);
         eprintln!("[TUN DEBUG] osascript stderr: {}", err);
         eprintln!("[TUN DEBUG] script was: {}", script);
-        // Authorization failed/canceled: old core is still running, just return error
+        // User canceled: old core is still running, just return error
         if err.contains("canceled") || err.contains("User canceled") {
             return Err("canceled".to_string());
         }
         return Err(format!("Failed to restart core as root: {}", err));
     }
     
-    // Step 2: Kill only old processes by PID (not the new root process)
-    for pid in &old_pids {
-        let _ = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(pid)
-            .output();
+    // Step 2: Authorization succeeded, kill old process to release port
+    // New process may be waiting for port, or will retry after old exits
+    kill_mihomo();
+    
+    // Step 3: Wait for port release, give new process time to bind
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    
+    // Step 4: Verify new process bound to port 9090
+    let mut bound = false;
+    for _ in 0..10 {
+        if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
+            bound = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
     
-    // Step 3: Wait for new process to bind port
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    if !bound {
+        return Err("root_start_failed".to_string());
+    }
     
     Ok(())
 }

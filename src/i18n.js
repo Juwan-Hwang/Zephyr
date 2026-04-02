@@ -309,6 +309,7 @@ export const translations = {
         tunFailedMac: "开启 TUN 失败：请在弹出的密码框中输入开机密码授权",
         tunAuthCanceled: "授权已取消",
         tunAuthFailed: "授权失败",
+        tunStartFailed: "TUN 启动失败，正在恢复核心...",
         configuring: "正在配置网络...",
         configuringTun: "正在配置虚拟网卡...",
         configSuccess: "配置已生效",

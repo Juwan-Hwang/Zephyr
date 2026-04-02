@@ -3947,12 +3947,21 @@ export function initTunToggle() {
                         console.log('[TUN] calling restart_core_as_root_cmd');
                         await window.__TAURI__.core.invoke('restart_core_as_root_cmd');
                         console.log('[TUN] restart success');
-                        // Wait for core to restart
-                        await new Promise(resolve => setTimeout(resolve, 1500));
                     } catch (authErr) {
                         console.error('[TUN] authErr:', authErr);
                         if (authErr === 'canceled') {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+                        } else if (authErr === 'root_start_failed') {
+                            // Root process failed to start, recover with regular user
+                            showNotification(t.tunStartFailed || 'TUN failed to start, recovering...', 'error');
+                            try {
+                                const settings = await window.__TAURI__.core.invoke('get_settings');
+                                const currentConfig = settings.last_config || 'config.yaml';
+                                const customArgs = settings.custom_args || [];
+                                await restartCore(currentConfig, customArgs);
+                            } catch (recoverErr) {
+                                console.error('[TUN] recovery failed:', recoverErr);
+                            }
                         } else {
                             showNotification(t.tunAuthFailed || 'Authorization failed', 'error');
                         }
