@@ -3941,8 +3941,14 @@ export function initTunToggle() {
                     console.log('[TUN] starting mac tun flow');
                     try {
                         console.log('[TUN] calling restart_core_as_root_cmd with enableTun=true');
-                        await window.__TAURI__.core.invoke('restart_core_as_root_cmd', { enableTun: true });
-                        console.log('[TUN] restart success');
+                        const result = await window.__TAURI__.core.invoke('restart_core_as_root_cmd', { enableTun: true });
+                        console.log('[TUN] restart success, updating secret');
+                        // Update secret from the new core
+                        if (result) {
+                            setSecret(result);
+                            const { setWsSecret } = await import('./websocket.js');
+                            setWsSecret(result);
+                        }
                     } catch (authErr) {
                         console.error('[TUN] authErr:', authErr);
                         if (authErr === 'canceled') {

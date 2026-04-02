@@ -70,8 +70,9 @@ pub fn kill_mihomo() {
 
 /// Restart mihomo core with root privileges on macOS for TUN mode
 /// This is required because creating /dev/utun devices needs root access
+/// Returns the secret for frontend to update
 #[cfg(target_os = "macos")]
-pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<(), String> {
+pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String, String> {
     let paths = resolve_app_paths(app)?;
     let core_path = paths.core_dir.join("mihomo");
     ensure_executable(&core_path)?;
@@ -80,42 +81,74 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<(), Str
     
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
+    let mut secret = String::new();
+    
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         
-        let updated = if content.contains("tun:") {
-            // Replace enable field in tun block
-            let re = regex::Regex::new(r"(?m)(^\s*enable:\s*)(?:true|false)")
-                .map_err(|e| e.to_string())?;
+        // Extract current secret from config
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("secret:") {
+                secret = trimmed.split(':').nth(1).unwrap_or("").trim().to_string();
+                break;
+            }
+        }
+        
+        // If no secret found, generate a new one
+        if secret.is_empty() {
+            secret = generate_secret();
+        }
+        
+        // Update config: modify TUN and ensure secret is present
+        let mut updated = if content.contains("tun:") {
             // Find the tun block and update enable within it
             let mut in_tun_block = false;
-            let lines: Vec<String> = content.lines().map(|line| {
+            let mut found_secret = false;
+            let mut lines: Vec<String> = content.lines().map(|line| {
                 if line.trim().starts_with("tun:") {
                     in_tun_block = true;
                 } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
                     in_tun_block = false;
                 }
                 
-                if in_tun_block && line.trim().starts_with("enable:") {
+                if line.trim().starts_with("secret:") {
+                    found_secret = true;
+                    // Update secret line with the new one
+                    let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                    format!("{}secret: {}", indent, secret)
+                } else if in_tun_block && line.trim().starts_with("enable:") {
                     let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
                     format!("{}enable: {}", indent, enable_tun)
                 } else {
                     line.to_string()
                 }
             }).collect();
+            
+            // If secret wasn't in original, append it
+            if !found_secret {
+                lines.push(format!("secret: {}", secret));
+            }
+            
             lines.join("\n")
         } else {
-            // No tun block, append it
+            // No tun block, append both tun and secret
             let tun_block = if enable_tun {
                 format!("\ntun:\n  enable: true\n  stack: system\n  auto-route: true\n  auto-detect-interface: true\n")
             } else {
                 format!("\ntun:\n  enable: false\n")
             };
-            format!("{}{}", content.trim_end(), tun_block)
+            
+            // Check if secret exists in original
+            if content.contains("secret:") {
+                format!("{}{}", content.trim_end(), tun_block)
+            } else {
+                format!("{}{}\nsecret: {}", content.trim_end(), tun_block, secret)
+            }
         };
         
-        std::fs::write(&config_file, updated)
+        std::fs::write(&config_file, &updated)
             .map_err(|e| format!("Failed to write config: {}", e))?;
     }
     
@@ -162,14 +195,14 @@ pub fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<(), Str
         return Err("root_start_failed".to_string());
     }
     
-    eprintln!("[TUN] root core started successfully");
-    Ok(())
+    eprintln!("[TUN] root core started successfully, secret: {}", secret);
+    Ok(secret)
 }
 
 /// On non-macOS platforms, this is a no-op
 #[cfg(not(target_os = "macos"))]
-pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<(), String> {
-    Ok(())
+pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
+    Ok(String::new())
 }
 
 /// Update TUN enable setting in run_config.yaml (without restarting core)
@@ -1831,8 +1864,9 @@ pub fn is_private_host_public(host: &str) -> bool {
 }
 
 /// Tauri command to restart mihomo core with root privileges on macOS for TUN mode
+/// Returns the secret for frontend to update
 #[tauri::command]
-pub fn restart_core_as_root_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<(), String> {
+pub fn restart_core_as_root_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<String, String> {
     restart_core_as_root(&app, enable_tun)
 }
 
