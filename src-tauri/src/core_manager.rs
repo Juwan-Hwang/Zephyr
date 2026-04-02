@@ -79,30 +79,17 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
     // Ensure core is executable
     ensure_executable(&core_path)?;
     
-    // Step 1: Record old PIDs before starting new process
-    let old_pids: Vec<String> = std::process::Command::new("pgrep")
-        .arg("mihomo")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default()
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    
-    eprintln!("[TUN] old PIDs to kill: {:?}", old_pids);
-    
     let core_path_str = core_path.to_string_lossy();
     let config_dir_str = paths.core_dir.to_string_lossy();
     
-    // Build the command to run mihomo with root in background
+    // Build the command: kill all mihomo (including root), wait, then start new
+    // All in one osascript with administrator privileges
     let script = format!(
-        r#"do shell script "('{}' -d '{}' -f 'run_config.yaml' &) > /dev/null 2>&1" with administrator privileges"#,
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; ('{}' -d '{}' -f 'run_config.yaml' &) > /dev/null 2>&1" with administrator privileges"#,
         core_path_str, config_dir_str
     );
     
-    // Step 2: Request authorization (old process still alive, cancel is safe)
+    // Request authorization (old process still alive, cancel is safe)
     let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -120,19 +107,10 @@ pub fn restart_core_as_root(app: &AppHandle) -> Result<(), String> {
         return Err(format!("Failed to restart core as root: {}", err));
     }
     
-    // Step 3: Kill only old PIDs (not the new root process)
-    for pid in &old_pids {
-        eprintln!("[TUN] killing old pid: {}", pid);
-        let _ = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(pid)
-            .output();
-    }
-    
-    // Step 4: Wait for new process to bind port
+    // Wait for new process to bind port
     std::thread::sleep(std::time::Duration::from_millis(500));
     
-    // Step 5: Verify new process bound to port 9090
+    // Verify new process bound to port 9090
     let mut bound = false;
     for _ in 0..10 {
         if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
