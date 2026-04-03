@@ -1288,7 +1288,8 @@ pub async fn start_core(
     
     // HTTP Health Check via raw TCP to avoid tokio runtime drop panic from reqwest::blocking
     let mut is_healthy = false;
-    for _ in 0..10 {
+    for i in 0..10 {
+        eprintln!("[CORE] Health check attempt {}/10, connecting to 127.0.0.1:{}", i + 1, port);
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             let request = format!(
                 "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
@@ -1298,12 +1299,16 @@ pub async fn start_core(
                 let mut response = [0u8; 256];
                 if let Ok(n) = stream.read(&mut response) {
                     let resp_str = String::from_utf8_lossy(&response[..n]);
+                    eprintln!("[CORE] Health check response: {}", resp_str.lines().next().unwrap_or("(empty)"));
                     if resp_str.starts_with("HTTP/1.1 200") || resp_str.starts_with("HTTP/1.1 401") || resp_str.starts_with("HTTP/1.0 200") || resp_str.starts_with("HTTP/1.0 401") {
                         is_healthy = true;
+                        eprintln!("[CORE] Health check passed");
                         break;
                     }
                 }
             }
+        } else {
+            eprintln!("[CORE] Health check connection failed");
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
             std::thread::sleep(std::time::Duration::from_millis(500));
