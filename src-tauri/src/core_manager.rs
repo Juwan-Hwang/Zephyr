@@ -1254,6 +1254,9 @@ pub async fn start_core(
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
+    let pid = child.id();
+    eprintln!("[CORE] Spawned mihomo PID: {:?}", pid);
+    
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => {
@@ -1285,6 +1288,8 @@ pub async fn start_core(
             }
         }
     }).await.map_err(|e| format!("Task failed: {}", e))?;
+    
+    eprintln!("[CORE] Process alive before health check: {:?}", child.try_wait());
     
     // HTTP Health Check via raw TCP to avoid tokio runtime drop panic from reqwest::blocking
     let mut is_healthy = false;
