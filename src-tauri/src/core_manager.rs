@@ -1295,6 +1295,22 @@ pub async fn start_core(
     let mut is_healthy = false;
     for i in 0..10 {
         eprintln!("[CORE] Health check attempt {}/10, connecting to 127.0.0.1:{}", i + 1, port);
+        
+        // On second attempt, check what's using port 9090
+        if i == 1 {
+            #[cfg(target_os = "macos")]
+            {
+                let lsof = std::process::Command::new("lsof")
+                    .args(["-i", ":9090", "-n", "-P"])
+                    .output();
+                eprintln!("[CORE] lsof :9090 = {:?}", lsof.as_ref().map(|o| String::from_utf8_lossy(&o.stdout).to_string()));
+                if let Ok(output) = lsof {
+                    eprintln!("[CORE] lsof stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+                    eprintln!("[CORE] lsof stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+                }
+            }
+        }
+        
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             let request = format!(
                 "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
