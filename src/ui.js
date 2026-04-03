@@ -3983,6 +3983,10 @@ export function initTunToggle() {
                         // 1. Kill all mihomo with root privileges
                         console.log('[TUN] step 1: kill_all_mihomo_as_root_cmd');
                         await window.__TAURI__.core.invoke('kill_all_mihomo_as_root_cmd');
+                        
+                        // Wait for OS to release the port (root mihomo was kill -9'd)
+                        await new Promise(r => setTimeout(r, 1500));
+                        
                         console.log('[TUN] step 2: set_tun_enabled(false)');
                         // 2. Update config to disable TUN
                         await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
