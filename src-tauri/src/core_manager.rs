@@ -1257,6 +1257,15 @@ pub async fn start_core(
     let pid = child.id();
     eprintln!("[CORE] Spawned mihomo PID: {:?}", pid);
     
+    // Print key config fields
+    if let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) {
+        for line in content.lines() {
+            if line.contains("external-controller") || line.contains("secret:") || line.contains("tun") {
+                eprintln!("[CORE] config: {}", line);
+            }
+        }
+    }
+    
     let port_free = std::net::TcpStream::connect("127.0.0.1:9090").is_err();
     eprintln!("[CORE] Port 9090 free at spawn time: {}", port_free);
     
