@@ -282,9 +282,10 @@ fn has_root_mihomo() -> bool {
 }
 
 /// Kill all mihomo processes with root privileges (kills both root and user processes)
+/// Also cleans up TUN interface to avoid blocking new mihomo startup
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
-    let script = r#"do shell script "killall -9 mihomo 2>/dev/null" with administrator privileges"#;
+    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; ifconfig utun3 down 2>/dev/null; route flush 2>/dev/null" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
