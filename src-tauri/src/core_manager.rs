@@ -1153,6 +1153,14 @@ pub async fn start_core(
     custom_args: Vec<String>,
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
+    // Check if TUN mode is active (root mihomo running)
+    #[cfg(target_os = "macos")]
+    if has_root_mihomo() {
+        eprintln!("[CORE] TUN mode detected, restarting with root privileges");
+        let secret = restart_core_as_root(&app, true).await?;
+        return Ok(CoreStartResult { secret, port: 9090 });
+    }
+    
     // Kill any existing mihomo processes before starting a new one
     kill_mihomo();
     
