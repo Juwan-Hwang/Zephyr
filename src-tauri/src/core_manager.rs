@@ -1227,7 +1227,7 @@ pub async fn start_core(
     
     cmd.current_dir(&paths.core_dir);
     cmd.stdout(std::process::Stdio::null());  // Discard stdout to avoid pipe blocking
-    cmd.stderr(std::process::Stdio::null());  // Discard stderr to avoid pipe blocking
+    cmd.stderr(std::process::Stdio::inherit());  // Inherit stderr to see errors in terminal
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
