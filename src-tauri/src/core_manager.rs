@@ -1257,7 +1257,7 @@ pub async fn start_core(
     
     cmd.current_dir(&paths.core_dir);
     cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::null());  // Discard stderr to avoid pipe blocking
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
@@ -1284,19 +1284,10 @@ pub async fn start_core(
             return Err("Failed to capture stdout".to_string());
         }
     };
-    let stderr = match child.stderr.take() {
-        Some(s) => s,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("Failed to capture stderr".to_string());
-        }
-    };
     
     let (tx, rx) = std::sync::mpsc::channel();
     
-    monitor_stream_for_port(stdout, tx.clone());
-    monitor_stream_for_port(stderr, tx);
+    monitor_stream_for_port(stdout, tx);
 
     let port = tauri::async_runtime::spawn_blocking(move || {
         match rx.recv_timeout(std::time::Duration::from_secs(5)) {
