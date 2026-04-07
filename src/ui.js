@@ -645,10 +645,10 @@ function renderConfigSection(title, obj, fullKey, depth = 0) {
             <svg class="w-3 h-3 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="m6 9 6 6 6-6"/>
             </svg>
-            <h3 class="text-xs font-semibold text-zinc-200 tracking-wide">${title}</h3>
+            <h3 class="text-xs font-semibold text-zinc-200 tracking-wide">${escapeHtml(title)}</h3>
             ${typeof obj === 'object' && obj !== null && !Array.isArray(obj) ? `<span class="text-[9px] text-zinc-600 font-mono">${Object.keys(obj).length}</span>` : ''}
         </div>
-        <span class="text-[9px] text-zinc-600 font-mono opacity-60">${fullKey}</span>
+        <span class="text-[9px] text-zinc-600 font-mono opacity-60">${escapeHtml(fullKey)}</span>
     `;
     
     // Content wrapper for smooth animation
@@ -802,7 +802,7 @@ function renderArraySection(title, arr, fullKey, depth) {
             <svg class="w-2.5 h-2.5 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="m6 9 6 6 6-6"/>
             </svg>
-            <span class="text-[11px] font-medium text-zinc-300">${title}</span>
+            <span class="text-[11px] font-medium text-zinc-300">${escapeHtml(title)}</span>
             <span class="text-[9px] text-zinc-600 font-mono">${arr.length}</span>
         </div>
     `;
