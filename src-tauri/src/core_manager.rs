@@ -1305,8 +1305,8 @@ pub async fn start_core(
     
     // HTTP Health Check via raw TCP to avoid tokio runtime drop panic from reqwest::blocking
     let mut is_healthy = false;
-    for i in 0..10 {
-        eprintln!("[CORE] Health check attempt {}/10, connecting to 127.0.0.1:{}", i + 1, port);
+    for i in 0..20 {
+        eprintln!("[CORE] Health check attempt {}/20, connecting to 127.0.0.1:{}", i + 1, port);
         
         // On second attempt, check what's using port 9090
         if i == 1 {
