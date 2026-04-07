@@ -18,12 +18,15 @@ static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {
+    eprintln!("[TUN FLAG] set_tun_mode({}) called", active);
     TUN_MODE_ACTIVE.store(active, Ordering::SeqCst);
 }
 
 /// Check if TUN mode is currently active
 pub fn is_tun_mode() -> bool {
-    TUN_MODE_ACTIVE.load(Ordering::SeqCst)
+    let v = TUN_MODE_ACTIVE.load(Ordering::SeqCst);
+    eprintln!("[TUN FLAG] is_tun_mode() = {}", v);
+    v
 }
 
 #[derive(Serialize)]
