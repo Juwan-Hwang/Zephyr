@@ -1257,6 +1257,9 @@ pub async fn start_core(
     let pid = child.id();
     eprintln!("[CORE] Spawned mihomo PID: {:?}", pid);
     
+    let port_free = std::net::TcpStream::connect("127.0.0.1:9090").is_err();
+    eprintln!("[CORE] Port 9090 free at spawn time: {}", port_free);
+    
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => {
