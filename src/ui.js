@@ -3996,6 +3996,10 @@ export function initTunToggle() {
                         const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
+                        
+                        // Extra wait to ensure port is fully released
+                        await new Promise(r => setTimeout(r, 1000));
+                        
                         const coreResult = await restartCore(currentConfig, customArgs);
                         console.log('[TUN] restartCore result:', coreResult);
                     } catch (restartErr) {

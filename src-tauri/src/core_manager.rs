@@ -16,6 +16,9 @@ use std::os::unix::fs::PermissionsExt;
 // Global TUN mode flag
 static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+// Global lock to prevent concurrent core start operations
+static CORE_STARTING: AtomicBool = AtomicBool::new(false);
+
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {
     eprintln!("[TUN FLAG] set_tun_mode({}) called", active);
@@ -83,24 +86,27 @@ pub fn kill_mihomo() {
             eprintln!("[CORE] mihomo processes before kill:\n{}", String::from_utf8_lossy(&o.stdout));
         }
         
-        let result = std::process::Command::new("killall")
-            .arg("-9")
-            .arg("mihomo")
-            .output();
-        match result {
-            Ok(output) => {
-                eprintln!("[CORE] killall exit code: {:?}", output.status.code());
-                if !output.stderr.is_empty() {
-                    eprintln!("[CORE] killall stderr: {}", String::from_utf8_lossy(&output.stderr));
+        // Try to kill multiple times to ensure all processes are terminated
+        for attempt in 0..3 {
+            let result = std::process::Command::new("killall")
+                .arg("-9")
+                .arg("mihomo")
+                .output();
+            match result {
+                Ok(output) => {
+                    eprintln!("[CORE] killall attempt {} exit code: {:?}", attempt + 1, output.status.code());
+                    if !output.stderr.is_empty() {
+                        eprintln!("[CORE] killall stderr: {}", String::from_utf8_lossy(&output.stderr));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[CORE] killall attempt {} failed: {}", attempt + 1, e);
                 }
             }
-            Err(e) => {
-                eprintln!("[CORE] killall failed: {}", e);
-            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
         
         // Verify all dead
-        std::thread::sleep(std::time::Duration::from_millis(300));
         let ps_after = std::process::Command::new("sh")
             .args(["-c", "ps aux | grep mihomo | grep -v grep"])
             .output()
@@ -387,8 +393,8 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     kill_all_mihomo_as_root()?;
     
-    // Monitor ports 9090 and 7890 for 2 seconds to catch any "ghost" process
-    for i in 0..20 {
+    // Monitor ports 9090 and 7890 for 3 seconds to catch any "ghost" process
+    for i in 0..30 {
         std::thread::sleep(std::time::Duration::from_millis(100));
         let lsof = std::process::Command::new("sh")
             .args(["-c", "lsof -i :9090 -i :7890 2>/dev/null | grep -v COMMAND || true"])
@@ -402,7 +408,7 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
         }
     }
     
-    eprintln!("[TUN FLAG] 2s port monitoring done");
+    eprintln!("[TUN FLAG] 3s port monitoring done");
     
     // Verify root mihomo is actually dead
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1280,6 +1286,30 @@ pub async fn start_core(
     custom_args: Vec<String>,
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
+    // Wait for any previous core start operation to complete (max 10s)
+    let mut wait_ms = 0;
+    while CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if wait_ms > 10000 {
+            eprintln!("[CORE] start_core waited 10s, force proceeding");
+            break;
+        }
+        if wait_ms == 0 {
+            eprintln!("[CORE] start_core waiting for previous call to finish...");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        wait_ms += 200;
+    }
+    
+    // Reset flag on function exit
+    struct ResetGuard;
+    impl Drop for ResetGuard {
+        fn drop(&mut self) {
+            CORE_STARTING.store(false, Ordering::SeqCst);
+            eprintln!("[CORE] start_core guard dropped, CORE_STARTING reset to false");
+        }
+    }
+    let _guard = ResetGuard;
+    
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
