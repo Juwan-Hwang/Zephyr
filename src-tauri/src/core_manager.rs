@@ -21,15 +21,12 @@ static CORE_STARTING: AtomicBool = AtomicBool::new(false);
 
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {
-    eprintln!("[TUN FLAG] set_tun_mode({}) called", active);
     TUN_MODE_ACTIVE.store(active, Ordering::SeqCst);
 }
 
 /// Check if TUN mode is currently active
 pub fn is_tun_mode() -> bool {
-    let v = TUN_MODE_ACTIVE.load(Ordering::SeqCst);
-    eprintln!("[TUN FLAG] is_tun_mode() = {}", v);
-    v
+    TUN_MODE_ACTIVE.load(Ordering::SeqCst)
 }
 
 #[derive(Serialize)]
@@ -75,49 +72,13 @@ pub fn core_binary_name() -> &'static str {
 pub fn kill_mihomo() {
     #[cfg(unix)]
     {
-        eprintln!("[CORE] kill_mihomo() called");
-        
-        // First show all mihomo processes
-        let ps = std::process::Command::new("sh")
-            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
-            .output()
-            .ok();
-        if let Some(ref o) = ps {
-            eprintln!("[CORE] mihomo processes before kill:\n{}", String::from_utf8_lossy(&o.stdout));
-        }
-        
         // Try to kill multiple times to ensure all processes are terminated
-        for attempt in 0..3 {
-            let result = std::process::Command::new("killall")
+        for _ in 0..3 {
+            let _ = std::process::Command::new("killall")
                 .arg("-9")
                 .arg("mihomo")
                 .output();
-            match result {
-                Ok(output) => {
-                    eprintln!("[CORE] killall attempt {} exit code: {:?}", attempt + 1, output.status.code());
-                    if !output.stderr.is_empty() {
-                        eprintln!("[CORE] killall stderr: {}", String::from_utf8_lossy(&output.stderr));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[CORE] killall attempt {} failed: {}", attempt + 1, e);
-                }
-            }
             std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        
-        // Verify all dead
-        let ps_after = std::process::Command::new("sh")
-            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
-            .output()
-            .ok();
-        if let Some(ref o) = ps_after {
-            let output_str = String::from_utf8_lossy(&o.stdout);
-            if output_str.is_empty() {
-                eprintln!("[CORE] all mihomo processes killed successfully");
-            } else {
-                eprintln!("[CORE] WARNING: mihomo processes still alive:\n{}", output_str);
-            }
         }
     }
     #[cfg(target_os = "windows")]
@@ -147,9 +108,6 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         
-        eprintln!("[TUN DEBUG] config file exists, length: {}", content.len());
-        eprintln!("[TUN DEBUG] contains 'tun:': {}", content.contains("tun:"));
-        
         // Extract current secret from config
         for line in content.lines() {
             let trimmed = line.trim();
@@ -159,12 +117,9 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
             }
         }
         
-        eprintln!("[TUN DEBUG] extracted secret: {}", if secret.is_empty() { "(empty)" } else { &secret });
-        
         // If no secret found, generate a new one
         if secret.is_empty() {
             secret = generate_secret();
-            eprintln!("[TUN DEBUG] generated new secret: {}", secret);
         }
         
         // Update config: modify TUN and ensure secret is present
@@ -239,8 +194,6 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         .spawn()
         .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
     
-    eprintln!("[TUN DEBUG] osascript spawned, waiting for root mihomo...");
-    
     // Wait a bit for osascript to potentially show errors (like user cancel)
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     
@@ -253,7 +206,6 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
                 if let Some(mut stderr) = stderr {
                     let mut err = String::new();
                     let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
-                    eprintln!("[TUN DEBUG] osascript failed: {}", err);
                     if err.contains("canceled") || err.contains("User canceled") {
                         return Err("canceled".to_string());
                     }
@@ -264,29 +216,24 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         }
         Ok(None) => {
             // Still running, which is expected - password dialog is showing
-            eprintln!("[TUN DEBUG] osascript still running (password dialog likely showing)");
         }
-        Err(e) => {
-            eprintln!("[TUN DEBUG] try_wait error: {}", e);
-        }
+        Err(_) => {}
     }
     
     // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
-    for i in 0..60 {
+    for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         
         // Check if user canceled (osascript exited with failure)
         if let Ok(Some(status)) = child.try_wait() {
             if !status.success() {
-                eprintln!("[TUN DEBUG] osascript exited with failure (likely user canceled)");
                 return Err("canceled".to_string());
             }
         }
         
         if has_root_mihomo() {
             started = true;
-            eprintln!("[TUN DEBUG] root mihomo detected after {}ms", (i + 1) * 500);
             break;
         }
     }
@@ -413,37 +360,10 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
             .unwrap_or(false);
         
         if !has_root_process || waited > 8000 {
-            eprintln!("[TUN FLAG] all root processes gone after {}ms", waited);
             break;
         }
-        eprintln!("[TUN FLAG] root processes still alive at {}ms, waiting...", waited);
         std::thread::sleep(std::time::Duration::from_millis(200));
         waited += 200;
-    }
-    
-    // Monitor ports 9090 and 7890 for 3 seconds to catch any "ghost" process
-    for i in 0..30 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let lsof = std::process::Command::new("sh")
-            .args(["-c", "lsof -i :9090 -i :7890 2>/dev/null | grep -v COMMAND || true"])
-            .output()
-            .ok();
-        if let Some(o) = lsof {
-            let s = String::from_utf8_lossy(&o.stdout);
-            if !s.trim().is_empty() {
-                eprintln!("[TUN FLAG] {}ms after kill, port occupied:\n{}", (i+1)*100, s);
-            }
-        }
-    }
-    
-    eprintln!("[TUN FLAG] 3s port monitoring done");
-    
-    // Verify root mihomo is actually dead
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    if has_root_mihomo() {
-        eprintln!("[TUN FLAG] WARNING: root mihomo still alive after kill!");
-    } else {
-        eprintln!("[TUN FLAG] root mihomo confirmed dead");
     }
     
     Ok(())
@@ -1318,11 +1238,7 @@ pub async fn start_core(
     let mut wait_ms = 0;
     while CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         if wait_ms > 10000 {
-            eprintln!("[CORE] start_core waited 10s, force proceeding");
             break;
-        }
-        if wait_ms == 0 {
-            eprintln!("[CORE] start_core waiting for previous call to finish...");
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         wait_ms += 200;
@@ -1333,7 +1249,6 @@ pub async fn start_core(
     impl Drop for ResetGuard {
         fn drop(&mut self) {
             CORE_STARTING.store(false, Ordering::SeqCst);
-            eprintln!("[CORE] start_core guard dropped, CORE_STARTING reset to false");
         }
     }
     let _guard = ResetGuard;
@@ -1341,7 +1256,6 @@ pub async fn start_core(
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
-        eprintln!("[CORE] TUN mode detected, restarting with root privileges");
         let secret = restart_core_as_root(&app, true).await?;
         return Ok(CoreStartResult { secret, port: 9090 });
     }
@@ -1460,63 +1374,25 @@ pub async fn start_core(
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
-    let pid = child.id();
-    eprintln!("[CORE] Spawned mihomo PID: {:?}", pid);
-    
     // Check if process exits immediately
     std::thread::sleep(std::time::Duration::from_millis(200));
     match child.try_wait() {
         Ok(Some(status)) => {
-            eprintln!("[CORE] Process exited immediately after 200ms with status: {:?}", status);
             let log = std::fs::read_to_string("/tmp/mihomo-restart.log").unwrap_or_default();
-            eprintln!("[CORE] Log content:\n{}", log);
-            return Err(format!("mihomo exited immediately: {:?}", status));
+            return Err(format!("mihomo exited immediately: {:?}, log: {}", status, log));
         }
-        Ok(None) => {
-            eprintln!("[CORE] Process still running after 200ms");
-        }
+        Ok(None) => {}
         Err(e) => {
-            eprintln!("[CORE] try_wait error: {}", e);
+            return Err(format!("try_wait error: {}", e));
         }
     }
-    
-    // Print key config fields
-    if let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) {
-        for line in content.lines() {
-            if line.contains("external-controller") || line.contains("secret:") || line.contains("tun") {
-                eprintln!("[CORE] config: {}", line);
-            }
-        }
-    }
-    
-    let port_free = std::net::TcpStream::connect("127.0.0.1:9090").is_err();
-    eprintln!("[CORE] Port 9090 free at spawn time: {}", port_free);
     
     // Use config port directly, rely on health check to verify
     let port = config_port;
     
-    eprintln!("[CORE] Process alive before health check: {:?}", child.try_wait());
-    
-    // HTTP Health Check via raw TCP to avoid tokio runtime drop panic from reqwest::blocking
+    // HTTP Health Check via raw TCP
     let mut is_healthy = false;
-    for i in 0..20 {
-        eprintln!("[CORE] Health check attempt {}/20, process status: {:?}", i + 1, child.try_wait());
-        
-        // On second attempt, check what's using port 9090
-        if i == 1 {
-            #[cfg(target_os = "macos")]
-            {
-                let lsof = std::process::Command::new("lsof")
-                    .args(["-i", ":9090", "-n", "-P"])
-                    .output();
-                eprintln!("[CORE] lsof :9090 = {:?}", lsof.as_ref().map(|o| String::from_utf8_lossy(&o.stdout).to_string()));
-                if let Ok(output) = lsof {
-                    eprintln!("[CORE] lsof stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-                    eprintln!("[CORE] lsof stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-                }
-            }
-        }
-        
+    for _ in 0..20 {
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             let request = format!(
                 "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
@@ -1526,16 +1402,12 @@ pub async fn start_core(
                 let mut response = [0u8; 256];
                 if let Ok(n) = stream.read(&mut response) {
                     let resp_str = String::from_utf8_lossy(&response[..n]);
-                    eprintln!("[CORE] Health check response: {}", resp_str.lines().next().unwrap_or("(empty)"));
                     if resp_str.starts_with("HTTP/1.1 200") || resp_str.starts_with("HTTP/1.1 401") || resp_str.starts_with("HTTP/1.0 200") || resp_str.starts_with("HTTP/1.0 401") {
                         is_healthy = true;
-                        eprintln!("[CORE] Health check passed");
                         break;
                     }
                 }
             }
-        } else {
-            eprintln!("[CORE] Health check connection failed");
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
             std::thread::sleep(std::time::Duration::from_millis(1000));

@@ -3938,11 +3938,8 @@ export function initTunToggle() {
             if (isMac) {
                 if (enable) {
                     // Enable TUN: restart core with root (backend will update config)
-                    console.log('[TUN] starting mac tun flow');
                     try {
-                        console.log('[TUN] calling restart_core_as_root_cmd with enableTun=true');
                         const result = await window.__TAURI__.core.invoke('restart_core_as_root_cmd', { enableTun: true });
-                        console.log('[TUN] restart success, updating secret');
                         // Update secret from the new core
                         if (result) {
                             setSecret(result);
@@ -3978,20 +3975,16 @@ export function initTunToggle() {
                     }
                 } else {
                     // Disable TUN: update config, kill root mihomo, then restart as regular user
-                    console.log('[TUN] disabling TUN on mac');
                     try {
                         // 1. Update config to disable TUN (write file first)
-                        console.log('[TUN] step 1: set_tun_enabled(false)');
                         await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
                         
                         // 2. Disable TUN (clears flag + kills root mihomo + cleans routes)
-                        console.log('[TUN] step 2: disable_tun_cmd');
                         await window.__TAURI__.core.invoke('disable_tun_cmd');
                         
                         // Wait for OS to release the port (root mihomo was kill -9'd)
                         await new Promise(r => setTimeout(r, 1500));
                         
-                        console.log('[TUN] step 3: restartCore');
                         // 3. Restart as regular user
                         const settings = await window.__TAURI__.core.invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
@@ -4001,7 +3994,6 @@ export function initTunToggle() {
                         await new Promise(r => setTimeout(r, 1000));
                         
                         const coreResult = await restartCore(currentConfig, customArgs);
-                        console.log('[TUN] restartCore result:', coreResult);
                     } catch (restartErr) {
                         console.error('[TUN] failed to disable TUN:', restartErr);
                         // Don't re-throw: root mihomo is already killed, toggle rollback would be wrong
