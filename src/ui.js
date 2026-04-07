@@ -3977,19 +3977,20 @@ export function initTunToggle() {
                         return;
                     }
                 } else {
-                    // Disable TUN: kill all mihomo (including root), update config, then restart as regular user
+                    // Disable TUN: update config, kill root mihomo, then restart as regular user
                     console.log('[TUN] disabling TUN on mac');
                     try {
-                        // 1. Kill all mihomo with root privileges
-                        console.log('[TUN] step 1: kill_all_mihomo_as_root_cmd');
-                        await window.__TAURI__.core.invoke('kill_all_mihomo_as_root_cmd');
+                        // 1. Update config to disable TUN (write file first)
+                        console.log('[TUN] step 1: set_tun_enabled(false)');
+                        await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
+                        
+                        // 2. Disable TUN (clears flag + kills root mihomo + cleans routes)
+                        console.log('[TUN] step 2: disable_tun_cmd');
+                        await window.__TAURI__.core.invoke('disable_tun_cmd');
                         
                         // Wait for OS to release the port (root mihomo was kill -9'd)
                         await new Promise(r => setTimeout(r, 1500));
                         
-                        console.log('[TUN] step 2: set_tun_enabled(false)');
-                        // 2. Update config to disable TUN
-                        await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
                         console.log('[TUN] step 3: restartCore');
                         // 3. Restart as regular user
                         const settings = await window.__TAURI__.core.invoke('get_settings');

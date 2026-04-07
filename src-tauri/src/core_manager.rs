@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::IpAddr;
 use std::time::Duration;
 use rand::{thread_rng, Rng};
@@ -11,6 +12,19 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt;
+
+// Global TUN mode flag
+static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Set TUN mode active state
+pub fn set_tun_mode(active: bool) {
+    TUN_MODE_ACTIVE.store(active, Ordering::SeqCst);
+}
+
+/// Check if TUN mode is currently active
+pub fn is_tun_mode() -> bool {
+    TUN_MODE_ACTIVE.load(Ordering::SeqCst)
+}
 
 #[derive(Serialize)]
 pub struct ConfigInfo {
@@ -251,6 +265,9 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         return Err("root_start_failed".to_string());
     }
     
+    // Mark TUN mode as active
+    set_tun_mode(true);
+    
     eprintln!("[TUN] root core started successfully, secret: {}", secret);
     Ok(secret)
 }
@@ -283,6 +300,7 @@ fn has_root_mihomo() -> bool {
 
 /// Kill all mihomo processes with root privileges (kills both root and user processes)
 /// Also cleans up TUN interface and routes to avoid blocking new mihomo startup
+/// Note: Does NOT clear TUN mode flag - caller should call set_tun_mode(false) if disabling TUN
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     let script = r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
@@ -320,6 +338,13 @@ pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
 /// Tauri command to kill all mihomo with root privileges
 #[tauri::command]
 pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String> {
+    kill_all_mihomo_as_root()
+}
+
+/// Tauri command to disable TUN mode (clears flag and kills root mihomo)
+#[tauri::command]
+pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
+    set_tun_mode(false);
     kill_all_mihomo_as_root()
 }
 
@@ -373,6 +398,41 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
 #[tauri::command]
 pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
     set_tun_enabled_internal(&app, enable)
+}
+
+/// Initialize TUN mode flag from config file (call at app startup)
+pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
+    let paths = resolve_app_paths(app)?;
+    let config_file = paths.core_dir.join("run_config.yaml");
+    
+    if !config_file.exists() {
+        return Ok(());
+    }
+    
+    let content = std::fs::read_to_string(&config_file)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    
+    // Check if TUN is enabled in config
+    let mut tun_enabled = false;
+    let mut in_tun_block = false;
+    
+    for line in content.lines() {
+        if line.trim().starts_with("tun:") {
+            in_tun_block = true;
+        } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
+            in_tun_block = false;
+        }
+        
+        if in_tun_block && line.trim().starts_with("enable:") {
+            tun_enabled = line.contains("true");
+            break;
+        }
+    }
+    
+    set_tun_mode(tun_enabled);
+    eprintln!("[CORE] TUN mode initialized from config: {}", tun_enabled);
+    
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1153,9 +1213,15 @@ pub async fn start_core(
     custom_args: Vec<String>,
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
-    // Check if TUN mode is active (root mihomo running)
+    // Initialize TUN mode flag from config file
     #[cfg(target_os = "macos")]
-    if has_root_mihomo() {
+    {
+        let _ = init_tun_mode_from_config(&app);
+    }
+    
+    // Check if TUN mode is active via flag (more reliable than process detection)
+    #[cfg(target_os = "macos")]
+    if is_tun_mode() {
         eprintln!("[CORE] TUN mode detected, restarting with root privileges");
         let secret = restart_core_as_root(&app, true).await?;
         return Ok(CoreStartResult { secret, port: 9090 });
