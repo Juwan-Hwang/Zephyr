@@ -73,6 +73,16 @@ pub fn kill_mihomo() {
     #[cfg(unix)]
     {
         eprintln!("[CORE] kill_mihomo() called");
+        
+        // First show all mihomo processes
+        let ps = std::process::Command::new("sh")
+            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
+            .output()
+            .ok();
+        if let Some(ref o) = ps {
+            eprintln!("[CORE] mihomo processes before kill:\n{}", String::from_utf8_lossy(&o.stdout));
+        }
+        
         let result = std::process::Command::new("killall")
             .arg("-9")
             .arg("mihomo")
@@ -86,6 +96,21 @@ pub fn kill_mihomo() {
             }
             Err(e) => {
                 eprintln!("[CORE] killall failed: {}", e);
+            }
+        }
+        
+        // Verify all dead
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let ps_after = std::process::Command::new("sh")
+            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
+            .output()
+            .ok();
+        if let Some(ref o) = ps_after {
+            let output_str = String::from_utf8_lossy(&o.stdout);
+            if output_str.is_empty() {
+                eprintln!("[CORE] all mihomo processes killed successfully");
+            } else {
+                eprintln!("[CORE] WARNING: mihomo processes still alive:\n{}", output_str);
             }
         }
     }
@@ -361,6 +386,23 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     kill_all_mihomo_as_root()?;
+    
+    // Monitor ports 9090 and 7890 for 2 seconds to catch any "ghost" process
+    for i in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let lsof = std::process::Command::new("sh")
+            .args(["-c", "lsof -i :9090 -i :7890 2>/dev/null | grep -v COMMAND || true"])
+            .output()
+            .ok();
+        if let Some(o) = lsof {
+            let s = String::from_utf8_lossy(&o.stdout);
+            if !s.trim().is_empty() {
+                eprintln!("[TUN FLAG] {}ms after kill, port occupied:\n{}", (i+1)*100, s);
+            }
+        }
+    }
+    
+    eprintln!("[TUN FLAG] 2s port monitoring done");
     
     // Verify root mihomo is actually dead
     std::thread::sleep(std::time::Duration::from_millis(500));
