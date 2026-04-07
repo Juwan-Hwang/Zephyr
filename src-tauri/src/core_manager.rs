@@ -1417,6 +1417,23 @@ pub async fn start_core(
     let pid = child.id();
     eprintln!("[CORE] Spawned mihomo PID: {:?}", pid);
     
+    // Check if process exits immediately
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            eprintln!("[CORE] Process exited immediately after 200ms with status: {:?}", status);
+            let log = std::fs::read_to_string("/tmp/mihomo-restart.log").unwrap_or_default();
+            eprintln!("[CORE] Log content:\n{}", log);
+            return Err(format!("mihomo exited immediately: {:?}", status));
+        }
+        Ok(None) => {
+            eprintln!("[CORE] Process still running after 200ms");
+        }
+        Err(e) => {
+            eprintln!("[CORE] try_wait error: {}", e);
+        }
+    }
+    
     // Print key config fields
     if let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) {
         for line in content.lines() {
