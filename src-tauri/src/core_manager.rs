@@ -72,10 +72,22 @@ pub fn core_binary_name() -> &'static str {
 pub fn kill_mihomo() {
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("killall")
+        eprintln!("[CORE] kill_mihomo() called");
+        let result = std::process::Command::new("killall")
             .arg("-9")
             .arg("mihomo")
             .output();
+        match result {
+            Ok(output) => {
+                eprintln!("[CORE] killall exit code: {:?}", output.status.code());
+                if !output.stderr.is_empty() {
+                    eprintln!("[CORE] killall stderr: {}", String::from_utf8_lossy(&output.stderr));
+                }
+            }
+            Err(e) => {
+                eprintln!("[CORE] killall failed: {}", e);
+            }
+        }
     }
     #[cfg(target_os = "windows")]
     {
@@ -1308,6 +1320,18 @@ pub async fn start_core(
     }
     
     cmd.current_dir(&paths.core_dir);
+    
+    // Debug: show mihomo processes before spawn
+    #[cfg(target_os = "macos")]
+    {
+        let ps = std::process::Command::new("sh")
+            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
+            .output()
+            .ok();
+        if let Some(o) = ps {
+            eprintln!("[CORE] mihomo processes before spawn:\n{}", String::from_utf8_lossy(&o.stdout));
+        }
+    }
     
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
     let stdout_file = std::fs::File::create("/tmp/mihomo-restart.log")
