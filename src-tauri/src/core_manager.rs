@@ -1213,13 +1213,7 @@ pub async fn start_core(
     custom_args: Vec<String>,
     secret: Option<String>,
 ) -> Result<CoreStartResult, String> {
-    // Initialize TUN mode flag from config file
-    #[cfg(target_os = "macos")]
-    {
-        let _ = init_tun_mode_from_config(&app);
-    }
-    
-    // Check if TUN mode is active via flag (more reliable than process detection)
+    // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
         eprintln!("[CORE] TUN mode detected, restarting with root privileges");
