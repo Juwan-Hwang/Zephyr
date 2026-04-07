@@ -1344,7 +1344,7 @@ pub async fn start_core(
             eprintln!("[CORE] Health check connection failed");
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
         }).await;
     }
     
