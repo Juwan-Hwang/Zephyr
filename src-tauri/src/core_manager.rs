@@ -1187,6 +1187,13 @@ pub async fn start_core(
     
     let paths = ensure_app_storage(&app)?;
     
+    // Remove cache file to avoid lock issues after root mihomo kill -9
+    let cache_path = paths.core_dir.join("cache.db");
+    if cache_path.exists() {
+        let _ = std::fs::remove_file(&cache_path);
+        eprintln!("[CORE] Removed stale cache.db");
+    }
+    
     let exe_path = get_core_exe_path(&app)?;
     
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1306,7 +1313,7 @@ pub async fn start_core(
     // HTTP Health Check via raw TCP to avoid tokio runtime drop panic from reqwest::blocking
     let mut is_healthy = false;
     for i in 0..20 {
-        eprintln!("[CORE] Health check attempt {}/20, connecting to 127.0.0.1:{}", i + 1, port);
+        eprintln!("[CORE] Health check attempt {}/20, process status: {:?}", i + 1, child.try_wait());
         
         // On second attempt, check what's using port 9090
         if i == 1 {
