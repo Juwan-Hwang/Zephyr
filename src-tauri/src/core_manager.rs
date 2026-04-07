@@ -349,7 +349,8 @@ fn has_root_mihomo() -> bool {
 /// Note: Does NOT clear TUN mode flag - caller should call set_tun_mode(false) if disabling TUN
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
-    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
+    // Reduce MSL to 1s so TIME_WAIT expires quickly (default 15s = 30s TIME_WAIT)
+    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; sysctl -w net.inet.tcp.msl=1000; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
@@ -1537,6 +1538,15 @@ pub async fn start_core(
         let _ = child.kill();
         let _ = child.wait();
         return Err(err_msg);
+    }
+    
+    // Restore MSL to default (15000ms) after successful start
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("sh")
+            .args(["-c", "sysctl -w net.inet.tcp.msl=15000 2>/dev/null || true"])
+            .output();
+        eprintln!("[CORE] Restored MSL to default 15000ms");
     }
     
     let mut lock = match state.0.lock() {
