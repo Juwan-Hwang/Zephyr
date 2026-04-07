@@ -311,6 +311,15 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         return Err("root_start_failed".to_string());
     }
     
+    // Set MSL to 1s so all health check connections have short TIME_WAIT (2s instead of 30s)
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("sh")
+            .args(["-c", "sysctl -w net.inet.tcp.msl=1000 2>/dev/null || true"])
+            .output();
+        eprintln!("[TUN] Set MSL=1000 for short TIME_WAIT");
+    }
+    
     // Mark TUN mode as active
     set_tun_mode(true);
     
