@@ -1143,36 +1143,6 @@ pub struct CoreStartResult {
     pub port: u16,
 }
 
-fn monitor_stream_for_port<R: std::io::Read + Send + 'static>(stream: R, tx: std::sync::mpsc::Sender<u16>) {
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = BufReader::new(stream);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                if let Some(idx) = line.find("RESTful API listening at: ") {
-                    let addr = &line[idx + "RESTful API listening at: ".len()..];
-                    let addr = addr.trim_end_matches('"');
-                    if let Some(port_str) = addr.split(':').next_back() {
-                        if let Ok(port) = port_str.trim().parse::<u16>() {
-                            let _ = tx.send(port);
-                        }
-                    }
-                } else if let Some(idx) = line.find("RESTful API listening at ") {
-                    let addr = &line[idx + "RESTful API listening at ".len()..];
-                    let addr = addr.trim_end_matches('"');
-                    if let Some(port_str) = addr.split(':').next_back() {
-                        if let Ok(port) = port_str.trim().parse::<u16>() {
-                            let _ = tx.send(port);
-                        }
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-    });
-}
-
 #[tauri::command]
 pub async fn start_core(
     app: AppHandle,
@@ -1256,7 +1226,7 @@ pub async fn start_core(
     }
     
     cmd.current_dir(&paths.core_dir);
-    cmd.stdout(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::null());  // Discard stdout to avoid pipe blocking
     cmd.stderr(std::process::Stdio::null());  // Discard stderr to avoid pipe blocking
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
@@ -1276,28 +1246,8 @@ pub async fn start_core(
     let port_free = std::net::TcpStream::connect("127.0.0.1:9090").is_err();
     eprintln!("[CORE] Port 9090 free at spawn time: {}", port_free);
     
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("Failed to capture stdout".to_string());
-        }
-    };
-    
-    let (tx, rx) = std::sync::mpsc::channel();
-    
-    monitor_stream_for_port(stdout, tx);
-
-    let port = tauri::async_runtime::spawn_blocking(move || {
-        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(p) => p,
-            Err(_) => {
-                println!("Warning: Timeout waiting for API port from logs, falling back to config port {}", config_port);
-                config_port
-            }
-        }
-    }).await.map_err(|e| format!("Task failed: {}", e))?;
+    // Use config port directly, rely on health check to verify
+    let port = config_port;
     
     eprintln!("[CORE] Process alive before health check: {:?}", child.try_wait());
     
