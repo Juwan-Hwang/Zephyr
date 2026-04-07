@@ -393,6 +393,24 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     kill_all_mihomo_as_root()?;
     
+    // Wait for ALL root processes (including osascript shell) to die
+    let mut waited = 0;
+    loop {
+        let has_root_process = std::process::Command::new("sh")
+            .args(["-c", "ps aux | grep -E 'mihomo|osascript.*mihomo|sleep.*mihomo' | grep root | grep -v grep"])
+            .output()
+            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+            .unwrap_or(false);
+        
+        if !has_root_process || waited > 8000 {
+            eprintln!("[TUN FLAG] all root processes gone after {}ms", waited);
+            break;
+        }
+        eprintln!("[TUN FLAG] root processes still alive at {}ms, waiting...", waited);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        waited += 200;
+    }
+    
     // Monitor ports 9090 and 7890 for 3 seconds to catch any "ghost" process
     for i in 0..30 {
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1328,6 +1346,24 @@ pub async fn start_core(
     if cache_path.exists() {
         let _ = std::fs::remove_file(&cache_path);
         eprintln!("[CORE] Removed stale cache.db");
+    }
+    
+    // Wait for port 9090 to be truly free (max 5s)
+    // Even after process death, port release may have a few hundred ms delay
+    #[cfg(target_os = "macos")]
+    {
+        for i in 0..50 {
+            if std::net::TcpListener::bind("127.0.0.1:9090").is_ok() {
+                eprintln!("[CORE] port 9090 confirmed free after {}ms", i * 100);
+                break;
+            }
+            if i == 49 {
+                eprintln!("[CORE] WARNING: port 9090 still occupied after 5s, proceeding anyway");
+            } else {
+                eprintln!("[CORE] waiting for port 9090... {}ms", (i+1)*100);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
     
     let exe_path = get_core_exe_path(&app)?;
