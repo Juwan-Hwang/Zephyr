@@ -348,7 +348,17 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 #[tauri::command]
 pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
-    kill_all_mihomo_as_root()
+    kill_all_mihomo_as_root()?;
+    
+    // Verify root mihomo is actually dead
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if has_root_mihomo() {
+        eprintln!("[TUN FLAG] WARNING: root mihomo still alive after kill!");
+    } else {
+        eprintln!("[TUN FLAG] root mihomo confirmed dead");
+    }
+    
+    Ok(())
 }
 
 /// Update TUN enable setting in run_config.yaml (without restarting core)
