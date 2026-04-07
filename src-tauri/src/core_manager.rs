@@ -285,7 +285,7 @@ fn has_root_mihomo() -> bool {
 /// Also cleans up TUN interface to avoid blocking new mihomo startup
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
-    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; ifconfig utun3 down 2>/dev/null; route flush 2>/dev/null" with administrator privileges"#;
+    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; ifconfig utun3 down 2>/dev/null" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
@@ -1227,8 +1227,13 @@ pub async fn start_core(
     }
     
     cmd.current_dir(&paths.core_dir);
-    cmd.stdout(std::process::Stdio::null());  // Discard stdout to avoid pipe blocking
-    cmd.stderr(std::process::Stdio::inherit());  // Inherit stderr to see errors in terminal
+    
+    // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
+    let stdout_file = std::fs::File::create("/tmp/mihomo-restart.log")
+        .unwrap_or_else(|_| std::fs::File::open("/dev/null").unwrap());
+    let stderr_file = stdout_file.try_clone().unwrap();
+    cmd.stdout(std::process::Stdio::from(stdout_file));
+    cmd.stderr(std::process::Stdio::from(stderr_file));
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
