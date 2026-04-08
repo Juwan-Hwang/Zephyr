@@ -1041,35 +1041,35 @@ fn generate_secret() -> String {
     // 核心伪装引擎 (DRY - 提取公共代码)
     // ==========================================
     fn build_http_client(user_agent: Option<String>, resolve_pin: Option<(String, std::net::SocketAddr)>) -> Result<reqwest::Client, String> {
-        // Enhanced redirect policy with SSRF protection for each redirect
+        build_http_client_with_proxy(user_agent, resolve_pin, None)
+    }
+
+    fn build_http_client_with_proxy(
+        user_agent: Option<String>, 
+        resolve_pin: Option<(String, std::net::SocketAddr)>,
+        proxy_url: Option<String>
+    ) -> Result<reqwest::Client, String> {
         let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
-            // Limit redirects
             if attempt.previous().len() > 5 {
                 return attempt.error("Too many redirects (max 5)");
             }
             
-            // Validate the redirect URL - clone to avoid borrow issues
             let url = attempt.url().clone();
             
-            // Check scheme
             let scheme = url.scheme();
             if scheme != "http" && scheme != "https" {
                 return attempt.error(format!("Invalid redirect scheme: {}", scheme));
             }
             
-            // Check host
             let host = match url.host_str() {
                 Some(h) => h.to_string(),
                 None => return attempt.error("Redirect URL has no host"),
             };
             
-            // Check if host is private
             if is_private_host(&host) {
                 return attempt.error(format!("Redirect to private host blocked: {}", host));
             }
             
-            // Perform DNS resolution check for redirect target
-            // This prevents DNS rebinding attacks during redirects
             let port = url.port().unwrap_or(if scheme == "https" { 443 } else { 80 });
             match std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, port)) {
                 Ok(addrs) => {
@@ -1092,7 +1092,14 @@ fn generate_secret() -> String {
         let mut client_builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(30))
-            .redirect(redirect_policy);
+            .redirect(redirect_policy)
+            .no_proxy();
+
+        if let Some(proxy) = proxy_url {
+            let proxy = reqwest::Proxy::all(&proxy)
+                .map_err(|e| format!("Failed to create proxy: {}", e))?;
+            client_builder = client_builder.proxy(proxy);
+        }
 
         if let Some((host, addr)) = resolve_pin {
             client_builder = client_builder.resolve(&host, addr);
@@ -1869,62 +1876,113 @@ pub async fn download_sub(
         return Err("Invalid subscription name".to_string());
     }
 
-    // SSRF protection: validate URL before making request
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
-    let resolve_pin = resolved_addr.map(|addr| (host, addr));
+    let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
 
-    // 仅仅一句代码，直接调用我们提取的公共伪装方法！
-    let client = build_http_client(user_agent, resolve_pin)?;
+    let do_download = |client: reqwest::Client, url: &str| async {
+        let resp = client.get(url).send().await.map_err(|e| {
+            println!("Download failed: {}", e);
+            "Network error occurred during download".to_string()
+        })?;
+        
+        if !resp.status().is_success() {
+            let status = resp.status();
+            println!("Download failed with status: {}", status);
+            return Err("Download failed with error status".to_string());
+        }
+        
+        if let Some(content_length) = resp.content_length() {
+            if content_length as usize > MAX_RESPONSE_SIZE {
+                return Err(format!("Response too large: {} bytes (max {} bytes)", content_length, MAX_RESPONSE_SIZE));
+            }
+        }
+        
+        let sub_info_header = resp.headers().get("subscription-userinfo")
+            .and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
 
-    let resp = client.get(&url).send().await.map_err(|e| {
-        println!("Download failed: {}", e);
-        "Network error occurred during download".to_string()
-    })?;
-    
-    if !resp.status().is_success() {
-        let status = resp.status();
-        println!("Download failed with status: {}", status);
-        return Err("Download failed with error status".to_string());
-    }
-    
-    // Check Content-Length header for size limit
-    if let Some(content_length) = resp.content_length() {
-        if content_length as usize > MAX_RESPONSE_SIZE {
-            return Err(format!("Response too large: {} bytes (max {} bytes)", content_length, MAX_RESPONSE_SIZE));
+        let final_url = resp.headers().get("profile-web-page-url")
+            .and_then(|h| h.to_str().ok()).unwrap_or(url).to_string();
+
+        let bytes = read_response_body(resp).await?;
+        
+        Ok::<(Vec<u8>, String, String), String>((bytes, sub_info_header, final_url))
+    };
+
+    let mut last_error = String::new();
+    let mut result: Option<(Vec<u8>, String, String)> = None;
+
+    let client_direct = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None);
+    if let Ok(client) = client_direct {
+        match do_download(client, &url).await {
+            Ok(data) => result = Some(data),
+            Err(e) => {
+                println!("[download_sub] Direct connection failed: {}", e);
+                last_error = e;
+            }
         }
     }
-    
-    let sub_info_header = resp.headers().get("subscription-userinfo")
-        .and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
 
-    let final_url = resp.headers().get("profile-web-page-url")
-        .and_then(|h| h.to_str().ok()).unwrap_or(&url).to_string();
+    if result.is_none() {
+        let state = app.state::<MihomoState>();
+        if let Ok(guard) = state.0.lock() {
+            if guard.process.is_some() {
+                let mixed_port = guard.last_port.unwrap_or(7890);
+                let proxy_url = format!("http://127.0.0.1:{}", mixed_port);
+                drop(guard);
+                
+                let client_mihomo = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(proxy_url));
+                if let Ok(client) = client_mihomo {
+                    match do_download(client, &url).await {
+                        Ok(data) => result = Some(data),
+                        Err(e) => {
+                            println!("[download_sub] Mihomo proxy failed: {}", e);
+                            last_error = e;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    let bytes = read_response_body(resp).await?;
+    if result.is_none() {
+        if let Some(sys_proxy_url) = crate::sys_proxy::get_sys_proxy_address() {
+            println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
+            let client_sys = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(sys_proxy_url));
+            if let Ok(client) = client_sys {
+                match do_download(client, &url).await {
+                    Ok(data) => result = Some(data),
+                    Err(e) => {
+                        println!("[download_sub] System proxy failed: {}", e);
+                        last_error = e;
+                    }
+                }
+            }
+        }
+    }
+
+    let (bytes, sub_info_header, final_url) = result.ok_or_else(|| {
+        if last_error.is_empty() {
+            "Network error occurred during download".to_string()
+        } else {
+            last_error
+        }
+    })?;
+
     let mut content = String::from_utf8_lossy(&bytes).to_string();
 
-    // 检测并解码 Base64 订阅
-    // 如果内容不包含标准的 yaml 标识（比如 "proxies:" 或 "port:"），且内容看起来像 Base64，尝试解码
     if !content.contains("proxies:") && !content.contains("port:") {
-        // 去除可能的空白字符
         let trimmed_content = content.replace(&['\r', '\n', ' ', '\t'][..], "");
         if let Ok(decoded_bytes) = base64_standard.decode(&trimmed_content) {
             if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
-                // 解码后如果是有效的 yaml 或者是节点列表（比如 ss://, vmess://），这里可以进一步处理
-                // 但如果是纯节点列表，可能需要转换为 clash yaml 格式。这里先简单保存解码后的文本，
-                // 如果机场返回的是 base64 编码的 yaml，这就足够了。
                 if decoded_str.contains("proxies:") || decoded_str.contains("port:") {
                     content = decoded_str;
                 } else {
-                    // If it's not a valid clash yaml, it might be a node list
-                    // We'll still save it but it might not run
                     content = decoded_str;
                 }
             }
         }
     }
     
-    // Basic YAML check and script sanitization for Clash config
     if content.contains("proxies:") || content.contains("proxy-groups:") {
         match serde_yaml::from_str::<serde_yaml::Value>(&content) {
             Ok(mut yaml_val) => {
@@ -1939,7 +1997,6 @@ pub async fn download_sub(
             }
         }
     } else if !content.trim().starts_with("http") && !content.trim().is_empty() {
-        // Not a link list and not a clash config?
         return Err("The subscription content is neither a valid Clash YAML nor a supported node list".to_string());
     }
     
@@ -1948,7 +2005,6 @@ pub async fn download_sub(
     let clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") { name.clone() } else { format!("{}.yaml", name) };
     let target_path = paths.profiles_dir.join(&clean_name);
     
-    // Save metadata instead of writing plaintext headers
     let mut metadata = load_metadata(&paths);
     metadata.configs.insert(clean_name.clone(), ConfigMetadata {
         url: Some(final_url.clone()),
