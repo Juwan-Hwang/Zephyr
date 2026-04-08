@@ -43,6 +43,9 @@ export const translations = {
         tunnelProtocol: "Protocol",
         tunnelNetwork: "Listen Network",
         tunnelTarget: "Target Address",
+        invalidProtocol: "Invalid protocol. Use tcp, udp, or both.",
+        invalidAddressFormat: "Invalid listen address format. Use host:port",
+        invalidTargetFormat: "Invalid target address format. Use host:port",
         
         core: "Mihomo Core",
         curVersion: "Current Version",
@@ -173,6 +176,9 @@ export const translations = {
         switching: "Switching...",
         tunnelNetwork: "Listen Address",
         tunnelTarget: "Target Address",
+        invalidProtocol: "无效协议。请使用 tcp、udp 或两者。",
+        invalidAddressFormat: "监听地址格式无效。请使用 主机:端口",
+        invalidTargetFormat: "目标地址格式无效。请使用 主机:端口",
         addPortForwarding: "Add Port Forwarding",
                 // Tray Menu
         trayShow: "Show Zephyr",

@@ -2500,16 +2500,68 @@ export async function initSettings() {
         const contentArea = await showModal(t.addPortForwarding || "Add Port Forwarding", "", "", true, customHtml);
         if (!contentArea) return; // Cancelled
 
-        const protocolStr = contentArea.querySelector('#tunnel-protocol-input').value;
-        const address = contentArea.querySelector('#tunnel-address-input').value;
-        const target = contentArea.querySelector('#tunnel-target-input').value;
+        const protocolStr = contentArea.querySelector('#tunnel-protocol-input').value.trim();
+        const address = contentArea.querySelector('#tunnel-address-input').value.trim();
+        const target = contentArea.querySelector('#tunnel-target-input').value.trim();
 
         if (!protocolStr || !address || !target) {
             showNotification(t.valueEmpty || 'Value cannot be empty', 'error');
             return;
         }
 
-        const network = protocolStr.split(',').map(s => s.trim().toLowerCase());
+        // Validate protocol
+        const protocols = protocolStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        const validProtocols = ['tcp', 'udp'];
+        const invalidProtocols = protocols.filter(p => !validProtocols.includes(p));
+        
+        if (protocols.length === 0 || invalidProtocols.length > 0) {
+            showNotification(t.invalidProtocol || 'Invalid protocol. Use tcp, udp, or both.', 'error');
+            return;
+        }
+
+        // Validate address format: host:port or [ipv6]:port
+        const isValidAddress = (addr) => {
+            // IPv6 with port: [ipv6]:port
+            const ipv6Match = addr.match(/^\[([0-9a-fA-F:]+)\]:(\d+)$/);
+            if (ipv6Match) {
+                const port = parseInt(ipv6Match[2], 10);
+                return isValidIPv6(ipv6Match[1]) && port > 0 && port <= 65535;
+            }
+            
+            // IPv4 with port
+            const ipv4Match = addr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d+)$/);
+            if (ipv4Match) {
+                const octets = [ipv4Match[1], ipv4Match[2], ipv4Match[3], ipv4Match[4]];
+                const validOctets = octets.every(o => {
+                    const num = parseInt(o, 10);
+                    return num >= 0 && num <= 255;
+                });
+                const port = parseInt(ipv4Match[5], 10);
+                const validPort = port > 0 && port <= 65535;
+                return validOctets && validPort;
+            }
+            
+            // Hostname with port - allow single char hostnames (e.g., 'a:8080')
+            const hostMatch = addr.match(/^([a-zA-Z0-9][-a-zA-Z0-9.]*):(\d+)$/);
+            if (hostMatch) {
+                const port = parseInt(hostMatch[2], 10);
+                return port > 0 && port <= 65535;
+            }
+            
+            return false;
+        };
+
+        if (!isValidAddress(address)) {
+            showNotification(t.invalidAddressFormat || 'Invalid listen address format. Use host:port', 'error');
+            return;
+        }
+
+        if (!isValidAddress(target)) {
+            showNotification(t.invalidTargetFormat || 'Invalid target address format. Use host:port', 'error');
+            return;
+        }
+
+        const network = protocols;
         currentTunnels.push({ network, address, target });
         saveConfigToCore({ tunnels: currentTunnels });
         renderTunnels();
