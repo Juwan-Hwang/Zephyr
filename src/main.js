@@ -5,9 +5,11 @@ import {
   initProxyToggle, initProxyControls, initSettings, 
   initWindowControls, applyTranslations, initModeSelector, initTunToggle,
   syncCoreConfig, initUwpExemption, initDnsRewriteToggle, initNodeWheel, updateTrayStatus,
-  startUnifiedSync, initTrayEventListeners, updateTrayMenu, cleanupTrayEventListeners, stopUnifiedSync
+  startUnifiedSync, initTrayEventListeners, updateTrayMenu, cleanupTrayEventListeners, stopUnifiedSync,
+  showNotification
 } from './ui.js';
 import { cleanupChart } from './modules/traffic-chart.js';
+import { translations } from './i18n.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -71,6 +73,24 @@ async function initApp() {
   initSettings();
   initUwpExemption();
   initNodeWheel();
+
+  // Check if encryption key is properly persisted
+  try {
+    const keyPersisted = await window.__TAURI__.core.invoke('is_machine_key_persisted');
+    if (!keyPersisted) {
+      console.error('[Security] Machine key not persisted - encrypted data will be lost on restart');
+      // Get current language and show notification
+      const currentLang = localStorage.getItem('lang') || 'en';
+      const t = translations[currentLang];
+      showNotification(
+        (t.keyNotPersistedTitle || 'Encryption Key Warning') + ': ' + 
+        (t.keyNotPersistedMessage || 'The encryption key could not be persisted. Subscription URLs and other sensitive data will be lost after restart.'),
+        'error'
+      );
+    }
+  } catch (err) {
+    console.error('Failed to check machine key status:', err);
+  }
 
   try {
     await syncCoreConfig();

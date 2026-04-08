@@ -1,0 +1,164 @@
+# Zephyr Custom Semgrep Rules
+# All patterns use valid Semgrep syntax (verified)
+rules:
+  # ============================================================
+  # Rust Rules
+  # ============================================================
+
+  - id: rust-osascript-privilege-escalation
+    languages: [rust]
+    message: |
+      Potential privilege escalation via osascript "with administrator privileges".
+      If format arguments include user-controlled paths, this could lead to
+      command injection with root privileges.
+    severity: WARNING
+    pattern-regex: 'with administrator privileges'
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.rs"
+        - "**/examples/**"
+    metadata:
+      category: security
+      cwe: "CWE-78"
+      confidence: MEDIUM
+
+  - id: rust-osascript-command-pattern
+    languages: [rust]
+    message: |
+      osascript command detected. Verify that all interpolated values
+      are properly escaped. Note: pattern-regex may match comments and
+      string literals; review findings for false positives.
+    severity: WARNING
+    pattern-regex: 'Command::new\("osascript"\)'
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.rs"
+        - "**/examples/**"
+    metadata:
+      category: security
+      cwe: "CWE-78"
+      confidence: LOW
+
+  - id: rust-command-format-arg
+    languages: [rust]
+    message: |
+      Command argument constructed via format!().
+      If format arguments include untrusted input, this could lead to
+      command injection. Prefer passing arguments separately via .args().
+      Note: pattern-regex may match comments and string literals.
+    severity: WARNING
+    pattern-regex: '\.arg\(format!\('
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.rs"
+        - "**/examples/**"
+    metadata:
+      category: security
+      cwe: "CWE-78"
+      confidence: LOW
+
+  - id: rust-unsafe-block
+    languages: [rust]
+    message: |
+      Unsafe block detected. Review for memory safety issues.
+      Ensure all unsafe operations have safety documentation comments.
+    severity: INFO
+    pattern: |
+      unsafe { ... }
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.rs"
+        - "**/examples/**"
+    metadata:
+      category: security
+      cwe: "CWE-119"
+      confidence: LOW
+
+  - id: rust-hardcoded-crypto-constant
+    languages: [rust]
+    message: |
+      Possible hardcoded cryptographic key or secret in a named constant.
+      The variable name suggests this may be a sensitive value.
+      Use environment variables or secure key derivation instead.
+    severity: WARNING
+    patterns:
+      - pattern: |
+          const $KEY: &str = $VALUE
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: '(?i)(key|secret|token|password|credential|api_key|private)'
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*_test.rs"
+        - "**/examples/**"
+        - "**/benches/**"
+    metadata:
+      category: security
+      cwe: "CWE-321"
+      confidence: MEDIUM
+
+  # ============================================================
+  # JavaScript / TypeScript Rules
+  # ============================================================
+
+  - id: js-innerhtml-assignment
+    languages: [javascript, typescript]
+    message: |
+      innerHTML assignment detected. If the value contains user-controlled data,
+      this could lead to XSS. Use textContent or DOMPurify.sanitize() instead.
+    severity: WARNING
+    pattern: |
+      $OBJ.innerHTML = $INPUT
+    paths:
+      exclude:
+        - "**/test/**"
+        - "**/*.test.js"
+        - "**/*.test.ts"
+        - "**/node_modules/**"
+    metadata:
+      category: security
+      cwe: "CWE-79"
+      confidence: MEDIUM
+
+  - id: js-insertadjacenthtml
+    languages: [javascript, typescript]
+    message: |
+      insertAdjacentHTML detected. Verify that the HTML content is
+      developer-controlled and not derived from user input.
+      Consider using DOMPurify.sanitize() for defense in depth.
+    severity: INFO
+    pattern: |
+      $OBJ.insertAdjacentHTML($POS, $HTML)
+    paths:
+      exclude:
+        - "**/test/**"
+        - "**/*.test.js"
+        - "**/*.test.ts"
+        - "**/node_modules/**"
+    metadata:
+      category: security
+      cwe: "CWE-79"
+      confidence: LOW
+
+  - id: js-document-write
+    languages: [javascript, typescript]
+    message: |
+      document.write() detected. This can lead to XSS if the argument
+      contains user-controlled data. Avoid using document.write().
+    severity: WARNING
+    pattern-regex: 'document\.write\('
+    paths:
+      exclude:
+        - "**/test/**"
+        - "**/*.test.js"
+        - "**/*.test.ts"
+        - "**/node_modules/**"
+    metadata:
+      category: security
+      cwe: "CWE-79"
+      confidence: MEDIUM

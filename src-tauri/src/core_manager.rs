@@ -1403,17 +1403,22 @@ pub async fn start_core(
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
     // Use temp directory for cross-platform compatibility
     let log_path = std::env::temp_dir().join("mihomo-restart.log");
-    let stdout_file = std::fs::File::create(&log_path)
-        .unwrap_or_else(|_| std::fs::File::create(std::env::temp_dir().join("nul")).unwrap_or_else(|_| {
-            // Fallback to null device
-            #[cfg(target_os = "windows")]
-            { std::fs::File::create("NUL").unwrap() }
-            #[cfg(not(target_os = "windows"))]
-            { std::fs::File::create("/dev/null").unwrap() }
-        }));
-    let stderr_file = stdout_file.try_clone().unwrap();
-    cmd.stdout(std::process::Stdio::from(stdout_file));
-    cmd.stderr(std::process::Stdio::from(stderr_file));
+    
+    // Create or truncate log file
+    match std::fs::File::create(&log_path) {
+        Ok(log_file) => {
+            // Clone the handle for stderr before converting to Stdio
+            let stderr_handle = log_file.try_clone();
+            cmd.stdout(std::process::Stdio::from(log_file));
+            cmd.stderr(stderr_handle.map(std::process::Stdio::from)
+                .unwrap_or_else(|_| std::process::Stdio::null()));
+        }
+        Err(_) => {
+            // Fallback to null if log file cannot be created
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+        }
+    }
     
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
@@ -1561,6 +1566,9 @@ const MACHINE_KEY_FILE: &str = ".machine_key";
 /// Get or create a persistent machine-specific encryption key.
 /// Uses multiple hardware fingerprints for enhanced security against VM cloning.
 /// Falls back to a randomly generated key persisted to disk if system IDs unavailable.
+/// Returns Ok(key) on success, or Err if the key could not be persisted (session-only key).
+static MACHINE_KEY_PERSISTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn get_machine_key() -> Vec<u8> {
     let mut seed_parts: Vec<String> = Vec::new();
     
@@ -1720,6 +1728,7 @@ fn get_machine_key() -> Vec<u8> {
                 let trimmed = existing_key.trim();
                 if !trimmed.is_empty() && trimmed.len() >= 32 {
                     // Use the stored key directly (already has enough entropy)
+                    MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                     return trimmed.as_bytes()[..32].to_vec();
                 }
             }
@@ -1734,6 +1743,7 @@ fn get_machine_key() -> Vec<u8> {
         
         // Persist the key (critical for data recovery)
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
+            MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
             return random_key;
         }
     }
@@ -1752,6 +1762,7 @@ fn get_machine_key() -> Vec<u8> {
             if let Ok(existing_key) = fs::read_to_string(&key_path) {
                 let trimmed = existing_key.trim();
                 if !trimmed.is_empty() && trimmed.len() >= 32 {
+                    MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                     return trimmed.as_bytes()[..32].to_vec();
                 }
             }
@@ -1766,6 +1777,7 @@ fn get_machine_key() -> Vec<u8> {
         
         // Persist the key
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
+            MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
             return random_key;
         }
     }
@@ -1773,11 +1785,20 @@ fn get_machine_key() -> Vec<u8> {
     // Absolute last resort: session-only key
     // This is a critical failure - warn user that data will be lost on restart
     eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
+    // Session-only key - will not persist
+    // Callers should check is_machine_key_persisted() before storing sensitive data
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
         .map(|c| c as u8)
         .collect()
+}
+
+/// Check if the machine key was successfully persisted
+/// Returns false if using a session-only key (data will be lost on restart)
+#[tauri::command]
+pub fn is_machine_key_persisted() -> bool {
+    MACHINE_KEY_PERSISTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Encrypt a string using AES-256-GCM with the machine key

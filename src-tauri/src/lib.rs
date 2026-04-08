@@ -280,6 +280,7 @@ pub fn run() {
             tray::set_tray_menu_state,
             tray::get_tray_proxy_status,
             tray::update_tray_toggle_states,
+            core_manager::is_machine_key_persisted,
         ]);
 
     let app = builder

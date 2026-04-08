@@ -116,7 +116,9 @@ jobs:
             fi
             echo "✓ SHA256 verified for mihomo-windows-amd64-compatible"
           else
-            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
+            echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "Cannot verify download integrity - aborting for security"
+            exit 1
           fi
           
           unzip mihomo.zip
@@ -150,7 +152,9 @@ jobs:
             fi
             echo "✓ SHA256 verified for mihomo-darwin-arm64"
           else
-            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
+            echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "Cannot verify download integrity - aborting for security"
+            exit 1
           fi
           
           gunzip mihomo.gz
@@ -184,7 +188,9 @@ jobs:
             fi
             echo "✓ SHA256 verified for mihomo-darwin-amd64-compatible"
           else
-            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
+            echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "Cannot verify download integrity - aborting for security"
+            exit 1
           fi
           
           gunzip mihomo.gz
@@ -218,7 +224,9 @@ jobs:
             fi
             echo "✓ SHA256 verified for mihomo-linux-amd64-compatible"
           else
-            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
+            echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "Cannot verify download integrity - aborting for security"
+            exit 1
           fi
           
           gunzip mihomo.gz
@@ -254,7 +262,9 @@ jobs:
               fi
               echo "✓ SHA256 verified for $file"
             else
-              echo "⚠ Warning: SHA256 digest not available for $file, skipping verification"
+              echo "ERROR: SHA256 digest not available for $file"
+              echo "Cannot verify download integrity - aborting for security"
+              exit 1
             fi
           done
         shell: bash

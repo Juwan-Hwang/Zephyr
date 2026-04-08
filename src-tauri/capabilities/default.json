@@ -16,7 +16,6 @@
     "core:window:allow-set-focus",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "core:event:allow-emit",
     "core:image:default",
     "core:menu:default",
     "core:tray:default",

@@ -1,0 +1,67 @@
+version: 2
+updates:
+  # Rust 依赖自动更新
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+
+  # 前端依赖自动更新
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "javascript"
+    versioning-strategy: "auto"
+    groups:
+      # 将补丁更新和次要更新分组，避免 PR 风暴
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+
+  # GitHub Actions 版本更新
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      # minor/patch 合并，major 单独 PR 便于审查破坏性变更
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Semgrep 工具链更新（自动更新 hash）
+  - package-ecosystem: "pip"
+    directory: "/.github"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "security"
