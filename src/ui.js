@@ -219,11 +219,11 @@ export function applyTranslations() {
         el.textContent = t.latency || "Latency";
     });
     
-    // Update Tray Menu
+    // Update Tray Menu - use simpler toggle states command
     if (window.__TAURI__ && window.__TAURI__.core) {
-        window.__TAURI__.core.invoke('update_tray_menu', {
-            showText: t.trayShow || "Show",
-            quitText: t.trayQuit || "Quit"
+        window.__TAURI__.core.invoke('update_tray_toggle_states', {
+            sysProxyEnabled: false,
+            tunEnabled: false
         }).catch(e => console.warn("Failed to update tray menu:", e));
     }
 }

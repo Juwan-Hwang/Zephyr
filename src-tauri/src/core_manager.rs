@@ -270,7 +270,6 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     // Mark TUN mode as active
     set_tun_mode(true);
     
-    eprintln!("[TUN] root core started successfully, secret: {}", secret);
     Ok(secret)
 }
 
@@ -1207,7 +1206,9 @@ fn validate_subscription_url_with_ip(url: &str) -> Result<(String, Option<std::n
     // Fix Med-3: DNS Rebinding / SSRF TOCTOU
     // Resolve here and return the resolved SocketAddr so we can pin it in reqwest.
     let mut resolved_addr = None;
-    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:80", host))
+    // Use the correct port based on URL scheme
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, default_port))
         .map_err(|e| format!("Failed to resolve host: {}", e))?;
     
     for addr in addrs {
@@ -1373,8 +1374,16 @@ pub async fn start_core(
     }
     
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
-    let stdout_file = std::fs::File::create("/tmp/mihomo-restart.log")
-        .unwrap_or_else(|_| std::fs::File::open("/dev/null").unwrap());
+    // Use temp directory for cross-platform compatibility
+    let log_path = std::env::temp_dir().join("mihomo-restart.log");
+    let stdout_file = std::fs::File::create(&log_path)
+        .unwrap_or_else(|_| std::fs::File::create(std::env::temp_dir().join("nul")).unwrap_or_else(|_| {
+            // Fallback to null device
+            #[cfg(target_os = "windows")]
+            { std::fs::File::create("NUL").unwrap() }
+            #[cfg(not(target_os = "windows"))]
+            { std::fs::File::create("/dev/null").unwrap() }
+        }));
     let stderr_file = stdout_file.try_clone().unwrap();
     cmd.stdout(std::process::Stdio::from(stdout_file));
     cmd.stderr(std::process::Stdio::from(stderr_file));
@@ -1385,7 +1394,7 @@ pub async fn start_core(
     std::thread::sleep(std::time::Duration::from_millis(200));
     match child.try_wait() {
         Ok(Some(status)) => {
-            let log = std::fs::read_to_string("/tmp/mihomo-restart.log").unwrap_or_default();
+            let log = std::fs::read_to_string(&log_path).unwrap_or_default();
             return Err(format!("mihomo exited immediately: {:?}, log: {}", status, log));
         }
         Ok(None) => {}
@@ -1880,10 +1889,24 @@ pub async fn download_sub(
     let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
 
     let do_download = |client: reqwest::Client, url: String| async move {
-        let resp = client.get(&url).send().await.map_err(|e| {
-            println!("Download failed: {}", e);
-            "Network error occurred during download".to_string()
-        })?;
+        let resp = client.get(&url)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    format!("Request timeout: {}", e)
+                } else if e.is_connect() {
+                    format!("Connection failed: {}", e)
+                } else if e.is_request() {
+                    format!("Request error: {}", e)
+                } else if e.is_body() {
+                    format!("Body error: {}", e)
+                } else if e.is_decode() {
+                    format!("Decode error: {}", e)
+                } else {
+                    format!("Network error: {}", e)
+                }
+            })?;
         
         if !resp.status().is_success() {
             let status = resp.status();
@@ -1911,14 +1934,20 @@ pub async fn download_sub(
     let mut last_error = String::new();
     let mut result: Option<(Vec<u8>, String, String)> = None;
 
-    let client_direct = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None);
-    if let Ok(client) = client_direct {
-        match do_download(client, url.clone()).await {
-            Ok(data) => result = Some(data),
-            Err(e) => {
-                println!("[download_sub] Direct connection failed: {}", e);
-                last_error = e;
+    // Try direct connection first
+    match build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None) {
+        Ok(client) => {
+            match do_download(client, url.clone()).await {
+                Ok(data) => result = Some(data),
+                Err(e) => {
+                    println!("[download_sub] Direct connection failed: {}", e);
+                    last_error = e;
+                }
             }
+        }
+        Err(e) => {
+            println!("[download_sub] Failed to build direct client: {}", e);
+            last_error = e;
         }
     }
 
