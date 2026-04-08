@@ -13,7 +13,7 @@
   "devDependencies": {
     "@tailwindcss/cli": "4.2.2",
     "@tauri-apps/cli": "2.10.1",
-    "eslint": "10.1.0",
+    "eslint": "10.2.0",
     "tailwindcss": "4.2.2",
     "vitest": "1.6.1"
   },
