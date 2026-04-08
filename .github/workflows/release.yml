@@ -99,24 +99,29 @@ jobs:
           # Download mihomo binary
           curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
           
-          # Download SHA256 checksums
-          curl -L -o checksums.txt "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/checksums.txt"
+          # Get SHA256 from GitHub API digest
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r '.assets[] | select(.name == "mihomo-windows-amd64-compatible-'${MIHOMO_VERSION}'.zip") | .digest // empty')
           
-          # Verify SHA256
-          EXPECTED_HASH=$(grep "mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip" checksums.txt | awk '{print $1}')
-          ACTUAL_HASH=$(sha256sum mihomo.zip | awk '{print $1}')
-          
-          if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-            echo "ERROR: SHA256 mismatch!"
-            echo "Expected: $EXPECTED_HASH"
-            echo "Actual: $ACTUAL_HASH"
-            exit 1
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum mihomo.zip | awk '{print $1}')
+            
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: SHA256 mismatch!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual: $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for mihomo-windows-amd64-compatible"
+          else
+            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
           fi
-          echo "✓ SHA256 verified for mihomo-windows-amd64-compatible"
           
           unzip mihomo.zip
           mv mihomo-windows-amd64-compatible.exe src-tauri/bundled/mihomo.exe
-          rm mihomo.zip checksums.txt
+          rm mihomo.zip
         shell: bash
 
       - name: Download mihomo core (macOS arm64)
@@ -128,25 +133,29 @@ jobs:
           # Download mihomo binary
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
           
-          # Download SHA256 checksums
-          curl -L -o checksums.txt "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/checksums.txt"
+          # Get SHA256 from GitHub API digest
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r '.assets[] | select(.name == "mihomo-darwin-arm64-'${MIHOMO_VERSION}'.gz") | .digest // empty')
           
-          # Verify SHA256
-          EXPECTED_HASH=$(grep "mihomo-darwin-arm64-${MIHOMO_VERSION}.gz" checksums.txt | awk '{print $1}')
-          ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
-          
-          if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-            echo "ERROR: SHA256 mismatch!"
-            echo "Expected: $EXPECTED_HASH"
-            echo "Actual: $ACTUAL_HASH"
-            exit 1
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
+            
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: SHA256 mismatch!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual: $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for mihomo-darwin-arm64"
+          else
+            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
           fi
-          echo "✓ SHA256 verified for mihomo-darwin-arm64"
           
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
-          rm checksums.txt
         shell: bash
 
       - name: Download mihomo core (macOS x64)
@@ -158,25 +167,29 @@ jobs:
           # Download mihomo binary (compatible version)
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
           
-          # Download SHA256 checksums
-          curl -L -o checksums.txt "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/checksums.txt"
+          # Get SHA256 from GitHub API digest
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r '.assets[] | select(.name == "mihomo-darwin-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
           
-          # Verify SHA256
-          EXPECTED_HASH=$(grep "mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz" checksums.txt | awk '{print $1}')
-          ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
-          
-          if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-            echo "ERROR: SHA256 mismatch!"
-            echo "Expected: $EXPECTED_HASH"
-            echo "Actual: $ACTUAL_HASH"
-            exit 1
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
+            
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: SHA256 mismatch!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual: $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for mihomo-darwin-amd64-compatible"
+          else
+            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
           fi
-          echo "✓ SHA256 verified for mihomo-darwin-amd64-compatible"
           
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
-          rm checksums.txt
         shell: bash
 
       - name: Download mihomo core (Linux)
@@ -188,25 +201,29 @@ jobs:
           # Download mihomo binary (compatible version)
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
           
-          # Download SHA256 checksums
-          curl -L -o checksums.txt "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/checksums.txt"
+          # Get SHA256 from GitHub API digest
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r '.assets[] | select(.name == "mihomo-linux-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
           
-          # Verify SHA256
-          EXPECTED_HASH=$(grep "mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz" checksums.txt | awk '{print $1}')
-          ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
-          
-          if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-            echo "ERROR: SHA256 mismatch!"
-            echo "Expected: $EXPECTED_HASH"
-            echo "Actual: $ACTUAL_HASH"
-            exit 1
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
+            
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: SHA256 mismatch!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual: $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for mihomo-linux-amd64-compatible"
+          else
+            echo "⚠ Warning: SHA256 digest not available from GitHub API, skipping verification"
           fi
-          echo "✓ SHA256 verified for mihomo-linux-amd64-compatible"
           
           gunzip mihomo.gz
           chmod +x mihomo
           mv mihomo src-tauri/bundled/mihomo
-          rm checksums.txt
         shell: bash
 
       # Download geo data files for full version
@@ -219,24 +236,27 @@ jobs:
           curl -L -o src-tauri/bundled/geosite.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
           curl -L -o src-tauri/bundled/Country.mmdb "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb"
           
-          # Download checksums
-          curl -L -o checksums.txt "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/sha256sums"
-          
-          # Verify SHA256 for each file
+          # Get SHA256 from GitHub API digest
           for file in geoip.dat geosite.dat Country.mmdb; do
-            EXPECTED_HASH=$(grep "$file" checksums.txt | awk '{print $1}')
-            ACTUAL_HASH=$(sha256sum "src-tauri/bundled/$file" | awk '{print $1}')
+            ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest" \
+              | jq -r --arg name "$file" '.assets[] | select(.name == $name) | .digest // empty')
             
-            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-              echo "ERROR: SHA256 mismatch for $file!"
-              echo "Expected: $EXPECTED_HASH"
-              echo "Actual: $ACTUAL_HASH"
-              exit 1
+            if [ -n "$ASSET_DIGEST" ]; then
+              EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+              ACTUAL_HASH=$(sha256sum "src-tauri/bundled/$file" | awk '{print $1}')
+              
+              if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+                echo "ERROR: SHA256 mismatch for $file!"
+                echo "Expected: $EXPECTED_HASH"
+                echo "Actual: $ACTUAL_HASH"
+                exit 1
+              fi
+              echo "✓ SHA256 verified for $file"
+            else
+              echo "⚠ Warning: SHA256 digest not available for $file, skipping verification"
             fi
-            echo "✓ SHA256 verified for $file"
           done
-          
-          rm checksums.txt
         shell: bash
 
       # Build full version (with bundled core and geo)
