@@ -1879,8 +1879,8 @@ pub async fn download_sub(
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
     let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
 
-    let do_download = |client: reqwest::Client, url: &str| async {
-        let resp = client.get(url).send().await.map_err(|e| {
+    let do_download = |client: reqwest::Client, url: String| async move {
+        let resp = client.get(&url).send().await.map_err(|e| {
             println!("Download failed: {}", e);
             "Network error occurred during download".to_string()
         })?;
@@ -1901,7 +1901,7 @@ pub async fn download_sub(
             .and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
 
         let final_url = resp.headers().get("profile-web-page-url")
-            .and_then(|h| h.to_str().ok()).unwrap_or(url).to_string();
+            .and_then(|h| h.to_str().ok()).unwrap_or(&url).to_string();
 
         let bytes = read_response_body(resp).await?;
         
@@ -1913,7 +1913,7 @@ pub async fn download_sub(
 
     let client_direct = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None);
     if let Ok(client) = client_direct {
-        match do_download(client, &url).await {
+        match do_download(client, url.clone()).await {
             Ok(data) => result = Some(data),
             Err(e) => {
                 println!("[download_sub] Direct connection failed: {}", e);
@@ -1923,21 +1923,27 @@ pub async fn download_sub(
     }
 
     if result.is_none() {
-        let state = app.state::<MihomoState>();
-        if let Ok(guard) = state.0.lock() {
-            if guard.process.is_some() {
-                let mixed_port = guard.last_port.unwrap_or(7890);
-                let proxy_url = format!("http://127.0.0.1:{}", mixed_port);
-                drop(guard);
-                
-                let client_mihomo = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(proxy_url));
-                if let Ok(client) = client_mihomo {
-                    match do_download(client, &url).await {
-                        Ok(data) => result = Some(data),
-                        Err(e) => {
-                            println!("[download_sub] Mihomo proxy failed: {}", e);
-                            last_error = e;
-                        }
+        // Get proxy port from state, then immediately release the lock
+        let proxy_url = {
+            let state = app.state::<MihomoState>();
+            let guard = state.0.lock().ok();
+            guard.and_then(|g| {
+                if g.process.is_some() {
+                    Some(format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
+                } else {
+                    None
+                }
+            })
+        };
+        
+        if let Some(proxy_url) = proxy_url {
+            let client_mihomo = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(proxy_url));
+            if let Ok(client) = client_mihomo {
+                match do_download(client, url.clone()).await {
+                    Ok(data) => result = Some(data),
+                    Err(e) => {
+                        println!("[download_sub] Mihomo proxy failed: {}", e);
+                        last_error = e;
                     }
                 }
             }
@@ -1949,7 +1955,7 @@ pub async fn download_sub(
             println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
             let client_sys = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(sys_proxy_url));
             if let Ok(client) = client_sys {
-                match do_download(client, &url).await {
+                match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
                         println!("[download_sub] System proxy failed: {}", e);
