@@ -3930,11 +3930,90 @@ export async function initDnsRewriteToggle() {
             }
             
             // Validate DNS server URLs (must be DoH, DoT, or traditional DNS format)
+            const isValidIPv6 = (ipv6) => {
+                // Must have at least one colon
+                if (!ipv6.includes(':')) return false;
+                
+                // Check for :: (zero compression) - can appear at most once
+                if ((ipv6.match(/::/g) || []).length > 1) return false;
+                
+                // Split and count groups
+                const groups = ipv6.split(':');
+                if (groups.length > 8) return false;
+                
+                // Validate each group is valid hex (1-4 digits) or empty (part of ::)
+                return groups.every(g => g === '' || /^[0-9a-fA-F]{1,4}$/.test(g));
+            };
+            
             const isValidDns = (url) => {
-                return url.startsWith('https://') ||  // DoH
-                       url.startsWith('tls://') ||    // DoT
-                       /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(url) ||  // IPv4
-                       /^\[[0-9a-fA-F:]+\](:\d+)?$/.test(url);  // IPv6
+                // DoH (DNS over HTTPS)
+                if (url.startsWith('https://')) {
+                    try {
+                        const parsed = new URL(url);
+                        return parsed.hostname.length > 0;
+                    } catch {
+                        return false;
+                    }
+                }
+                
+                // DoT (DNS over TLS) - not a standard browser scheme, handle carefully
+                if (url.startsWith('tls://')) {
+                    const host = url.slice(6); // Remove "tls://"
+                    // Must have a hostname and no spaces
+                    if (!host || host.includes(' ')) return false;
+                    
+                    // Check for IPv6 in brackets with port: [ipv6]:port
+                    const ipv6WithPortMatch = host.match(/^\[([0-9a-fA-F:]+)\]:(\d+)$/);
+                    if (ipv6WithPortMatch) {
+                        const port = parseInt(ipv6WithPortMatch[2], 10);
+                        return isValidIPv6(ipv6WithPortMatch[1]) && port > 0 && port <= 65535;
+                    }
+                    
+                    // Check for IPv6 in brackets without port: [ipv6]
+                    const ipv6BareMatch = host.match(/^\[([0-9a-fA-F:]+)\]$/);
+                    if (ipv6BareMatch) {
+                        return isValidIPv6(ipv6BareMatch[1]);
+                    }
+                    
+                    // Check for IPv4 or hostname with port
+                    const portMatch = host.match(/^([^:]+):(\d+)$/);
+                    if (portMatch) {
+                        const port = parseInt(portMatch[2], 10);
+                        return port > 0 && port <= 65535;
+                    }
+                    
+                    // Plain hostname or IPv4 without port
+                    return host.length > 0;
+                }
+                
+                // IPv4 with optional port
+                const ipv4Match = url.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?::(\d+))?$/);
+                if (ipv4Match) {
+                    // Validate each octet is 0-255
+                    const octets = [ipv4Match[1], ipv4Match[2], ipv4Match[3], ipv4Match[4]];
+                    const validOctets = octets.every(octet => {
+                        const num = parseInt(octet, 10);
+                        return num >= 0 && num <= 255;
+                    });
+                    
+                    // Validate port if present
+                    const port = ipv4Match[5];
+                    const validPort = !port || (parseInt(port, 10) > 0 && parseInt(port, 10) <= 65535);
+                    
+                    return validOctets && validPort;
+                }
+                
+                // IPv6 with optional port
+                const ipv6Match = url.match(/^\[([0-9a-fA-F:]+)\](?::(\d+))?$/);
+                if (ipv6Match) {
+                    const ipv6 = ipv6Match[1];
+                    const port = ipv6Match[2];
+                    const validPort = !port || (parseInt(port, 10) > 0 && parseInt(port, 10) <= 65535);
+                    
+                    return isValidIPv6(ipv6) && validPort;
+                }
+                
+                return false;
             };
             
             const invalidNameservers = nameservers.filter(s => !isValidDns(s));

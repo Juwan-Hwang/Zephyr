@@ -282,7 +282,7 @@ jobs:
                 echo "This could mean:"
                 echo "  1. GitHub API rate limit reached - wait and retry"
                 echo "  2. Network timeout - check workflow logs"
-                echo "  3. Asset missing from release - verify upstream"
+                echo "  3. Release asset missing digest - verify upstream release"
                 echo "Cannot verify download integrity - aborting for security"
                 exit 1
               fi
