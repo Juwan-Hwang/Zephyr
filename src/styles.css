@@ -1,4 +1,4 @@
-/* 隐藏滚动条 */
+/* Hide all scrollbars globally */
 ::-webkit-scrollbar {
   display: none;
 }
@@ -175,20 +175,6 @@ input:checked + .switch-slider:before {
 }
 .ios-switch.switch-sm input:checked + .switch-slider:before {
     transform: translateX(14px);
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
 }
 
 /* Main container background driven by theme + opacity variable */

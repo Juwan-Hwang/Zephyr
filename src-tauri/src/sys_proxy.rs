@@ -288,133 +288,218 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
         let mut success = false;
 
         if has_gnome() {
-            if let Ok(status) = Command::new("gsettings")
-                .args(["set", "org.gnome.system.proxy", "mode", "'manual'"])
+            // Use gsettings without shell escaping - gsettings expects plain values
+            // The host is already validated to be localhost/127.0.0.1/::1 only
+            
+            // Try to set all proxy settings atomically by using a single script
+            // If any command fails, we won't set the mode to 'manual'
+            let mut all_commands_ok = true;
+            
+            // First, configure all the proxy details
+            let http_host = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "host", &host])
                 .status()
-            {
-                if status.success() {
-                    let _ = Command::new("gsettings")
-                        .args([
-                            "set",
-                            "org.gnome.system.proxy.http",
-                            "host",
-                            &format!("'{}'", host),
-                        ])
-                        .status();
-                    let _ = Command::new("gsettings")
-                        .args(["set", "org.gnome.system.proxy.http", "port", &port])
-                        .status();
-                    let _ = Command::new("gsettings")
-                        .args([
-                            "set",
-                            "org.gnome.system.proxy.https",
-                            "host",
-                            &format!("'{}'", host),
-                        ])
-                        .status();
-                    let _ = Command::new("gsettings")
-                        .args(["set", "org.gnome.system.proxy.https", "port", &port])
-                        .status();
-                    let _ = Command::new("gsettings")
-                        .args([
-                            "set",
-                            "org.gnome.system.proxy.socks",
-                            "host",
-                            &format!("'{}'", host),
-                        ])
-                        .status();
-                    let _ = Command::new("gsettings")
-                        .args(["set", "org.gnome.system.proxy.socks", "port", &port])
-                        .status();
+                .map(|s| s.success())
+                .unwrap_or(false);
+            
+            if !http_host { all_commands_ok = false; }
+            
+            if all_commands_ok {
+                let http_port = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy.http", "port", &port])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !http_port { all_commands_ok = false; }
+            }
+            
+            if all_commands_ok {
+                let https_host = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy.https", "host", &host])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !https_host { all_commands_ok = false; }
+            }
+            
+            if all_commands_ok {
+                let https_port = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy.https", "port", &port])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !https_port { all_commands_ok = false; }
+            }
+            
+            if all_commands_ok {
+                let socks_host = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy.socks", "host", &host])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !socks_host { all_commands_ok = false; }
+            }
+            
+            if all_commands_ok {
+                let socks_port = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy.socks", "port", &port])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !socks_port { all_commands_ok = false; }
+            }
 
-                    if let Some(bp) = bypass {
-                        let hosts: Vec<&str> = bp.split(',').collect();
-                        let formatted_bp = format!("['{}']", hosts.join("', '"));
-                        let _ = Command::new("gsettings")
-                            .args([
-                                "set",
-                                "org.gnome.system.proxy",
-                                "ignore-hosts",
-                                &formatted_bp,
-                            ])
-                            .status();
+            if all_commands_ok {
+                if let Some(bp) = bypass {
+                    // Build ignore-hosts as a GVariant array string
+                    // Format: ['host1', 'host2'] - filter out entries with single quotes
+                    let hosts: Vec<String> = bp
+                        .split(',')
+                        .map(|h| h.trim().to_string())
+                        .filter(|h| !h.is_empty() && !h.contains('\''))
+                        .map(|h| format!("'{}'", h))
+                        .collect();
+                    
+                    if !hosts.is_empty() {
+                        let formatted_bp = format!("[{}]", hosts.join(", "));
+                        let ignore_hosts = Command::new("gsettings")
+                            .args(["set", "org.gnome.system.proxy", "ignore-hosts", &formatted_bp])
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false);
+                        if !ignore_hosts { all_commands_ok = false; }
                     }
-                    success = true;
                 }
+            }
+            
+            // Only enable the proxy mode if all previous settings succeeded
+            // This provides atomicity: either all settings are applied, or none
+            if all_commands_ok {
+                if let Ok(status) = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy", "mode", "manual"])
+                    .status()
+                {
+                    if status.success() {
+                        success = true;
+                    }
+                }
+            } else {
+                // Rollback: disable proxy mode if settings failed
+                let _ = Command::new("gsettings")
+                    .args(["set", "org.gnome.system.proxy", "mode", "none"])
+                    .status();
+                eprintln!("[Proxy] Warning: Failed to set all GNOME proxy settings, rolling back");
             }
         }
 
         if let Some((kwrite_cmd, _)) = get_kde_cmd() {
-            if let Ok(status) = Command::new(kwrite_cmd)
+            // Apply same atomic pattern as GNOME
+            let mut all_kde_ok = true;
+            
+            // Set all proxy values first
+            let http_ok = Command::new(kwrite_cmd)
                 .args([
                     "--file",
                     "kioslaverc",
                     "--group",
                     "Proxy Settings",
                     "--key",
-                    "ProxyType",
-                    "1",
+                    "httpProxy",
+                    &format!("http://{}:{}", host, port),
                 ])
                 .status()
-            {
-                if status.success() {
-                    let _ = Command::new(kwrite_cmd)
-                        .args([
-                            "--file",
-                            "kioslaverc",
-                            "--group",
-                            "Proxy Settings",
-                            "--key",
-                            "httpProxy",
-                            &format!("http://{}:{}", host, port),
-                        ])
-                        .status();
-                    let _ = Command::new(kwrite_cmd)
-                        .args([
-                            "--file",
-                            "kioslaverc",
-                            "--group",
-                            "Proxy Settings",
-                            "--key",
-                            "httpsProxy",
-                            &format!("http://{}:{}", host, port),
-                        ])
-                        .status();
-                    let _ = Command::new(kwrite_cmd)
-                        .args([
-                            "--file",
-                            "kioslaverc",
-                            "--group",
-                            "Proxy Settings",
-                            "--key",
-                            "socksProxy",
-                            &format!("socks://{}:{}", host, port),
-                        ])
-                        .status();
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !http_ok { all_kde_ok = false; }
+            
+            if all_kde_ok {
+                let https_ok = Command::new(kwrite_cmd)
+                    .args([
+                        "--file",
+                        "kioslaverc",
+                        "--group",
+                        "Proxy Settings",
+                        "--key",
+                        "httpsProxy",
+                        &format!("http://{}:{}", host, port),
+                    ])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !https_ok { all_kde_ok = false; }
+            }
+            
+            if all_kde_ok {
+                let socks_ok = Command::new(kwrite_cmd)
+                    .args([
+                        "--file",
+                        "kioslaverc",
+                        "--group",
+                        "Proxy Settings",
+                        "--key",
+                        "socksProxy",
+                        &format!("socks://{}:{}", host, port),
+                    ])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !socks_ok { all_kde_ok = false; }
+            }
 
-                    let _ = Command::new("dbus-send")
-                        .args([
-                            "--type=method_call",
-                            "--dest=org.kde.KIODaemon",
-                            "/KIODaemon",
-                            "org.kde.KIODaemon.update",
-                        ])
-                        .status();
-                    let _ = Command::new("dbus-send")
-                        .args([
-                            "--type=method_call",
-                            "--dest=org.kde.KWin",
-                            "/KWin",
-                            "org.kde.KWin.reconfigure",
-                        ])
-                        .status();
-                    success = true;
+            // Only enable proxy mode if all settings succeeded
+            if all_kde_ok {
+                if let Ok(status) = Command::new(kwrite_cmd)
+                    .args([
+                        "--file",
+                        "kioslaverc",
+                        "--group",
+                        "Proxy Settings",
+                        "--key",
+                        "ProxyType",
+                        "1",
+                    ])
+                    .status()
+                {
+                    if status.success() {
+                        let _ = Command::new("dbus-send")
+                            .args([
+                                "--type=method_call",
+                                "--dest=org.kde.KIODaemon",
+                                "/KIODaemon",
+                                "org.kde.KIODaemon.update",
+                            ])
+                            .status();
+                        let _ = Command::new("dbus-send")
+                            .args([
+                                "--type=method_call",
+                                "--dest=org.kde.KWin",
+                                "/KWin",
+                                "org.kde.KWin.reconfigure",
+                            ])
+                            .status();
+                        success = true;
+                    }
                 }
+            } else {
+                // Rollback: disable proxy
+                let _ = Command::new(kwrite_cmd)
+                    .args([
+                        "--file",
+                        "kioslaverc",
+                        "--group",
+                        "Proxy Settings",
+                        "--key",
+                        "ProxyType",
+                        "0",
+                    ])
+                    .status();
+                eprintln!("[Proxy] Warning: Failed to set all KDE proxy settings, rolling back");
             }
         }
 
         if has_xfce() {
-            let _ = Command::new("xfconf-query")
+            // XFCE uses a single command, which is naturally atomic
+            if let Ok(status) = Command::new("xfconf-query")
                 .args([
                     "-c",
                     "xfce4-session",
@@ -426,8 +511,12 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
                     "-t",
                     "string",
                 ])
-                .status();
-            success = true;
+                .status()
+            {
+                if status.success() {
+                    success = true;
+                }
+            }
         }
 
         if success {

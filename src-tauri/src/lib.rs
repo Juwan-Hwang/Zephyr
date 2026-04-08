@@ -12,11 +12,58 @@ use config_manager::{read_config, update_config};
 use uwp_loopback::exempt_uwp_apps;
 use tray::{init_tray, TrayState, change_tray_icon, update_tray_full_menu};
 use std::sync::{Mutex, Arc};
+use std::collections::HashMap;
+use std::time::{Instant, Duration};
 use tauri::Manager;
 use serde::{Deserialize, Serialize};
 use std::fs;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
+
+/// Rate limiter for Tauri commands
+pub struct RateLimiter {
+    calls: Mutex<HashMap<String, Instant>>,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self {
+            calls: Mutex::new(HashMap::new()),
+        }
+    }
+    
+    /// Check if a command can be executed (returns true if allowed, false if rate limited)
+    /// Also cleans up expired entries to prevent unbounded memory growth
+    pub fn check_rate_limit(&self, command: &str, min_interval_ms: u64) -> bool {
+        let mut calls = self.calls.lock().unwrap();
+        let now = Instant::now();
+        
+        // Clean up entries older than 1 minute to prevent unbounded growth
+        calls.retain(|_, last_call| {
+            now.duration_since(*last_call) < Duration::from_secs(60)
+        });
+        
+        if let Some(last_call) = calls.get(command) {
+            let elapsed = now.duration_since(*last_call);
+            if elapsed < Duration::from_millis(min_interval_ms) {
+                return false;
+            }
+        }
+        
+        calls.insert(command.to_string(), now);
+        true
+    }
+}
+
+/// Macro to simplify rate limiting in commands
+#[macro_export]
+macro_rules! rate_limit {
+    ($limiter:expr, $cmd:expr, $ms:expr) => {
+        if !$limiter.check_rate_limit($cmd, $ms) {
+            return Err(format!("{} rate limited, please wait", $cmd));
+        }
+    };
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Settings {
@@ -27,6 +74,10 @@ struct Settings {
     last_config: Option<String>,
     #[serde(default)]
     custom_args: Vec<String>,
+    #[serde(default)]
+    dns_nameservers: Option<Vec<String>>,
+    #[serde(default)]
+    dns_fallbacks: Option<Vec<String>>,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -119,6 +170,7 @@ pub fn run() {
             last_port: None,
         })))
         .manage(TrayState::default())
+        .manage(RateLimiter::new())
         .setup(|app| {
             ensure_app_storage(app.handle()).map_err(|e| e.to_string())?;
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -134,6 +186,8 @@ pub fn run() {
                     theme: None,
                     last_config: None,
                     custom_args: Vec::new(),
+                    dns_nameservers: None,
+                    dns_fallbacks: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings.clone()))));

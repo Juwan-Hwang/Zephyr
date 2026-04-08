@@ -65,6 +65,39 @@ export function initChart() {
 }
 
 /**
+ * Cleanup chart resources - call when unmounting or switching pages
+ */
+export function cleanupChart() {
+    // Cancel any pending animation frame
+    if (_chartFrameId !== null) {
+        cancelAnimationFrame(_chartFrameId);
+        _chartFrameId = null;
+    }
+    
+    // Clear debounce timer
+    if (_chartResizeDebounce) {
+        clearTimeout(_chartResizeDebounce);
+        _chartResizeDebounce = null;
+    }
+    
+    // Remove resize listener
+    if (_chartResizeHandler) {
+        window.removeEventListener('resize', _chartResizeHandler);
+        _chartResizeHandler = null;
+    }
+    
+    // Disconnect ResizeObserver
+    if (_chartResizeObserver) {
+        _chartResizeObserver.disconnect();
+        _chartResizeObserver = null;
+    }
+    
+    // Clear references
+    canvas = null;
+    ctx = null;
+}
+
+/**
  * Update traffic data with new values
  * @param {Object} data - Traffic data object
  * @param {string} data.up - Upload speed formatted string (e.g., "10 KB/s")

@@ -536,7 +536,10 @@ pub async fn update_core(
         .ok_or_else(|| "Invalid update URL: only official MetaCubeX/mihomo GitHub releases are supported".to_string())?;
 
     let paths = core_manager::ensure_app_storage(&app)?;
-    let archive_path = paths.core_dir.join("core_update.tmp");
+    
+    // Use unpredictable temp file names to prevent TOCTOU attacks
+    let temp_suffix = uuid::Uuid::new_v4().to_string();
+    let archive_path = paths.core_dir.join(format!("core_update_{}.tmp", temp_suffix));
     
     if let Err(e) = download_release_asset(&window, &url, &archive_path).await {
         let _ = std::fs::remove_file(&archive_path);
@@ -551,7 +554,7 @@ pub async fn update_core(
     })?;
     
     emit_core_download_status(&window, "下载完成，正在解压核心...", 84);
-    let temp_exe_path = paths.core_dir.join(format!("{}.tmp", core_manager::core_binary_name()));
+    let temp_exe_path = paths.core_dir.join(format!("{}_{}.tmp", core_manager::core_binary_name(), temp_suffix));
     if let Err(e) = extract_core_binary(&archive_path, &temp_exe_path, &url) {
         let _ = std::fs::remove_file(&archive_path);
         let _ = std::fs::remove_file(&temp_exe_path);
@@ -601,7 +604,11 @@ pub async fn update_core(
     };
 
     emit_core_download_status(&window, "更新完成，正在重启核心...", 98);
-    let result = core_manager::start_core(app.clone(), state, last_config, false, last_args, last_secret).await?;
+    
+    // Get rate limiter from app state
+    let rate_limiter = app.state::<crate::RateLimiter>();
+    
+    let result = core_manager::start_core(app.clone(), state, last_config, false, last_args, last_secret, rate_limiter).await?;
     emit_core_download_status(&window, "核心已就绪", 100);
 
     Ok(result)
@@ -637,9 +644,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let geosite_sha_text = geosite_sha_res.text().await.map_err(|e| format!("Failed to read GeoSite hash: {}", e))?;
     let geosite_expected_hash = geosite_sha_text.split_whitespace().next().ok_or("Invalid GeoSite hash format")?.to_string();
 
+    // Use unpredictable temp file names to prevent TOCTOU attacks
+    let temp_suffix = uuid::Uuid::new_v4().to_string();
+
     // Download GeoIP
     emit_core_download_status(&window, "正在下载 GeoIP...", 10);
-    let geoip_path = paths.core_dir.join("geoip.dat.tmp");
+    let geoip_path = paths.core_dir.join(format!("geoip_{}.dat.tmp", temp_suffix));
     let response = client.get(geoip_url).send().await
         .map_err(|e| format!("Failed to download GeoIP: {}", e))?;
     
@@ -678,7 +688,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
 
     // Download GeoSite
     emit_core_download_status(&window, "正在下载 GeoSite...", 50);
-    let geosite_path = paths.core_dir.join("geosite.dat.tmp");
+    let geosite_path = paths.core_dir.join(format!("geosite_{}.dat.tmp", temp_suffix));
     let response = client.get(geosite_url).send().await
         .map_err(|e| format!("Failed to download GeoSite: {}", e))?;
     

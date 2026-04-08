@@ -58,7 +58,8 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "sidebarImage": "icons/Sidebar.bmp",
-        "languages": ["SimpChinese", "English"]
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
       },
       "wix": {
         "language": "zh-CN"

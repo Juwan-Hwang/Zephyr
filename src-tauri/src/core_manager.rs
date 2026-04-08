@@ -83,8 +83,11 @@ pub fn kill_mihomo() {
     }
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "mihomo.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
 }
@@ -175,12 +178,32 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > /tmp/mihomo-tun.log 2>&1 &" with administrator privileges"#,
-        config_dir_str
-    );
+    // Use user-specific Logs directory (~/Library/Logs/) - secure and predictable for debugging
+    let log_path = std::env::var("HOME")
+        .map(|h| {
+            // macOS: ~/Library/Logs/ - user-specific, other users cannot access
+            let path = format!("{}/Library/Logs", h);
+            // Create directory if it doesn't exist
+            if let Err(e) = std::fs::create_dir_all(&path) {
+                eprintln!("[TUN] Failed to create log directory: {}", e);
+            }
+            format!("{}/mihomo-tun.log", path)
+        })
+        .unwrap_or_else(|_| {
+            // Fallback to user temp directory with fixed name
+            let temp = std::env::temp_dir();
+            temp.join("mihomo-tun.log").to_string_lossy().to_string()
+        });
     
-    eprintln!("[TUN DEBUG] script: {}", script);
+    // CRITICAL: Escape paths for shell single-quote context to prevent command injection
+    // Replace all ' with '\'' (end quote, escaped quote, start quote)
+    let escaped_config_dir = config_dir_str.replace("'", "'\\''");
+    let escaped_log_path = log_path.replace("'", "'\\''");
+    
+    let script = format!(
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > '{}' 2>&1 &" with administrator privileges"#,
+        escaped_config_dir, escaped_log_path
+    );
     
     // Spawn osascript without waiting for it to complete
     // The & at the end of the shell command makes mihomo run in background
@@ -1241,7 +1264,11 @@ pub async fn start_core(
     test: bool,
     custom_args: Vec<String>,
     secret: Option<String>,
+    rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<CoreStartResult, String> {
+    // Rate limit: max 1 call per 3 seconds
+    crate::rate_limit!(rate_limiter, "start_core", 3000);
+    
     // Wait for any previous core start operation to complete (max 10s)
     let mut wait_ms = 0;
     while CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
@@ -1635,6 +1662,83 @@ fn get_machine_key() -> Vec<u8> {
     
     // Fallback: use a persistent random key stored in the app data directory
     // This ensures key consistency across sessions while avoiding hardcoded keys
+    // Try platform-specific locations first
+    let key_path = {
+        #[cfg(target_os = "windows")]
+        {
+            std::env::var("APPDATA")
+                .map(|base| PathBuf::from(base).join("Zephyr").join(MACHINE_KEY_FILE))
+                .ok()
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join("Library/Application Support/Zephyr").join(MACHINE_KEY_FILE))
+                .ok()
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // XDG_CONFIG_HOME takes precedence over ~/.config
+            std::env::var("XDG_CONFIG_HOME")
+                .map(|base| PathBuf::from(base).join("Zephyr").join(MACHINE_KEY_FILE))
+                .ok()
+                .or_else(|| {
+                    std::env::var("HOME")
+                        .map(|h| PathBuf::from(h).join(".config/Zephyr").join(MACHINE_KEY_FILE))
+                        .ok()
+                })
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(".config/Zephyr").join(MACHINE_KEY_FILE))
+                .ok()
+        }
+    };
+    
+    if let Some(key_path) = key_path {
+        // Ensure directory exists with secure permissions
+        if let Some(parent) = key_path.parent() {
+            if !parent.exists() {
+                if fs::create_dir_all(parent).is_ok() {
+                    // Set directory permissions on Unix
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+                    }
+                }
+            }
+        }
+        
+        // Try to read existing key
+        if key_path.exists() {
+            if let Ok(existing_key) = fs::read_to_string(&key_path) {
+                let trimmed = existing_key.trim();
+                if !trimmed.is_empty() && trimmed.len() >= 32 {
+                    // Use the stored key directly (already has enough entropy)
+                    return trimmed.as_bytes()[..32].to_vec();
+                }
+            }
+        }
+        
+        // Generate new random key (32 bytes is sufficient for AES-256)
+        let random_key: Vec<u8> = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(32)
+            .map(|c| c as u8)
+            .collect();
+        
+        // Persist the key (critical for data recovery)
+        if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
+            return random_key;
+        }
+    }
+    
+    // Last resort: try current_exe directory as before
     if let Some(app_data_dir) = std::env::current_exe()
         .ok()
         .as_ref()
@@ -1648,66 +1752,125 @@ fn get_machine_key() -> Vec<u8> {
             if let Ok(existing_key) = fs::read_to_string(&key_path) {
                 let trimmed = existing_key.trim();
                 if !trimmed.is_empty() && trimmed.len() >= 32 {
-                    // Derive key from stored seed
-                    use sha2::{Sha256, Digest};
-                    let mut hasher = Sha256::new();
-                    hasher.update(trimmed.as_bytes());
-                    return hasher.finalize().to_vec();
+                    return trimmed.as_bytes()[..32].to_vec();
                 }
             }
         }
         
         // Generate new random key
-        let random_key: String = thread_rng()
+        let random_key: Vec<u8> = thread_rng()
             .sample_iter(&Alphanumeric)
-            .take(64)
-            .map(char::from)
+            .take(32)
+            .map(|c| c as u8)
             .collect();
         
-        // Try to persist the key (ignore errors - we'll use it in memory anyway)
-        let _ = write_file_secure(&key_path, &random_key);
-        
-        // Derive key from random seed
-        use sha2::{Sha256, Digest};
-        let mut hasher = Sha256::new();
-        hasher.update(random_key.as_bytes());
-        return hasher.finalize().to_vec();
+        // Persist the key
+        if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
+            return random_key;
+        }
     }
     
-    // Last resort: generate a session-only key (will change on restart)
-    // This should rarely happen, but ensures the app doesn't crash
-    eprintln!("[Security] Warning: Could not generate persistent machine key, using session-only key");
-    let session_key: String = thread_rng()
+    // Absolute last resort: session-only key
+    // This is a critical failure - warn user that data will be lost on restart
+    eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
+    thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect();
-
-    use sha2::{Sha256, Digest};
-    let mut hasher = Sha256::new();
-    hasher.update(session_key.as_bytes());
-    hasher.finalize().to_vec()
+        .take(32)
+        .map(|c| c as u8)
+        .collect()
 }
 
+/// Encrypt a string using AES-256-GCM with the machine key
+/// Returns base64-encoded ciphertext with version prefix and nonce prepended
+/// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
 fn obfuscate_string(s: &str) -> String {
-    let key = get_machine_key();
-    let mut xored = Vec::with_capacity(s.len());
-    for (i, b) in s.bytes().enumerate() {
-        xored.push(b ^ key[i % key.len()]);
+    use aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Nonce,
+    };
+    
+    let key_bytes = get_machine_key();
+    
+    // Ensure key is 32 bytes for AES-256
+    let mut key_array = [0u8; 32];
+    key_array[..key_bytes.len().min(32)].copy_from_slice(&key_bytes[..key_bytes.len().min(32)]);
+    
+    let cipher = match Aes256Gcm::new_from_slice(&key_array) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
+            return String::new();
+        }
+    };
+    
+    // Generate random nonce
+    let nonce_bytes: [u8; 12] = rand::thread_rng().gen();
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    
+    // Encrypt
+    match cipher.encrypt(nonce, s.as_bytes()) {
+        Ok(ciphertext) => {
+            // Format: "v2:" + nonce + ciphertext
+            let mut result = b"v2:".to_vec();
+            result.extend(&nonce_bytes);
+            result.extend(ciphertext);
+            base64_standard.encode(&result)
+        }
+        Err(e) => {
+            eprintln!("[Security] CRITICAL: AES encryption failed: {:?}", e);
+            String::new()
+        }
     }
-    base64_standard.encode(&xored)
 }
 
+/// Decrypt a string encrypted with AES-256-GCM
+/// Expects base64-encoded ciphertext with "v2:" prefix
 fn deobfuscate_string(s: &str) -> String {
+    use aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Nonce,
+    };
+    
     if let Ok(decoded) = base64_standard.decode(s) {
-        let key = get_machine_key();
-        let mut unxored = Vec::with_capacity(decoded.len());
-        for (i, b) in decoded.into_iter().enumerate() {
-            unxored.push(b ^ key[i % key.len()]);
+        // Check for version prefix
+        if !decoded.starts_with(b"v2:") {
+            eprintln!("[Security] CRITICAL: Unknown or missing encryption version prefix");
+            return String::new();
         }
-        String::from_utf8_lossy(&unxored).to_string()
+        
+        if decoded.len() < 31 { // "v2:" (3) + nonce (12) + auth tag (16) minimum
+            eprintln!("[Security] Invalid v2 ciphertext: too short");
+            return String::new();
+        }
+        
+        // Extract nonce (bytes 3-15) and ciphertext (bytes 16-)
+        let nonce_bytes = &decoded[3..15];
+        let ciphertext = &decoded[15..];
+        
+        let key_bytes = get_machine_key();
+        let mut key_array = [0u8; 32];
+        key_array[..key_bytes.len().min(32)].copy_from_slice(&key_bytes[..key_bytes.len().min(32)]);
+        
+        let cipher = match Aes256Gcm::new_from_slice(&key_array) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
+                return String::new();
+            }
+        };
+        
+        let nonce = Nonce::from_slice(nonce_bytes);
+        
+        match cipher.decrypt(nonce, ciphertext) {
+            Ok(plaintext) => String::from_utf8_lossy(&plaintext).to_string(),
+            Err(e) => {
+                eprintln!("[Security] CRITICAL: AES decryption failed - data may be tampered: {:?}", e);
+                String::new()
+            }
+        }
     } else {
-        s.to_string() // Fallback to original if not base64
+        eprintln!("[Security] CRITICAL: Invalid base64 encoding");
+        String::new()
     }
 }
 
@@ -1879,8 +2042,12 @@ pub async fn download_sub(
     app: AppHandle, 
     url: String, 
     name: String, 
-    user_agent: Option<String>
+    user_agent: Option<String>,
+    rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<String, String> {
+    // Rate limit: max 1 call per 5 seconds
+    crate::rate_limit!(rate_limiter, "download_sub", 5000);
+    
     if name.contains("..") || name.contains('/') || name.contains('\\') {
         return Err("Invalid subscription name".to_string());
     }
@@ -2128,11 +2295,149 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
 
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|e| format!("Failed to write to {:?}: {}", path, e))?;
+    
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, use explicit ACL to restrict file access to current user only
+        // This is equivalent to Unix 0600 permissions
+        use std::os::windows::ffi::OsStrExt;
+        use std::ffi::OsStr;
+        use std::ptr;
+        use windows_sys::Win32::Foundation::*;
+        use windows_sys::Win32::Security::Authorization::*;
+        use windows_sys::Win32::Storage::FileSystem::*;
+        use windows_sys::Win32::System::Threading::*;
+        use windows_sys::Win32::Security::*;
+        
+        // Convert path to wide string
+        let wide_path: Vec<u16> = OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        
+        unsafe {
+            // Get a handle to the file with WRITE_DAC access
+            let handle = CreateFileW(
+                wide_path.as_ptr(),
+                WRITE_DAC | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                ptr::null_mut(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                ptr::null_mut(),
+            );
+            
+            if handle == INVALID_HANDLE_VALUE {
+                #[cfg(debug_assertions)]
+                eprintln!("[SECURITY] Failed to open file for DACL modification");
+                return Ok(()); // Non-fatal: file was written, just permissions not set
+            }
+            
+            // Get current process token to find the user
+            let mut token_handle: HANDLE = ptr::null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) == 0 {
+                CloseHandle(handle);
+                #[cfg(debug_assertions)]
+                eprintln!("[SECURITY] Failed to open process token");
+                return Ok(());
+            }
+            
+            // Get token user info size
+            let mut size: u32 = 0;
+            GetTokenInformation(token_handle, TokenUser, std::ptr::null_mut::<std::ffi::c_void>(), 0, &mut size);
+            
+            // Allocate buffer and get token user
+            let mut buffer: Vec<u8> = vec![0u8; size as usize];
+            if GetTokenInformation(token_handle, TokenUser, buffer.as_mut_ptr() as *mut std::ffi::c_void, size, &mut size) == 0 {
+                CloseHandle(token_handle);
+                CloseHandle(handle);
+                #[cfg(debug_assertions)]
+                eprintln!("[SECURITY] Failed to get token user info");
+                return Ok(());
+            }
+            
+            let token_user = &*(buffer.as_ptr() as *const TOKEN_USER);
+            
+            // Build explicit access entries: current user + SYSTEM
+            let mut ea: [EXPLICIT_ACCESS_W; 2] = [std::mem::zeroed(), std::mem::zeroed()];
+            
+            // Entry 0: Current user with full access
+            ea[0].grfAccessPermissions = GENERIC_ALL;
+            ea[0].grfAccessMode = GRANT_ACCESS;
+            ea[0].grfInheritance = NO_INHERITANCE;
+            ea[0].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+            ea[0].Trustee.TrusteeType = TRUSTEE_IS_USER;
+            ea[0].Trustee.ptstrName = token_user.User.Sid as *mut _;
+            
+            // Entry 1: SYSTEM account with full access (required for services)
+            // Get SYSTEM SID
+            let mut sid_size: u32 = 0;
+            
+            // First call to get size
+            CreateWellKnownSid(WinLocalSystemSid, ptr::null_mut(), ptr::null_mut(), &mut sid_size);
+            
+            // Allocate buffer for SYSTEM SID
+            let mut system_sid_buffer: Vec<u8> = vec![0u8; sid_size as usize];
+            let system_sid: PSID = system_sid_buffer.as_mut_ptr() as PSID;
+            
+            if CreateWellKnownSid(WinLocalSystemSid, ptr::null_mut(), system_sid, &mut sid_size) == 0 {
+                CloseHandle(token_handle);
+                CloseHandle(handle);
+                #[cfg(debug_assertions)]
+                eprintln!("[SECURITY] Failed to create SYSTEM SID");
+                return Ok(());
+            }
+            
+            ea[1].grfAccessPermissions = GENERIC_ALL;
+            ea[1].grfAccessMode = GRANT_ACCESS;
+            ea[1].grfInheritance = NO_INHERITANCE;
+            ea[1].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+            ea[1].Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+            ea[1].Trustee.ptstrName = system_sid as *mut _;
+            
+            CloseHandle(token_handle);
+            
+            // Create a new ACL with both entries
+            let mut new_acl: *mut ACL = ptr::null_mut();
+            if SetEntriesInAclW(2, ea.as_ptr(), ptr::null_mut(), &mut new_acl) != ERROR_SUCCESS {
+                CloseHandle(handle);
+                #[cfg(debug_assertions)]
+                eprintln!("[SECURITY] Failed to create ACL");
+                return Ok(());
+            }
+            
+            // Apply the security descriptor to the file
+            // SetSecurityInfo returns ERROR_SUCCESS (0) on success, non-zero on failure
+            if SetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                new_acl,
+                ptr::null_mut(),
+            ) != 0 {
+                LocalFree(new_acl as *mut _);
+                CloseHandle(handle);
+                // Security issue - file written with insecure permissions
+                eprintln!("[SECURITY] WARNING: Failed to set file security info - file may have insecure permissions");
+                return Ok(());
+            }
+            
+            LocalFree(new_acl as *mut _);
+            CloseHandle(handle);
+            
+            // Note: Windows administrators can always take ownership of files.
+            // This is equivalent to Unix 0600 - protects against regular users,
+            // not against privileged accounts.
+            #[cfg(debug_assertions)]
+            eprintln!("[SECURITY] Successfully set file permissions (owner-only, equivalent to Unix 0600)");
+        }
+    }
+    
     Ok(())
 }
 

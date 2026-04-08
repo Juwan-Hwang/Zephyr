@@ -66,6 +66,7 @@ export function connectTraffic(callback) {
   let retryCount = 0;
   let isClosed = false;
   let maxRetriesReached = false;
+  let isForceReconnecting = false;  // Guard flag to prevent double connection
   const MAX_RETRIES = 15;
   const BASE_DELAY = 1000;
   const MAX_DELAY = 30000;
@@ -154,6 +155,8 @@ export function connectTraffic(callback) {
   };
 
   const handleClose = () => {
+    // Don't auto-reconnect if we're force reconnecting
+    if (isForceReconnecting) return;
     if (isClosed) return;
     if (retryCount < MAX_RETRIES) {
       retryCount++;
@@ -186,9 +189,15 @@ export function connectTraffic(callback) {
       abortController.abort();
     },
     reconnect: () => {
+        // Clear any pending retry timer first to prevent double connection
+        if (retryTimer) clearTimeout(retryTimer);
         maxRetriesReached = false;
         retryCount = 0;
-        abortController.abort(); // Triggers handleClose -> reconnect
+        // Set guard flag to prevent handleClose from triggering connect
+        isForceReconnecting = true;
+        abortController.abort();
+        abortController = new AbortController();
+        isForceReconnecting = false;
         connect();
     },
     isMaxRetriesReached: () => maxRetriesReached

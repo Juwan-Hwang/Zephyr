@@ -5,8 +5,9 @@ import {
   initProxyToggle, initProxyControls, initSettings, 
   initWindowControls, applyTranslations, initModeSelector, initTunToggle,
   syncCoreConfig, initUwpExemption, initDnsRewriteToggle, initNodeWheel, updateTrayStatus,
-  startTraySync, initTrayEventListeners, updateTrayMenu
+  startUnifiedSync, initTrayEventListeners, updateTrayMenu, cleanupTrayEventListeners, stopUnifiedSync
 } from './ui.js';
+import { cleanupChart } from './modules/traffic-chart.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -75,13 +76,25 @@ async function initApp() {
     await syncCoreConfig();
     await updateTrayStatus();
     await updateTrayMenu(); // Initialize tray menu with current state
-    startTraySync(); // Start periodic tray status synchronization
+    startUnifiedSync(); // Start unified periodic sync (replaces separate polling)
   } catch (err) {
     console.warn("Initial syncCoreConfig failed:", err);
   }
 
   window._trafficWsHandle = connectTraffic((data) => {
     updateTrafficData(data);
+  });
+  
+  // Cleanup on window close/reload (for hot-reload during development)
+  window.addEventListener('beforeunload', () => {
+    cleanupTrayEventListeners();
+    stopUnifiedSync();
+    cleanupChart();
+    
+    // Close WebSocket connection
+    if (window._trafficWsHandle) {
+      window._trafficWsHandle.close();
+    }
   });
 }
 

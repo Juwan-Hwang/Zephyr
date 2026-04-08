@@ -7,6 +7,77 @@ import { initChart, updateTrafficData, clearTrafficHistory } from './modules/tra
 // Re-export traffic chart functions for external use
 export { initChart, updateTrafficData, clearTrafficHistory };
 
+// Latency constants
+export const DELAY_INFINITE = 1000000; // Represents "infinite" or "timeout" latency
+
+// Unified cache system for all API data
+const apiCache = {
+    config: { data: null, time: 0 },
+    proxies: { data: null, time: 0 },
+    settings: { data: null, time: 0 },
+    configs: { data: null, time: 0 }
+};
+const CACHE_TTL = 2000; // 2 seconds cache TTL
+
+// Generic cache helper
+function getCached(key, fetcher) {
+    const now = Date.now();
+    const entry = apiCache[key];
+    if (entry.data && (now - entry.time) < CACHE_TTL) {
+        return Promise.resolve(entry.data);
+    }
+    return fetcher().then(data => {
+        entry.data = data;
+        entry.time = now;
+        return data;
+    });
+}
+
+// Cached API wrappers
+async function getConfigCached() {
+    return getCached('config', getConfig);
+}
+
+async function getProxiesCached() {
+    return getCached('proxies', getProxies);
+}
+
+async function getSettingsCached() {
+    return getCached('settings', () => window.__TAURI__.core.invoke('get_settings'));
+}
+
+async function getConfigsCached() {
+    return getCached('configs', () => window.__TAURI__.core.invoke('list_configs'));
+}
+
+// Invalidate specific caches
+function invalidateConfigCache() {
+    apiCache.config = { data: null, time: 0 };
+    // Also invalidate tray menu cache
+    trayMenuCache = { config: null, configs: null, proxyGroups: null, lastUpdate: 0 };
+}
+
+function invalidateProxiesCache() {
+    apiCache.proxies = { data: null, time: 0 };
+    trayMenuCache = { config: null, configs: null, proxyGroups: null, lastUpdate: 0 };
+}
+
+function invalidateSettingsCache() {
+    apiCache.settings = { data: null, time: 0 };
+}
+
+function invalidateConfigsCache() {
+    apiCache.configs = { data: null, time: 0 };
+    trayMenuCache = { config: null, configs: null, proxyGroups: null, lastUpdate: 0 };
+}
+
+function invalidateAllCaches() {
+    Object.keys(apiCache).forEach(key => {
+        apiCache[key] = { data: null, time: 0 };
+    });
+    trayMenuCache = { config: null, configs: null, proxyGroups: null, lastUpdate: 0 };
+}
+
 export function switchPage(pageId) {
     const pages = document.querySelectorAll('[data-page]');
     pages.forEach(p => p.classList.add('hidden'));
@@ -14,12 +85,12 @@ export function switchPage(pageId) {
     if (targetPage) targetPage.classList.remove('hidden');
 }
 
-export function sortProxiesByLatency(proxies, data) {
+function sortProxiesByLatency(proxies, data) {
     proxies.sort((a, b) => {
         const getLat = (name) => {
             const p = data.proxies[name];
             const lat = (p && p.history && p.history.length > 0) ? p.history[p.history.length-1].delay : 0;
-            return (lat === 0 || lat >= 999999) ? 1000000 : lat;
+            return (lat === 0 || lat >= 999999) ? DELAY_INFINITE : lat;
         };
         return getLat(a) - getLat(b);
     });
@@ -95,7 +166,6 @@ const detectSystemLanguage = () => {
 
 const savedLanguage = localStorage.getItem('lang');
 export let currentLang = savedLanguage || detectSystemLanguage();
-window._currentLang = currentLang;
 if (!savedLanguage) {
     localStorage.setItem('lang', currentLang);
 }
@@ -124,15 +194,15 @@ function applyLatencySortToDom(finalPass = false) {
         if (!finalPass) {
             if (pendingA !== pendingB) return pendingA - pendingB;
             if (pendingA === 1 && pendingB === 1) {
-                const estimateA = parseInt(a.dataset.estimate || '1000000', 10);
-                const estimateB = parseInt(b.dataset.estimate || '1000000', 10);
+const estimateA = parseInt(a.dataset.estimate || String(DELAY_INFINITE), 10);
+const estimateB = parseInt(b.dataset.estimate || String(DELAY_INFINITE), 10);
                 if (estimateA !== estimateB) return estimateA - estimateB;
                 return baseA - baseB;
             }
         }
 
-        const latA = parseInt(a.dataset.latency || '1000000', 10);
-        const latB = parseInt(b.dataset.latency || '1000000', 10);
+const latA = parseInt(a.dataset.latency || String(DELAY_INFINITE), 10);
+const latB = parseInt(b.dataset.latency || String(DELAY_INFINITE), 10);
         if (latA !== latB) return latA - latB;
         return baseA - baseB;
     });
@@ -156,7 +226,7 @@ function buildLatencyPriorityQueue(data, candidates) {
         const lastDelay = (proxy?.history && proxy.history.length > 0)
             ? proxy.history[proxy.history.length - 1].delay
             : 0;
-        const score = (lastDelay > 0 && lastDelay < 999999) ? lastDelay : 1000000;
+        const score = (lastDelay > 0 && lastDelay < 999999) ? lastDelay : DELAY_INFINITE;
         return { name, score, idx };
     });
 
@@ -184,8 +254,8 @@ function showLatencyLoadingForAllCards() {
     cards.forEach((card, index) => {
         const order = parseInt(card.style.order || `${index}`, 10);
         card.dataset.baseOrder = `${Number.isNaN(order) ? index : order}`;
-        card.dataset.estimate = card.dataset.latency || '1000000';
-        card.dataset.latency = 1000000;
+card.dataset.estimate = card.dataset.latency || String(DELAY_INFINITE);
+card.dataset.latency = DELAY_INFINITE;
         card.dataset.pending = '1';
         const latVal = card.querySelector('[id^="latency-"]');
         if (latVal) {
@@ -198,7 +268,6 @@ function showLatencyLoadingForAllCards() {
 
 export function setLanguage(lang) {
     currentLang = lang;
-    window._currentLang = lang;
     localStorage.setItem('lang', lang);
     applyTranslations();
 }
@@ -229,8 +298,18 @@ export function applyTranslations() {
 }
 
 let currentTheme = 'purple';
-let coreLoadingUnlisten = null;
-let coreLoadingVisible = false;
+
+// Store tray event listener unlisten functions for cleanup
+let _trayEventUnlisteners = [];
+
+export function cleanupTrayEventListeners() {
+    _trayEventUnlisteners.forEach(unlisten => {
+        if (typeof unlisten === 'function') {
+            unlisten();
+        }
+    });
+    _trayEventUnlisteners = [];
+}
 
 export function applyTheme(theme) {
     currentTheme = theme;
@@ -259,99 +338,6 @@ export function applyTheme(theme) {
     if (customColorInput && theme && theme.startsWith('#')) {
         customColorInput.value = theme;
     }
-}
-
-function setCoreLoadingOverlayState(statusText, progress, failed = false) {
-    const overlay = document.getElementById('core-loading-overlay');
-    const badge = document.getElementById('core-loading-badge');
-    const status = document.getElementById('core-loading-status');
-    const percent = document.getElementById('core-loading-percent');
-    const progressBar = document.getElementById('core-loading-progress');
-    const glow = document.getElementById('core-loading-progress-glow');
-    const panel = document.getElementById('core-loading-panel');
-
-    if (!overlay || !status || !percent || !progressBar || !glow) return;
-
-    const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
-    coreLoadingVisible = true;
-    overlay.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
-    if (panel) panel.style.pointerEvents = 'auto';
-    const t = translations[currentLang] || translations['en'];
-    status.textContent = statusText || t.coreInitStatusDefault || 'Preparing core...';
-    percent.textContent = `${Math.round(safeProgress)}%`;
-    progressBar.style.width = `${safeProgress}%`;
-    glow.style.left = `${Math.max(8, safeProgress)}%`;
-
-    if (!badge) return;
-    badge.textContent = failed ? (t.coreInitError || 'Error') : (safeProgress >= 100 ? (t.coreInitReady || 'Ready') : (t.coreInitBadge || 'Initializing'));
-    badge.className = failed
-        ? 'inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-3 py-1 text-[10px] font-semibold tracking-[0.3em] text-rose-200 uppercase'
-        : 'inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold tracking-[0.3em] text-zinc-300 uppercase';
-}
-
-export async function initCoreLoadingOverlay() {
-    const overlay = document.getElementById('core-loading-overlay');
-    const panel = document.getElementById('core-loading-panel');
-    coreLoadingVisible = false;
-    if (overlay) {
-        overlay.classList.add('hidden', 'opacity-0', 'pointer-events-none');
-    }
-    if (panel) panel.style.pointerEvents = '';
-    panel?.classList.remove('scale-95');
-    
-    // Clean up previous event listener if exists
-    if (coreLoadingUnlisten) {
-        coreLoadingUnlisten();
-        coreLoadingUnlisten = null;
-    }
-
-    const { listen } = window.__TAURI__.event;
-    coreLoadingUnlisten = await listen('core-download-status', (event) => {
-        const payload = event.payload || {};
-        setCoreLoadingOverlayState(payload.status_text, payload.progress);
-    });
-}
-
-export function finishCoreLoadingOverlay(statusText = '核心已就绪') {
-    const overlay = document.getElementById('core-loading-overlay');
-    const panel = document.getElementById('core-loading-panel');
-    if (!overlay || !coreLoadingVisible) return;
-
-    setCoreLoadingOverlayState(statusText, 100);
-    setTimeout(() => {
-        overlay.classList.add('opacity-0', 'pointer-events-none');
-        if (panel) panel.style.pointerEvents = '';
-        panel?.classList.add('scale-95');
-        setTimeout(() => {
-            coreLoadingVisible = false;
-            overlay.classList.add('hidden', 'pointer-events-none');
-            
-            // Clean up event listener when overlay is finished
-            if (coreLoadingUnlisten) {
-                coreLoadingUnlisten();
-                coreLoadingUnlisten = null;
-            }
-        }, 360);
-    }, 240);
-}
-
-export function failCoreLoadingOverlay(statusText) {
-    if (coreLoadingVisible) {
-        finishCoreLoadingOverlay();
-    }
-    showNotification(statusText, 'error');
-}
-
-/**
- * Cleanup function to be called when the component is unloaded
- * or the application is shutting down
- */
-export function cleanupCoreLoadingOverlay() {
-    if (coreLoadingUnlisten) {
-        coreLoadingUnlisten();
-        coreLoadingUnlisten = null;
-    }
-    coreLoadingVisible = false;
 }
 
 // --- Notification System ---
@@ -1032,6 +1018,9 @@ async function handleConfigUpdate(path, value) {
         // 1. Patch config to running core (hot reload)
         await patchConfig(payload);
         
+        // Invalidate config cache after patch
+        invalidateConfigCache();
+        
         // 2. Persist changes to config file
         await persistConfigChanges(payload);
         
@@ -1178,8 +1167,6 @@ export async function initRulesPage() {
                 renderRulesList(e.target.value);
             });
         }
-        
-        list.dataset.init = 'true';
     }
 
     await loadRules();
@@ -1474,7 +1461,7 @@ export function initProxyControls() {
                             if (delay > 0) {
                                 wrapper.dataset.latency = delay;
                             } else {
-                                wrapper.dataset.latency = 1000000;
+                                wrapper.dataset.latency = DELAY_INFINITE;
                             }
                             wrapper.dataset.pending = '0';
                         }
@@ -1494,7 +1481,7 @@ export function initProxyControls() {
                             updatedLatVal.textContent = translations[currentLang].timeout || 'Timeout';
                             updatedLatVal.className = 'text-xs tabular-nums font-semibold text-zinc-600';
                             if (card) {
-                                card.dataset.latency = 1000000;
+                                card.dataset.latency = DELAY_INFINITE;
                                 card.dataset.pending = '0';
                             }
                         }
@@ -1565,7 +1552,12 @@ async function renderProxies() {
         container.appendChild(loading);
     }
     
-    const data = await getProxies();
+    // Fetch proxies and config in parallel using cached versions
+    const [data, config] = await Promise.all([
+        getProxiesCached(),
+        getConfigCached()
+    ]);
+    
     if (!data || !data.proxies) {
         container.innerHTML = '';
         const err = document.createElement('div');
@@ -1575,7 +1567,6 @@ async function renderProxies() {
         return;
     }
     
-    const config = await getConfig();
     if (config?.mode?.toLowerCase() === 'direct') {
         container.innerHTML = '';
         const prompt = document.createElement('div');
@@ -1631,7 +1622,7 @@ async function renderProxies() {
             wrapper.dataset.selected = isSelected ? '1' : '0';
             const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length-1].delay : null;
             if (wrapper.dataset.pending !== '1') {
-                 wrapper.dataset.latency = (lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? 1000000 : lastDelay;
+                 wrapper.dataset.latency = (lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay;
                  wrapper.dataset.estimate = wrapper.dataset.latency;
             }
             
@@ -1695,7 +1686,7 @@ async function renderProxies() {
         
         let lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length-1].delay : null;
         if (latFromWrapper !== null) {
-            lastDelay = latFromWrapper === 1000000 ? 0 : latFromWrapper;
+            lastDelay = latFromWrapper === DELAY_INFINITE ? 0 : latFromWrapper;
         }
         
         const delayColor = lastDelay === null ? 'text-zinc-600' : (lastDelay === 0 || lastDelay >= 999999 ? 'text-zinc-600' : (lastDelay < 200 ? 'text-emerald-400' : (lastDelay < 500 ? 'text-amber-400' : 'text-rose-400')));
@@ -1748,7 +1739,7 @@ async function renderProxies() {
         if (pendingFromWrapper === '1') {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
             latVal.innerHTML = latencyLoadingIcon;
-            card.dataset.latency = 1000000;
+            card.dataset.latency = DELAY_INFINITE;
         } else {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
             latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? lastDelay + 'ms' : (translations[currentLang].timeout || 'Timeout');
@@ -1778,6 +1769,9 @@ async function renderProxies() {
             }
 
             const success = await switchProxy(mainGroup, name);
+            
+            // Invalidate proxies cache after switch
+            invalidateProxiesCache();
             
             card.classList.remove('opacity-50', 'pointer-events-none');
             if (latVal) {
@@ -1831,7 +1825,7 @@ async function renderProxies() {
         wrapper.dataset.selected = isSelected ? '1' : '0';
         wrapper.dataset.pending = isTestingLatency ? '1' : '0';
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length-1].delay : null;
-        wrapper.dataset.latency = (lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? 1000000 : lastDelay;
+        wrapper.dataset.latency = (lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay;
         wrapper.dataset.estimate = wrapper.dataset.latency;
         
         wrapper.style.height = '96px'; 
@@ -2187,7 +2181,7 @@ export async function initSettings() {
                 const fakeClientToggle = document.getElementById('setting-fake-client');
                 if (fakeClientToggle) {
                     fakeClientToggle.checked = true;
-                    localStorage.setItem('fakeClientEnabled', _obfuscate('true'));
+                    localStorage.setItem('fakeClientEnabled', 'true');
                     localStorage.removeItem('fakeClientType');
                     localStorage.removeItem('fakeClientCustom');
                     const fakeClientSelect = document.getElementById('fake-client-select');
@@ -2204,6 +2198,7 @@ export async function initSettings() {
                 await trackResult('appSettings', async () => {
                     await window.__TAURI__.core.invoke('save_settings', { settings });
                 });
+                invalidateSettingsCache();
 
                 // 10. Reset theme mode
                 localStorage.setItem('themeMode', 'auto');
@@ -2270,7 +2265,9 @@ export async function initSettings() {
     const updateThemeModeUI = (mode) => {
         const idx = themeModeMap.indexOf(mode);
         if (themeModeSlider && idx !== -1) {
-            themeModeSlider.style.transform = `translateX(${idx * 100}%)`;
+            // Use translateX with percentage of slider width
+            // Slider moves by its own width + 4px gap for each step
+            themeModeSlider.style.transform = `translateX(calc(${idx * 100}% + ${idx * 4}px))`;
         }
         themeModeButtons.forEach((btn, btnIdx) => {
             if (btnIdx === idx) {
@@ -2336,6 +2333,7 @@ export async function initSettings() {
             currentSettings.theme = currentTheme;
             currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
             await window.__TAURI__.core.invoke('save_settings', { settings: currentSettings });
+            invalidateSettingsCache();
         } catch (err) {
             console.error('Failed to save settings:', err);
         }
@@ -2593,6 +2591,9 @@ export async function initSettings() {
                 }
                 await window.__TAURI__.core.invoke('download_sub', invokeArgs);
                 
+                // Invalidate configs cache after downloading new subscription
+                invalidateConfigsCache();
+                
                 const settings = await window.__TAURI__.core.invoke('get_settings');
                 const currentConfig = settings.last_config || 'config.yaml';
                 if (name === currentConfig || name === currentConfig + '.yaml') {
@@ -2638,6 +2639,9 @@ export async function initSettings() {
                     console.error(`Failed to update ${config.name}:`, err);
                 }
             }
+
+            // Invalidate configs cache after batch update
+            invalidateConfigsCache();
 
             // Reload once if current config was updated
             const settings = await window.__TAURI__.core.invoke('get_settings');
@@ -2752,8 +2756,13 @@ export async function initSettings() {
 
     const renderConfigs = async () => {
         if (!configsList) return;
-        const configs = await window.__TAURI__.core.invoke('list_configs');
-        const settings = await window.__TAURI__.core.invoke('get_settings');
+        
+        // Fetch configs and settings in parallel using cached versions
+        const [configs, settings] = await Promise.all([
+            getConfigsCached(),
+            getSettingsCached()
+        ]);
+        
         const currentConfig = settings.last_config || 'config.yaml';
         const customArgs = settings.custom_args || [];
         const t = translations[currentLang];
@@ -2809,6 +2818,8 @@ export async function initSettings() {
                 
                 try {
                     await window.__TAURI__.core.invoke('delete_config', { name });
+                    // Invalidate configs cache after deletion
+                    invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
                     renderConfigs(); // Immediate refresh, no delay needed
                 } catch (err) {
@@ -2828,6 +2839,8 @@ export async function initSettings() {
                     try {
                         const userAgent = getSubscriptionUserAgent();
                         await window.__TAURI__.core.invoke('download_sub', { url: configInfo.url, name: configInfo.name, userAgent });
+                        // Invalidate configs cache after update
+                        invalidateConfigsCache();
                         if (isCurrent) {
                             // If current config is updated, restart core or dynamically reload
                             const customArgs = settings.custom_args || [];
@@ -2861,6 +2874,7 @@ export async function initSettings() {
                         const s = await window.__TAURI__.core.invoke('get_settings');
                         s.last_config = name;
                         await window.__TAURI__.core.invoke('save_settings', { settings: s });
+                        invalidateSettingsCache();
 
                         await new Promise(r => setTimeout(r, 1000));
                         await renderConfigs();
@@ -2959,28 +2973,6 @@ export async function initSettings() {
     initFakeClient();
 }
 
-// Simple obfuscation for localStorage sensitive data
-const _obfKey = 'Zephyr2024';
-function _obfuscate(str) {
-    if (!str) return str;
-    try {
-        const encoded = Array.from(str).map((c, i) => 
-            String.fromCharCode(c.charCodeAt(0) ^ _obfKey.charCodeAt(i % _obfKey.length))
-        ).join('');
-        return 'obf:' + btoa(encoded);
-    } catch { return str; }
-}
-function _deobfuscate(str) {
-    if (!str) return str;
-    if (!str.startsWith('obf:')) return str; // backward compatible with plain text
-    try {
-        const decoded = atob(str.slice(4));
-        return Array.from(decoded).map((c, i) =>
-            String.fromCharCode(c.charCodeAt(0) ^ _obfKey.charCodeAt(i % _obfKey.length))
-        ).join('');
-    } catch { return str; }
-}
-
 function initFakeClient() {
     const toggle = document.getElementById('setting-fake-client');
     const optionsContainer = document.getElementById('fake-client-options');
@@ -2994,22 +2986,22 @@ function initFakeClient() {
     let isFetching = false;
     let versionsFetched = false;
 
-    // Load from local storage with deobfuscation
+    // Load from local storage
     const storedEnabled = localStorage.getItem('fakeClientEnabled');
-    const savedEnabled = storedEnabled === null ? true : _deobfuscate(storedEnabled) === 'true';
+    const savedEnabled = storedEnabled === null ? true : storedEnabled === 'true';
     
     // Ensure initial state is persisted if not exists
     if (storedEnabled === null) {
-        localStorage.setItem('fakeClientEnabled', _obfuscate('true'));
+        localStorage.setItem('fakeClientEnabled', 'true');
     }
     
     // Set default value if not set
     if (!localStorage.getItem('fakeClientType')) {
-        localStorage.setItem('fakeClientType', _obfuscate('clash-verge/1.6.0'));
+        localStorage.setItem('fakeClientType', 'clash-verge/1.6.0');
     }
     
-    const savedType = _deobfuscate(localStorage.getItem('fakeClientType')) || 'clash-verge/1.6.0';
-    const savedCustom = _deobfuscate(localStorage.getItem('fakeClientCustom')) || '';
+    const savedType = localStorage.getItem('fakeClientType') || 'clash-verge/1.6.0';
+    const savedCustom = localStorage.getItem('fakeClientCustom') || '';
 
     toggle.checked = savedEnabled;
     select.value = savedType;
@@ -3074,7 +3066,7 @@ function initFakeClient() {
     };
 
     toggle.addEventListener('change', () => {
-        localStorage.setItem('fakeClientEnabled', _obfuscate(toggle.checked.toString()));
+        localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
         updateVisibility();
         if (!toggle.checked) {
             const t = translations[currentLang];
@@ -3083,12 +3075,12 @@ function initFakeClient() {
     });
 
     select.addEventListener('change', () => {
-        localStorage.setItem('fakeClientType', _obfuscate(select.value));
+        localStorage.setItem('fakeClientType', select.value);
         updateVisibility();
     });
 
     customInput.addEventListener('input', () => {
-        localStorage.setItem('fakeClientCustom', _obfuscate(customInput.value));
+        localStorage.setItem('fakeClientCustom', customInput.value);
     });
 
     // Initial setup
@@ -3101,12 +3093,12 @@ function initFakeClient() {
 
 function getFakeClientUA() {
     const storedEnabled = localStorage.getItem('fakeClientEnabled');
-    const enabled = _deobfuscate(storedEnabled) === 'true';
+    const enabled = storedEnabled === 'true';
     if (!enabled) return null;
     
-    const type = _deobfuscate(localStorage.getItem('fakeClientType'));
+    const type = localStorage.getItem('fakeClientType');
     if (type === 'custom') {
-        const custom = _deobfuscate(localStorage.getItem('fakeClientCustom'));
+        const custom = localStorage.getItem('fakeClientCustom');
         return custom ? custom : null;
     }
     return type || null;
@@ -3143,7 +3135,6 @@ export function initWindowControls() {
 }
 
 // --- System Proxy Logic ---
-let _traySyncInterval = null;
 let _trayEventListener = null;
 
 export async function updateTrayStatus() {
@@ -3160,8 +3151,20 @@ export async function updateTrayStatus() {
 }
 
 /// Update the full tray menu with current state
-export async function updateTrayMenu() {
-    console.log('[Tray] updateTrayMenu called');
+/// Uses cached data when possible to reduce API calls
+let trayMenuCache = {
+    config: null,
+    configs: null,
+    proxyGroups: null,
+    lastUpdate: 0
+};
+const TRAY_CACHE_TTL = 2000; // 2 seconds cache
+
+export async function updateTrayMenu(forceRefresh = false) {
+    console.log('[Tray] updateTrayMenu called, forceRefresh:', forceRefresh);
+    const now = Date.now();
+    const useCache = !forceRefresh && (now - trayMenuCache.lastUpdate) < TRAY_CACHE_TTL;
+    
     const t = translations[currentLang];
     const tunToggle = document.getElementById('tun-proxy-toggle');
     const sysProxyToggle = document.getElementById('sys-proxy-toggle');
@@ -3171,53 +3174,74 @@ export async function updateTrayMenu() {
     
     console.log('[Tray] sysProxyEnabled:', sysProxyEnabled, 'tunEnabled:', tunEnabled);
     
-    // Get current mode
-    const config = await getConfig();
-    const currentMode = config?.mode || 'rule';
-    console.log('[Tray] currentMode:', currentMode);
+    // Use cached data if available and not expired
+    let currentMode, configs, proxyGroups;
     
-    // Get subscription list
-    let configs = [];
-    try {
-        configs = await window.__TAURI__.core.invoke('list_configs');
-        const settings = await window.__TAURI__.core.invoke('get_settings');
-        const activeConfig = settings.last_config || 'config.yaml';
-        configs = configs.map(c => ({
-            name: c.name,
-            is_active: c.name === activeConfig
-        }));
-        console.log('[Tray] configs:', configs);
-    } catch (e) {
-        console.warn('Failed to get configs for tray menu:', e);
-    }
-    
-    // Get proxy groups
-    let proxyGroups = [];
-    try {
-        const data = await getProxies();
-        if (data && data.proxies) {
-            // Find selector/select type groups
-            const groupNames = Object.keys(data.proxies).filter(name => {
-                const type = data.proxies[name].type?.toLowerCase() || '';
-                return type === 'selector' || type === 'select';
-            });
-            
-            proxyGroups = groupNames.slice(0, 5).map(groupName => {
-                const group = data.proxies[groupName];
-                return {
-                    name: groupName,
-                    type: group.type,  // Use 'type' to match Rust struct
-                    now: group.now || '',
-                    proxies: (group.all || []).slice(0, 20).map(proxyName => ({
-                        name: proxyName,
-                        alive: data.proxies[proxyName]?.alive
-                    }))
-                };
-            });
-            console.log('[Tray] proxyGroups:', proxyGroups);
+    if (useCache && trayMenuCache.config && trayMenuCache.configs && trayMenuCache.proxyGroups) {
+        console.log('[Tray] Using cached data');
+        currentMode = trayMenuCache.config?.mode || 'rule';
+        configs = trayMenuCache.configs;
+        proxyGroups = trayMenuCache.proxyGroups;
+    } else {
+        console.log('[Tray] Fetching fresh data');
+        // Batch ALL API calls in parallel
+        const [config, configsList, proxyData, settings] = await Promise.all([
+            getConfig(),
+            window.__TAURI__.core.invoke('list_configs'),
+            getProxies(),
+            window.__TAURI__.core.invoke('get_settings')
+        ]);
+        
+        currentMode = config?.mode || 'rule';
+        console.log('[Tray] currentMode:', currentMode);
+        
+        // Process configs
+        try {
+            const activeConfig = settings.last_config || 'config.yaml';
+            configs = configsList.map(c => ({
+                name: c.name,
+                is_active: c.name === activeConfig
+            }));
+            console.log('[Tray] configs:', configs);
+        } catch (e) {
+            console.warn('Failed to get configs for tray menu:', e);
+            configs = [];
         }
-    } catch (e) {
-        console.warn('Failed to get proxy groups for tray menu:', e);
+        
+        // Process proxy groups
+        proxyGroups = [];
+        try {
+            if (proxyData && proxyData.proxies) {
+                const groupNames = Object.keys(proxyData.proxies).filter(name => {
+                    const type = proxyData.proxies[name].type?.toLowerCase() || '';
+                    return type === 'selector' || type === 'select';
+                });
+                
+                proxyGroups = groupNames.slice(0, 5).map(groupName => {
+                    const group = proxyData.proxies[groupName];
+                    return {
+                        name: groupName,
+                        type: group.type,
+                        now: group.now || '',
+                        proxies: (group.all || []).slice(0, 20).map(proxyName => ({
+                            name: proxyName,
+                            alive: proxyData.proxies[proxyName]?.alive
+                        }))
+                    };
+                });
+                console.log('[Tray] proxyGroups:', proxyGroups);
+            }
+        } catch (e) {
+            console.warn('Failed to get proxy groups for tray menu:', e);
+        }
+        
+        // Update cache with full config object
+        trayMenuCache = {
+            config: config || { mode: currentMode },
+            configs,
+            proxyGroups,
+            lastUpdate: now
+        };
     }
     
     try {
@@ -3246,12 +3270,12 @@ export async function updateTrayMenu() {
 
 /// Initialize tray event listeners
 export function initTrayEventListeners() {
-    if (_trayEventListener) return; // Already initialized
+    if (_trayEventUnlisteners.length > 0) return; // Already initialized
     
     const { listen } = window.__TAURI__.event;
     
     // Listen for sys proxy toggle from tray
-    listen('tray-sysproxy-changed', async (event) => {
+    const unlisten1 = listen('tray-sysproxy-changed', async (event) => {
         const enabled = event.payload;
         const toggle = document.getElementById('sys-proxy-toggle');
         const statusText = document.getElementById('proxy-status-text');
@@ -3280,9 +3304,10 @@ export function initTrayEventListeners() {
             if (toggle) toggle.checked = !enabled;
         }
     });
+    _trayEventUnlisteners.push(unlisten1);
     
     // Listen for TUN toggle from tray
-    listen('tray-tun-changed', async (event) => {
+    const unlisten2 = listen('tray-tun-changed', async (event) => {
         const enabled = event.payload;
         const toggle = document.getElementById('tun-proxy-toggle');
         
@@ -3292,9 +3317,10 @@ export function initTrayEventListeners() {
             toggle.dispatchEvent(new Event('change'));
         }
     });
+    _trayEventUnlisteners.push(unlisten2);
     
     // Listen for mode change from tray
-    listen('tray-mode-changed', async (event) => {
+    const unlisten3 = listen('tray-mode-changed', async (event) => {
         const mode = event.payload;
         const buttons = document.querySelectorAll('[data-mode]');
         
@@ -3304,9 +3330,10 @@ export function initTrayEventListeners() {
             }
         });
     });
+    _trayEventUnlisteners.push(unlisten3);
     
     // Listen for subscription change from tray
-    listen('tray-subscription-changed', async (event) => {
+    const unlisten4 = listen('tray-subscription-changed', async (event) => {
         const subName = event.payload;
         const t = translations[currentLang];
         
@@ -3323,6 +3350,7 @@ export function initTrayEventListeners() {
                 // Save last_config to settings
                 settings.last_config = subName;
                 await window.__TAURI__.core.invoke('save_settings', { settings });
+                invalidateSettingsCache();
                 
                 await new Promise(r => setTimeout(r, 500));
                 await syncCoreConfig();
@@ -3342,6 +3370,9 @@ export function initTrayEventListeners() {
         try {
             const success = await switchProxy(group, proxy);
             if (success) {
+                // Invalidate caches after proxy switch
+                invalidateProxiesCache();
+                
                 await closeAllConnections();
                 await syncCoreConfig();
                 
@@ -3356,34 +3387,58 @@ export function initTrayEventListeners() {
             console.error('Failed to switch proxy from tray:', err);
         }
     });
-    
-    _trayEventListener = true;
+    _trayEventUnlisteners.push(unlisten4);
 }
 
-/// Start periodic tray status synchronization to ensure UI and tray stay in sync
-export function startTraySync() {
+/// Unified periodic sync for tray status and sys proxy state
+/// Combines what was previously two separate 10-second intervals
+let _unifiedSyncInterval = null;
+
+export function startUnifiedSync() {
     // Clear any existing interval
-    if (_traySyncInterval) {
-        clearInterval(_traySyncInterval);
+    if (_unifiedSyncInterval) {
+        clearInterval(_unifiedSyncInterval);
+    }
+    if (window._sysProxyPollInterval) {
+        clearInterval(window._sysProxyPollInterval);
+        window._sysProxyPollInterval = null;
     }
     
-    // Sync every 10 seconds
-    _traySyncInterval = setInterval(async () => {
+    // Unified sync every 10 seconds
+    _unifiedSyncInterval = setInterval(async () => {
         try {
-            const actualMode = await window.__TAURI__.core.invoke('get_tray_status');
             const tunToggle = document.getElementById('tun-proxy-toggle');
             const sysProxyToggle = document.getElementById('sys-proxy-toggle');
             
-            const expectedMode = tunToggle?.checked ? 'tun' : (sysProxyToggle?.checked ? 'sysproxy' : 'default');
+            // Batch both API calls in parallel
+            const [realSysProxyState, actualMode] = await Promise.all([
+                window.__TAURI__.core.invoke('get_sys_proxy'),
+                window.__TAURI__.core.invoke('get_tray_status')
+            ]);
             
-            // If modes don't match, update the tray
+            // Check sys proxy state
+            if (sysProxyToggle && sysProxyToggle.checked !== realSysProxyState) {
+                sysProxyToggle.checked = realSysProxyState;
+                updateSysProxyUI();
+            }
+            
+            // Check tray status consistency
+            const expectedMode = tunToggle?.checked ? 'tun' : (realSysProxyState ? 'sysproxy' : 'default');
+            
             if (actualMode !== expectedMode) {
                 await updateTrayStatus();
             }
         } catch (e) {
-            console.error('Tray sync error:', e);
+            console.error('Unified sync error:', e);
         }
     }, 10000); // 10 second interval
+}
+
+export function stopUnifiedSync() {
+    if (_unifiedSyncInterval) {
+        clearInterval(_unifiedSyncInterval);
+        _unifiedSyncInterval = null;
+    }
 }
 
 export async function initProxyToggle() {
@@ -3399,20 +3454,8 @@ export async function initProxyToggle() {
         updateSysProxyUI();
         await updateTrayStatus();
         
-        // Poll for real sys proxy state periodically
-        if (window._sysProxyPollInterval) {
-            clearInterval(window._sysProxyPollInterval);
-        }
-        window._sysProxyPollInterval = setInterval(async () => {
-            try {
-                const realState = await window.__TAURI__.core.invoke('get_sys_proxy');
-                if (toggle.checked !== realState) {
-                    toggle.checked = realState;
-                    updateSysProxyUI();
-                    await updateTrayStatus();
-                }
-            } catch(e) {}
-        }, 10000); // Check every 10 seconds instead of 5
+        // Start unified sync (replaces separate polling intervals)
+        startUnifiedSync();
     } catch (err) {
         console.error('Failed to get initial sys proxy status:', err);
     }
@@ -3445,25 +3488,50 @@ export async function initProxyToggle() {
 }
 
 // --- Mode & TUN Logic ---
-const DNS_REWRITE_PAYLOAD = {
-  "sniffing": true,
-  "dns": {
-    "enable": true,
-    "listen": "0.0.0.0:1053",
-    "ipv6": false,
-    "enhanced-mode": "fake-ip",
-    "fake-ip-range": "198.18.0.1/16",
-    "fake-ip-filter":["*.lan", "localhost.ptlogin2.qq.com"],
-    "nameserver":[
-      "https://doh.pub/dns-query",
-      "https://dns.alidns.com/dns-query"
+
+// Default DNS configuration - can be overridden in settings
+const DEFAULT_DNS_CONFIG = {
+    nameserver: [
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query"
     ],
-    "fallback":[
-      "https://dns.cloudflare.com/dns-query",
-      "https://dns.google/dns-query"
+    fallback: [
+        "https://dns.cloudflare.com/dns-query",
+        "https://dns.google/dns-query"
     ]
-  }
 };
+
+// Get DNS configuration from settings or use defaults
+async function getDnsConfig() {
+    try {
+        const settings = await window.__TAURI__.core.invoke('get_settings');
+        return {
+            nameserver: settings.dns_nameservers || DEFAULT_DNS_CONFIG.nameserver,
+            fallback: settings.dns_fallbacks || DEFAULT_DNS_CONFIG.fallback
+        };
+    } catch (e) {
+        console.warn('[DNS] Failed to get DNS settings, using defaults:', e);
+        return DEFAULT_DNS_CONFIG;
+    }
+}
+
+// Build DNS rewrite payload with user-configured servers
+async function buildDnsRewritePayload() {
+    const dnsConfig = await getDnsConfig();
+    return {
+        "sniffing": true,
+        "dns": {
+            "enable": true,
+            "listen": "0.0.0.0:1053",
+            "ipv6": false,
+            "enhanced-mode": "fake-ip",
+            "fake-ip-range": "198.18.0.1/16",
+            "fake-ip-filter": ["*.lan", "localhost.ptlogin2.qq.com"],
+            "nameserver": dnsConfig.nameserver,
+            "fallback": dnsConfig.fallback
+        }
+    };
+}
 
 let wheelHoverTimer = null;
 let isWheelOpen = false;
@@ -3743,8 +3811,9 @@ export function initNodeWheel() {
 
 export async function applyDnsRewrite() {
     try {
-        await patchConfig(DNS_REWRITE_PAYLOAD);
-        await persistConfigChanges(DNS_REWRITE_PAYLOAD);
+        const dnsRewritePayload = await buildDnsRewritePayload();
+        await patchConfig(dnsRewritePayload);
+        await persistConfigChanges(dnsRewritePayload);
         return true;
     } catch (err) {
         console.error('[Core] Failed to apply DNS rewrite:', err);
@@ -3755,7 +3824,11 @@ export async function applyDnsRewrite() {
 function deepMerge(target, source) {
     if (typeof target !== 'object' || target === null) return source;
     if (typeof source !== 'object' || source === null) return source;
-    if (Array.isArray(target) && Array.isArray(source)) return source; // Or merge arrays if needed
+    
+    // Arrays are fully replaced (not merged by index).
+    // This is intentional: config arrays like nameserver/rules/proxies
+    // represent complete lists, not partial patches.
+    if (Array.isArray(target) && Array.isArray(source)) return source;
 
     for (const key in source) {
         if (Object.prototype.hasOwnProperty.call(source, key)) {
@@ -3792,6 +3865,13 @@ export async function persistConfigChanges(payload) {
 
 export async function initDnsRewriteToggle() {
     const toggle = document.getElementById('dns-rewrite-toggle');
+    const configBtn = document.getElementById('dns-config-btn');
+    const modal = document.getElementById('dns-config-modal');
+    const cancelBtn = document.getElementById('dns-config-cancel');
+    const saveBtn = document.getElementById('dns-config-save');
+    const nameserversInput = document.getElementById('dns-nameservers-input');
+    const fallbacksInput = document.getElementById('dns-fallbacks-input');
+    
     if (!toggle) return;
 
     try {
@@ -3801,6 +3881,91 @@ export async function initDnsRewriteToggle() {
     } catch (e) {
         const savedState = localStorage.getItem('dnsRewrite');
         toggle.checked = savedState === null ? true : savedState === 'true';
+    }
+
+    // Load saved DNS config into inputs
+    async function loadDnsConfig() {
+        const config = await getDnsConfig();
+        nameserversInput.value = config.nameserver.join('\n');
+        fallbacksInput.value = config.fallback.join('\n');
+    }
+
+    // Open config modal
+    if (configBtn) {
+        configBtn.addEventListener('click', async () => {
+            await loadDnsConfig();
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        });
+    }
+
+    // Close modal
+    function closeModal() {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeModal);
+    }
+
+    // Click outside to close
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+    }
+
+    // Save DNS config
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const nameservers = nameserversInput.value.split('\n').map(s => s.trim()).filter(s => s);
+            const fallbacks = fallbacksInput.value.split('\n').map(s => s.trim()).filter(s => s);
+            
+            if (nameservers.length === 0) {
+                showNotification('At least one nameserver is required', 'error');
+                return;
+            }
+            
+            // Validate DNS server URLs (must be DoH, DoT, or traditional DNS format)
+            const isValidDns = (url) => {
+                return url.startsWith('https://') ||  // DoH
+                       url.startsWith('tls://') ||    // DoT
+                       /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(url) ||  // IPv4
+                       /^\[[0-9a-fA-F:]+\](:\d+)?$/.test(url);  // IPv6
+            };
+            
+            const invalidNameservers = nameservers.filter(s => !isValidDns(s));
+            const invalidFallbacks = fallbacks.filter(s => !isValidDns(s));
+            
+            if (invalidNameservers.length > 0 || invalidFallbacks.length > 0) {
+                const t = translations[currentLang];
+                showNotification(t.invalidDnsFormat || 'Invalid DNS server format. Use https://, tls://, or IP address', 'error');
+                return;
+            }
+
+            try {
+                const settings = await window.__TAURI__.core.invoke('get_settings');
+                settings.dns_nameservers = nameservers;
+                settings.dns_fallbacks = fallbacks.length > 0 ? fallbacks : null;
+                await window.__TAURI__.core.invoke('save_settings', { settings });
+                invalidateSettingsCache();
+                
+                closeModal();
+                showNotification('DNS configuration saved', 'success');
+                
+                // If DNS rewrite is enabled, reapply with new config
+                if (toggle.checked) {
+                    await applyDnsRewrite();
+                    await closeAllConnections();
+                }
+            } catch (err) {
+                console.error('[DNS] Failed to save DNS config:', err);
+                showNotification('Failed to save DNS configuration', 'error');
+            }
+        });
     }
 
     toggle.addEventListener('change', async (e) => {
