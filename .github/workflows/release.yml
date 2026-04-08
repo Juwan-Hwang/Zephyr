@@ -117,6 +117,10 @@ jobs:
             echo "✓ SHA256 verified for mihomo-windows-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "This could mean:"
+            echo "  1. GitHub API rate limit reached - wait and retry"
+            echo "  2. Network timeout - check workflow logs"
+            echo "  3. Release asset missing digest - verify upstream release"
             echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
@@ -153,6 +157,10 @@ jobs:
             echo "✓ SHA256 verified for mihomo-darwin-arm64"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "This could mean:"
+            echo "  1. GitHub API rate limit reached - wait and retry"
+            echo "  2. Network timeout - check workflow logs"
+            echo "  3. Release asset missing digest - verify upstream release"
             echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
@@ -189,6 +197,10 @@ jobs:
             echo "✓ SHA256 verified for mihomo-darwin-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "This could mean:"
+            echo "  1. GitHub API rate limit reached - wait and retry"
+            echo "  2. Network timeout - check workflow logs"
+            echo "  3. Release asset missing digest - verify upstream release"
             echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
@@ -225,6 +237,10 @@ jobs:
             echo "✓ SHA256 verified for mihomo-linux-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
+            echo "This could mean:"
+            echo "  1. GitHub API rate limit reached - wait and retry"
+            echo "  2. Network timeout - check workflow logs"
+            echo "  3. Release asset missing digest - verify upstream release"
             echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
@@ -261,11 +277,15 @@ jobs:
                 exit 1
               fi
               echo "✓ SHA256 verified for $file"
-            else
-              echo "ERROR: SHA256 digest not available for $file"
-              echo "Cannot verify download integrity - aborting for security"
-              exit 1
-            fi
+              else
+                echo "ERROR: SHA256 digest not available for $file"
+                echo "This could mean:"
+                echo "  1. GitHub API rate limit reached - wait and retry"
+                echo "  2. Network timeout - check workflow logs"
+                echo "  3. Asset missing from release - verify upstream"
+                echo "Cannot verify download integrity - aborting for security"
+                exit 1
+              fi
           done
         shell: bash
 

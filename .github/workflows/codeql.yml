@@ -46,6 +46,8 @@ jobs:
       - name: Setup Rust toolchain (Rust only)
         if: matrix.language == 'rust'
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
 
       # Rust 和 JS 均使用 build-mode: none（Rust 不支持 manual）
       - name: Initialize CodeQL
