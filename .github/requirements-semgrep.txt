@@ -1,10 +1,12 @@
 # Semgrep 1.80.0 - locked hashes from PyPI
 # Generated from: https://pypi.org/pypi/semgrep/1.80.0/json
 # Update procedure: pip download semgrep==<version> --no-deps && pip hash <file>
-semgrep==1.80.0 \
-    --hash=sha256:81f7bd39917f7f9019ebba15bab0c974af4fc1a9344eef328f3f9af12653de35 \
-    --hash=sha256:e79c8d15d996db00952e631f1b4d4179cd91bf11d2c342e1ecf821f141e90cc1 \
-    --hash=sha256:125fff9620bc12393104aac09b981753495f38ddc7e33e639d2eeaaf1d4db069 \
-    --hash=sha256:82e47660f9af4c4642b16dbc91833ce6cee3d67ca0827ada436e7a68c14b8bb0 \
-    --hash=sha256:5c7101a9ab8374dd1d5dec58ba8ca01f46a24318de5fde6d0319bdd8a809353d \
-    --hash=sha256:a28391a0ac3a570d551b94c9e28f15b45a531c42a28bc923198c5543a2fb4ecc
+semgrep==1.157.0 \
+    --hash=sha256:36912fac1a6f65ed16589a50cc719dca3c0c2f14e90b8fac0edc3bcd061fb78e \
+    --hash=sha256:5f8469cc89595badb61080f6319cecade35a145eaf3b7347b1555e85dffcc0fc \
+    --hash=sha256:6617ed63b715c9e1c59a49fc0aca2a8c6bd39c71d9f7c99cba985d6f469a8d86 \
+    --hash=sha256:89d53682655d7fff90ecfdd190a7e96085a41257fd32f3596460f86b52fe91a9 \
+    --hash=sha256:acbb72aaf4cd31a97dd1e83b6378f2cfa9956149a80ca1a85fd5d10374837187 \
+    --hash=sha256:d5496954d75c7d8a93955baed55160c19555af737e7f313b0bdfe39ebfb472b7 \
+    --hash=sha256:e98f1ad5406a631ba8b8df571b91f7675c4db530c69bd0599328afb336fa7779 \
+    --hash=sha256:e9d6476d7db6cb9d5bbd9b8cb35c6b5d98ded53211495e54ed7adcaf010be7bd
