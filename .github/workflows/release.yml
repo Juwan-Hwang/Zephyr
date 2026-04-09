@@ -43,16 +43,30 @@ jobs:
 
       - name: Update version in config files
         run: |
+          set -e
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          
-          # Use jq for JSON files (safe and cross-platform)
+
+          echo "Before update:"
+          nl -ba src-tauri/tauri.conf.json | sed -n '1,80p'
+
           tmp=$(mktemp)
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > "$tmp" && mv "$tmp" src-tauri/tauri.conf.json
-          
-          # Use sed with backup for cross-platform compatibility
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json && rm -f package.json.bak
-          
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" src-tauri/tauri.conf.json
+
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          rm -f src-tauri/Cargo.toml.bak
+
+          tmp=$(mktemp)
+          jq --arg v "$VERSION" '.version = $v' package.json > "$tmp"
+          mv "$tmp" package.json
+
+          echo "After update:"
+          nl -ba src-tauri/tauri.conf.json | sed -n '1,80p'
+
+          echo "Validate JSON:"
+          jq empty src-tauri/tauri.conf.json
+          jq empty package.json
+
           echo "Updated version to $VERSION"
         shell: bash
 
