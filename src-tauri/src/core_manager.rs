@@ -225,7 +225,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         
         // Ensure secret is present and up-to-date
         let mut found_secret = false;
-        let lines: Vec<String> = updated.lines().map(|line| {
+        let mut lines: Vec<String> = updated.lines().map(|line| {
             if line.trim().starts_with("secret:") {
                 found_secret = true;
                 let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
