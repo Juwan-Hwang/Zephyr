@@ -29,8 +29,6 @@
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* ipc://localhost http://ipc.localhost"
-      // Note: 'unsafe-inline' for styles is required for dynamic inline styles used throughout the UI.
-      // This is safe in Tauri because the frontend is bundled locally and doesn't load external content.
     }
   },
   "bundle": {
