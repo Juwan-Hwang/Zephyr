@@ -45,16 +45,13 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
           
-          # Use sed -i '' for macOS, sed -i for Linux/Windows
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
-            sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-            sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-          else
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
-            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-          fi
+          # Use jq for JSON files (safe and cross-platform)
+          tmp=$(mktemp)
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > "$tmp" && mv "$tmp" src-tauri/tauri.conf.json
+          
+          # Use sed with backup for cross-platform compatibility
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json && rm -f package.json.bak
           
           echo "Updated version to $VERSION"
         shell: bash
