@@ -193,7 +193,7 @@ async fn download_release_asset(window: &Window, url: &str, dest_path: &std::pat
     }
     
     let client = build_github_client()?;
-    emit_core_download_status(window, "正在从 GitHub 下载核心...", 24);
+    emit_core_download_status(window, "Downloading core from GitHub...", 24);
     
     let response = client
         .get(url)
@@ -240,7 +240,7 @@ async fn download_release_asset(window: &Window, url: &str, dest_path: &std::pat
         } else {
             52
         };
-        emit_core_download_status(window, format!("正在下载核心... {}%", progress), progress);
+        emit_core_download_status(window, format!("Downloading core... {}%", progress), progress);
     }
     
     if let Err(e) = file.sync_all() {
@@ -530,7 +530,7 @@ pub async fn update_core(
     url: String,
 ) -> Result<core_manager::CoreStartResult, String> {
     let app = window.app_handle();
-    emit_core_download_status(&window, "正在准备更新 Mihomo 核心...", 4);
+    emit_core_download_status(&window, "Preparing to update Mihomo core...", 4);
     
     let (version, asset_name) = parse_github_release_info(&url)
         .ok_or_else(|| "Invalid update URL: only official MetaCubeX/mihomo GitHub releases are supported".to_string())?;
@@ -546,14 +546,14 @@ pub async fn update_core(
         return Err(e);
     }
 
-    emit_core_download_status(&window, "正在验证文件完整性...", 82);
+    emit_core_download_status(&window, "Verifying file integrity...", 82);
     let expected_hash = get_expected_sha256(&version, &asset_name).await?;
     verify_sha256(&archive_path, &expected_hash).await.map_err(|e| {
         let _ = std::fs::remove_file(&archive_path);
         e
     })?;
     
-    emit_core_download_status(&window, "下载完成，正在解压核心...", 84);
+    emit_core_download_status(&window, "Download complete, extracting core...", 84);
     let temp_exe_path = paths.core_dir.join(format!("{}_{}.tmp", core_manager::core_binary_name(), temp_suffix));
     if let Err(e) = extract_core_binary(&archive_path, &temp_exe_path, &url) {
         let _ = std::fs::remove_file(&archive_path);
@@ -562,13 +562,13 @@ pub async fn update_core(
     }
     let _ = std::fs::remove_file(&archive_path);
     
-    emit_core_download_status(&window, "正在写入核心文件...", 92);
+    emit_core_download_status(&window, "Writing core files...", 92);
     
     // Stop core and wait for it to fully exit
     let _ = core_manager::stop_core(app.clone(), state.clone());
     
     // Wait for the process to fully exit (give it some time)
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     
     let exe_path = paths.core_dir.join(core_manager::core_binary_name());
     
@@ -582,7 +582,7 @@ pub async fn update_core(
                     let _ = std::fs::remove_file(&temp_exe_path);
                     return Err(format!("Failed to replace core binary: {}. Please close any running mihomo processes and try again.", e2));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             } else {
                 let _ = std::fs::remove_file(&temp_exe_path);
                 break;
@@ -603,13 +603,13 @@ pub async fn update_core(
         (config, args, secret)
     };
 
-    emit_core_download_status(&window, "更新完成，正在重启核心...", 98);
+    emit_core_download_status(&window, "Update complete, restarting core...", 98);
     
     // Get rate limiter from app state
     let rate_limiter = app.state::<crate::RateLimiter>();
     
     let result = core_manager::start_core(app.clone(), state, last_config, false, last_args, last_secret, rate_limiter).await?;
-    emit_core_download_status(&window, "核心已就绪", 100);
+    emit_core_download_status(&window, "Core ready", 100);
 
     Ok(result)
 }
@@ -626,7 +626,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let geosite_sha_url = "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat.sha256sum";
 
     // Fetch hashes first
-    emit_core_download_status(&window, "正在获取校验信息...", 5);
+    emit_core_download_status(&window, "Fetching verification info...", 5);
     
     let geoip_sha_res = client.get(geoip_sha_url).send().await
         .map_err(|e| format!("Failed to fetch GeoIP hash: {}", e))?;
@@ -648,7 +648,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let temp_suffix = uuid::Uuid::new_v4().to_string();
 
     // Download GeoIP
-    emit_core_download_status(&window, "正在下载 GeoIP...", 10);
+    emit_core_download_status(&window, "Downloading GeoIP...", 10);
     let geoip_path = paths.core_dir.join(format!("geoip_{}.dat.tmp", temp_suffix));
     let response = client.get(geoip_url).send().await
         .map_err(|e| format!("Failed to download GeoIP: {}", e))?;
@@ -680,14 +680,14 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         return Err(e.to_string());
     }
 
-    emit_core_download_status(&window, "正在验证 GeoIP...", 45);
+    emit_core_download_status(&window, "Verifying GeoIP...", 45);
     verify_sha256(&geoip_path, &geoip_expected_hash).await.map_err(|e| {
         let _ = std::fs::remove_file(&geoip_path);
         e
     })?;
 
     // Download GeoSite
-    emit_core_download_status(&window, "正在下载 GeoSite...", 50);
+    emit_core_download_status(&window, "Downloading GeoSite...", 50);
     let geosite_path = paths.core_dir.join(format!("geosite_{}.dat.tmp", temp_suffix));
     let response = client.get(geosite_url).send().await
         .map_err(|e| format!("Failed to download GeoSite: {}", e))?;
@@ -719,14 +719,14 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         return Err(e.to_string());
     }
 
-    emit_core_download_status(&window, "正在验证 GeoSite...", 90);
+    emit_core_download_status(&window, "Verifying GeoSite...", 90);
     verify_sha256(&geosite_path, &geosite_expected_hash).await.map_err(|e| {
         let _ = std::fs::remove_file(&geosite_path);
         e
     })?;
 
     // Apply updates
-    emit_core_download_status(&window, "正在应用更新...", 95);
+    emit_core_download_status(&window, "Applying updates...", 95);
     let final_geoip = paths.core_dir.join("geoip.dat");
     let final_geosite = paths.core_dir.join("geosite.dat");
     
@@ -740,6 +740,6 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     std::fs::rename(&geoip_path, &final_geoip).map_err(|e| format!("Failed to apply geoip: {}", e))?;
     std::fs::rename(&geosite_path, &final_geosite).map_err(|e| format!("Failed to apply geosite: {}", e))?;
 
-    emit_core_download_status(&window, "Geo 数据库更新完成", 100);
+    emit_core_download_status(&window, "Geo database update complete", 100);
     Ok("Geo databases updated successfully".to_string())
 }

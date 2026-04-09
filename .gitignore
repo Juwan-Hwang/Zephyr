@@ -28,9 +28,11 @@ core/
 # Runtime generated
 run_config.yaml
 *.db
-# Environment
+# Environment files (common leak source)
 .env
 .env.local
+.env.*.local
+*.env
 
 # Rust build artifacts
 target/
@@ -51,3 +53,15 @@ rustup-init.exe
 
 # Qoder/CatPaw IDE settings
 .qoder/
+
+# Security sensitive files - NEVER commit these
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.keystore
+*.crt
+*.cer
+*.der

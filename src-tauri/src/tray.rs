@@ -113,11 +113,9 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     
     let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
     
-    // Check TUN status via core state
-    let tray_state = app.state::<TrayState>();
-    let tun_enabled = tray_state.0.lock()
-        .map(|guard| guard.tun_enabled)
-        .unwrap_or(false);
+    // Check TUN status from config file (authoritative source)
+    // Note: run_config.yaml is the actual config loaded by Mihomo
+    let tun_enabled = get_tun_status_from_config(&app).unwrap_or(false);
     
     if tun_enabled {
         Ok("tun".to_string())
@@ -126,6 +124,29 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     } else {
         Ok("running".to_string())
     }
+}
+
+/// Get TUN status from config file (authoritative source)
+/// run_config.yaml is what Mihomo actually loads, so it's the truth
+fn get_tun_status_from_config(app: &AppHandle) -> Result<bool, String> {
+    let paths = crate::core_manager::ensure_app_storage(app)?;
+    let run_config_path = paths.core_dir.join("run_config.yaml");
+    
+    if !run_config_path.exists() {
+        return Ok(false);
+    }
+    
+    let content = std::fs::read_to_string(&run_config_path)
+        .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
+    
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|e| format!("Failed to parse YAML: {}", e))?;
+    
+    // Check tun.enable in config
+    Ok(yaml.get("tun")
+        .and_then(|tun| tun.get("enable"))
+        .and_then(|enable| enable.as_bool())
+        .unwrap_or(false))
 }
 
 /// Initialize tray with left-click to show window, right-click for menu

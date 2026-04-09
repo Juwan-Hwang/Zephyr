@@ -187,6 +187,10 @@ export function connectTraffic(callback) {
       maxRetriesReached = false;
       if (retryTimer) clearTimeout(retryTimer);
       abortController.abort();
+      // Clear global handle to prevent stale references
+      if (globalConnectionHandle === handle) {
+        globalConnectionHandle = null;
+      }
     },
     reconnect: () => {
         // Clear any pending retry timer first to prevent double connection

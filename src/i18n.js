@@ -36,6 +36,23 @@ export const translations = {
         geoDataDesc: "Update GeoIP and GeoSite routing databases",
         updateNow: "Update Now",
         
+        // Core update status messages (keys match Rust backend)
+        statusDownloadingCore: "Downloading core from GitHub...",
+        statusDownloadingProgress: "Downloading core... {progress}%",
+        statusPreparingUpdate: "Preparing to update Mihomo core...",
+        statusVerifyingFile: "Verifying file integrity...",
+        statusExtractingCore: "Download complete, extracting core...",
+        statusWritingFiles: "Writing core files...",
+        statusRestartingCore: "Update complete, restarting core...",
+        statusCoreReady: "Core ready",
+        statusFetchingVerify: "Fetching verification info...",
+        statusDownloadingGeoIP: "Downloading GeoIP...",
+        statusVerifyingGeoIP: "Verifying GeoIP...",
+        statusDownloadingGeoSite: "Downloading GeoSite...",
+        statusVerifyingGeoSite: "Verifying GeoSite...",
+        statusApplyingUpdates: "Applying updates...",
+        statusGeoUpdateComplete: "Geo database update complete",
+        
         // Tunnels
         tunnels: "Port Forwarding",
         add: "Add",
@@ -176,9 +193,9 @@ export const translations = {
         switching: "Switching...",
         tunnelNetwork: "Listen Address",
         tunnelTarget: "Target Address",
-        invalidProtocol: "无效协议。请使用 tcp、udp 或两者。",
-        invalidAddressFormat: "监听地址格式无效。请使用 主机:端口",
-        invalidTargetFormat: "目标地址格式无效。请使用 主机:端口",
+        invalidProtocol: "Invalid protocol. Use tcp, udp, or both.",
+        invalidAddressFormat: "Invalid listen address format. Use host:port",
+        invalidTargetFormat: "Invalid target address format. Use host:port",
         addPortForwarding: "Add Port Forwarding",
                 // Tray Menu
         trayShow: "Show Zephyr",
@@ -203,6 +220,23 @@ export const translations = {
         githubHomepage: "GitHub Homepage",
         githubHomepageDesc: "Star & Contribute",
         
+        // Core update status messages (keys match Rust backend)
+        statusDownloadingCore: "Downloading core from GitHub...",
+        statusDownloadingProgress: "Downloading core... {progress}%",
+        statusPreparingUpdate: "Preparing to update Mihomo core...",
+        statusVerifyingFile: "Verifying file integrity...",
+        statusExtractingCore: "Download complete, extracting core...",
+        statusWritingFiles: "Writing core files...",
+        statusRestartingCore: "Update complete, restarting core...",
+        statusCoreReady: "Core ready",
+        statusFetchingVerify: "Fetching verification info...",
+        statusDownloadingGeoIP: "Downloading GeoIP...",
+        statusVerifyingGeoIP: "Verifying GeoIP...",
+        statusDownloadingGeoSite: "Downloading GeoSite...",
+        statusVerifyingGeoSite: "Verifying GeoSite...",
+        statusApplyingUpdates: "Applying updates...",
+        statusGeoUpdateComplete: "Geo database update complete",
+        
         // Error messages
         connectionLost: "Lost connection to core traffic monitor. Click to reconnect.",
         invalidJson: "Invalid JSON format",
@@ -212,6 +246,8 @@ export const translations = {
         failedSaveSettings: "Failed to save settings to core",
         partialRestore: "Some settings failed to restore",
         restoreFailed: "Failed to restore defaults",
+        configParseErrorTitle: "Configuration Parse Error",
+        configParseErrorMsg: "Configuration file could not be parsed. Using empty config.",
         
         // Storage
         usedSpace: "used",
@@ -259,6 +295,23 @@ export const translations = {
         geoData: "Geo 数据库",
         geoDataDesc: "更新 GeoIP 和 GeoSite 路由数据库",
         updateNow: "立即更新",
+        
+        // Core update status messages (keys match Rust backend)
+        statusDownloadingCore: "正在从 GitHub 下载核心...",
+        statusDownloadingProgress: "正在下载核心... {progress}%",
+        statusPreparingUpdate: "正在准备更新 Mihomo 核心...",
+        statusVerifyingFile: "正在验证文件完整性...",
+        statusExtractingCore: "下载完成，正在解压核心...",
+        statusWritingFiles: "正在写入核心文件...",
+        statusRestartingCore: "更新完成，正在重启核心...",
+        statusCoreReady: "核心已就绪",
+        statusFetchingVerify: "正在获取校验信息...",
+        statusDownloadingGeoIP: "正在下载 GeoIP...",
+        statusVerifyingGeoIP: "正在验证 GeoIP...",
+        statusDownloadingGeoSite: "正在下载 GeoSite...",
+        statusVerifyingGeoSite: "正在验证 GeoSite...",
+        statusApplyingUpdates: "正在应用更新...",
+        statusGeoUpdateComplete: "Geo 数据库更新完成",
         
         // Tunnels
         tunnels: "代理端口转发",
@@ -431,6 +484,8 @@ export const translations = {
         failedSaveSettings: "保存设置到核心失败",
         partialRestore: "部分设置恢复失败",
         restoreFailed: "恢复默认设置失败",
+        configParseErrorTitle: "配置文件解析错误",
+        configParseErrorMsg: "配置文件解析失败，将使用空配置。",
         
         // Storage
         usedSpace: "已用",
@@ -443,3 +498,37 @@ export const translations = {
         loading: "加载中...",
     }
 };
+
+/**
+ * Map backend status messages to localized strings
+ * Backend sends English status as key, frontend maps to current language
+ */
+export function mapStatusMessage(statusText, progress = null) {
+    const t = translations[currentLang] || translations.en;
+    
+    // Handle progress messages
+    if (statusText.includes('Downloading core...') && progress !== null) {
+        return (t.statusDownloadingProgress || statusText).replace('{progress}', progress);
+    }
+    
+    // Map status messages to translation keys
+    const statusMap = {
+        'Downloading core from GitHub...': 'statusDownloadingCore',
+        'Preparing to update Mihomo core...': 'statusPreparingUpdate',
+        'Verifying file integrity...': 'statusVerifyingFile',
+        'Download complete, extracting core...': 'statusExtractingCore',
+        'Writing core files...': 'statusWritingFiles',
+        'Update complete, restarting core...': 'statusRestartingCore',
+        'Core ready': 'statusCoreReady',
+        'Fetching verification info...': 'statusFetchingVerify',
+        'Downloading GeoIP...': 'statusDownloadingGeoIP',
+        'Verifying GeoIP...': 'statusVerifyingGeoIP',
+        'Downloading GeoSite...': 'statusDownloadingGeoSite',
+        'Verifying GeoSite...': 'statusVerifyingGeoSite',
+        'Applying updates...': 'statusApplyingUpdates',
+        'Geo database update complete': 'statusGeoUpdateComplete',
+    };
+    
+    const key = statusMap[statusText];
+    return key ? (t[key] || statusText) : statusText;
+}

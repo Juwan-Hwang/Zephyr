@@ -6,12 +6,17 @@ import {
   initWindowControls, applyTranslations, initModeSelector, initTunToggle,
   syncCoreConfig, initUwpExemption, initDnsRewriteToggle, initNodeWheel, updateTrayStatus,
   startUnifiedSync, initTrayEventListeners, updateTrayMenu, cleanupTrayEventListeners, stopUnifiedSync,
-  showNotification
+  showNotification, currentLang
 } from './ui.js';
 import { cleanupChart } from './modules/traffic-chart.js';
 import { translations } from './i18n.js';
 
 const { invoke } = window.__TAURI__.core;
+
+// Mount functions to window for cross-module access
+window.showNotification = showNotification;
+window.translations = translations;
+window.currentLang = currentLang;
 
 /**
  * Initialize UI and bind data
@@ -101,6 +106,19 @@ async function initApp() {
     console.warn("Initial syncCoreConfig failed:", err);
   }
 
+  // Listen for config parse errors from backend (only once)
+  if (!window._configParseErrorListener) {
+    window._configParseErrorListener = await window.__TAURI__.event.listen('config-parse-error', (event) => {
+      const t = translations[window.currentLang] || translations.en;
+      showNotification(
+        t.configParseErrorMsg || 'Configuration file could not be parsed. Using empty config.',
+        'warning',
+        t.configParseErrorTitle || 'Configuration Parse Error'
+      );
+      console.error('[Config]', event.payload);
+    });
+  }
+
   window._trafficWsHandle = connectTraffic((data) => {
     updateTrafficData(data);
   });
@@ -114,6 +132,12 @@ async function initApp() {
     // Close WebSocket connection
     if (window._trafficWsHandle) {
       window._trafficWsHandle.close();
+    }
+    
+    // Cleanup config parse error listener
+    if (window._configParseErrorListener) {
+      window._configParseErrorListener();
+      window._configParseErrorListener = null;
     }
   });
 }

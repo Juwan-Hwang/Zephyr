@@ -21,6 +21,6 @@
     "core:tray:default",
     "core:resources:default",
     "core:app:default",
-    "dialog:default"
+    "dialog:allow-message"
   ]
 }

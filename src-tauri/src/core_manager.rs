@@ -19,6 +19,45 @@ static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 // Global lock to prevent concurrent core start operations
 static CORE_STARTING: AtomicBool = AtomicBool::new(false);
 
+/// Recursively remove dangerous keys from YAML structure to prevent code execution
+/// This function is security-critical and used by both production code and tests
+pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            // Always remove script-related keys globally
+            // script: can execute arbitrary JavaScript
+            // script-path: can load external script files
+            for key in ["script", "script-path"] {
+                map.remove(&serde_yaml::Value::String(key.to_string()));
+            }
+            
+            // Check if this mapping looks like a provider
+            // Providers have 'type' and either 'url' or 'path' fields
+            let is_provider = map.contains_key(&serde_yaml::Value::String("type".to_string()))
+                && (map.contains_key(&serde_yaml::Value::String("url".to_string()))
+                    || map.contains_key(&serde_yaml::Value::String("path".to_string())));
+            
+            // Remove 'path' only in provider context to prevent path traversal
+            // while allowing legitimate 'path' fields elsewhere
+            if in_provider_context || is_provider {
+                map.remove(&serde_yaml::Value::String("path".to_string()));
+            }
+            
+            // Recursively process all values in the mapping
+            for (_, v) in map.iter_mut() {
+                remove_dangerous_keys(v, is_provider);
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            // Recursively process all items in the sequence
+            for item in seq.iter_mut() {
+                remove_dangerous_keys(item, in_provider_context);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {
     TUN_MODE_ACTIVE.store(active, Ordering::SeqCst);
@@ -84,12 +123,79 @@ pub fn kill_mihomo() {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "mihomo.exe"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
+}
+
+/// Extract secret from YAML config content (simple line-by-line parsing)
+#[cfg(target_os = "macos")]
+fn extract_secret_from_yaml(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("secret:") {
+            return trimmed.split(':').nth(1).map(|s| s.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Update TUN enable setting in YAML config content
+/// Returns updated content with TUN block modified or appended
+fn update_tun_in_yaml(content: &str, enable: bool) -> String {
+    if content.contains("tun:") {
+        // Find the tun block and update enable within it
+        let mut in_tun_block = false;
+        let lines: Vec<String> = content.lines().map(|line| {
+            if line.trim().starts_with("tun:") {
+                in_tun_block = true;
+            } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
+                in_tun_block = false;
+            }
+            
+            if in_tun_block && line.trim().starts_with("enable:") {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                format!("{}enable: {}", indent, enable)
+            } else {
+                line.to_string()
+            }
+        }).collect();
+        lines.join("\n")
+    } else {
+        // No tun block, append it
+        let tun_block = if enable {
+            "\ntun:\n  enable: true\n  stack: system\n  auto-route: true\n  auto-detect-interface: true\n"
+        } else {
+            "\ntun:\n  enable: false\n"
+        };
+        format!("{}{}", content.trim_end(), tun_block)
+    }
+}
+
+/// Extract TUN enable status from YAML config content
+fn extract_tun_enabled_from_yaml(content: &str) -> bool {
+    let mut in_tun_block = false;
+    
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("tun:") {
+            in_tun_block = true;
+        } else if in_tun_block {
+            if trimmed.starts_with("enable:") {
+                return trimmed.split(':')
+                    .nth(1)
+                    .map(|s| s.trim() == "true")
+                    .unwrap_or(false);
+            }
+            // Exit tun block when we hit a non-indented line
+            if !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
+                in_tun_block = false;
+            }
+        }
+    }
+    false
 }
 
 /// Restart mihomo core with root privileges on macOS for TUN mode
@@ -111,66 +217,29 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         
-        // Extract current secret from config
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("secret:") {
-                secret = trimmed.split(':').nth(1).unwrap_or("").trim().to_string();
-                break;
+        // Extract current secret from config or generate new one
+        secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
+        
+        // Update TUN setting
+        let mut updated = update_tun_in_yaml(&content, enable_tun);
+        
+        // Ensure secret is present and up-to-date
+        let mut found_secret = false;
+        let lines: Vec<String> = updated.lines().map(|line| {
+            if line.trim().starts_with("secret:") {
+                found_secret = true;
+                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                format!("{}secret: {}", indent, secret)
+            } else {
+                line.to_string()
             }
+        }).collect();
+        
+        if !found_secret {
+            lines.push(format!("secret: {}", secret));
         }
         
-        // If no secret found, generate a new one
-        if secret.is_empty() {
-            secret = generate_secret();
-        }
-        
-        // Update config: modify TUN and ensure secret is present
-        let mut updated = if content.contains("tun:") {
-            // Find the tun block and update enable within it
-            let mut in_tun_block = false;
-            let mut found_secret = false;
-            let mut lines: Vec<String> = content.lines().map(|line| {
-                if line.trim().starts_with("tun:") {
-                    in_tun_block = true;
-                } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
-                    in_tun_block = false;
-                }
-                
-                if line.trim().starts_with("secret:") {
-                    found_secret = true;
-                    // Update secret line with the new one
-                    let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-                    format!("{}secret: {}", indent, secret)
-                } else if in_tun_block && line.trim().starts_with("enable:") {
-                    let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-                    format!("{}enable: {}", indent, enable_tun)
-                } else {
-                    line.to_string()
-                }
-            }).collect();
-            
-            // If secret wasn't in original, append it
-            if !found_secret {
-                lines.push(format!("secret: {}", secret));
-            }
-            
-            lines.join("\n")
-        } else {
-            // No tun block, append both tun and secret
-            let tun_block = if enable_tun {
-                format!("\ntun:\n  enable: true\n  stack: system\n  auto-route: true\n  auto-detect-interface: true\n")
-            } else {
-                format!("\ntun:\n  enable: false\n")
-            };
-            
-            // Check if secret exists in original
-            if content.contains("secret:") {
-                format!("{}{}", content.trim_end(), tun_block)
-            } else {
-                format!("{}{}\nsecret: {}", content.trim_end(), tun_block, secret)
-            }
-        };
+        updated = lines.join("\n");
         
         std::fs::write(&config_file, &updated)
             .map_err(|e| format!("Failed to write config: {}", e))?;
@@ -367,7 +436,9 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 }
 
 /// Tauri command to disable TUN mode (clears flag and kills root mihomo)
+/// Only available on macOS - TUN requires root on macOS
 #[tauri::command]
+#[cfg(target_os = "macos")]
 pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     kill_all_mihomo_as_root()?;
@@ -391,6 +462,17 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Tauri command to disable TUN mode on non-macOS platforms
+/// TUN mode is handled differently on Windows/Linux and doesn't require root
+#[tauri::command]
+#[cfg(not(target_os = "macos"))]
+pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    set_tun_mode(false);
+    // On Windows/Linux, TUN is handled via config change, no need for root kill
+    // Just update the config
+    set_tun_enabled_internal(&app, false)
+}
+
 /// Update TUN enable setting in run_config.yaml (without restarting core)
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
@@ -403,33 +485,7 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
     let content = std::fs::read_to_string(&config_file)
         .map_err(|e| format!("Failed to read config: {}", e))?;
     
-    let updated = if content.contains("tun:") {
-        // Find the tun block and update enable within it
-        let mut in_tun_block = false;
-        let lines: Vec<String> = content.lines().map(|line| {
-            if line.trim().starts_with("tun:") {
-                in_tun_block = true;
-            } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
-                in_tun_block = false;
-            }
-            
-            if in_tun_block && line.trim().starts_with("enable:") {
-                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-                format!("{}enable: {}", indent, enable)
-            } else {
-                line.to_string()
-            }
-        }).collect();
-        lines.join("\n")
-    } else {
-        // No tun block, append it
-        let tun_block = if enable {
-            format!("\ntun:\n  enable: true\n  stack: system\n  auto-route: true\n  auto-detect-interface: true\n")
-        } else {
-            format!("\ntun:\n  enable: false\n")
-        };
-        format!("{}{}", content.trim_end(), tun_block)
-    };
+    let updated = update_tun_in_yaml(&content, enable);
     
     std::fs::write(&config_file, updated)
         .map_err(|e| format!("Failed to write config: {}", e))?;
@@ -456,21 +512,7 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to read config: {}", e))?;
     
     // Check if TUN is enabled in config
-    let mut tun_enabled = false;
-    let mut in_tun_block = false;
-    
-    for line in content.lines() {
-        if line.trim().starts_with("tun:") {
-            in_tun_block = true;
-        } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
-            in_tun_block = false;
-        }
-        
-        if in_tun_block && line.trim().starts_with("enable:") {
-            tun_enabled = line.contains("true");
-            break;
-        }
-    }
+    let tun_enabled = extract_tun_enabled_from_yaml(&content);
     
     set_tun_mode(tun_enabled);
     eprintln!("[CORE] TUN mode initialized from config: {}", tun_enabled);
@@ -508,12 +550,16 @@ fn legacy_core_candidates() -> Result<Vec<PathBuf>, String> {
         candidates.push(direct_core_dir);
     }
 
+    // Search parent directories with depth limit to prevent traversing to root
+    const MAX_DEPTH: usize = 10;
     let mut dev_path = exe_path.clone();
-    while dev_path.pop() {
+    let mut depth = 0;
+    while dev_path.pop() && depth < MAX_DEPTH {
         let candidate = dev_path.join("core");
         if candidate.exists() {
             candidates.push(candidate);
         }
+        depth += 1;
     }
 
     let relative_core_dir = Path::new("core");
@@ -992,7 +1038,10 @@ fn select_runtime_config(
     let mut fallback_profiles = Vec::new();
     let entries = match fs::read_dir(&paths.profiles_dir) {
         Ok(entries) => entries,
-        Err(_) => return Ok((None, build_minimal_runtime_config(secret).0, build_minimal_runtime_config(secret).1)),
+        Err(_) => {
+            let (config, port) = build_minimal_runtime_config(secret);
+            return Ok((None, config, port));
+        }
     };
 
     for entry in entries.flatten() {
@@ -1273,7 +1322,15 @@ pub async fn start_core(
     let mut wait_ms = 0;
     while CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         if wait_ms > 10000 {
-            break;
+            // Timeout: force reset the flag to prevent permanent deadlock
+            // This can happen if previous start crashed without cleaning up
+            eprintln!("[CORE] WARNING: Core start lock timeout, forcing reset");
+            CORE_STARTING.store(false, Ordering::SeqCst);
+            // Try to acquire again after reset
+            if CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                break; // Successfully acquired after reset
+            }
+            // If still can't acquire, another thread is racing, wait more
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         wait_ms += 200;
@@ -1300,12 +1357,10 @@ pub async fn start_core(
     
     let paths = ensure_app_storage(&app)?;
     
-    // Remove cache file to avoid lock issues after root mihomo kill -9
-    let cache_path = paths.core_dir.join("cache.db");
-    if cache_path.exists() {
-        let _ = std::fs::remove_file(&cache_path);
-        eprintln!("[CORE] Removed stale cache.db");
-    }
+    // Note: We no longer delete cache.db proactively
+    // cache.db contains DNS cache and other useful data
+    // If mihomo fails to start due to lock issues, we'll retry after removing it
+    // This is handled in the spawn error handling below
     
     // Wait for port 9090 to be truly free (max 5s)
     // Even after process death, port release may have a few hundred ms delay
@@ -1401,8 +1456,45 @@ pub async fn start_core(
     }
     
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
-    // Use temp directory for cross-platform compatibility
-    let log_path = std::env::temp_dir().join("mihomo-restart.log");
+    // Use temp directory with unique filename per process to avoid multi-instance conflicts
+    // Prefix with app name to avoid conflicts with other applications
+    let log_path = std::env::temp_dir().join(format!(
+        "zephyr-mihomo-{}-{}.log",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    ));
+    
+    // Cleanup old zephyr-mihomo log files (older than 1 hour) to prevent accumulation
+    // Only scan for files matching our specific prefix to avoid interfering with other apps
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                // Only cleanup files with our specific prefix
+                if name.starts_with("zephyr-mihomo-") && name.ends_with(".log") {
+                    // Extract timestamp from the last segment before .log
+                    // Format: zephyr-mihomo-{pid}-{timestamp}.log
+                    // We parse from the end to be resilient to prefix changes
+                    if let Some(name_without_ext) = name.strip_suffix(".log") {
+                        if let Some(last_segment) = name_without_ext.rsplit('-').next() {
+                            if let Ok(ts) = last_segment.parse::<u128>() {
+                                // Delete logs older than 1 hour (3600000 ms)
+                                if now.saturating_sub(ts) > 3600000 {
+                                    let _ = std::fs::remove_file(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     // Create or truncate log file
     match std::fs::File::create(&log_path) {
@@ -1423,11 +1515,84 @@ pub async fn start_core(
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
     
     // Check if process exits immediately
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     match child.try_wait() {
         Ok(Some(status)) => {
             let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-            return Err(format!("mihomo exited immediately: {:?}, log: {}", status, log));
+            
+            // Check if this looks like a cache/lock issue
+            let is_lock_issue = log.contains("database is locked") 
+                || log.contains("cache.db") 
+                || log.contains("unable to open database")
+                || log.contains("database disk image is malformed");
+            
+            if is_lock_issue {
+                eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
+                let cache_path = paths.core_dir.join("cache.db");
+                let _ = std::fs::remove_file(&cache_path);
+                
+                // Retry once after removing cache.db
+                let mut retry_cmd = Command::new(&exe_path);
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    retry_cmd.creation_flags(CREATE_NO_WINDOW);
+                }
+                retry_cmd.args(["-d", "."]);
+                retry_cmd.args(["-f", "run_config.yaml"]);
+                for arg in &safe_custom_args {
+                    retry_cmd.arg(arg);
+                }
+                retry_cmd.current_dir(&paths.core_dir);
+                
+                // Setup log file for retry
+                let retry_log_path = std::env::temp_dir().join(format!(
+                    "zephyr-mihomo-{}-{}-retry.log",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0)
+                ));
+                match std::fs::File::create(&retry_log_path) {
+                    Ok(log_file) => {
+                        let stderr_handle = log_file.try_clone();
+                        retry_cmd.stdout(std::process::Stdio::from(log_file));
+                        retry_cmd.stderr(stderr_handle.map(std::process::Stdio::from)
+                            .unwrap_or_else(|_| std::process::Stdio::null()));
+                    }
+                    Err(_) => {
+                        retry_cmd.stdout(std::process::Stdio::null());
+                        retry_cmd.stderr(std::process::Stdio::null());
+                    }
+                }
+                
+                match retry_cmd.spawn() {
+                    Ok(mut retry_child) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        match retry_child.try_wait() {
+                            Ok(None) => {
+                                // Retry successful, use this process
+                                child = retry_child;
+                                // Continue to health check below
+                            },
+                            Ok(Some(retry_status)) => {
+                                let retry_log = std::fs::read_to_string(&retry_log_path).unwrap_or_default();
+                                return Err(format!("mihomo retry also failed: {:?}, log: {}", retry_status, retry_log));
+                            },
+                            Err(e) => {
+                                return Err(format!("retry try_wait error: {}", e));
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        return Err(format!("Failed to spawn mihomo on retry: {}", e));
+                    }
+                }
+            } else {
+                return Err(format!("mihomo exited immediately: {:?}, log: {}", status, log));
+            }
         }
         Ok(None) => {}
         Err(e) => {
@@ -1563,6 +1728,9 @@ struct ConfigMetadata {
 /// Machine key file name for persistent storage
 const MACHINE_KEY_FILE: &str = ".machine_key";
 
+/// Cached derived key - computed once, used for all encryption/decryption
+static DERIVED_KEY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
 /// Get or create a persistent machine-specific encryption key.
 /// Uses multiple hardware fingerprints for enhanced security against VM cloning.
 /// Falls back to a randomly generated key persisted to disk if system IDs unavailable.
@@ -1570,6 +1738,17 @@ const MACHINE_KEY_FILE: &str = ".machine_key";
 static MACHINE_KEY_PERSISTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn get_machine_key() -> Vec<u8> {
+    // Use cached key if available (PBKDF2 is expensive)
+    DERIVED_KEY.get().cloned().unwrap_or_else(|| {
+        // Compute and cache the key
+        let key = compute_machine_key();
+        let _ = DERIVED_KEY.set(key.clone());
+        key
+    })
+}
+
+/// Compute the machine key (expensive operation - use get_machine_key() for cached access)
+fn compute_machine_key() -> Vec<u8> {
     let mut seed_parts: Vec<String> = Vec::new();
     
     // Collect system machine ID
@@ -1660,12 +1839,21 @@ fn get_machine_key() -> Vec<u8> {
         String::new()
     };
     
-    // If we have a system seed, derive key from it
+    // If we have a system seed, derive a 32-byte key using PBKDF2
+    // This ensures consistent key length and proper entropy distribution
     if !combined_seed.is_empty() {
-        use sha2::{Sha256, Digest};
-        let mut hasher = Sha256::new();
-        hasher.update(combined_seed.as_bytes());
-        return hasher.finalize().to_vec();
+        use pbkdf2::pbkdf2_hmac;
+        use sha2::Sha256;
+        
+        // Use a fixed salt for key derivation (not secret, just prevents rainbow tables)
+        const SALT: &[u8] = b"Zephyr_AES256_Key_Derivation";
+        
+        // Derive 32 bytes for AES-256 using PBKDF2-HMAC-SHA256
+        // 100,000 iterations provides good security vs performance balance
+        let mut derived_key = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(combined_seed.as_bytes(), SALT, 100_000, &mut derived_key);
+        
+        return derived_key.to_vec();
     }
     
     // Fallback: use a persistent random key stored in the app data directory
@@ -1812,11 +2000,14 @@ fn obfuscate_string(s: &str) -> String {
     
     let key_bytes = get_machine_key();
     
-    // Ensure key is 32 bytes for AES-256
-    let mut key_array = [0u8; 32];
-    key_array[..key_bytes.len().min(32)].copy_from_slice(&key_bytes[..key_bytes.len().min(32)]);
+    // Key should already be 32 bytes from PBKDF2 or random generation
+    // If not exactly 32 bytes, something is wrong - fail closed
+    if key_bytes.len() != 32 {
+        eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
+        return String::new();
+    }
     
-    let cipher = match Aes256Gcm::new_from_slice(&key_array) {
+    let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
@@ -1864,15 +2055,19 @@ fn deobfuscate_string(s: &str) -> String {
             return String::new();
         }
         
-        // Extract nonce (bytes 3-15) and ciphertext (bytes 16-)
+        // Extract nonce (bytes 3-15) and ciphertext (bytes 15-)
         let nonce_bytes = &decoded[3..15];
         let ciphertext = &decoded[15..];
         
         let key_bytes = get_machine_key();
-        let mut key_array = [0u8; 32];
-        key_array[..key_bytes.len().min(32)].copy_from_slice(&key_bytes[..key_bytes.len().min(32)]);
         
-        let cipher = match Aes256Gcm::new_from_slice(&key_array) {
+        // Key should already be 32 bytes from PBKDF2 or random generation
+        if key_bytes.len() != 32 {
+            eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
+            return String::new();
+        }
+        
+        let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
@@ -2197,9 +2392,11 @@ pub async fn download_sub(
         let trimmed_content = content.replace(&['\r', '\n', ' ', '\t'][..], "");
         if let Ok(decoded_bytes) = base64_standard.decode(&trimmed_content) {
             if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
-                if decoded_str.contains("proxies:") || decoded_str.contains("port:") {
-                    content = decoded_str;
-                } else {
+                // Validate: must be valid YAML AND contain proxies key
+                // This prevents injecting invalid/corrupted data or non-subscription content
+                if serde_yaml::from_str::<serde_yaml::Value>(&decoded_str).is_ok()
+                    && decoded_str.contains("proxies:")
+                {
                     content = decoded_str;
                 }
             }
@@ -2209,9 +2406,9 @@ pub async fn download_sub(
     if content.contains("proxies:") || content.contains("proxy-groups:") {
         match serde_yaml::from_str::<serde_yaml::Value>(&content) {
             Ok(mut yaml_val) => {
-                if let Some(mapping) = yaml_val.as_mapping_mut() {
-                    mapping.remove(&serde_yaml::Value::String("script".to_string()));
-                }
+                // Use module-level function to remove dangerous keys
+                remove_dangerous_keys(&mut yaml_val, false);
+                
                 content = serde_yaml::to_string(&yaml_val)
                     .map_err(|e| format!("Failed to serialize sanitized subscription: {}", e))?;
             },
@@ -2286,7 +2483,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     
     // Verify deletion (Windows may report success but file remains if locked)
     if target_path.exists() {
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
         
         if target_path.exists() {

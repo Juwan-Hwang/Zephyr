@@ -498,24 +498,33 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
         }
 
         if has_xfce() {
-            // XFCE uses a single command, which is naturally atomic
-            if let Ok(status) = Command::new("xfconf-query")
-                .args([
-                    "-c",
-                    "xfce4-session",
-                    "-p",
-                    "/proxies/HTTP",
-                    "-s",
-                    &format!("{}:{}", host, port),
-                    "-n",
-                    "-t",
-                    "string",
-                ])
-                .status()
-            {
-                if status.success() {
-                    success = true;
+            // XFCE uses xfconf-query - set all proxy types
+            let proxy_addr = format!("{}:{}", host, port);
+            let mut all_success = true;
+            for proxy_type in &["HTTP", "HTTPS", "SOCKS"] {
+                if let Ok(status) = Command::new("xfconf-query")
+                    .args([
+                        "-c",
+                        "xfce4-session",
+                        "-p",
+                        &format!("/proxies/{}", proxy_type),
+                        "-s",
+                        &proxy_addr,
+                        "-n",
+                        "-t",
+                        "string",
+                    ])
+                    .status()
+                {
+                    if !status.success() {
+                        all_success = false;
+                    }
+                } else {
+                    all_success = false;
                 }
+            }
+            if all_success {
+                success = true;
             }
         }
 
@@ -575,7 +584,7 @@ pub fn disable_sysproxy() -> Result<String, String> {
         let mut success = false;
         if has_gnome() {
             if let Ok(status) = Command::new("gsettings")
-                .args(["set", "org.gnome.system.proxy", "mode", "'none'"])
+                .args(["set", "org.gnome.system.proxy", "mode", "none"])
                 .status()
             {
                 if status.success() {
@@ -628,10 +637,23 @@ pub fn disable_sysproxy() -> Result<String, String> {
         }
 
         if has_xfce() {
-            let _ = Command::new("xfconf-query")
-                .args(["-c", "xfce4-session", "-p", "/proxies/HTTP", "-r"])
-                .status();
-            success = true;
+            // XFCE - remove all proxy types
+            let mut all_success = true;
+            for proxy_type in &["HTTP", "HTTPS", "SOCKS"] {
+                if let Ok(status) = Command::new("xfconf-query")
+                    .args(["-c", "xfce4-session", "-p", &format!("/proxies/{}", proxy_type), "-r"])
+                    .status()
+                {
+                    if !status.success() {
+                        all_success = false;
+                    }
+                } else {
+                    all_success = false;
+                }
+            }
+            if all_success {
+                success = true;
+            }
         }
 
         if success {

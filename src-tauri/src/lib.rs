@@ -152,6 +152,15 @@ mod lib_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Setup panic hook to cleanup child processes
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("[PANIC] Application panicked, cleaning up child processes...");
+        // Kill all mihomo processes on panic
+        crate::core_manager::kill_mihomo();
+        default_panic(info);
+    }));
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]

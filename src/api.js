@@ -110,19 +110,6 @@ export async function patchConfig(payload) {
 }
 
 /**
- * 获取当前所有连接
- */
-export async function getConnections() {
-  try {
-    const res = await fetch(`${BASE_URL}/connections`, { headers: getHeaders() });
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    console.error('[API] Failed to get connections:', err);
-  }
-}
-
-/**
  * 断开所有连接
  */
 export async function closeAllConnections() {

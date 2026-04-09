@@ -171,7 +171,23 @@ if (!savedLanguage) {
 }
 let isNetworkUpdating = false;
 let isTestingLatency = false;
-const latencyLoadingIcon = `<svg class="animate-spin h-3 w-3 text-accent/50 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+
+// Shared SVG icons to avoid repetition
+const SVG_ICONS = {
+    loading: `<svg class="animate-spin h-3 w-3 text-accent/50 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`,
+    loadingSmall: '<svg class="w-3 h-3 animate-spin text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
+    loadingSmall2: '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.21-8.58"/></svg>',
+    plus: '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14"/></svg>',
+    arrowUp: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+    arrowDown: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>',
+    trash: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    refresh: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
+    externalLink: '<svg class="w-12 h-12 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    collapseArrow: '<svg class="w-3 h-3 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>',
+    collapseArrowSmall: '<svg class="w-2.5 h-2.5 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>'
+};
+
+const latencyLoadingIcon = SVG_ICONS.loading;
 let latencySortTimer = null;
 
 function applyLatencySortToDom(finalPass = false) {
@@ -247,6 +263,25 @@ function buildLatencyPriorityQueue(data, candidates) {
     return queue;
 }
 
+/**
+ * Set pending state for a proxy card and its wrapper
+ * This ensures card.dataset.pending and wrapper.dataset.pending are always synchronized
+ * @param {HTMLElement|null} card - The proxy card element (safe if null)
+ * @param {boolean} isPending - Whether the card is in pending state
+ */
+function setProxyPendingState(card, isPending) {
+    if (!card) return;
+    
+    const pendingValue = isPending ? '1' : '0';
+    card.dataset.pending = pendingValue;
+    
+    // Also update wrapper to keep state synchronized
+    const wrapper = card.closest('[data-name]');
+    if (wrapper) {
+        wrapper.dataset.pending = pendingValue;
+    }
+}
+
 function showLatencyLoadingForAllCards() {
     const container = document.getElementById('proxies-list');
     if (!container) return;
@@ -256,7 +291,8 @@ function showLatencyLoadingForAllCards() {
         card.dataset.baseOrder = `${Number.isNaN(order) ? index : order}`;
 card.dataset.estimate = card.dataset.latency || String(DELAY_INFINITE);
 card.dataset.latency = DELAY_INFINITE;
-        card.dataset.pending = '1';
+        setProxyPendingState(card, true);
+        
         const latVal = card.querySelector('[id^="latency-"]');
         if (latVal) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
@@ -268,6 +304,7 @@ card.dataset.latency = DELAY_INFINITE;
 
 export function setLanguage(lang) {
     currentLang = lang;
+    window.currentLang = lang;  // Keep window in sync for cross-module access
     localStorage.setItem('lang', lang);
     applyTranslations();
 }
@@ -288,11 +325,18 @@ export function applyTranslations() {
         el.textContent = t.latency || "Latency";
     });
     
-    // Update Tray Menu - use simpler toggle states command
+    // Update Tray Menu - read current states from UI controls (most reliable)
     if (window.__TAURI__ && window.__TAURI__.core) {
+        // Read directly from UI controls - the source of truth
+        const sysProxyToggle = document.querySelector('#sys-proxy-toggle');
+        const tunToggle = document.querySelector('#tun-proxy-toggle');
+        
+        const sysProxyEnabled = sysProxyToggle?.checked ?? window._currentSysProxyEnabled ?? false;
+        const tunEnabled = tunToggle?.checked ?? window._currentTunEnabled ?? false;
+        
         window.__TAURI__.core.invoke('update_tray_toggle_states', {
-            sysProxyEnabled: false,
-            tunEnabled: false
+            sysProxyEnabled: sysProxyEnabled,
+            tunEnabled: tunEnabled
         }).catch(e => console.warn("Failed to update tray menu:", e));
     }
 }
@@ -341,22 +385,31 @@ export function applyTheme(theme) {
 }
 
 // --- Notification System ---
-export function showNotification(message, type = 'info') {
+export function showNotification(message, type = 'info', title = null) {
     const container = document.getElementById('notif-container');
     if (!container) return;
 
     const notif = document.createElement('div');
-    notif.className = `glass-card py-3 px-5 border-l-4 flex items-center gap-3 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-[200px]`;
+    notif.className = `glass-card py-3 px-5 border-l-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-[200px] max-w-[400px]`;
     
     const colors = {
         info: 'border-accent text-accent',
         success: 'border-emerald-500 text-emerald-400',
-        error: 'border-rose-500 text-rose-400'
+        error: 'border-rose-500 text-rose-400',
+        warning: 'border-amber-500 text-amber-400'
     };
     notif.className += ` ${colors[type] || colors.info}`;
     
+    // Add title if provided
+    if (title) {
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'text-xs font-bold tracking-tight';
+        titleDiv.textContent = title;
+        notif.appendChild(titleDiv);
+    }
+    
     const msgDiv = document.createElement('div');
-    msgDiv.className = 'text-xs font-bold tracking-tight';
+    msgDiv.className = 'text-xs tracking-tight opacity-80';
     msgDiv.textContent = message;
     notif.appendChild(msgDiv);
 
@@ -367,11 +420,11 @@ export function showNotification(message, type = 'info') {
         notif.classList.remove('translate-x-full', 'opacity-0');
     });
 
-    // Remove after 3s
+    // Remove after 4s (longer for messages with title)
     setTimeout(() => {
         notif.classList.add('translate-x-full', 'opacity-0');
         setTimeout(() => notif.remove(), 500);
-    }, 3000);
+    }, title ? 4000 : 3000);
 }
 
 // --- Custom Modal ---
@@ -969,7 +1022,7 @@ function renderConfigItem(key, value, fullKey) {
         const setBtn = document.createElement('button');
         setBtn.className = "text-[10px] text-accent hover:text-accent/80 px-1.5 py-0.5 rounded transition-colors";
         setBtn.title = "Set value";
-        setBtn.innerHTML = `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14"/></svg>`;
+        setBtn.innerHTML = SVG_ICONS.plus;
         setBtn.onclick = (e) => {
             e.stopPropagation();
             const input = document.createElement('input');
@@ -1345,7 +1398,7 @@ async function saveRules() {
     const btn = document.getElementById('save-rules-btn');
     if (!btn) return;
     const originalContent = btn.innerHTML;
-    btn.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.21-8.58"/></svg>';
+    btn.innerHTML = SVG_ICONS.loadingSmall2;
     btn.disabled = true;
 
     try {
@@ -1463,7 +1516,7 @@ export function initProxyControls() {
                             } else {
                                 wrapper.dataset.latency = DELAY_INFINITE;
                             }
-                            wrapper.dataset.pending = '0';
+                            setProxyPendingState(wrapper.firstElementChild, false);
                         }
                     }
 
@@ -1475,14 +1528,14 @@ export function initProxyControls() {
                             updatedLatVal.className = `text-xs tabular-nums font-semibold ${delay < 200 ? 'text-emerald-400' : (delay < 500 ? 'text-amber-400' : 'text-rose-400')}`;
                             if (card) {
                                 card.dataset.latency = delay;
-                                card.dataset.pending = '0';
+                                setProxyPendingState(card, false);
                             }
                         } else {
                             updatedLatVal.textContent = translations[currentLang].timeout || 'Timeout';
                             updatedLatVal.className = 'text-xs tabular-nums font-semibold text-zinc-600';
                             if (card) {
                                 card.dataset.latency = DELAY_INFINITE;
-                                card.dataset.pending = '0';
+                                setProxyPendingState(card, false);
                             }
                         }
                     }
@@ -1673,14 +1726,14 @@ async function renderProxies() {
         const isSelected = name === current;
         
         let latFromWrapper = null;
-        let pendingFromWrapper = isTestingLatency ? '1' : '0';
         if (wrapper.dataset.latency) latFromWrapper = parseInt(wrapper.dataset.latency, 10);
-        if (wrapper.dataset.pending) pendingFromWrapper = wrapper.dataset.pending;
+        
+        const isPending = wrapper.dataset.pending === '1';
 
         const card = document.createElement('div');
         card.dataset.baseOrder = `${index}`;
         card.dataset.selected = isSelected ? '1' : '0';
-        card.dataset.pending = pendingFromWrapper;
+        // Note: pending state is set by caller using setProxyPendingState
         card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-all duration-300 group h-full w-full
             ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-white/5'}`;
         
@@ -1736,7 +1789,7 @@ async function renderProxies() {
         latLabel.textContent = translations[currentLang].latency || "Latency";
         const latVal = document.createElement('span');
         latVal.id = `latency-${CSS.escape(name)}`;
-        if (pendingFromWrapper === '1') {
+        if (isPending) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
             latVal.innerHTML = latencyLoadingIcon;
             card.dataset.latency = DELAY_INFINITE;
@@ -1765,7 +1818,7 @@ async function renderProxies() {
             card.classList.add('opacity-50', 'pointer-events-none');
             const originalLatContent = latVal ? latVal.innerHTML : '';
             if (latVal) {
-                latVal.innerHTML = '<svg class="w-3 h-3 animate-spin text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+                latVal.innerHTML = SVG_ICONS.loadingSmall;
             }
 
             const success = await switchProxy(mainGroup, name);
@@ -1823,7 +1876,6 @@ async function renderProxies() {
         const proxy = data.proxies[name];
         const isSelected = name === current;
         wrapper.dataset.selected = isSelected ? '1' : '0';
-        wrapper.dataset.pending = isTestingLatency ? '1' : '0';
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length-1].delay : null;
         wrapper.dataset.latency = (lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay;
         wrapper.dataset.estimate = wrapper.dataset.latency;
@@ -1835,6 +1887,10 @@ async function renderProxies() {
         
         // Directly append the card
         const card = createCard(wrapper);
+        
+        // Set pending state through unified function
+        setProxyPendingState(card, isTestingLatency);
+        
         wrapper.appendChild(card);
         setup3DEffect(card);
         
@@ -2465,7 +2521,7 @@ export async function initSettings() {
             
             const delBtn = document.createElement('button');
             delBtn.className = 'p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all';
-            delBtn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+            delBtn.innerHTML = SVG_ICONS.trash;
             delBtn.onclick = () => {
                 currentTunnels.splice(index, 1);
                 saveConfigToCore({ tunnels: currentTunnels });
@@ -2849,7 +2905,7 @@ export async function initSettings() {
             // Delete button
             const delBtn = document.createElement('button');
             delBtn.className = 'p-1.5 rounded-md hover:bg-rose-500/20 text-zinc-500 hover:text-rose-400 transition-all';
-            delBtn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+            delBtn.innerHTML = SVG_ICONS.trash;
             delBtn.title = t.delete;
             delBtn.onclick = async (e) => {
                 e.stopPropagation();
@@ -2883,7 +2939,7 @@ export async function initSettings() {
             if (configInfo.url) {
                 const updateBtn = document.createElement('button');
                 updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-zinc-500 hover:text-accent transition-all';
-                updateBtn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`;
+                updateBtn.innerHTML = SVG_ICONS.refresh;
                 updateBtn.title = t.update;
                 updateBtn.onclick = async (e) => {
                     e.stopPropagation();
@@ -3213,7 +3269,6 @@ let trayMenuCache = {
 const TRAY_CACHE_TTL = 2000; // 2 seconds cache
 
 export async function updateTrayMenu(forceRefresh = false) {
-    console.log('[Tray] updateTrayMenu called, forceRefresh:', forceRefresh);
     const now = Date.now();
     const useCache = !forceRefresh && (now - trayMenuCache.lastUpdate) < TRAY_CACHE_TTL;
     
@@ -3224,18 +3279,15 @@ export async function updateTrayMenu(forceRefresh = false) {
     const sysProxyEnabled = sysProxyToggle?.checked || false;
     const tunEnabled = tunToggle?.checked || false;
     
-    console.log('[Tray] sysProxyEnabled:', sysProxyEnabled, 'tunEnabled:', tunEnabled);
     
     // Use cached data if available and not expired
     let currentMode, configs, proxyGroups;
     
     if (useCache && trayMenuCache.config && trayMenuCache.configs && trayMenuCache.proxyGroups) {
-        console.log('[Tray] Using cached data');
         currentMode = trayMenuCache.config?.mode || 'rule';
         configs = trayMenuCache.configs;
         proxyGroups = trayMenuCache.proxyGroups;
     } else {
-        console.log('[Tray] Fetching fresh data');
         // Batch ALL API calls in parallel
         const [config, configsList, proxyData, settings] = await Promise.all([
             getConfig(),
@@ -3245,7 +3297,6 @@ export async function updateTrayMenu(forceRefresh = false) {
         ]);
         
         currentMode = config?.mode || 'rule';
-        console.log('[Tray] currentMode:', currentMode);
         
         // Process configs
         try {
@@ -3254,7 +3305,6 @@ export async function updateTrayMenu(forceRefresh = false) {
                 name: c.name,
                 is_active: c.name === activeConfig
             }));
-            console.log('[Tray] configs:', configs);
         } catch (e) {
             console.warn('Failed to get configs for tray menu:', e);
             configs = [];
@@ -3281,7 +3331,6 @@ export async function updateTrayMenu(forceRefresh = false) {
                         }))
                     };
                 });
-                console.log('[Tray] proxyGroups:', proxyGroups);
             }
         } catch (e) {
             console.warn('Failed to get proxy groups for tray menu:', e);
@@ -3297,7 +3346,6 @@ export async function updateTrayMenu(forceRefresh = false) {
     }
     
     try {
-        console.log('[Tray] Calling update_tray_full_menu...');
         await window.__TAURI__.core.invoke('update_tray_full_menu', {
             showText: t.trayShow || "Show Zephyr",
             quitText: t.trayQuit || "Quit",
@@ -3314,7 +3362,10 @@ export async function updateTrayMenu(forceRefresh = false) {
             proxyGroups,
             currentMode
         });
-        console.log('[Tray] update_tray_full_menu completed successfully');
+        
+        // Save current states for use by applyTranslations
+        window._currentSysProxyEnabled = sysProxyEnabled;
+        window._currentTunEnabled = tunEnabled;
     } catch (err) {
         console.error('Failed to update tray menu:', err);
     }
@@ -3506,8 +3557,8 @@ export async function initProxyToggle() {
         updateSysProxyUI();
         await updateTrayStatus();
         
-        // Start unified sync (replaces separate polling intervals)
-        startUnifiedSync();
+        // Note: startUnifiedSync is called once from main.js, not here
+        // to avoid duplicate calls
     } catch (err) {
         console.error('Failed to get initial sys proxy status:', err);
     }

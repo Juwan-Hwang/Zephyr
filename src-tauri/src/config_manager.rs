@@ -2,7 +2,7 @@ use crate::core_manager::ensure_app_storage;
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use crate::core_manager::MihomoState;
 
 #[tauri::command]
@@ -74,7 +74,22 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
     let mut current_yaml: YamlValue = if run_config_path.exists() {
         let content = fs::read_to_string(&run_config_path)
             .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
-        serde_yaml::from_str(&content).unwrap_or(YamlValue::Mapping(Mapping::new()))
+        
+        match serde_yaml::from_str(&content) {
+            Ok(yaml) => yaml,
+            Err(e) => {
+                eprintln!("[Config] WARNING: Failed to parse run_config.yaml: {}. Starting with empty config.", e);
+                
+                // Notify user about parse failure
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("config-parse-error", format!(
+                        "Configuration file could not be parsed. Using empty config. Error: {}", e
+                    ));
+                }
+                
+                YamlValue::Mapping(Mapping::new())
+            }
+        }
     } else {
         YamlValue::Mapping(Mapping::new())
     };
@@ -84,7 +99,59 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
         .map_err(|e| format!("Failed to convert JSON patch to YAML: {}", e))?;
 
     // 3. Merge patch into current config
+    // SECURITY: Save critical settings before merge to restore after
+    let original_external_controller = current_yaml.get("external-controller")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let original_secret = current_yaml.get("secret")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let tun_enabled_before = current_yaml.get("tun")
+        .and_then(|tun| tun.get("enable"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
     merge_yaml(&mut current_yaml, &patch_yaml, 0)?;
+    
+    // 3.5. SECURITY: Restore critical security settings after merge
+    // These settings must never be changed by user config or subscriptions
+    if let YamlValue::Mapping(ref mut map) = current_yaml {
+        // Restore external-controller to localhost binding
+        if let Some(ref original) = original_external_controller {
+            // Extract port and ensure it binds to localhost only
+            let port = original.split(':').last().unwrap_or("9090");
+            map.insert(
+                YamlValue::String("external-controller".to_string()),
+                YamlValue::String(format!("127.0.0.1:{}", port))
+            );
+        } else {
+            // No original, set secure default
+            map.insert(
+                YamlValue::String("external-controller".to_string()),
+                YamlValue::String("127.0.0.1:9090".to_string())
+            );
+        }
+        
+        // Restore original secret - never allow removal
+        if let Some(ref secret) = original_secret {
+            map.insert(
+                YamlValue::String("secret".to_string()),
+                YamlValue::String(secret.clone())
+            );
+        }
+        // If there was no secret before, don't add one (empty or otherwise)
+        
+        // Protect TUN state - only allow changes through proper UI toggle
+        if !tun_enabled_before {
+            // TUN was disabled before patch, ensure it stays disabled
+            if let Some(YamlValue::Mapping(ref mut tun_map)) = map.get_mut(&YamlValue::String("tun".to_string())) {
+                tun_map.insert(
+                    YamlValue::String("enable".to_string()),
+                    YamlValue::Bool(false)
+                );
+            }
+        }
+    }
 
     // 4. Write back to run_config.yaml
     let new_content = serde_yaml::to_string(&current_yaml)

@@ -34,7 +34,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Get version from tag
         id: get_version
@@ -60,12 +60,12 @@ jobs:
         shell: bash
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed47d4056f62 # v4.1.0
         with:
           node-version: lts/*
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master 2026-03-27
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
@@ -255,37 +255,34 @@ jobs:
         run: |
           mkdir -p src-tauri/bundled
           
-          # Download geo data files
+          # Download geo data files and their SHA256 checksums
           curl -L -o src-tauri/bundled/geoip.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
+          curl -L -o src-tauri/bundled/geoip.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat.sha256sum"
           curl -L -o src-tauri/bundled/geosite.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
+          curl -L -o src-tauri/bundled/geosite.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat.sha256sum"
           curl -L -o src-tauri/bundled/Country.mmdb "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb"
+          curl -L -o src-tauri/bundled/Country.mmdb.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb.sha256sum"
           
-          # Get SHA256 from GitHub API digest
+          # Verify SHA256 checksums
           for file in geoip.dat geosite.dat Country.mmdb; do
-            ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest" \
-              | jq -r --arg name "$file" '.assets[] | select(.name == $name) | .digest // empty')
+            EXPECTED=$(cat "src-tauri/bundled/$file.sha256sum" | cut -d' ' -f1)
+            ACTUAL=$(sha256sum "src-tauri/bundled/$file" | cut -d' ' -f1)
             
-            if [ -n "$ASSET_DIGEST" ]; then
-              EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
-              ACTUAL_HASH=$(sha256sum "src-tauri/bundled/$file" | awk '{print $1}')
-              
-              if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-                echo "ERROR: SHA256 mismatch for $file!"
-                echo "Expected: $EXPECTED_HASH"
-                echo "Actual: $ACTUAL_HASH"
-                exit 1
-              fi
-              echo "✓ SHA256 verified for $file"
-              else
-                echo "ERROR: SHA256 digest not available for $file"
-                echo "This could mean:"
-                echo "  1. GitHub API rate limit reached - wait and retry"
-                echo "  2. Network timeout - check workflow logs"
-                echo "  3. Release asset missing digest - verify upstream release"
-                echo "Cannot verify download integrity - aborting for security"
-                exit 1
-              fi
+            if [ -z "$EXPECTED" ]; then
+              echo "ERROR: Could not read SHA256 checksum for $file"
+              exit 1
+            fi
+            
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "ERROR: SHA256 mismatch for $file!"
+              echo "Expected: $EXPECTED"
+              echo "Actual: $ACTUAL"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for $file"
+            
+            # Clean up checksum files
+            rm "src-tauri/bundled/$file.sha256sum"
           done
         shell: bash
 
@@ -391,7 +388,7 @@ jobs:
 
       # 6. 一键清空购物车！上传保险柜里的所有文件到 GitHub Release
       - name: Upload All Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c95fe1489396fb2e0e5a9285c41c0c5987b6b3bd # v2.2.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
