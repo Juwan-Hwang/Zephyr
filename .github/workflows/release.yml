@@ -90,6 +90,14 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           brew install pkg-config glib
+          # For cross-compilation, set pkg-config to allow cross-compilation
+          # and point to the correct sysroot
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          # Use the SDK root as sysroot for cross-targets
+          if [ "${{ matrix.target }}" == "aarch64-apple-darwin" ]; then
+            SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+            echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
+          fi
 
       - name: Install frontend dependencies
         run: npm ci
