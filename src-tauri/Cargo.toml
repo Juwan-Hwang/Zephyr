@@ -46,7 +46,8 @@ aes-gcm = "0.10"
 pbkdf2 = "0.12"
 hmac = "0.12"
 
-# Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk)
+[target.'cfg(unix)'.dependencies]
+# Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
 glib = ">= 0.20, < 1"
 
 [target.'cfg(target_os = "windows")'.dependencies]

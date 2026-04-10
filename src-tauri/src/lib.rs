@@ -248,37 +248,36 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
-                    let app = window.app_handle();
-                    if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
-                        let mut imported_count = 0;
-                        for path in paths {
-                            let ext = std::path::Path::new(&path)
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            if ext == "yaml" || ext == "yml" {
-                                if let Ok(content) = std::fs::read_to_string(path) {
-                                    if let Some(file_name) = std::path::Path::new(&path)
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
+                let app = window.app_handle();
+                if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
+                    let mut imported_count = 0;
+                    for path in paths {
+                        let ext = std::path::Path::new(&path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        if ext == "yaml" || ext == "yml" {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                if let Some(file_name) = std::path::Path::new(&path)
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                {
+                                    let target_path = storage_paths.profiles_dir.join(file_name);
+                                    if core_manager::write_file_secure(&target_path, &content)
+                                        .is_ok()
                                     {
-                                        let target_path =
-                                            storage_paths.profiles_dir.join(file_name);
-                                        if core_manager::write_file_secure(&target_path, &content)
-                                            .is_ok()
-                                        {
-                                            imported_count += 1;
-                                        }
+                                        imported_count += 1;
                                     }
                                 }
                             }
                         }
-                        if imported_count > 0 {
-                            use tauri::Emitter;
-                            let _ = window.emit("profiles-imported", imported_count);
-                        }
                     }
+                    if imported_count > 0 {
+                        use tauri::Emitter;
+                        let _ = window.emit("profiles-imported", imported_count);
+                    }
+                }
             }
             _ => {}
         })

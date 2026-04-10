@@ -2002,15 +2002,14 @@ fn compute_machine_key() -> Vec<u8> {
     if let Some(key_path) = key_path {
         // Ensure directory exists with secure permissions
         if let Some(parent) = key_path.parent() {
-            if !parent.exists()
-                && fs::create_dir_all(parent).is_ok() {
-                    // Set directory permissions on Unix
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
-                    }
+            if !parent.exists() && fs::create_dir_all(parent).is_ok() {
+                // Set directory permissions on Unix
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
                 }
+            }
         }
 
         // Try to read existing key
@@ -2026,10 +2025,7 @@ fn compute_machine_key() -> Vec<u8> {
         }
 
         // Generate new random key (32 bytes is sufficient for AES-256)
-        let random_key: Vec<u8> = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(32)
-            .collect();
+        let random_key: Vec<u8> = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
 
         // Persist the key (critical for data recovery)
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
@@ -2059,10 +2055,7 @@ fn compute_machine_key() -> Vec<u8> {
         }
 
         // Generate new random key
-        let random_key: Vec<u8> = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(32)
-            .collect();
+        let random_key: Vec<u8> = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
 
         // Persist the key
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
@@ -2076,10 +2069,7 @@ fn compute_machine_key() -> Vec<u8> {
     eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
     // Session-only key - will not persist
     // Callers should check is_machine_key_persisted() before storing sensitive data
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .collect()
+    thread_rng().sample_iter(&Alphanumeric).take(32).collect()
 }
 
 /// Check if the machine key was successfully persisted

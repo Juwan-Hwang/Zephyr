@@ -57,11 +57,11 @@ mod tests {
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(&serde_yaml::Value::String("script".to_string())));
+                .contains_key(serde_yaml::Value::String("script".to_string())));
             assert!(value
                 .as_mapping()
                 .unwrap()
-                .contains_key(&serde_yaml::Value::String("port".to_string())));
+                .contains_key(serde_yaml::Value::String("port".to_string())));
         }
 
         #[test]
@@ -79,8 +79,8 @@ proxy-groups:
 
             let groups = value.get("proxy-groups").unwrap().as_sequence().unwrap();
             let group = groups.first().unwrap().as_mapping().unwrap();
-            assert!(!group.contains_key(&serde_yaml::Value::String("script".to_string())));
-            assert!(group.contains_key(&serde_yaml::Value::String("name".to_string())));
+            assert!(!group.contains_key(serde_yaml::Value::String("script".to_string())));
+            assert!(group.contains_key(serde_yaml::Value::String("name".to_string())));
         }
 
         #[test]
@@ -98,12 +98,12 @@ proxy-providers:
 
             let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
             let provider = providers
-                .get(&serde_yaml::Value::String("my-provider".to_string()))
+                .get(serde_yaml::Value::String("my-provider".to_string()))
                 .unwrap()
                 .as_mapping()
                 .unwrap();
-            assert!(!provider.contains_key(&serde_yaml::Value::String("path".to_string())));
-            assert!(provider.contains_key(&serde_yaml::Value::String("type".to_string())));
+            assert!(!provider.contains_key(serde_yaml::Value::String("path".to_string())));
+            assert!(provider.contains_key(serde_yaml::Value::String("type".to_string())));
         }
 
         #[test]
@@ -127,7 +127,7 @@ proxies:
             let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
             let proxy = proxies.first().unwrap().as_mapping().unwrap();
             // 'port' is different from 'path', should be preserved
-            assert!(proxy.contains_key(&serde_yaml::Value::String("port".to_string())));
+            assert!(proxy.contains_key(serde_yaml::Value::String("port".to_string())));
         }
 
         #[test]
@@ -146,7 +146,7 @@ script:
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(&serde_yaml::Value::String("script".to_string())));
+                .contains_key(serde_yaml::Value::String("script".to_string())));
         }
 
         #[test]
@@ -161,7 +161,7 @@ mode: rule
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(&serde_yaml::Value::String("script-path".to_string())));
+                .contains_key(serde_yaml::Value::String("script-path".to_string())));
         }
 
         #[test]
@@ -177,7 +177,7 @@ rule-providers:
             remove_dangerous_keys(&mut value, false);
 
             let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
-            assert!(providers.contains_key(&serde_yaml::Value::String("my-rules".to_string())));
+            assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_string())));
         }
     }
 }
