@@ -51,10 +51,10 @@ fn validate_proxy_server(server: &str) -> Result<(), String> {
 
     // Reject any other hostname that's not localhost
     // This prevents attacks like "127.0.0.1.evil.com"
-    return Err(format!(
+    Err(format!(
         "Invalid proxy host '{}': only localhost, 127.0.0.1, or ::1 are allowed",
         host
-    ));
+    ))
 }
 
 /// Parse host and port from a proxy server string.
@@ -69,8 +69,8 @@ fn parse_host_port(server: &str) -> Result<(String, String), String> {
         if let Some(end_bracket) = server.rfind(']') {
             let host = server[1..end_bracket].to_string();
             let remainder = &server[end_bracket + 1..];
-            if remainder.starts_with(':') {
-                let port = remainder[1..].trim().to_string();
+            if let Some(port) = remainder.strip_prefix(':') {
+                let port = port.trim().to_string();
                 if !port.is_empty() {
                     // Validate port is a valid number
                     if port.parse::<u16>().is_err() {

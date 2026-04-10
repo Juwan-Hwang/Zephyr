@@ -46,6 +46,9 @@ aes-gcm = "0.10"
 pbkdf2 = "0.12"
 hmac = "0.12"
 
+# Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk)
+glib = ">= 0.20, < 1"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper", 

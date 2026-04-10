@@ -22,7 +22,7 @@ pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
 
     // Security mitigation: Strip secret and external-controller to prevent credential leakage
     if let YamlValue::Mapping(ref mut map) = yaml_val {
-        map.remove(&YamlValue::String("secret".to_string()));
+        map.remove(YamlValue::String("secret".to_string()));
     }
 
     let json_val: JsonValue = serde_json::to_value(yaml_val)
@@ -130,7 +130,7 @@ pub async fn update_config(
         // Restore external-controller to localhost binding
         if let Some(ref original) = original_external_controller {
             // Extract port and ensure it binds to localhost only
-            let port = original.split(':').last().unwrap_or("9090");
+            let port = original.split(':').next_back().unwrap_or("9090");
             map.insert(
                 YamlValue::String("external-controller".to_string()),
                 YamlValue::String(format!("127.0.0.1:{}", port)),
@@ -156,7 +156,7 @@ pub async fn update_config(
         if !tun_enabled_before {
             // TUN was disabled before patch, ensure it stays disabled
             if let Some(YamlValue::Mapping(ref mut tun_map)) =
-                map.get_mut(&YamlValue::String("tun".to_string()))
+                map.get_mut(YamlValue::String("tun".to_string()))
             {
                 tun_map.insert(
                     YamlValue::String("enable".to_string()),
@@ -209,7 +209,7 @@ pub async fn update_config(
         .get("external-controller")
         .and_then(|v| v.as_str())
     {
-        if let Some(p) = ext_ctrl.split(':').last() {
+        if let Some(p) = ext_ctrl.split(':').next_back() {
             p.parse::<u16>().unwrap_or(port)
         } else {
             port

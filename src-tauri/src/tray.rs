@@ -286,6 +286,7 @@ fn toggle_tun(app: &AppHandle) {
 
 /// Update tray menu with new configuration
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn update_tray_full_menu(
     app: AppHandle,
     show_text: String,

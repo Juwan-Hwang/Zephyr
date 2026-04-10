@@ -30,6 +30,12 @@ pub struct RateLimiter {
     calls: Mutex<HashMap<String, Instant>>,
 }
 
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RateLimiter {
     pub fn new() -> Self {
         Self {
@@ -241,8 +247,7 @@ pub fn run() {
                     app.exit(0);
                 }
             }
-            tauri::WindowEvent::DragDrop(drop_event) => {
-                if let tauri::DragDropEvent::Drop { paths, .. } = drop_event {
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     let app = window.app_handle();
                     if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
                         let mut imported_count = 0;
@@ -253,7 +258,7 @@ pub fn run() {
                                 .unwrap_or("")
                                 .to_lowercase();
                             if ext == "yaml" || ext == "yml" {
-                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                if let Ok(content) = std::fs::read_to_string(path) {
                                     if let Some(file_name) = std::path::Path::new(&path)
                                         .file_name()
                                         .and_then(|n| n.to_str())
@@ -274,7 +279,6 @@ pub fn run() {
                             let _ = window.emit("profiles-imported", imported_count);
                         }
                     }
-                }
             }
             _ => {}
         })

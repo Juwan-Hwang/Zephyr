@@ -28,19 +28,19 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
             // script: can execute arbitrary JavaScript
             // script-path: can load external script files
             for key in ["script", "script-path"] {
-                map.remove(&serde_yaml::Value::String(key.to_string()));
+                map.remove(serde_yaml::Value::String(key.to_string()));
             }
 
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
-            let is_provider = map.contains_key(&serde_yaml::Value::String("type".to_string()))
-                && (map.contains_key(&serde_yaml::Value::String("url".to_string()))
-                    || map.contains_key(&serde_yaml::Value::String("path".to_string())));
+            let is_provider = map.contains_key(serde_yaml::Value::String("type".to_string()))
+                && (map.contains_key(serde_yaml::Value::String("url".to_string()))
+                    || map.contains_key(serde_yaml::Value::String("path".to_string())));
 
             // Remove 'path' only in provider context to prevent path traversal
             // while allowing legitimate 'path' fields elsewhere
             if in_provider_context || is_provider {
-                map.remove(&serde_yaml::Value::String("path".to_string()));
+                map.remove(serde_yaml::Value::String("path".to_string()));
             }
 
             // Recursively process all values in the mapping
@@ -975,7 +975,7 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
     yaml_val
         .get("external-controller")
         .and_then(|v| v.as_str())
-        .and_then(|ext_ctrl| ext_ctrl.split(':').last())
+        .and_then(|ext_ctrl| ext_ctrl.split(':').next_back())
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(9090)
 }
@@ -1854,7 +1854,7 @@ fn compute_machine_key() -> Vec<u8> {
         // Additional Windows fingerprint: Volume serial number of C: drive
         // This adds another factor that changes if the system is cloned
         if let Ok(output) = std::process::Command::new("cmd")
-            .args(&["/C", "vol C:"])
+            .args(["/C", "vol C:"])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
         {
@@ -2002,8 +2002,8 @@ fn compute_machine_key() -> Vec<u8> {
     if let Some(key_path) = key_path {
         // Ensure directory exists with secure permissions
         if let Some(parent) = key_path.parent() {
-            if !parent.exists() {
-                if fs::create_dir_all(parent).is_ok() {
+            if !parent.exists()
+                && fs::create_dir_all(parent).is_ok() {
                     // Set directory permissions on Unix
                     #[cfg(unix)]
                     {
@@ -2011,7 +2011,6 @@ fn compute_machine_key() -> Vec<u8> {
                         let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
                     }
                 }
-            }
         }
 
         // Try to read existing key
@@ -2030,7 +2029,6 @@ fn compute_machine_key() -> Vec<u8> {
         let random_key: Vec<u8> = thread_rng()
             .sample_iter(&Alphanumeric)
             .take(32)
-            .map(|c| c as u8)
             .collect();
 
         // Persist the key (critical for data recovery)
@@ -2064,7 +2062,6 @@ fn compute_machine_key() -> Vec<u8> {
         let random_key: Vec<u8> = thread_rng()
             .sample_iter(&Alphanumeric)
             .take(32)
-            .map(|c| c as u8)
             .collect();
 
         // Persist the key
@@ -2082,7 +2079,6 @@ fn compute_machine_key() -> Vec<u8> {
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
-        .map(|c| c as u8)
         .collect()
 }
 
@@ -2332,7 +2328,7 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
             let path = entry.path();
             if path
                 .extension()
-                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {

@@ -109,7 +109,7 @@ Get-AppxPackage | Where-Object {
 
         let mut cmd = Command::new("powershell");
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.args(&["-NoProfile", "-NonInteractive", "-Command", &outer_script]);
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &outer_script]);
 
         match cmd.status() {
             Ok(status) if status.success() => {

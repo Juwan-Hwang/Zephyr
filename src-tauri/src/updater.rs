@@ -280,7 +280,7 @@ async fn download_release_asset(
     Ok(())
 }
 
-fn select_release_asset<'a>(assets: &'a [GithubAsset]) -> Result<&'a GithubAsset, String> {
+fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     let (os_tag, arch_tag) = current_platform_tags()?;
     let key = format!("mihomo-{}-{}", os_tag, arch_tag);
     let is_windows = os_tag == "windows";
@@ -395,7 +395,7 @@ fn extract_from_gz(
             }
         }
         let _ = std::fs::remove_file(&temp_tar_path);
-        return Err("No executable found in tar.gz".to_string());
+        Err("No executable found in tar.gz".to_string())
     } else {
         let mut out_file = std::fs::File::create(exe_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut decomp_file, &mut out_file).map_err(|e| e.to_string())?;
@@ -626,7 +626,7 @@ pub async fn update_core(
             .to_string()
     })?;
 
-    let paths = core_manager::ensure_app_storage(&app)?;
+    let paths = core_manager::ensure_app_storage(app)?;
 
     // Use unpredictable temp file names to prevent TOCTOU attacks
     let temp_suffix = uuid::Uuid::new_v4().to_string();
@@ -643,9 +643,9 @@ pub async fn update_core(
     let expected_hash = get_expected_sha256(&version, &asset_name).await?;
     verify_sha256(&archive_path, &expected_hash)
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             let _ = std::fs::remove_file(&archive_path);
-            e
+            let _ = e;
         })?;
 
     emit_core_download_status(&window, "Download complete, extracting core...", 84);
@@ -692,7 +692,7 @@ pub async fn update_core(
         }
     }
 
-    install_core_binary(&app)?;
+    install_core_binary(app)?;
 
     let (last_config, last_args, last_secret) = {
         let lock = state.0.lock().map_err(|_| "Failed to lock state")?;
@@ -836,9 +836,9 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     emit_core_download_status(&window, "Verifying GeoIP...", 45);
     verify_sha256(&geoip_path, &geoip_expected_hash)
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             let _ = std::fs::remove_file(&geoip_path);
-            e
+            let _ = e;
         })?;
 
     // Download GeoSite
@@ -886,9 +886,9 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     emit_core_download_status(&window, "Verifying GeoSite...", 90);
     verify_sha256(&geosite_path, &geosite_expected_hash)
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             let _ = std::fs::remove_file(&geosite_path);
-            e
+            let _ = e;
         })?;
 
     // Apply updates
