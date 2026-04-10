@@ -2,6 +2,7 @@
 name = "Zephyr"
 version = "0.1.0"
 description = "A modern Mihomo GUI client"
+license = "MIT"
 authors = ["Zephyr Team"]
 edition = "2021"
 
