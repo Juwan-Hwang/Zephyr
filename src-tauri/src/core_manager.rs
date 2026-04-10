@@ -1408,7 +1408,7 @@ pub async fn start_core(
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
-        let secret = restart_core_as_root(&app, true)?;
+        let secret = restart_core_as_root(&app, true).await?;
         return Ok(CoreStartResult { secret, port: 9090 });
     }
 
@@ -2929,11 +2929,22 @@ pub fn is_private_host_public(host: &str) -> bool {
 /// Tauri command to restart mihomo core with root privileges on macOS for TUN mode
 /// Returns the secret for frontend to update
 #[tauri::command]
+#[cfg(target_os = "macos")]
 pub async fn restart_core_as_root_cmd(
     app: tauri::AppHandle,
     enable_tun: bool,
 ) -> Result<String, String> {
-    restart_core_as_root(&app, enable_tun)
+    restart_core_as_root(&app, enable_tun).await
+}
+
+/// On non-macOS platforms, this is a no-op
+#[tauri::command]
+#[cfg(not(target_os = "macos"))]
+pub async fn restart_core_as_root_cmd(
+    _app: tauri::AppHandle,
+    _enable_tun: bool,
+) -> Result<String, String> {
+    Ok(String::new())
 }
 
 #[cfg(test)]

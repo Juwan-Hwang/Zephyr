@@ -1,6 +1,8 @@
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager};
+
+#[cfg(target_os = "windows")]
 use tauri_plugin_dialog::DialogExt;
 
 // Rate limiting: Maximum 1 UWP exemption operation per 5 minutes
@@ -53,6 +55,7 @@ fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
