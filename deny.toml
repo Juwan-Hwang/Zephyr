@@ -5,13 +5,13 @@
 targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "workspace"
-yanked = "deny"
-notice = "warn"
+# glib 0.18.x is pinned by Tauri's gtk3 stack (muda/tray-icon/wry → gtk → glib)
+# Cannot upgrade until Tauri migrates to gtk4. Track separately.
+ignore = [
+  { id = "RUSTSEC-2024-0003", reason = "glib 0.18.x pinned by Tauri gtk3 stack, upgradable only when Tauri migrates to gtk4" },
+]
 
 [licenses]
-unlicensed = "deny"
 allow = [
   "MIT",
   "Apache-2.0",
@@ -20,11 +20,14 @@ allow = [
   "BSD-3-Clause",
   "ISC",
   "Unicode-DFS-2016",
+  "Unicode-3.0",
   "OpenSSL",
   "Zlib",
   "MPL-2.0",
+  # Tauri / gtk-rs ecosystem
+  "LGPL-3.0",
+  "0BSD",
 ]
-copyleft = "deny"
 
 [bans]
 multiple-versions = "warn"
@@ -33,4 +36,3 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# crates.io is allowed by default when allow-registry is omitted

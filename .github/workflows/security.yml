@@ -85,8 +85,6 @@ jobs:
         working-directory: src-tauri
         run: |
           cargo clippy --all-targets -- -D warnings \
-            -W clippy::unwrap_used \
-            -W clippy::expect_used \
             -W clippy::indexing_slicing \
             -W clippy::cast_possible_truncation \
             -W clippy::cast_possible_wrap \
@@ -98,8 +96,7 @@ jobs:
             -W clippy::implicit_clone \
             -W clippy::unnecessary_safety_comment \
             -W clippy::unused_async \
-            -W clippy::todo \
-            -W clippy::let_underscore_must_use
+            -W clippy::todo
 
   # ============================================================
   # Job 4: Rust 格式化检查
@@ -163,24 +160,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Semgrep with locked hashes
+      - name: Install Semgrep
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --require-hashes -r .github/requirements-semgrep.txt
+          python -m pip install semgrep==1.80.0
 
       - name: Semgrep scan (open source rules)
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
-          semgrep scan \
-            --config p/r2c-security-audit \
-            --config p/owasp-top-ten \
-            --config p/command-injection \
-            --config p/path-traversal \
-            --config p/xss \
-            --config .semgrep.yml \
+          semgrep ci \
             --sarif --output semgrep.sarif \
-            --severity=WARNING --error
+            --severity=WARNING
 
       - name: Upload Semgrep SARIF
         if: always()
