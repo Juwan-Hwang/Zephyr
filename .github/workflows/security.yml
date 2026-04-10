@@ -51,7 +51,7 @@ jobs:
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check
-          arguments: --config deny.toml
+          command-arguments: --config deny.toml
           log-level: warn
 
   # ============================================================
@@ -165,6 +165,8 @@ jobs:
           python -m pip install --require-hashes -r .github/requirements-semgrep.txt
 
       - name: Semgrep scan (open source rules)
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
           semgrep scan \
             --config p/r2c-security-audit \
@@ -195,7 +197,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: trufflesecurity/trufflehog@v3
+      - uses: trufflesecurity/trufflehog@v3.94.3
         with:
           extra_args: --only-verified
           path: .
