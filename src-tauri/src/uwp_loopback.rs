@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager};
 
@@ -93,6 +92,7 @@ pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
 
         use base64::{engine::general_purpose::STANDARD, Engine};
         use std::os::windows::process::CommandExt;
+        use std::process::Command;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         // Apply loopback exemption to all non-framework Appx packages.
