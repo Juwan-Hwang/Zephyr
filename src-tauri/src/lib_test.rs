@@ -23,6 +23,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_config_file_name() {
+        // Valid filenames should pass through
         assert_eq!(
             core_manager::sanitize_config_file_name_public("test.yaml").unwrap(),
             "test.yaml"
@@ -31,6 +32,7 @@ mod tests {
             core_manager::sanitize_config_file_name_public("test.yml").unwrap(),
             "test.yml"
         );
+        // Path components are stripped by Path::file_name(), leaving just the filename
         assert_eq!(
             core_manager::sanitize_config_file_name_public("../test.yaml").unwrap(),
             "test.yaml"
@@ -43,7 +45,21 @@ mod tests {
             core_manager::sanitize_config_file_name_public("foo\\test.yaml").unwrap(),
             "test.yaml"
         );
+        // Invalid extension must be rejected
         assert!(core_manager::sanitize_config_file_name_public("test.txt").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_config_file_name_rejects_path_traversal() {
+        // Literal '..' in the filename component (after extraction) is rejected
+        assert!(core_manager::sanitize_config_file_name_public("..").is_err());
+        // Directory separators in the final filename are rejected
+        assert!(core_manager::sanitize_config_file_name_public("foo/bar").is_err());
+        // Null bytes rejected
+        assert!(core_manager::sanitize_config_file_name_public("test\x00.yaml").is_err());
+        // Legitimate filenames with dots (but no separators) should work
+        assert!(core_manager::sanitize_config_file_name_public(".test.yaml").is_ok());
+        assert!(core_manager::sanitize_config_file_name_public("config.backup.yml").is_ok());
     }
 
     mod dangerous_keys_tests {

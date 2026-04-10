@@ -6,12 +6,17 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows
 
 [advisories]
 ignore = [
-  # unic-* crates pulled in by Tauri (tauri-utils → urlpattern → unic-ucd-ident → unic-ucd-*)
+  # rust-unic family — all pulled in by Tauri (tauri-utils → urlpattern → unic-ucd-ident → unic-ucd-*)
   # No safe upgrade available upstream, waiting for Tauri to update its urlpattern dependency
-  { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version pulled in by Tauri, no safe upgrade available" },
-  { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident pulled in by Tauri, no safe upgrade available" },
-  { id = "RUSTSEC-2025-0080", reason = "unic-common pulled in by Tauri, no safe upgrade available" },
-  { id = "RUSTSEC-2025-0075", reason = "unic-char-range pulled in by Tauri, no safe upgrade available" },
+  # Advisory IDs RUSTSEC-2025-0075~0084 + 0098/0100 cover the entire unic crate ecosystem
+  { id = "RUSTSEC-2025-0075", reason = "unic-char-range, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0080", reason = "unic-common, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0081", reason = "unic-char-property, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0082", reason = "unic-ucd-version, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0083", reason = "unic-ucd-ident, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0084", reason = "unic-segment, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version, rust-unic family via Tauri, no safe upgrade" },
+  { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident, rust-unic family via Tauri, no safe upgrade" },
 ]
 
 [licenses]
