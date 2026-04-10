@@ -5,10 +5,13 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "windows")]
 use tauri_plugin_dialog::DialogExt;
 
+#[allow(dead_code)]
 // Rate limiting: Maximum 1 UWP exemption operation per 5 minutes
 static LAST_UWP_OPERATION: AtomicU64 = AtomicU64::new(0);
+#[allow(dead_code)]
 const UWP_OPERATION_COOLDOWN_SECS: u64 = 300; // 5 minutes
 
+#[allow(dead_code)]
 /// Check if enough time has passed since last UWP operation (rate limiting)
 fn check_rate_limit() -> Result<(), String> {
     let now = std::time::SystemTime::now()
@@ -29,6 +32,7 @@ fn check_rate_limit() -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Validate that this is a legitimate call by checking various security markers
 fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
     // Check if the app is in a valid state
