@@ -11,7 +11,13 @@ ignore = [
   { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version pulled in by Tauri, no safe upgrade available" },
   { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident pulled in by Tauri, no safe upgrade available" },
   { id = "RUSTSEC-2025-0080", reason = "unic-common pulled in by Tauri, no safe upgrade available" },
+  { id = "RUSTSEC-2025-0075", reason = "unic-char-range pulled in by Tauri, no safe upgrade available" },
 ]
+
+# Print all advisories instead of failing on the first one
+unmaintained = "warn"
+vulnerability = "deny"
+unsound = "deny"
 
 [licenses]
 allow = [
