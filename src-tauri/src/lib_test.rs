@@ -41,10 +41,17 @@ mod tests {
             core_manager::sanitize_config_file_name_public("foo/test.yaml").unwrap(),
             "test.yaml"
         );
+        // Note: "foo\test.yaml" with backslash is platform-dependent:
+        // - Windows: \ is a separator, file_name() extracts "test.yaml" → Ok
+        // - Linux:   \ is a valid filename char, NOT a separator, so it's rejected
+        // We test both forward slash (portable) and backslash (platform-specific) separately
+        #[cfg(target_os = "windows")]
         assert_eq!(
             core_manager::sanitize_config_file_name_public("foo\\test.yaml").unwrap(),
             "test.yaml"
         );
+        #[cfg(not(target_os = "windows"))]
+        assert!(core_manager::sanitize_config_file_name_public("foo\\test.yaml").is_err());
         // Invalid extension must be rejected
         assert!(core_manager::sanitize_config_file_name_public("test.txt").is_err());
     }
