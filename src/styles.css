@@ -67,6 +67,7 @@ input[type=number]::-webkit-outer-spin-button {
   margin: 0; 
 }
 input[type=number] {
+  appearance: textfield; /* standard */
   -moz-appearance: textfield; /* Firefox */
 }
 body.theme-blue { --color-accent: #0A84FF; --color-accent-glow: rgba(10, 132, 255, 0.2); }
@@ -280,4 +281,63 @@ html:not(.dark) #setting-lang-menu {
   background-color: rgba(255, 255, 255, 0.92) !important;
   border-color: rgba(30, 41, 59, 0.16) !important;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+/* Common dropdown trigger styles - pill shape like language selector */
+.select-common {
+  @apply bg-black/40 border border-white/5 rounded-full px-4 py-2 text-xs text-zinc-300;
+  @apply focus:outline-none focus:border-accent/50 transition-all;
+  @apply appearance-none cursor-pointer;
+}
+
+/* Custom dropdown panels - solid background, no scroll */
+[id$="-menu"] {
+  background-color: rgb(24 24 27 / 0.97);
+  overflow: hidden;
+}
+
+/* Custom dropdown option hover & active state - covers all buttons inside any dropdown menu */
+[id$="-menu"] button:hover,
+[id$="-menu"] button.active {
+  @apply bg-accent/20;
+}
+
+/* Light mode overrides for custom dropdown menus */
+html:not(.dark) [id$="-menu"] {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(30, 41, 59, 0.16) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12) !important;
+}
+
+/* Common input styles - pill shape */
+.input-common {
+  @apply w-full bg-black/40 border border-white/5 rounded-full px-4 py-2 text-xs text-zinc-300;
+  @apply focus:outline-none focus:border-accent/50 transition-all;
+}
+
+/* Common textarea styles - rounded corners */
+.textarea-common {
+  @apply w-full bg-black/40 border border-white/5 rounded-2xl p-3 text-xs text-zinc-300 font-mono;
+  @apply focus:outline-none focus:border-accent/50 transition-all resize-none;
+}
+
+/* Light mode overrides for common inputs */
+html:not(.dark) .select-common,
+html:not(.dark) .input-common,
+html:not(.dark) .textarea-common {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(30, 41, 59, 0.1) !important;
+  color: #334155 !important;
+}
+
+html:not(.dark) .select-common:focus,
+html:not(.dark) .input-common:focus,
+html:not(.dark) .textarea-common:focus {
+  border-color: var(--accent-primary) !important;
+}
+
+html:not(.dark) .select-common::placeholder,
+html:not(.dark) .input-common::placeholder,
+html:not(.dark) .textarea-common::placeholder {
+  color: #94a3b8 !important;
 }

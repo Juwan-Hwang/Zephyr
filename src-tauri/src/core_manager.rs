@@ -1853,6 +1853,8 @@ fn compute_machine_key() -> Vec<u8> {
         let mut derived_key = [0u8; 32];
         pbkdf2_hmac::<Sha256>(combined_seed.as_bytes(), SALT, 100_000, &mut derived_key);
         
+// Hardware fingerprint-based key is deterministic and stable across restarts
+MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
         return derived_key.to_vec();
     }
     
@@ -1986,6 +1988,9 @@ fn compute_machine_key() -> Vec<u8> {
 /// Returns false if using a session-only key (data will be lost on restart)
 #[tauri::command]
 pub fn is_machine_key_persisted() -> bool {
+    if !MACHINE_KEY_PERSISTED.load(std::sync::atomic::Ordering::SeqCst) {
+        let _key = get_machine_key();
+    }
     MACHINE_KEY_PERSISTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 

@@ -23,6 +23,8 @@ export const translations = {
         minToTrayDesc: "Hide to tray instead of quitting when closing window",
         autoCheckUpdate: "Auto Check Updates",
         autoCheckUpdateDesc: "Automatically check for core updates on startup",
+        confirm: "Confirm",
+        cancel: "Cancel",
         
         // Network & Routing
         networkRouting: "Network & Routing",
@@ -283,6 +285,8 @@ export const translations = {
         minToTrayDesc: "关闭窗口时隐藏到后台，而不是退出",
         autoCheckUpdate: "自动检查更新",
         autoCheckUpdateDesc: "启动时自动检查核心更新",
+        confirm: "确定",
+        cancel: "取消",
         
         // Network & Routing
         networkRouting: "网络与路由",

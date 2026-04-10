@@ -1148,6 +1148,147 @@ function buildNestedPayload(path, value) {
 let currentConfigRules = [];
 let originalConfigRules = [];
 
+// --- Custom Dropdown (replaces native <select> for rounded dropdown panel) ---
+
+/**
+ * Initialize a custom dropdown that mirrors a hidden native <select>.
+ * @param {Object} opts
+ * @param {string} opts.wrapId - The wrapper div id (e.g. 'new-rule-type-wrap')
+ * @param {string} opts.triggerId - The button trigger id
+ * @param {string} opts.menuId - The dropdown menu div id
+ * @param {string} opts.labelId - The label span id inside trigger
+ * @param {string} opts.selectId - The hidden native select id
+ * @param {Function} [opts.onChange] - Callback when selection changes
+ */
+function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectId, onChange, optionAttr = 'data-value' }) {
+    const wrap = document.getElementById(wrapId);
+    const trigger = document.getElementById(triggerId);
+    const menu = document.getElementById(menuId);
+    const label = document.getElementById(labelId);
+    const select = document.getElementById(selectId);
+    if (!wrap || !trigger || !menu || !label || !select) return;
+
+    // Prevent duplicate initialization
+    if (wrap.dataset.dropdownInit) return;
+    wrap.dataset.dropdownInit = '1';
+
+    const arrow = trigger.querySelector('.dropdown-arrow');
+    let isPortalActive = false; // Track portal state
+
+    // Position the menu relative to the trigger (used when portaled to body)
+    const positionMenu = () => {
+        const rect = trigger.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.left = `${rect.left}px`;
+        menu.style.top = `${rect.bottom + 6}px`;
+        menu.style.width = `${rect.width}px`;
+        menu.style.zIndex = '99999';
+    };
+
+    // Wheel scroll: JS passthrough with smooth scrolling (best we can do in Tauri webview)
+    // fixed-position elements capture wheel events and cannot pass them through natively
+    menu.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY;
+        document.querySelectorAll('.overflow-y-auto, .custom-scrollbar').forEach(el => {
+            if (el.scrollHeight > el.clientHeight) {
+                el.scrollBy({ top: delta, behavior: 'smooth' });
+            }
+        });
+    }, { passive: false });
+
+    const closeMenu = () => {
+        menu.classList.add('hidden');
+        if (arrow) arrow.classList.remove('rotate-180');
+        trigger.classList.remove('border-accent/50');
+        // Return from portal
+        if (isPortalActive) {
+            isPortalActive = false;
+            menu.style.position = '';
+            menu.style.left = '';
+            menu.style.top = '';
+            menu.style.width = '';
+            menu.style.zIndex = '';
+            wrap.appendChild(menu);
+        }
+    };
+
+    const openMenu = () => {
+        menu.classList.remove('hidden');
+        if (arrow) arrow.classList.add('rotate-180');
+        trigger.classList.add('border-accent/50');
+        // Portal to body to escape any parent stacking context
+        if (!isPortalActive) {
+            isPortalActive = true;
+            positionMenu();
+            document.body.appendChild(menu);
+        } else {
+            positionMenu(); // Reposition in case of scroll/resize
+        }
+    };
+
+    const syncUI = () => {
+        const opt = select.querySelector(`option[value="${select.value}"]`);
+        if (label && opt) {
+            const activeBtn = menu.querySelector(`[${optionAttr}="${select.value}"]`);
+            label.textContent = activeBtn?.getAttribute('data-label') || opt.textContent || select.value;
+        }
+        menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
+            item.classList.toggle('active', item.getAttribute(optionAttr) === select.value);
+        });
+    };
+
+    // Hover highlight
+    menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
+        item.addEventListener('mouseenter', () => {
+            menu.querySelectorAll(`[${optionAttr}]`).forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+        });
+    });
+    menu.addEventListener('mouseleave', syncUI);
+
+    // Toggle
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.contains('hidden') ? openMenu() : closeMenu();
+    });
+
+    // Option click
+    menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const val = item.getAttribute(optionAttr);
+            if (!val || val === select.value) { closeMenu(); return; }
+            select.value = val;
+            syncUI();
+            closeMenu();
+            if (onChange) onChange(val, select);
+        });
+    });
+
+    // Close on outside click / Escape
+    document.addEventListener('click', (e) => {
+        if (!(e.target instanceof Element)) return;
+        if (!e.target.closest(`#${wrapId}`) && !e.target.closest(`#${menuId}`)) closeMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMenu();
+    });
+
+    // Reposition on window resize/scroll while open
+    window.addEventListener('resize', () => { if (!menu.classList.contains('hidden')) positionMenu(); });
+    window.addEventListener('scroll', () => { if (!menu.classList.contains('hidden')) positionMenu(); }, true);
+
+    // Initial sync
+    syncUI();
+
+    return {
+        setValue: (val) => { select.value = val; syncUI(); },
+        getValue: () => select.value,
+        syncUI
+    };
+}
+
 // --- Rules Engine Logic ---
 export async function initRulesPage() {
     const list = document.getElementById('rules-list');
@@ -1179,6 +1320,22 @@ export async function initRulesPage() {
         const addBtn = document.getElementById('add-rule-btn');
         const cancelBtn = document.getElementById('cancel-add-rule-btn');
         const confirmBtn = document.getElementById('confirm-add-rule-btn');
+
+        // Initialize custom dropdowns for rule form
+        window.__ruleTypeDropdown = initCustomDropdown({
+            wrapId: 'new-rule-type-wrap',
+            triggerId: 'new-rule-type-trigger',
+            menuId: 'new-rule-type-menu',
+            labelId: 'new-rule-type-label',
+            selectId: 'new-rule-type'
+        });
+        window.__rulePolicyDropdown = initCustomDropdown({
+            wrapId: 'new-rule-policy-wrap',
+            triggerId: 'new-rule-policy-trigger',
+            menuId: 'new-rule-policy-menu',
+            labelId: 'new-rule-policy-label',
+            selectId: 'new-rule-policy'
+        });
 
         addBtn?.addEventListener('click', () => {
             form.classList.remove('hidden');
@@ -1322,6 +1479,9 @@ function renderRulesList(searchQuery = '') {
             document.getElementById('new-rule-type').value = type;
             document.getElementById('new-rule-value').value = value || '';
             document.getElementById('new-rule-policy').value = policy;
+            // Sync custom dropdown labels
+            if (window.__ruleTypeDropdown) window.__ruleTypeDropdown.setValue(type);
+            if (window.__rulePolicyDropdown) window.__rulePolicyDropdown.setValue(policy);
             
             // Remove the old rule, so saving the form acts as an update
             currentConfigRules.splice(index, 1);
@@ -1961,10 +2121,6 @@ export function initUwpExemption() {
 // --- Settings Logic ---
 export async function initSettings() {
     const langSelect = document.getElementById('setting-lang');
-    const langTrigger = document.getElementById('setting-lang-trigger');
-    const langMenu = document.getElementById('setting-lang-menu');
-    const langLabel = document.getElementById('setting-lang-label');
-    const langArrow = document.getElementById('setting-lang-arrow');
     const closeTrayToggle = document.getElementById('setting-close-tray');
     const autoUpdateToggle = document.getElementById('setting-auto-update');
     const autostartToggle = document.getElementById('setting-autostart');
@@ -2037,80 +2193,23 @@ export async function initSettings() {
     }
 
     if (langSelect) {
-        const syncLanguageUI = () => {
-            const selectedOption = langSelect.querySelector(`option[value="${langSelect.value}"]`);
-            if (langLabel && selectedOption) {
-                langLabel.textContent = selectedOption.textContent || selectedOption.value;
-            }
-            if (langMenu) {
-                langMenu.querySelectorAll('[data-lang-value]').forEach((item) => {
-                    const value = item.getAttribute('data-lang-value');
-                    item.classList.toggle('bg-accent/20', value === langSelect.value);
-                    item.classList.toggle('text-accent', value === langSelect.value);
-                    item.classList.toggle('text-zinc-200', value !== langSelect.value);
-                });
-            }
-        };
-
-        const closeLanguageMenu = () => {
-            if (langMenu) langMenu.classList.add('hidden');
-            if (langArrow) langArrow.classList.remove('rotate-180');
-            if (langTrigger) langTrigger.classList.remove('border-accent/50');
-        };
-
-        const openLanguageMenu = () => {
-            if (langMenu) langMenu.classList.remove('hidden');
-            if (langArrow) langArrow.classList.add('rotate-180');
-            if (langTrigger) langTrigger.classList.add('border-accent/50');
-        };
-
         langSelect.value = currentLang;
-        syncLanguageUI();
 
-        if (langTrigger && langMenu) {
-            langTrigger.onclick = () => {
-                if (langMenu.classList.contains('hidden')) {
-                    openLanguageMenu();
-                } else {
-                    closeLanguageMenu();
-                }
-            };
-
-            langMenu.querySelectorAll('[data-lang-value]').forEach((item) => {
-                item.onclick = () => {
-                    const value = item.getAttribute('data-lang-value');
-                    if (!value || value === langSelect.value) {
-                        closeLanguageMenu();
-                        return;
-                    }
-                    langSelect.value = value;
-                    setLanguage(value);
-                    renderConfigs();
-                    syncLanguageUI();
-                    closeLanguageMenu();
-                };
-            });
-
-            if (!langMenu.dataset.boundOutside) {
-                langMenu.dataset.boundOutside = '1';
-                document.addEventListener('click', (event) => {
-                    const target = event.target;
-                    if (!(target instanceof Element)) return;
-                    if (!target.closest('#setting-lang-wrap')) {
-                        closeLanguageMenu();
-                    }
-                });
-                document.addEventListener('keydown', (event) => {
-                    if (event.key === 'Escape') closeLanguageMenu();
-                });
-            }
-        } else {
-            langSelect.onchange = () => {
-                setLanguage(langSelect.value);
+        const langDropdown = initCustomDropdown({
+            wrapId: 'setting-lang-wrap',
+            triggerId: 'setting-lang-trigger',
+            menuId: 'setting-lang-menu',
+            labelId: 'setting-lang-label',
+            selectId: 'setting-lang',
+            optionAttr: 'data-lang-value',
+            onChange: (value) => {
+                setLanguage(value);
                 renderConfigs();
-                syncLanguageUI();
-            };
-        }
+            }
+        });
+
+        // Expose for external sync (e.g. after language switch from tray)
+        window.__langDropdown = langDropdown;
     }
 
     // Load current settings
@@ -2321,9 +2420,16 @@ export async function initSettings() {
     const updateThemeModeUI = (mode) => {
         const idx = themeModeMap.indexOf(mode);
         if (themeModeSlider && idx !== -1) {
-            // Use translateX with percentage of slider width
-            // Slider moves by its own width + 4px gap for each step
-            themeModeSlider.style.transform = `translateX(calc(${idx * 100}% + ${idx * 4}px))`;
+            // Each section is 1/3 of the container
+            // Slider starts at left: 4px (p-1 = 4px padding)
+            // Slider width = (container width - 8px) / 3
+            // Position for each index:
+            // idx=0 (light): translateX(0) - at left position
+            // idx=1 (auto): translateX(100% of slider width + gap) 
+            // idx=2 (dark): translateX(2 * slider width + 2 * gap)
+            // The slider width is calc((100% - 8px) / 3) of container
+            // So translateX should be: idx * (100% / 3) considering slider's own width
+            themeModeSlider.style.transform = `translateX(${idx * 100}%)`;
         }
         themeModeButtons.forEach((btn, btnIdx) => {
             if (btnIdx === idx) {
@@ -3116,9 +3222,22 @@ function initFakeClient() {
     if (!select.value) select.value = 'custom'; // fallback if option not found
     customInput.value = savedCustom;
 
+    // Initialize custom dropdown for fake client
+    const fakeClientDropdown = initCustomDropdown({
+        wrapId: 'fake-client-select-wrap',
+        triggerId: 'fake-client-trigger',
+        menuId: 'fake-client-menu',
+        labelId: 'fake-client-label',
+        selectId: 'fake-client-select',
+        onChange: (val) => {
+            localStorage.setItem('fakeClientType', val);
+            updateVisibility();
+        }
+    });
+
     const updateVisibility = () => {
         if (toggle.checked) {
-            optionsContainer.classList.remove('max-h-0', 'opacity-0');
+            optionsContainer.classList.remove('max-h-0', 'opacity-0', 'overflow-hidden');
             optionsContainer.classList.add('max-h-40', 'opacity-100');
             if (select.value === 'custom') {
                 customContainer.classList.remove('hidden');
@@ -3130,7 +3249,7 @@ function initFakeClient() {
             }
         } else {
             optionsContainer.classList.remove('max-h-40', 'opacity-100');
-            optionsContainer.classList.add('max-h-0', 'opacity-0');
+            optionsContainer.classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
             setTimeout(() => customContainer.classList.add('hidden'), 300);
         }
     };
@@ -3138,21 +3257,30 @@ function initFakeClient() {
     const fetchLatestVersions = async () => {
         if (isFetching || versionsFetched) return;
         isFetching = true;
-        select.disabled = true;
         spinner.classList.remove('hidden');
 
         try {
             const versions = await window.__TAURI__.core.invoke('get_latest_client_versions');
             
-            // Update options
-            select.querySelector('option[value^="clash-verge"]').value = versions.verge;
-            select.querySelector('option[value^="clash-verge"]').textContent = `Clash Verge Rev (${versions.verge})`;
-            
-            select.querySelector('option[value^="mihomo-party"]').value = versions.mihomo_party;
-            select.querySelector('option[value^="mihomo-party"]').textContent = `mihomo-party (${versions.mihomo_party})`;
-            
-            select.querySelector('option[value^="Flclash"]').value = versions.flclash;
-            select.querySelector('option[value^="Flclash"]').textContent = `Flclash (${versions.flclash})`;
+            // Update native select options (source of truth)
+            const vergeOpt = select.querySelector('option[value^="clash-verge"]');
+            const partyOpt = select.querySelector('option[value^="mihomo-party"]');
+            const flclashOpt = select.querySelector('option[value^="Flclash"]');
+
+            if (vergeOpt) { vergeOpt.value = versions.verge; vergeOpt.textContent = `Clash Verge Rev (${versions.verge})`; }
+            if (partyOpt) { partyOpt.value = versions.mihomo_party; partyOpt.textContent = `mihomo-party (${versions.mihomo_party})`; }
+            if (flclashOpt) { flclashOpt.value = versions.flclash; flclashOpt.textContent = `Flclash (${versions.flclash})`; }
+
+            // Update dropdown menu buttons to match
+            const menu = document.getElementById('fake-client-menu');
+            if (menu) {
+                const vergeBtn = menu.querySelector('[data-value^="clash-verge"]');
+                const partyBtn = menu.querySelector('[data-value^="mihomo-party"]');
+                const flclashBtn = menu.querySelector('[data-value^="Flclash"]');
+                if (vergeBtn) { vergeBtn.setAttribute('data-value', versions.verge); vergeBtn.textContent = `Clash Verge Rev (${versions.verge})`; vergeBtn.setAttribute('data-label', `Clash Verge Rev (${versions.verge})`); }
+                if (partyBtn) { partyBtn.setAttribute('data-value', versions.mihomo_party); partyBtn.textContent = `mihomo-party (${versions.mihomo_party})`; partyBtn.setAttribute('data-label', `mihomo-party (${versions.mihomo_party})`); }
+                if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
+            }
 
             // Reselect based on previous choice if possible
             if (savedType && savedType.startsWith('clash-verge')) select.value = versions.verge;
@@ -3160,12 +3288,14 @@ function initFakeClient() {
             else if (savedType && savedType.startsWith('Flclash')) select.value = versions.flclash;
             else select.value = savedType;
 
+            // Sync custom dropdown UI after updating values
+            if (fakeClientDropdown) fakeClientDropdown.syncUI();
+
             versionsFetched = true;
         } catch (err) {
             console.error('Failed to fetch latest client versions:', err);
         } finally {
             isFetching = false;
-            select.disabled = false;
             spinner.classList.add('hidden');
             
             // Re-check visibility in case it was changed during fetch
@@ -3180,11 +3310,6 @@ function initFakeClient() {
             const t = translations[currentLang];
             showNotification(t.fakeClientWarning || "Warning: Disabling this may cause incorrect config format from subscriptions.", "warning");
         }
-    });
-
-    select.addEventListener('change', () => {
-        localStorage.setItem('fakeClientType', select.value);
-        updateVisibility();
     });
 
     customInput.addEventListener('input', () => {
