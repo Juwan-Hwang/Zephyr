@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: EmbarkStudios/cargo-deny-action@3373b876b3d5c4fa3a38e484e6b1663bb785e20d # v2.0.10
+      - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check
@@ -91,7 +91,7 @@ jobs:
             -W clippy::filetype_is_file \
             -W clippy::large_include_file \
             -W clippy::shadow_reuse \
-            -W clippy::string_to_string \
+            -W clippy::implicit_clone \
             -W clippy::unnecessary_safety_comment \
             -W clippy::unused_async \
             -W clippy::todo \
@@ -195,7 +195,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: trufflesecurity/trufflehog@3f194e9e4d8e02c6e91a28a69f2bbcd5b4c6b931 # v3.88.7
+      - uses: trufflesecurity/trufflehog@v3
         with:
           extra_args: --only-verified
           path: .

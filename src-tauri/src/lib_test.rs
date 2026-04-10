@@ -23,26 +23,47 @@ mod tests {
 
     #[test]
     fn test_sanitize_config_file_name() {
-        assert_eq!(core_manager::sanitize_config_file_name_public("test.yaml").unwrap(), "test.yaml");
-        assert_eq!(core_manager::sanitize_config_file_name_public("test.yml").unwrap(), "test.yml");
-        assert_eq!(core_manager::sanitize_config_file_name_public("../test.yaml").unwrap(), "test.yaml");
-        assert_eq!(core_manager::sanitize_config_file_name_public("foo/test.yaml").unwrap(), "test.yaml");
-        assert_eq!(core_manager::sanitize_config_file_name_public("foo\\test.yaml").unwrap(), "test.yaml");
+        assert_eq!(
+            core_manager::sanitize_config_file_name_public("test.yaml").unwrap(),
+            "test.yaml"
+        );
+        assert_eq!(
+            core_manager::sanitize_config_file_name_public("test.yml").unwrap(),
+            "test.yml"
+        );
+        assert_eq!(
+            core_manager::sanitize_config_file_name_public("../test.yaml").unwrap(),
+            "test.yaml"
+        );
+        assert_eq!(
+            core_manager::sanitize_config_file_name_public("foo/test.yaml").unwrap(),
+            "test.yaml"
+        );
+        assert_eq!(
+            core_manager::sanitize_config_file_name_public("foo\\test.yaml").unwrap(),
+            "test.yaml"
+        );
         assert!(core_manager::sanitize_config_file_name_public("test.txt").is_err());
     }
-    
+
     mod dangerous_keys_tests {
         use crate::core_manager::remove_dangerous_keys;
-        
+
         #[test]
         fn test_top_level_script_removed() {
             let yaml = "script: test.js\nport: 7890";
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            assert!(!value.as_mapping().unwrap().contains_key(&serde_yaml::Value::String("script".to_string())));
-            assert!(value.as_mapping().unwrap().contains_key(&serde_yaml::Value::String("port".to_string())));
+            assert!(!value
+                .as_mapping()
+                .unwrap()
+                .contains_key(&serde_yaml::Value::String("script".to_string())));
+            assert!(value
+                .as_mapping()
+                .unwrap()
+                .contains_key(&serde_yaml::Value::String("port".to_string())));
         }
-        
+
         #[test]
         fn test_nested_script_in_proxy_group_removed() {
             let yaml = r#"
@@ -55,13 +76,13 @@ proxy-groups:
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
+
             let groups = value.get("proxy-groups").unwrap().as_sequence().unwrap();
             let group = groups.first().unwrap().as_mapping().unwrap();
             assert!(!group.contains_key(&serde_yaml::Value::String("script".to_string())));
             assert!(group.contains_key(&serde_yaml::Value::String("name".to_string())));
         }
-        
+
         #[test]
         fn test_provider_path_removed() {
             let yaml = r#"
@@ -74,14 +95,17 @@ proxy-providers:
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
+
             let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
-            let provider = providers.get(&serde_yaml::Value::String("my-provider".to_string()))
-                .unwrap().as_mapping().unwrap();
+            let provider = providers
+                .get(&serde_yaml::Value::String("my-provider".to_string()))
+                .unwrap()
+                .as_mapping()
+                .unwrap();
             assert!(!provider.contains_key(&serde_yaml::Value::String("path".to_string())));
             assert!(provider.contains_key(&serde_yaml::Value::String("type".to_string())));
         }
-        
+
         #[test]
         fn test_non_provider_path_preserved() {
             let yaml = r#"
@@ -98,14 +122,14 @@ proxies:
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
+
             // These should NOT be removed - not in provider context
             let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
             let proxy = proxies.first().unwrap().as_mapping().unwrap();
             // 'port' is different from 'path', should be preserved
             assert!(proxy.contains_key(&serde_yaml::Value::String("port".to_string())));
         }
-        
+
         #[test]
         fn test_deeply_nested_script_removed() {
             let yaml = r#"
@@ -118,10 +142,13 @@ script:
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
-            assert!(!value.as_mapping().unwrap().contains_key(&serde_yaml::Value::String("script".to_string())));
+
+            assert!(!value
+                .as_mapping()
+                .unwrap()
+                .contains_key(&serde_yaml::Value::String("script".to_string())));
         }
-        
+
         #[test]
         fn test_script_path_removed() {
             let yaml = r#"
@@ -130,10 +157,13 @@ mode: rule
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
-            assert!(!value.as_mapping().unwrap().contains_key(&serde_yaml::Value::String("script-path".to_string())));
+
+            assert!(!value
+                .as_mapping()
+                .unwrap()
+                .contains_key(&serde_yaml::Value::String("script-path".to_string())));
         }
-        
+
         #[test]
         fn test_provider_without_path_preserved() {
             let yaml = r#"
@@ -145,7 +175,7 @@ rule-providers:
 "#;
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
-            
+
             let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
             assert!(providers.contains_key(&serde_yaml::Value::String("my-rules".to_string())));
         }

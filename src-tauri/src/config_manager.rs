@@ -1,9 +1,9 @@
 use crate::core_manager::ensure_app_storage;
+use crate::core_manager::MihomoState;
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
 use tauri::{AppHandle, Emitter, Manager, State};
-use crate::core_manager::MihomoState;
 
 #[tauri::command]
 pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
@@ -17,8 +17,8 @@ pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
     let content = fs::read_to_string(&run_config_path)
         .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
 
-    let mut yaml_val: YamlValue = serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse YAML: {}", e))?;
+    let mut yaml_val: YamlValue =
+        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
     // Security mitigation: Strip secret and external-controller to prevent credential leakage
     if let YamlValue::Mapping(ref mut map) = yaml_val {
@@ -66,7 +66,11 @@ pub struct ConfigUpdateResult {
 }
 
 #[tauri::command]
-pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch: JsonValue) -> Result<ConfigUpdateResult, String> {
+pub async fn update_config(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    patch: JsonValue,
+) -> Result<ConfigUpdateResult, String> {
     let paths = ensure_app_storage(&app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
 
@@ -74,19 +78,23 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
     let mut current_yaml: YamlValue = if run_config_path.exists() {
         let content = fs::read_to_string(&run_config_path)
             .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
-        
+
         match serde_yaml::from_str(&content) {
             Ok(yaml) => yaml,
             Err(e) => {
                 eprintln!("[Config] WARNING: Failed to parse run_config.yaml: {}. Starting with empty config.", e);
-                
+
                 // Notify user about parse failure
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("config-parse-error", format!(
-                        "Configuration file could not be parsed. Using empty config. Error: {}", e
-                    ));
+                    let _ = window.emit(
+                        "config-parse-error",
+                        format!(
+                            "Configuration file could not be parsed. Using empty config. Error: {}",
+                            e
+                        ),
+                    );
                 }
-                
+
                 YamlValue::Mapping(Mapping::new())
             }
         }
@@ -100,19 +108,22 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
 
     // 3. Merge patch into current config
     // SECURITY: Save critical settings before merge to restore after
-    let original_external_controller = current_yaml.get("external-controller")
+    let original_external_controller = current_yaml
+        .get("external-controller")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let original_secret = current_yaml.get("secret")
+    let original_secret = current_yaml
+        .get("secret")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let tun_enabled_before = current_yaml.get("tun")
+    let tun_enabled_before = current_yaml
+        .get("tun")
         .and_then(|tun| tun.get("enable"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    
+
     merge_yaml(&mut current_yaml, &patch_yaml, 0)?;
-    
+
     // 3.5. SECURITY: Restore critical security settings after merge
     // These settings must never be changed by user config or subscriptions
     if let YamlValue::Mapping(ref mut map) = current_yaml {
@@ -122,32 +133,34 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
             let port = original.split(':').last().unwrap_or("9090");
             map.insert(
                 YamlValue::String("external-controller".to_string()),
-                YamlValue::String(format!("127.0.0.1:{}", port))
+                YamlValue::String(format!("127.0.0.1:{}", port)),
             );
         } else {
             // No original, set secure default
             map.insert(
                 YamlValue::String("external-controller".to_string()),
-                YamlValue::String("127.0.0.1:9090".to_string())
+                YamlValue::String("127.0.0.1:9090".to_string()),
             );
         }
-        
+
         // Restore original secret - never allow removal
         if let Some(ref secret) = original_secret {
             map.insert(
                 YamlValue::String("secret".to_string()),
-                YamlValue::String(secret.clone())
+                YamlValue::String(secret.clone()),
             );
         }
         // If there was no secret before, don't add one (empty or otherwise)
-        
+
         // Protect TUN state - only allow changes through proper UI toggle
         if !tun_enabled_before {
             // TUN was disabled before patch, ensure it stays disabled
-            if let Some(YamlValue::Mapping(ref mut tun_map)) = map.get_mut(&YamlValue::String("tun".to_string())) {
+            if let Some(YamlValue::Mapping(ref mut tun_map)) =
+                map.get_mut(&YamlValue::String("tun".to_string()))
+            {
                 tun_map.insert(
                     YamlValue::String("enable".to_string()),
-                    YamlValue::Bool(false)
+                    YamlValue::Bool(false),
                 );
             }
         }
@@ -160,11 +173,14 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
 
     // 5. Update original profile if it exists
     let (last_config_path, port, secret) = {
-        let lock = state.0.lock().map_err(|_| "Failed to lock state".to_string())?;
+        let lock = state
+            .0
+            .lock()
+            .map_err(|_| "Failed to lock state".to_string())?;
         (
             lock.last_config_path.clone(),
             lock.last_port.unwrap_or(9090),
-            lock.last_secret.clone()
+            lock.last_secret.clone(),
         )
     };
 
@@ -176,7 +192,10 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
                 if let Ok(mut profile_yaml) = serde_yaml::from_str::<YamlValue>(&profile_content) {
                     if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
                         if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                            let _ = crate::core_manager::write_file_secure(&profile_path, &new_profile_content);
+                            let _ = crate::core_manager::write_file_secure(
+                                &profile_path,
+                                &new_profile_content,
+                            );
                         }
                     }
                 }
@@ -186,7 +205,10 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
 
     // 6. Request Core Reload
     // First, try to find the actual port from run_config.yaml external-controller
-    let actual_port = if let Some(ext_ctrl) = current_yaml.get("external-controller").and_then(|v| v.as_str()) {
+    let actual_port = if let Some(ext_ctrl) = current_yaml
+        .get("external-controller")
+        .and_then(|v| v.as_str())
+    {
         if let Some(p) = ext_ctrl.split(':').last() {
             p.parse::<u16>().unwrap_or(port)
         } else {
@@ -203,7 +225,7 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
     // For Mihomo, /configs requires PATCH for partial updates.
     let url = format!("http://127.0.0.1:{}/configs?force=true", actual_port);
     let mut req = client.patch(&url).json(&patch_yaml);
-    
+
     if !secret.is_empty() {
         req = req.bearer_auth(secret);
     }
@@ -211,7 +233,7 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
     // Attempt hot reload but don't fail if it doesn't work
     let mut hot_reload_success = false;
     let mut hot_reload_message = String::new();
-    
+
     match req.send().await {
         Ok(res) => {
             let status = res.status();
@@ -222,7 +244,7 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
                 println!("Warning: Core reload API returned non-success: {}", text);
                 hot_reload_message = format!("Hot reload returned status {}", status);
             }
-        },
+        }
         Err(e) => {
             println!("Warning: Failed to reload core via API: {}", e);
             hot_reload_message = "Core API unavailable for hot reload".to_string();
@@ -234,7 +256,10 @@ pub async fn update_config(app: AppHandle, state: State<'_, MihomoState>, patch:
     let message = if hot_reload_success {
         "Configuration saved and applied successfully".to_string()
     } else if !hot_reload_message.is_empty() {
-        format!("Configuration saved. {} - restart core to apply changes.", hot_reload_message)
+        format!(
+            "Configuration saved. {} - restart core to apply changes.",
+            hot_reload_message
+        )
     } else {
         "Configuration saved. Restart core to apply changes.".to_string()
     };

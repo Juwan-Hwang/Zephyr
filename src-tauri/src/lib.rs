@@ -1,24 +1,29 @@
-pub mod core_manager;
-pub mod updater;
-pub mod sys_proxy;
-pub mod uwp_loopback;
 pub mod config_manager;
+pub mod core_manager;
+pub mod sys_proxy;
 pub mod tray;
+pub mod updater;
+pub mod uwp_loopback;
 
-use core_manager::{ensure_app_storage, start_core, stop_core, list_configs, download_sub, delete_config, get_core_version, MihomoState, CoreData, read_config_file, write_config_file, open_config_folder, fetch_text, kill_mihomo, restart_core_as_root_cmd, set_tun_enabled, kill_all_mihomo_as_root_cmd, smart_kill_all_mihomo_as_root, disable_tun_cmd};
-use updater::{get_latest_version, update_core, update_geo_data, get_latest_client_versions};
-use sys_proxy::{enable_sysproxy, disable_sysproxy, get_sys_proxy, clear_sys_proxy};
 use config_manager::{read_config, update_config};
-use uwp_loopback::exempt_uwp_apps;
-use tray::{init_tray, TrayState, change_tray_icon, update_tray_full_menu};
-use std::sync::{Mutex, Arc};
-use std::collections::HashMap;
-use std::time::{Instant, Duration};
-use tauri::Manager;
+use core_manager::{
+    delete_config, disable_tun_cmd, download_sub, ensure_app_storage, fetch_text, get_core_version,
+    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
+    restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root, start_core,
+    stop_core, write_config_file, CoreData, MihomoState,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use sys_proxy::{clear_sys_proxy, disable_sysproxy, enable_sysproxy, get_sys_proxy};
+use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
+use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
+use updater::{get_latest_client_versions, get_latest_version, update_core, update_geo_data};
+use uwp_loopback::exempt_uwp_apps;
 
 /// Rate limiter for Tauri commands
 pub struct RateLimiter {
@@ -31,25 +36,23 @@ impl RateLimiter {
             calls: Mutex::new(HashMap::new()),
         }
     }
-    
+
     /// Check if a command can be executed (returns true if allowed, false if rate limited)
     /// Also cleans up expired entries to prevent unbounded memory growth
     pub fn check_rate_limit(&self, command: &str, min_interval_ms: u64) -> bool {
         let mut calls = self.calls.lock().unwrap();
         let now = Instant::now();
-        
+
         // Clean up entries older than 1 minute to prevent unbounded growth
-        calls.retain(|_, last_call| {
-            now.duration_since(*last_call) < Duration::from_secs(60)
-        });
-        
+        calls.retain(|_, last_call| now.duration_since(*last_call) < Duration::from_secs(60));
+
         if let Some(last_call) = calls.get(command) {
             let elapsed = now.duration_since(*last_call);
             if elapsed < Duration::from_millis(min_interval_ms) {
                 return false;
             }
         }
-        
+
         calls.insert(command.to_string(), now);
         true
     }
@@ -88,16 +91,24 @@ fn get_settings(state: tauri::State<SettingsState>) -> Settings {
 }
 
 #[tauri::command]
-fn save_settings(app: tauri::AppHandle, state: tauri::State<SettingsState>, settings: Settings) -> Result<(), String> {
+fn save_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    settings: Settings,
+) -> Result<(), String> {
     if let Ok(mut guard) = state.0.lock() {
         *guard = settings.clone();
     }
-    let path = app.path().app_data_dir().map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     if !path.exists() {
         fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
     let file_path = path.join("settings.json");
-    let json_str = serde_json::to_string(&settings).map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    let json_str = serde_json::to_string(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     fs::write(&file_path, json_str).map_err(|e| format!("Failed to write settings.json: {}", e))?;
     #[cfg(unix)]
     {
@@ -118,32 +129,36 @@ fn show_main_window(window: tauri::Window) {
 fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
     // Check if core is running
     let state = app.state::<MihomoState>();
-    let core_running = state.0.lock()
+    let core_running = state
+        .0
+        .lock()
         .map(|guard| guard.process.is_some())
         .unwrap_or(false);
-    
+
     if !core_running {
         // Core not running, return default state
         return Ok("default".to_string());
     }
-    
+
     // Check system proxy status using existing function
     let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
-    
+
     // Check TUN status from tray state
-    let tun_enabled = app.state::<TrayState>()
-        .0.lock()
+    let tun_enabled = app
+        .state::<TrayState>()
+        .0
+        .lock()
         .map(|guard| guard.tun_enabled)
         .unwrap_or(false);
-    
+
     if tun_enabled {
         return Ok("tun".to_string());
     }
-    
+
     if sys_proxy_enabled {
         return Ok("sysproxy".to_string());
     }
-    
+
     Ok("default".to_string())
 }
 
@@ -206,52 +221,62 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    let settings_state = window.state::<SettingsState>();
-                    let close_to_tray = settings_state.0.lock()
-                        .map(|guard| guard.close_to_tray)
-                        .unwrap_or(true);
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let settings_state = window.state::<SettingsState>();
+                let close_to_tray = settings_state
+                    .0
+                    .lock()
+                    .map(|guard| guard.close_to_tray)
+                    .unwrap_or(true);
 
-                    if close_to_tray {
-                        api.prevent_close();
-                        let _ = window.hide();
-                    } else {
-                        kill_mihomo();
-                        let _ = clear_sys_proxy();
-                        let app = window.app_handle();
-                        app.cleanup_before_exit();
-                        app.exit(0);
-                    }
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    kill_mihomo();
+                    let _ = clear_sys_proxy();
+                    let app = window.app_handle();
+                    app.cleanup_before_exit();
+                    app.exit(0);
                 }
-                tauri::WindowEvent::DragDrop(drop_event) => {
-                    if let tauri::DragDropEvent::Drop { paths, .. } = drop_event {
-                        let app = window.app_handle();
-                        if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
-                            let mut imported_count = 0;
-                            for path in paths {
-                                let ext = std::path::Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                                if ext == "yaml" || ext == "yml" {
-                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                        if let Some(file_name) = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()) {
-                                            let target_path = storage_paths.profiles_dir.join(file_name);
-                                            if core_manager::write_file_secure(&target_path, &content).is_ok() {
-                                                imported_count += 1;
-                                            }
+            }
+            tauri::WindowEvent::DragDrop(drop_event) => {
+                if let tauri::DragDropEvent::Drop { paths, .. } = drop_event {
+                    let app = window.app_handle();
+                    if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
+                        let mut imported_count = 0;
+                        for path in paths {
+                            let ext = std::path::Path::new(&path)
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            if ext == "yaml" || ext == "yml" {
+                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                    if let Some(file_name) = std::path::Path::new(&path)
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                    {
+                                        let target_path =
+                                            storage_paths.profiles_dir.join(file_name);
+                                        if core_manager::write_file_secure(&target_path, &content)
+                                            .is_ok()
+                                        {
+                                            imported_count += 1;
                                         }
                                     }
                                 }
                             }
-                            if imported_count > 0 {
-                                use tauri::Emitter;
-                                let _ = window.emit("profiles-imported", imported_count);
-                            }
+                        }
+                        if imported_count > 0 {
+                            use tauri::Emitter;
+                            let _ = window.emit("profiles-imported", imported_count);
                         }
                     }
                 }
-                _ => {}
             }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             start_core,

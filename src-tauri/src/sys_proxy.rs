@@ -290,63 +290,75 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
         if has_gnome() {
             // Use gsettings without shell escaping - gsettings expects plain values
             // The host is already validated to be localhost/127.0.0.1/::1 only
-            
+
             // Try to set all proxy settings atomically by using a single script
             // If any command fails, we won't set the mode to 'manual'
             let mut all_commands_ok = true;
-            
+
             // First, configure all the proxy details
             let http_host = Command::new("gsettings")
                 .args(["set", "org.gnome.system.proxy.http", "host", &host])
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
-            
-            if !http_host { all_commands_ok = false; }
-            
+
+            if !http_host {
+                all_commands_ok = false;
+            }
+
             if all_commands_ok {
                 let http_port = Command::new("gsettings")
                     .args(["set", "org.gnome.system.proxy.http", "port", &port])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !http_port { all_commands_ok = false; }
+                if !http_port {
+                    all_commands_ok = false;
+                }
             }
-            
+
             if all_commands_ok {
                 let https_host = Command::new("gsettings")
                     .args(["set", "org.gnome.system.proxy.https", "host", &host])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !https_host { all_commands_ok = false; }
+                if !https_host {
+                    all_commands_ok = false;
+                }
             }
-            
+
             if all_commands_ok {
                 let https_port = Command::new("gsettings")
                     .args(["set", "org.gnome.system.proxy.https", "port", &port])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !https_port { all_commands_ok = false; }
+                if !https_port {
+                    all_commands_ok = false;
+                }
             }
-            
+
             if all_commands_ok {
                 let socks_host = Command::new("gsettings")
                     .args(["set", "org.gnome.system.proxy.socks", "host", &host])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !socks_host { all_commands_ok = false; }
+                if !socks_host {
+                    all_commands_ok = false;
+                }
             }
-            
+
             if all_commands_ok {
                 let socks_port = Command::new("gsettings")
                     .args(["set", "org.gnome.system.proxy.socks", "port", &port])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !socks_port { all_commands_ok = false; }
+                if !socks_port {
+                    all_commands_ok = false;
+                }
             }
 
             if all_commands_ok {
@@ -359,19 +371,26 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
                         .filter(|h| !h.is_empty() && !h.contains('\''))
                         .map(|h| format!("'{}'", h))
                         .collect();
-                    
+
                     if !hosts.is_empty() {
                         let formatted_bp = format!("[{}]", hosts.join(", "));
                         let ignore_hosts = Command::new("gsettings")
-                            .args(["set", "org.gnome.system.proxy", "ignore-hosts", &formatted_bp])
+                            .args([
+                                "set",
+                                "org.gnome.system.proxy",
+                                "ignore-hosts",
+                                &formatted_bp,
+                            ])
                             .status()
                             .map(|s| s.success())
                             .unwrap_or(false);
-                        if !ignore_hosts { all_commands_ok = false; }
+                        if !ignore_hosts {
+                            all_commands_ok = false;
+                        }
                     }
                 }
             }
-            
+
             // Only enable the proxy mode if all previous settings succeeded
             // This provides atomicity: either all settings are applied, or none
             if all_commands_ok {
@@ -395,7 +414,7 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
         if let Some((kwrite_cmd, _)) = get_kde_cmd() {
             // Apply same atomic pattern as GNOME
             let mut all_kde_ok = true;
-            
+
             // Set all proxy values first
             let http_ok = Command::new(kwrite_cmd)
                 .args([
@@ -410,8 +429,10 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
-            if !http_ok { all_kde_ok = false; }
-            
+            if !http_ok {
+                all_kde_ok = false;
+            }
+
             if all_kde_ok {
                 let https_ok = Command::new(kwrite_cmd)
                     .args([
@@ -426,9 +447,11 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !https_ok { all_kde_ok = false; }
+                if !https_ok {
+                    all_kde_ok = false;
+                }
             }
-            
+
             if all_kde_ok {
                 let socks_ok = Command::new(kwrite_cmd)
                     .args([
@@ -443,7 +466,9 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if !socks_ok { all_kde_ok = false; }
+                if !socks_ok {
+                    all_kde_ok = false;
+                }
             }
 
             // Only enable proxy mode if all settings succeeded
@@ -641,7 +666,13 @@ pub fn disable_sysproxy() -> Result<String, String> {
             let mut all_success = true;
             for proxy_type in &["HTTP", "HTTPS", "SOCKS"] {
                 if let Ok(status) = Command::new("xfconf-query")
-                    .args(["-c", "xfce4-session", "-p", &format!("/proxies/{}", proxy_type), "-r"])
+                    .args([
+                        "-c",
+                        "xfce4-session",
+                        "-p",
+                        &format!("/proxies/{}", proxy_type),
+                        "-r",
+                    ])
                     .status()
                 {
                     if !status.success() {

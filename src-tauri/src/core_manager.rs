@@ -1,17 +1,17 @@
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
+use serde::Serialize;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::IpAddr;
-use std::time::Duration;
-use rand::{thread_rng, Rng};
-use rand::distributions::Alphanumeric;
-use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
+use tauri::{AppHandle, Manager, State};
 
 // Global TUN mode flag
 static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -30,19 +30,19 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
             for key in ["script", "script-path"] {
                 map.remove(&serde_yaml::Value::String(key.to_string()));
             }
-            
+
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
             let is_provider = map.contains_key(&serde_yaml::Value::String("type".to_string()))
                 && (map.contains_key(&serde_yaml::Value::String("url".to_string()))
                     || map.contains_key(&serde_yaml::Value::String("path".to_string())));
-            
+
             // Remove 'path' only in provider context to prevent path traversal
             // while allowing legitimate 'path' fields elsewhere
             if in_provider_context || is_provider {
                 map.remove(&serde_yaml::Value::String("path".to_string()));
             }
-            
+
             // Recursively process all values in the mapping
             for (_, v) in map.iter_mut() {
                 remove_dangerous_keys(v, is_provider);
@@ -75,7 +75,7 @@ pub struct ConfigInfo {
     pub sub_info: Option<String>,
 }
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as base64_standard};
+use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
 
 pub struct CoreData {
     pub process: Option<Child>,
@@ -148,20 +148,30 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
     if content.contains("tun:") {
         // Find the tun block and update enable within it
         let mut in_tun_block = false;
-        let lines: Vec<String> = content.lines().map(|line| {
-            if line.trim().starts_with("tun:") {
-                in_tun_block = true;
-            } else if in_tun_block && !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
-                in_tun_block = false;
-            }
-            
-            if in_tun_block && line.trim().starts_with("enable:") {
-                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-                format!("{}enable: {}", indent, enable)
-            } else {
-                line.to_string()
-            }
-        }).collect();
+        let lines: Vec<String> = content
+            .lines()
+            .map(|line| {
+                if line.trim().starts_with("tun:") {
+                    in_tun_block = true;
+                } else if in_tun_block
+                    && !line.starts_with(" ")
+                    && !line.starts_with("\t")
+                    && !line.is_empty()
+                {
+                    in_tun_block = false;
+                }
+
+                if in_tun_block && line.trim().starts_with("enable:") {
+                    let indent = line
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+                    format!("{}enable: {}", indent, enable)
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
         lines.join("\n")
     } else {
         // No tun block, append it
@@ -177,14 +187,15 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
 /// Extract TUN enable status from YAML config content
 fn extract_tun_enabled_from_yaml(content: &str) -> bool {
     let mut in_tun_block = false;
-    
+
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("tun:") {
             in_tun_block = true;
         } else if in_tun_block {
             if trimmed.starts_with("enable:") {
-                return trimmed.split(':')
+                return trimmed
+                    .split(':')
                     .nth(1)
                     .map(|s| s.trim() == "true")
                     .unwrap_or(false);
@@ -206,45 +217,51 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let paths = resolve_app_paths(app)?;
     let core_path = paths.core_dir.join("mihomo");
     ensure_executable(&core_path)?;
-    
+
     let config_dir_str = paths.core_dir.to_string_lossy();
-    
+
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
     let mut secret = String::new();
-    
+
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        
+
         // Extract current secret from config or generate new one
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
-        
+
         // Update TUN setting
         let mut updated = update_tun_in_yaml(&content, enable_tun);
-        
+
         // Ensure secret is present and up-to-date
         let mut found_secret = false;
-        let mut lines: Vec<String> = updated.lines().map(|line| {
-            if line.trim().starts_with("secret:") {
-                found_secret = true;
-                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
-                format!("{}secret: {}", indent, secret)
-            } else {
-                line.to_string()
-            }
-        }).collect();
-        
+        let mut lines: Vec<String> = updated
+            .lines()
+            .map(|line| {
+                if line.trim().starts_with("secret:") {
+                    found_secret = true;
+                    let indent = line
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+                    format!("{}secret: {}", indent, secret)
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
+
         if !found_secret {
             lines.push(format!("secret: {}", secret));
         }
-        
+
         updated = lines.join("\n");
-        
+
         std::fs::write(&config_file, &updated)
             .map_err(|e| format!("Failed to write config: {}", e))?;
     }
-    
+
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
     // Use user-specific Logs directory (~/Library/Logs/) - secure and predictable for debugging
@@ -263,17 +280,17 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
             let temp = std::env::temp_dir();
             temp.join("mihomo-tun.log").to_string_lossy().to_string()
         });
-    
+
     // CRITICAL: Escape paths for shell single-quote context to prevent command injection
     // Replace all ' with '\'' (end quote, escaped quote, start quote)
     let escaped_config_dir = config_dir_str.replace("'", "'\\''");
     let escaped_log_path = log_path.replace("'", "'\\''");
-    
+
     let script = format!(
         r#"do shell script "killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > '{}' 2>&1 &" with administrator privileges"#,
         escaped_config_dir, escaped_log_path
     );
-    
+
     // Spawn osascript without waiting for it to complete
     // The & at the end of the shell command makes mihomo run in background
     // but osascript might still wait, so we use spawn() instead of output()
@@ -285,10 +302,10 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
-    
+
     // Wait a bit for osascript to potentially show errors (like user cancel)
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-    
+
     // Check if osascript exited quickly with an error (e.g., user canceled)
     match child.try_wait() {
         Ok(Some(status)) => {
@@ -311,31 +328,31 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         }
         Err(_) => {}
     }
-    
+
     // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        
+
         // Check if user canceled (osascript exited with failure)
         if let Ok(Some(status)) = child.try_wait() {
             if !status.success() {
                 return Err("canceled".to_string());
             }
         }
-        
+
         if has_root_mihomo() {
             started = true;
             break;
         }
     }
-    
+
     if !started {
         // Kill osascript if still running
         let _ = child.kill();
         return Err("Root mihomo failed to start within 30 seconds".to_string());
     }
-    
+
     // Wait for port to be bound
     let mut bound = false;
     for _ in 0..10 {
@@ -345,17 +362,17 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
             break;
         }
     }
-    
+
     if !bound {
         return Err("root_start_failed".to_string());
     }
-    
+
     // MSL is already set in the root osascript above (sysctl needs root)
     eprintln!("[TUN] Set MSL=1000 for short TIME_WAIT (via root shell)");
-    
+
     // Mark TUN mode as active
     set_tun_mode(true);
-    
+
     Ok(secret)
 }
 
@@ -373,7 +390,8 @@ fn has_root_mihomo() -> bool {
         .output()
     {
         let text = String::from_utf8_lossy(&output.stdout);
-        text.lines().any(|line| line.trim_start().starts_with("root ") && line.contains("mihomo"))
+        text.lines()
+            .any(|line| line.trim_start().starts_with("root ") && line.contains("mihomo"))
     } else {
         false
     }
@@ -436,7 +454,7 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     kill_all_mihomo_as_root()?;
-    
+
     // Wait for ALL root processes (including osascript shell) to die
     let mut waited = 0;
     loop {
@@ -445,14 +463,14 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
             .output()
             .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
             .unwrap_or(false);
-        
+
         if !has_root_process || waited > 8000 {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
         waited += 200;
     }
-    
+
     Ok(())
 }
 
@@ -471,19 +489,18 @@ pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
     let config_file = paths.core_dir.join("run_config.yaml");
-    
+
     if !config_file.exists() {
         return Err("Config file not found".to_string());
     }
-    
+
     let content = std::fs::read_to_string(&config_file)
         .map_err(|e| format!("Failed to read config: {}", e))?;
-    
+
     let updated = update_tun_in_yaml(&content, enable);
-    
-    std::fs::write(&config_file, updated)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-    
+
+    std::fs::write(&config_file, updated).map_err(|e| format!("Failed to write config: {}", e))?;
+
     Ok(())
 }
 
@@ -497,29 +514,31 @@ pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String
 pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
     let config_file = paths.core_dir.join("run_config.yaml");
-    
+
     if !config_file.exists() {
         return Ok(());
     }
-    
+
     let content = std::fs::read_to_string(&config_file)
         .map_err(|e| format!("Failed to read config: {}", e))?;
-    
+
     // Check if TUN is enabled in config
     let tun_enabled = extract_tun_enabled_from_yaml(&content);
-    
+
     set_tun_mode(tun_enabled);
     eprintln!("[CORE] TUN mode initialized from config: {}", tun_enabled);
-    
+
     Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn ensure_executable(path: &Path) -> Result<(), String> {
-    let metadata = fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {}", e))?;
+    let metadata =
+        fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {}", e))?;
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).map_err(|e| format!("Failed to set executable permissions: {}", e))
+    fs::set_permissions(path, permissions)
+        .map_err(|e| format!("Failed to set executable permissions: {}", e))
 }
 
 pub fn resolve_app_paths(app: &AppHandle) -> Result<AppPaths, String> {
@@ -608,7 +627,7 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                         eprintln!("Warning: Failed to copy bundled file {}: {}", file_name, e);
                     }
                 }
-                
+
                 // Always ensure executable permission on Unix
                 #[cfg(any(target_os = "macos", target_os = "linux"))]
                 {
@@ -663,7 +682,8 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 continue;
             }
 
-            fs::copy(&source, &target).map_err(|e| format!("Failed to migrate {:?}: {}", source, e))?;
+            fs::copy(&source, &target)
+                .map_err(|e| format!("Failed to migrate {:?}: {}", source, e))?;
         }
     }
 
@@ -672,18 +692,20 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
 
 pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
     let paths = resolve_app_paths(app)?;
-    
+
     let _is_new = !paths.app_data_dir.exists();
-    
-    fs::create_dir_all(&paths.app_data_dir).map_err(|e| format!("Failed to create app data dir: {}", e))?;
+
+    fs::create_dir_all(&paths.app_data_dir)
+        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
     fs::create_dir_all(&paths.core_dir).map_err(|e| format!("Failed to create core dir: {}", e))?;
-    fs::create_dir_all(&paths.profiles_dir).map_err(|e| format!("Failed to create profiles dir: {}", e))?;
-    
+    fs::create_dir_all(&paths.profiles_dir)
+        .map_err(|e| format!("Failed to create profiles dir: {}", e))?;
+
     #[cfg(target_os = "windows")]
     {
         if _is_new {
-            use std::process::Command;
             use std::os::windows::process::CommandExt;
+            use std::process::Command;
             if let Ok(username) = std::env::var("USERNAME") {
                 let _ = Command::new("icacls")
                     .arg(&paths.app_data_dir)
@@ -699,35 +721,34 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
             }
         }
     }
-    
+
     migrate_legacy_assets(app, &paths)?;
     Ok(paths)
 }
-
 
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
 fn url_decode_complete(input: &str) -> String {
     let mut result = input.to_string();
-    
+
     // Decode iteratively until no more changes (handles nested encoding)
     let mut changed = true;
     let max_iterations = 5; // Prevent infinite loops
     let mut iterations = 0;
-    
+
     while changed && iterations < max_iterations {
         changed = false;
         iterations += 1;
-        
+
         // Handle standard percent-encoded characters
         let mut decoded = String::new();
         let chars: Vec<char> = result.chars().collect();
         let mut i = 0;
-        
+
         while i < chars.len() {
             if chars[i] == '%' && i + 2 < chars.len() {
                 // Try to decode %XX
-                let hex: String = chars[i+1..i+3].iter().collect();
+                let hex: String = chars[i + 1..i + 3].iter().collect();
                 if let Ok(byte) = u8::from_str_radix(&hex, 16) {
                     decoded.push(byte as char);
                     i += 3;
@@ -738,10 +759,10 @@ fn url_decode_complete(input: &str) -> String {
             decoded.push(chars[i]);
             i += 1;
         }
-        
+
         result = decoded;
     }
-    
+
     result
 }
 
@@ -749,7 +770,7 @@ fn url_decode_complete(input: &str) -> String {
 fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
     // Step 1: Complete URL decoding to catch all encoded patterns
     let decoded_path = url_decode_complete(config_path);
-    
+
     // Step 2: Extract just the filename
     let config_file_name = Path::new(&decoded_path)
         .file_name()
@@ -759,48 +780,52 @@ fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
         .to_string();
 
     // Step 3: Security checks
-    
+
     // Check for path traversal attempts
     if config_file_name.contains("..") {
         return Err("Path traversal detected: '..' is not allowed".to_string());
     }
-    
+
     // Check for directory separators
     if config_file_name.contains('/') || config_file_name.contains('\\') {
         return Err("Path traversal detected: directory separators are not allowed".to_string());
     }
-    
+
     // Check for null bytes (could be used to bypass extension checks)
     if config_file_name.contains('\0') {
         return Err("Invalid character in filename: null byte detected".to_string());
     }
-    
+
     // Check for control characters
     if config_file_name.chars().any(|c| c.is_control()) {
         return Err("Invalid character in filename: control characters not allowed".to_string());
     }
-    
+
     // Validate extension
     let lower_name = config_file_name.to_lowercase();
     if !lower_name.ends_with(".yaml") && !lower_name.ends_with(".yml") {
         return Err("Invalid file type: only .yaml and .yml files are permitted".to_string());
     }
-    
+
     // Additional safety: check filename length
     if config_file_name.len() > 255 {
         return Err("Filename too long: maximum 255 characters allowed".to_string());
     }
-    
+
     // Check for reserved Windows names (even on other platforms for consistency)
     let upper_name = config_file_name.to_uppercase();
-    let base_name = upper_name.trim_end_matches(".YAML").trim_end_matches(".YML");
+    let base_name = upper_name
+        .trim_end_matches(".YAML")
+        .trim_end_matches(".YML");
     let reserved_names = [
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if reserved_names.contains(&base_name) {
-        return Err(format!("Reserved filename: '{}' is not allowed", config_file_name));
+        return Err(format!(
+            "Reserved filename: '{}' is not allowed",
+            config_file_name
+        ));
     }
 
     Ok(config_file_name)
@@ -810,26 +835,32 @@ fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
 fn validate_path_within_dir(resolved_path: &Path, base_dir: &Path) -> Result<(), String> {
     // If the file exists, use canonicalize for definitive check
     if resolved_path.exists() {
-        let canonical_resolved = resolved_path.canonicalize()
+        let canonical_resolved = resolved_path
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize resolved path: {}", e))?;
-        let canonical_base = base_dir.canonicalize()
+        let canonical_base = base_dir
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
-        
+
         if !canonical_resolved.starts_with(&canonical_base) {
-            return Err("Path traversal detected: resolved path is outside allowed directory".to_string());
+            return Err(
+                "Path traversal detected: resolved path is outside allowed directory".to_string(),
+            );
         }
     } else {
         // File doesn't exist yet, do string-level validation
         // Convert to string and check for path traversal patterns
         let resolved_str = resolved_path.to_string_lossy();
         let base_str = base_dir.to_string_lossy();
-        
+
         // Normalize path separators for comparison
         let resolved_normalized = resolved_str.replace('\\', "/");
         let base_normalized = base_str.replace('\\', "/");
-        
+
         if !resolved_normalized.starts_with(&*base_normalized) {
-            return Err("Path traversal detected: resolved path is outside allowed directory".to_string());
+            return Err(
+                "Path traversal detected: resolved path is outside allowed directory".to_string(),
+            );
         }
     }
     Ok(())
@@ -842,10 +873,10 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
     }
 
     let resolved_path = paths.profiles_dir.join(&config_file_name);
-    
+
     // Validate that the resolved path is within profiles_dir
     validate_path_within_dir(&resolved_path, &paths.profiles_dir)?;
-    
+
     if resolved_path.exists() {
         return Ok((config_file_name, resolved_path));
     }
@@ -904,10 +935,10 @@ rules:
   - GEOIP,CN,DIRECT
   - MATCH,DIRECT
 "#;
-    
+
     fs::write(path, default_config)
         .map_err(|e| format!("Failed to create default config: {}", e))?;
-    
+
     println!("Created default config at {:?}", path);
     Ok(())
 }
@@ -951,12 +982,16 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
 
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
     let mut safe_custom_args = Vec::new();
-    
+
     let blocked_args = [
-        "-d", "--directory",
-        "-f", "--config",
-        "-ext-ctl", "--external-controller",
-        "-secret", "--secret",
+        "-d",
+        "--directory",
+        "-f",
+        "--config",
+        "-ext-ctl",
+        "--external-controller",
+        "-secret",
+        "--secret",
     ];
 
     for arg in custom_args {
@@ -966,10 +1001,15 @@ fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
         }
 
         let arg_lower = trimmed.to_lowercase();
-        let is_blocked = blocked_args.iter().any(|&b| arg_lower == b || arg_lower.starts_with(&format!("{}=", b)));
+        let is_blocked = blocked_args
+            .iter()
+            .any(|&b| arg_lower == b || arg_lower.starts_with(&format!("{}=", b)));
 
         if is_blocked {
-            return Err(format!("Argument '{}' is not allowed for security reasons", trimmed));
+            return Err(format!(
+                "Argument '{}' is not allowed for security reasons",
+                trimmed
+            ));
         }
 
         safe_custom_args.push(trimmed.to_string());
@@ -994,7 +1034,7 @@ fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u16)> 
             serde_yaml::Value::String("secret".to_string()),
             serde_yaml::Value::String(secret.to_string()),
         );
-        
+
         // Default unified-delay to true if missing
         let unified_delay_key = serde_yaml::Value::String("unified-delay".to_string());
         if !mapping.contains_key(&unified_delay_key) {
@@ -1091,7 +1131,10 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
         return Ok(core_path);
     }
 
-    Err(format!("Could not find {} in app data core directory", binary_name))
+    Err(format!(
+        "Could not find {} in app data core directory",
+        binary_name
+    ))
 }
 
 fn generate_secret() -> String {
@@ -1102,108 +1145,119 @@ fn generate_secret() -> String {
         .collect()
 }
 
-    // ==========================================
-    // 核心伪装引擎 (DRY - 提取公共代码)
-    // ==========================================
-    fn build_http_client(user_agent: Option<String>, resolve_pin: Option<(String, std::net::SocketAddr)>) -> Result<reqwest::Client, String> {
-        build_http_client_with_proxy(user_agent, resolve_pin, None)
-    }
+// ==========================================
+// 核心伪装引擎 (DRY - 提取公共代码)
+// ==========================================
+fn build_http_client(
+    user_agent: Option<String>,
+    resolve_pin: Option<(String, std::net::SocketAddr)>,
+) -> Result<reqwest::Client, String> {
+    build_http_client_with_proxy(user_agent, resolve_pin, None)
+}
 
-    fn build_http_client_with_proxy(
-        user_agent: Option<String>, 
-        resolve_pin: Option<(String, std::net::SocketAddr)>,
-        proxy_url: Option<String>
-    ) -> Result<reqwest::Client, String> {
-        let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() > 5 {
-                return attempt.error("Too many redirects (max 5)");
-            }
-            
-            let url = attempt.url().clone();
-            
-            let scheme = url.scheme();
-            if scheme != "http" && scheme != "https" {
-                return attempt.error(format!("Invalid redirect scheme: {}", scheme));
-            }
-            
-            let host = match url.host_str() {
-                Some(h) => h.to_string(),
-                None => return attempt.error("Redirect URL has no host"),
-            };
-            
-            if is_private_host(&host) {
-                return attempt.error(format!("Redirect to private host blocked: {}", host));
-            }
-            
-            let port = url.port().unwrap_or(if scheme == "https" { 443 } else { 80 });
-            match std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, port)) {
-                Ok(addrs) => {
-                    for addr in addrs {
-                        if is_private_ip(addr.ip()) {
-                            return attempt.error(format!(
-                                "Redirect to private IP blocked: {} -> {}",
-                                host,
-                                addr.ip()
-                            ));
-                        }
-                    }
-                },
-                Err(e) => return attempt.error(format!("Failed to resolve redirect host {}: {}", host, e)),
-            }
-            
-            attempt.follow()
-        });
-
-        let mut client_builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(30))
-            .redirect(redirect_policy)
-            .no_proxy();
-
-        if let Some(proxy) = proxy_url {
-            let proxy = reqwest::Proxy::all(&proxy)
-                .map_err(|e| format!("Failed to create proxy: {}", e))?;
-            client_builder = client_builder.proxy(proxy);
+fn build_http_client_with_proxy(
+    user_agent: Option<String>,
+    resolve_pin: Option<(String, std::net::SocketAddr)>,
+    proxy_url: Option<String>,
+) -> Result<reqwest::Client, String> {
+    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() > 5 {
+            return attempt.error("Too many redirects (max 5)");
         }
 
-        if let Some((host, addr)) = resolve_pin {
-            client_builder = client_builder.resolve(&host, addr);
+        let url = attempt.url().clone();
+
+        let scheme = url.scheme();
+        if scheme != "http" && scheme != "https" {
+            return attempt.error(format!("Invalid redirect scheme: {}", scheme));
         }
 
-        // Determine User-Agent: use provided UA, or default to Zephyr
-        let ua_to_use = match user_agent {
-            Some(ref ua) if !ua.trim().is_empty() => ua.trim().to_string(),
-            _ => {
-                // Default Zephyr User-Agent with version
-                let version = env!("CARGO_PKG_VERSION");
-                format!("Zephyr/{}", version)
-            }
+        let host = match url.host_str() {
+            Some(h) => h.to_string(),
+            None => return attempt.error("Redirect URL has no host"),
         };
 
-        // Apply User-Agent and headers based on type
-        if ua_to_use.contains("Shadowrocket") {
-            let full_ua = "Shadowrocket/3082 CFNetwork/3826.600.41 Darwin/24.6.0 iPhone11,6";
-            client_builder = client_builder
-                .user_agent(full_ua)
-                .default_headers({
-                    let mut headers = reqwest::header::HeaderMap::new();
-                    headers.insert("Accept", reqwest::header::HeaderValue::from_static("*/*"));
-                    headers.insert("Accept-Language", reqwest::header::HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"));
-                    headers.insert("Cache-Control", reqwest::header::HeaderValue::from_static("no-cache"));
-                    headers
-                });
-        } else {
-            client_builder = client_builder
+        if is_private_host(&host) {
+            return attempt.error(format!("Redirect to private host blocked: {}", host));
+        }
+
+        let port = url
+            .port()
+            .unwrap_or(if scheme == "https" { 443 } else { 80 });
+        match std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, port)) {
+            Ok(addrs) => {
+                for addr in addrs {
+                    if is_private_ip(addr.ip()) {
+                        return attempt.error(format!(
+                            "Redirect to private IP blocked: {} -> {}",
+                            host,
+                            addr.ip()
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return attempt.error(format!("Failed to resolve redirect host {}: {}", host, e))
+            }
+        }
+
+        attempt.follow()
+    });
+
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(30))
+        .redirect(redirect_policy)
+        .no_proxy();
+
+    if let Some(proxy) = proxy_url {
+        let proxy =
+            reqwest::Proxy::all(&proxy).map_err(|e| format!("Failed to create proxy: {}", e))?;
+        client_builder = client_builder.proxy(proxy);
+    }
+
+    if let Some((host, addr)) = resolve_pin {
+        client_builder = client_builder.resolve(&host, addr);
+    }
+
+    // Determine User-Agent: use provided UA, or default to Zephyr
+    let ua_to_use = match user_agent {
+        Some(ref ua) if !ua.trim().is_empty() => ua.trim().to_string(),
+        _ => {
+            // Default Zephyr User-Agent with version
+            let version = env!("CARGO_PKG_VERSION");
+            format!("Zephyr/{}", version)
+        }
+    };
+
+    // Apply User-Agent and headers based on type
+    if ua_to_use.contains("Shadowrocket") {
+        let full_ua = "Shadowrocket/3082 CFNetwork/3826.600.41 Darwin/24.6.0 iPhone11,6";
+        client_builder = client_builder.user_agent(full_ua).default_headers({
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("Accept", reqwest::header::HeaderValue::from_static("*/*"));
+            headers.insert(
+                "Accept-Language",
+                reqwest::header::HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
+            );
+            headers.insert(
+                "Cache-Control",
+                reqwest::header::HeaderValue::from_static("no-cache"),
+            );
+            headers
+        });
+    } else {
+        client_builder = client_builder
                 .user_agent(&ua_to_use)
                 .default_headers({
                     let mut headers = reqwest::header::HeaderMap::new();
                     headers.insert("Accept", reqwest::header::HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
                     headers
                 });
-        }
-
-        client_builder.build().map_err(|e| e.to_string())
     }
+
+    client_builder.build().map_err(|e| e.to_string())
+}
 
 // ==========================================
 // SSRF 防护 - 私有地址检测
@@ -1214,18 +1268,18 @@ const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024; // 10MB
 fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
-            ipv4.is_private() || 
-            ipv4.is_loopback() || 
-            ipv4.is_link_local() || 
-            ipv4.is_broadcast() ||
-            ipv4.is_documentation() ||
-            ipv4.is_unspecified()
-        },
+            ipv4.is_private()
+                || ipv4.is_loopback()
+                || ipv4.is_link_local()
+                || ipv4.is_broadcast()
+                || ipv4.is_documentation()
+                || ipv4.is_unspecified()
+        }
         IpAddr::V6(ipv6) => {
-            ipv6.is_loopback() || 
+            ipv6.is_loopback() ||
             ipv6.is_unspecified() ||
             (ipv6.segments()[0] & 0xfe00) == 0xfc00 || // Unique Local Address
-            (ipv6.segments()[0] & 0xff00) == 0xfe00    // Link Local Address
+            (ipv6.segments()[0] & 0xff00) == 0xfe00 // Link Local Address
         }
     }
 }
@@ -1233,38 +1287,41 @@ fn is_private_ip(ip: IpAddr) -> bool {
 /// Check if a host is a private or local address (SSRF protection)
 fn is_private_host(host: &str) -> bool {
     let host_lower = host.to_lowercase();
-    
+
     // Quick checks for common localnames
-    if host_lower == "localhost" || 
-       host_lower.ends_with(".localhost") || 
-       host_lower.ends_with(".local") || 
-       host_lower.ends_with(".test") || 
-       host_lower.ends_with(".example") || 
-       host_lower.ends_with(".invalid") {
+    if host_lower == "localhost"
+        || host_lower.ends_with(".localhost")
+        || host_lower.ends_with(".local")
+        || host_lower.ends_with(".test")
+        || host_lower.ends_with(".example")
+        || host_lower.ends_with(".invalid")
+    {
         return true;
     }
-    
+
     // If it's a direct IP address, check it
     if let Ok(ip) = host.parse::<IpAddr>() {
         return is_private_ip(ip);
     }
-    
+
     false
 }
 
 /// Validate URL and its resolved IPs for SSRF protection
-fn validate_subscription_url_with_ip(url: &str) -> Result<(String, Option<std::net::SocketAddr>), String> {
+fn validate_subscription_url_with_ip(
+    url: &str,
+) -> Result<(String, Option<std::net::SocketAddr>), String> {
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
-    
+
     // Only allow http and https schemes
     let scheme = parsed_url.scheme();
     if scheme != "http" && scheme != "https" {
         return Err("Only HTTP and HTTPS URLs are allowed".to_string());
     }
-    
+
     // Extract host
     let host = parsed_url.host_str().ok_or("URL must have a host")?;
-    
+
     if is_private_host(host) {
         return Err("Access to private/local addresses is not allowed".to_string());
     }
@@ -1276,7 +1333,7 @@ fn validate_subscription_url_with_ip(url: &str) -> Result<(String, Option<std::n
     let default_port = if scheme == "https" { 443 } else { 80 };
     let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, default_port))
         .map_err(|e| format!("Failed to resolve host: {}", e))?;
-    
+
     for addr in addrs {
         if is_private_ip(addr.ip()) {
             return Err("Access to private/local resolved addresses is not allowed".to_string());
@@ -1285,11 +1342,11 @@ fn validate_subscription_url_with_ip(url: &str) -> Result<(String, Option<std::n
             resolved_addr = Some(addr);
         }
     }
-    
+
     if resolved_addr.is_none() {
         return Err("Could not resolve any IP address for the host".to_string());
     }
-    
+
     Ok((host.to_string(), resolved_addr))
 }
 
@@ -1311,17 +1368,23 @@ pub async fn start_core(
 ) -> Result<CoreStartResult, String> {
     // Rate limit: max 1 call per 3 seconds
     crate::rate_limit!(rate_limiter, "start_core", 3000);
-    
+
     // Wait for any previous core start operation to complete (max 10s)
     let mut wait_ms = 0;
-    while CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    while CORE_STARTING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         if wait_ms > 10000 {
             // Timeout: force reset the flag to prevent permanent deadlock
             // This can happen if previous start crashed without cleaning up
             eprintln!("[CORE] WARNING: Core start lock timeout, forcing reset");
             CORE_STARTING.store(false, Ordering::SeqCst);
             // Try to acquire again after reset
-            if CORE_STARTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if CORE_STARTING
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 break; // Successfully acquired after reset
             }
             // If still can't acquire, another thread is racing, wait more
@@ -1329,7 +1392,7 @@ pub async fn start_core(
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         wait_ms += 200;
     }
-    
+
     // Reset flag on function exit
     struct ResetGuard;
     impl Drop for ResetGuard {
@@ -1338,24 +1401,24 @@ pub async fn start_core(
         }
     }
     let _guard = ResetGuard;
-    
+
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
         let secret = restart_core_as_root(&app, true).await?;
         return Ok(CoreStartResult { secret, port: 9090 });
     }
-    
+
     // Kill any existing mihomo processes before starting a new one
     kill_mihomo();
-    
+
     let paths = ensure_app_storage(&app)?;
-    
+
     // Note: We no longer delete cache.db proactively
     // cache.db contains DNS cache and other useful data
     // If mihomo fails to start due to lock issues, we'll retry after removing it
     // This is handled in the spawn error handling below
-    
+
     // Wait for port 9090 to be truly free (max 5s)
     // Even after process death, port release may have a few hundred ms delay
     #[cfg(target_os = "macos")]
@@ -1368,19 +1431,19 @@ pub async fn start_core(
             if i == 49 {
                 eprintln!("[CORE] WARNING: port 9090 still occupied after 5s, proceeding anyway");
             } else {
-                eprintln!("[CORE] waiting for port 9090... {}ms", (i+1)*100);
+                eprintln!("[CORE] waiting for port 9090... {}ms", (i + 1) * 100);
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
-    
+
     let exe_path = get_core_exe_path(&app)?;
-    
+
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     ensure_executable(&exe_path)?;
-    
+
     let (resolved_config_name, resolved_config_path) = resolve_profile_path(&paths, &config_path)?;
-    
+
     let safe_custom_args = validate_custom_args(&custom_args)?;
 
     if test {
@@ -1389,14 +1452,16 @@ pub async fn start_core(
         use std::os::windows::process::CommandExt;
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        
+
         cmd.args(["-t", "-f"]);
         cmd.arg(&resolved_config_path);
         for arg in &safe_custom_args {
             cmd.arg(arg);
         }
-        let output = cmd.output().map_err(|e| format!("Failed to run test: {}", e))?;
-        
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to run test: {}", e))?;
+
         if output.status.success() {
             return Ok(CoreStartResult {
                 secret: "test_ok".to_string(),
@@ -1408,17 +1473,23 @@ pub async fn start_core(
             err_msg = err_msg.replace(paths.core_dir.to_str().unwrap_or(""), "[CORE_DIR]");
             err_msg = err_msg.replace(paths.profiles_dir.to_str().unwrap_or(""), "[PROFILES_DIR]");
             println!("Config test failed: {}", err_msg);
-            return Err("Config test failed. Please check the config file for syntax errors.".to_string());
+            return Err(
+                "Config test failed. Please check the config file for syntax errors.".to_string(),
+            );
         }
     }
 
     stop_core(app.clone(), state.clone())?;
 
     let secret = secret.unwrap_or_else(generate_secret);
-    
-    let (active_config_name, final_config, config_port) =
-        select_runtime_config(&paths, &resolved_config_name, &resolved_config_path, &secret)?;
-    
+
+    let (active_config_name, final_config, config_port) = select_runtime_config(
+        &paths,
+        &resolved_config_name,
+        &resolved_config_path,
+        &secret,
+    )?;
+
     let run_config_path = paths.core_dir.join("run_config.yaml");
     write_file_secure(&run_config_path, &final_config)?;
 
@@ -1427,16 +1498,16 @@ pub async fn start_core(
     use std::os::windows::process::CommandExt;
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    
+
     cmd.args(["-d", "."]);
     cmd.args(["-f", "run_config.yaml"]);
 
     for arg in &safe_custom_args {
         cmd.arg(arg);
     }
-    
+
     cmd.current_dir(&paths.core_dir);
-    
+
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
@@ -1445,10 +1516,13 @@ pub async fn start_core(
             .output()
             .ok();
         if let Some(o) = ps {
-            eprintln!("[CORE] mihomo processes before spawn:\n{}", String::from_utf8_lossy(&o.stdout));
+            eprintln!(
+                "[CORE] mihomo processes before spawn:\n{}",
+                String::from_utf8_lossy(&o.stdout)
+            );
         }
     }
-    
+
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
     // Use temp directory with unique filename per process to avoid multi-instance conflicts
     // Prefix with app name to avoid conflicts with other applications
@@ -1460,7 +1534,7 @@ pub async fn start_core(
             .map(|d| d.as_millis())
             .unwrap_or(0)
     ));
-    
+
     // Cleanup old zephyr-mihomo log files (older than 1 hour) to prevent accumulation
     // Only scan for files matching our specific prefix to avoid interfering with other apps
     if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
@@ -1489,15 +1563,18 @@ pub async fn start_core(
             }
         }
     }
-    
+
     // Create or truncate log file
     match std::fs::File::create(&log_path) {
         Ok(log_file) => {
             // Clone the handle for stderr before converting to Stdio
             let stderr_handle = log_file.try_clone();
             cmd.stdout(std::process::Stdio::from(log_file));
-            cmd.stderr(stderr_handle.map(std::process::Stdio::from)
-                .unwrap_or_else(|_| std::process::Stdio::null()));
+            cmd.stderr(
+                stderr_handle
+                    .map(std::process::Stdio::from)
+                    .unwrap_or_else(|_| std::process::Stdio::null()),
+            );
         }
         Err(_) => {
             // Fallback to null if log file cannot be created
@@ -1505,26 +1582,28 @@ pub async fn start_core(
             cmd.stderr(std::process::Stdio::null());
         }
     }
-    
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
-    
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
+
     // Check if process exits immediately
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     match child.try_wait() {
         Ok(Some(status)) => {
             let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-            
+
             // Check if this looks like a cache/lock issue
-            let is_lock_issue = log.contains("database is locked") 
-                || log.contains("cache.db") 
+            let is_lock_issue = log.contains("database is locked")
+                || log.contains("cache.db")
                 || log.contains("unable to open database")
                 || log.contains("database disk image is malformed");
-            
+
             if is_lock_issue {
                 eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
                 let cache_path = paths.core_dir.join("cache.db");
                 let _ = std::fs::remove_file(&cache_path);
-                
+
                 // Retry once after removing cache.db
                 let mut retry_cmd = Command::new(&exe_path);
                 #[cfg(target_os = "windows")]
@@ -1539,7 +1618,7 @@ pub async fn start_core(
                     retry_cmd.arg(arg);
                 }
                 retry_cmd.current_dir(&paths.core_dir);
-                
+
                 // Setup log file for retry
                 let retry_log_path = std::env::temp_dir().join(format!(
                     "zephyr-mihomo-{}-{}-retry.log",
@@ -1553,15 +1632,18 @@ pub async fn start_core(
                     Ok(log_file) => {
                         let stderr_handle = log_file.try_clone();
                         retry_cmd.stdout(std::process::Stdio::from(log_file));
-                        retry_cmd.stderr(stderr_handle.map(std::process::Stdio::from)
-                            .unwrap_or_else(|_| std::process::Stdio::null()));
+                        retry_cmd.stderr(
+                            stderr_handle
+                                .map(std::process::Stdio::from)
+                                .unwrap_or_else(|_| std::process::Stdio::null()),
+                        );
                     }
                     Err(_) => {
                         retry_cmd.stdout(std::process::Stdio::null());
                         retry_cmd.stderr(std::process::Stdio::null());
                     }
                 }
-                
+
                 match retry_cmd.spawn() {
                     Ok(mut retry_child) => {
                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1570,22 +1652,29 @@ pub async fn start_core(
                                 // Retry successful, use this process
                                 child = retry_child;
                                 // Continue to health check below
-                            },
+                            }
                             Ok(Some(retry_status)) => {
-                                let retry_log = std::fs::read_to_string(&retry_log_path).unwrap_or_default();
-                                return Err(format!("mihomo retry also failed: {:?}, log: {}", retry_status, retry_log));
-                            },
+                                let retry_log =
+                                    std::fs::read_to_string(&retry_log_path).unwrap_or_default();
+                                return Err(format!(
+                                    "mihomo retry also failed: {:?}, log: {}",
+                                    retry_status, retry_log
+                                ));
+                            }
                             Err(e) => {
                                 return Err(format!("retry try_wait error: {}", e));
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         return Err(format!("Failed to spawn mihomo on retry: {}", e));
                     }
                 }
             } else {
-                return Err(format!("mihomo exited immediately: {:?}, log: {}", status, log));
+                return Err(format!(
+                    "mihomo exited immediately: {:?}, log: {}",
+                    status, log
+                ));
             }
         }
         Ok(None) => {}
@@ -1593,10 +1682,10 @@ pub async fn start_core(
             return Err(format!("try_wait error: {}", e));
         }
     }
-    
+
     // Use config port directly, rely on health check to verify
     let port = config_port;
-    
+
     // HTTP Health Check via raw TCP
     let mut is_healthy = false;
     for _ in 0..20 {
@@ -1609,7 +1698,11 @@ pub async fn start_core(
                 let mut response = [0u8; 256];
                 if let Ok(n) = stream.read(&mut response) {
                     let resp_str = String::from_utf8_lossy(&response[..n]);
-                    if resp_str.starts_with("HTTP/1.1 200") || resp_str.starts_with("HTTP/1.1 401") || resp_str.starts_with("HTTP/1.0 200") || resp_str.starts_with("HTTP/1.0 401") {
+                    if resp_str.starts_with("HTTP/1.1 200")
+                        || resp_str.starts_with("HTTP/1.1 401")
+                        || resp_str.starts_with("HTTP/1.0 200")
+                        || resp_str.starts_with("HTTP/1.0 401")
+                    {
                         is_healthy = true;
                         break;
                     }
@@ -1618,19 +1711,21 @@ pub async fn start_core(
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
             std::thread::sleep(std::time::Duration::from_millis(1000));
-        }).await;
+        })
+        .await;
     }
-    
+
     if !is_healthy {
-        let err_msg = "Core started but health check failed. Check the logs for details.".to_string();
+        let err_msg =
+            "Core started but health check failed. Check the logs for details.".to_string();
         let _ = child.kill();
         let _ = child.wait();
         return Err(err_msg);
     }
-    
+
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
-    
+
     let mut lock = match state.0.lock() {
         Ok(l) => l,
         Err(_) => {
@@ -1652,17 +1747,20 @@ pub async fn start_core(
 pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
     // Take the child process
     let child = {
-        let mut lock = state.0.lock().map_err(|_| "Failed to lock state".to_string())?;
+        let mut lock = state
+            .0
+            .lock()
+            .map_err(|_| "Failed to lock state".to_string())?;
         lock.last_port = None;
         lock.process.take()
     };
-    
+
     if let Some(mut child) = child {
         // Force kill the process (cross-platform safe)
         let _ = child.kill();
         let _ = child.wait();
     }
-    
+
     if let Ok(paths) = ensure_app_storage(&app) {
         let run_config_path = paths.core_dir.join("run_config.yaml");
         if run_config_path.exists() {
@@ -1671,7 +1769,7 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
             }
         }
     }
-    
+
     Ok("Core stopped and cleaned up".to_string())
 }
 
@@ -1688,9 +1786,11 @@ pub async fn get_core_version(app: AppHandle) -> Result<String, String> {
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.arg("-v");
 
-    let output = cmd.output().map_err(|e| format!("Failed to run version check: {}", e))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run version check: {}", e))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     if let Some(v_idx) = stdout.find('v') {
         let after_v = &stdout[v_idx..];
         if let Some(space_idx) = after_v.find(' ') {
@@ -1698,7 +1798,7 @@ pub async fn get_core_version(app: AppHandle) -> Result<String, String> {
         }
         return Ok(after_v.to_string());
     }
-    
+
     Ok(stdout.trim().to_string())
 }
 
@@ -1723,7 +1823,8 @@ static DERIVED_KEY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 /// Uses multiple hardware fingerprints for enhanced security against VM cloning.
 /// Falls back to a randomly generated key persisted to disk if system IDs unavailable.
 /// Returns Ok(key) on success, or Err if the key could not be persisted (session-only key).
-static MACHINE_KEY_PERSISTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static MACHINE_KEY_PERSISTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 fn get_machine_key() -> Vec<u8> {
     // Use cached key if available (PBKDF2 is expensive)
@@ -1738,13 +1839,14 @@ fn get_machine_key() -> Vec<u8> {
 /// Compute the machine key (expensive operation - use get_machine_key() for cached access)
 fn compute_machine_key() -> Vec<u8> {
     let mut seed_parts: Vec<String> = Vec::new();
-    
+
     // Collect system machine ID
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         if let Ok(hklm) = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
-            .open_subkey("SOFTWARE\\Microsoft\\Cryptography") {
+            .open_subkey("SOFTWARE\\Microsoft\\Cryptography")
+        {
             if let Ok(guid) = hklm.get_value::<String, _>("MachineGuid") {
                 seed_parts.push(guid);
             }
@@ -1754,7 +1856,7 @@ fn compute_machine_key() -> Vec<u8> {
         if let Ok(output) = std::process::Command::new("cmd")
             .args(&["/C", "vol C:"])
             .creation_flags(CREATE_NO_WINDOW)
-            .output() 
+            .output()
         {
             let vol_output = String::from_utf8_lossy(&output.stdout);
             // Extract serial number from output like "Volume Serial Number is XXXX-XXXX"
@@ -1772,7 +1874,7 @@ fn compute_machine_key() -> Vec<u8> {
             .arg("-rd1")
             .arg("-c")
             .arg("IOPlatformExpertDevice")
-            .output() 
+            .output()
         {
             let out_str = String::from_utf8_lossy(&output.stdout);
             if let Some(idx) = out_str.find("IOPlatformUUID") {
@@ -1786,7 +1888,7 @@ fn compute_machine_key() -> Vec<u8> {
             .arg("IOPlatformExpertDevice")
             .arg("-d")
             .arg("1")
-            .output() 
+            .output()
         {
             let out_str = String::from_utf8_lossy(&output.stdout);
             if let Some(idx) = out_str.find("IOPlatformSerialNumber") {
@@ -1807,7 +1909,7 @@ fn compute_machine_key() -> Vec<u8> {
         // Additional Linux fingerprint: board serial if available
         if let Ok(output) = std::process::Command::new("cat")
             .arg("/sys/class/dmi/id/board_serial")
-            .output() 
+            .output()
         {
             let board_serial = String::from_utf8_lossy(&output.stdout);
             let trimmed = board_serial.trim();
@@ -1816,7 +1918,7 @@ fn compute_machine_key() -> Vec<u8> {
             }
         }
     }
-    
+
     // Combine all seed parts with process ID for additional uniqueness
     // This adds a session-specific component to prevent cross-session attacks
     let combined_seed = if !seed_parts.is_empty() {
@@ -1826,26 +1928,26 @@ fn compute_machine_key() -> Vec<u8> {
         // Fallback: empty seed
         String::new()
     };
-    
+
     // If we have a system seed, derive a 32-byte key using PBKDF2
     // This ensures consistent key length and proper entropy distribution
     if !combined_seed.is_empty() {
         use pbkdf2::pbkdf2_hmac;
         use sha2::Sha256;
-        
+
         // Use a fixed salt for key derivation (not secret, just prevents rainbow tables)
         const SALT: &[u8] = b"Zephyr_AES256_Key_Derivation";
-        
+
         // Derive 32 bytes for AES-256 using PBKDF2-HMAC-SHA256
         // 100,000 iterations provides good security vs performance balance
         let mut derived_key = [0u8; 32];
         pbkdf2_hmac::<Sha256>(combined_seed.as_bytes(), SALT, 100_000, &mut derived_key);
-        
-// Hardware fingerprint-based key is deterministic and stable across restarts
-MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        // Hardware fingerprint-based key is deterministic and stable across restarts
+        MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
         return derived_key.to_vec();
     }
-    
+
     // Fallback: use a persistent random key stored in the app data directory
     // This ensures key consistency across sessions while avoiding hardcoded keys
     // Try platform-specific locations first
@@ -1856,14 +1958,18 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                 .map(|base| PathBuf::from(base).join("Zephyr").join(MACHINE_KEY_FILE))
                 .ok()
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join("Library/Application Support/Zephyr").join(MACHINE_KEY_FILE))
+                .map(|h| {
+                    PathBuf::from(h)
+                        .join("Library/Application Support/Zephyr")
+                        .join(MACHINE_KEY_FILE)
+                })
                 .ok()
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             // XDG_CONFIG_HOME takes precedence over ~/.config
@@ -1872,19 +1978,27 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                 .ok()
                 .or_else(|| {
                     std::env::var("HOME")
-                        .map(|h| PathBuf::from(h).join(".config/Zephyr").join(MACHINE_KEY_FILE))
+                        .map(|h| {
+                            PathBuf::from(h)
+                                .join(".config/Zephyr")
+                                .join(MACHINE_KEY_FILE)
+                        })
                         .ok()
                 })
         }
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         {
             std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(".config/Zephyr").join(MACHINE_KEY_FILE))
+                .map(|h| {
+                    PathBuf::from(h)
+                        .join(".config/Zephyr")
+                        .join(MACHINE_KEY_FILE)
+                })
                 .ok()
         }
     };
-    
+
     if let Some(key_path) = key_path {
         // Ensure directory exists with secure permissions
         if let Some(parent) = key_path.parent() {
@@ -1899,7 +2013,7 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
-        
+
         // Try to read existing key
         if key_path.exists() {
             if let Ok(existing_key) = fs::read_to_string(&key_path) {
@@ -1911,21 +2025,21 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
-        
+
         // Generate new random key (32 bytes is sufficient for AES-256)
         let random_key: Vec<u8> = thread_rng()
             .sample_iter(&Alphanumeric)
             .take(32)
             .map(|c| c as u8)
             .collect();
-        
+
         // Persist the key (critical for data recovery)
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
             MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
             return random_key;
         }
     }
-    
+
     // Last resort: try current_exe directory as before
     if let Some(app_data_dir) = std::env::current_exe()
         .ok()
@@ -1934,7 +2048,7 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
         .map(|p| p.to_path_buf())
     {
         let key_path = app_data_dir.join(MACHINE_KEY_FILE);
-        
+
         // Try to read existing key
         if key_path.exists() {
             if let Ok(existing_key) = fs::read_to_string(&key_path) {
@@ -1945,21 +2059,21 @@ MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
-        
+
         // Generate new random key
         let random_key: Vec<u8> = thread_rng()
             .sample_iter(&Alphanumeric)
             .take(32)
             .map(|c| c as u8)
             .collect();
-        
+
         // Persist the key
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
             MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
             return random_key;
         }
     }
-    
+
     // Absolute last resort: session-only key
     // This is a critical failure - warn user that data will be lost on restart
     eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
@@ -1990,28 +2104,34 @@ fn obfuscate_string(s: &str) -> String {
         aead::{Aead, KeyInit},
         Aes256Gcm, Nonce,
     };
-    
+
     let key_bytes = get_machine_key();
-    
+
     // Key should already be 32 bytes from PBKDF2 or random generation
     // If not exactly 32 bytes, something is wrong - fail closed
     if key_bytes.len() != 32 {
-        eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
+        eprintln!(
+            "[Security] CRITICAL: Invalid key length {}, expected 32",
+            key_bytes.len()
+        );
         return String::new();
     }
-    
+
     let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
+            eprintln!(
+                "[Security] CRITICAL: Failed to initialize AES cipher: {:?}",
+                e
+            );
             return String::new();
         }
     };
-    
+
     // Generate random nonce
     let nonce_bytes: [u8; 12] = rand::thread_rng().gen();
     let nonce = Nonce::from_slice(&nonce_bytes);
-    
+
     // Encrypt
     match cipher.encrypt(nonce, s.as_bytes()) {
         Ok(ciphertext) => {
@@ -2035,45 +2155,55 @@ fn deobfuscate_string(s: &str) -> String {
         aead::{Aead, KeyInit},
         Aes256Gcm, Nonce,
     };
-    
+
     if let Ok(decoded) = base64_standard.decode(s) {
         // Check for version prefix
         if !decoded.starts_with(b"v2:") {
             eprintln!("[Security] CRITICAL: Unknown or missing encryption version prefix");
             return String::new();
         }
-        
-        if decoded.len() < 31 { // "v2:" (3) + nonce (12) + auth tag (16) minimum
+
+        if decoded.len() < 31 {
+            // "v2:" (3) + nonce (12) + auth tag (16) minimum
             eprintln!("[Security] Invalid v2 ciphertext: too short");
             return String::new();
         }
-        
+
         // Extract nonce (bytes 3-15) and ciphertext (bytes 15-)
         let nonce_bytes = &decoded[3..15];
         let ciphertext = &decoded[15..];
-        
+
         let key_bytes = get_machine_key();
-        
+
         // Key should already be 32 bytes from PBKDF2 or random generation
         if key_bytes.len() != 32 {
-            eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
+            eprintln!(
+                "[Security] CRITICAL: Invalid key length {}, expected 32",
+                key_bytes.len()
+            );
             return String::new();
         }
-        
+
         let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {:?}", e);
+                eprintln!(
+                    "[Security] CRITICAL: Failed to initialize AES cipher: {:?}",
+                    e
+                );
                 return String::new();
             }
         };
-        
+
         let nonce = Nonce::from_slice(nonce_bytes);
-        
+
         match cipher.decrypt(nonce, ciphertext) {
             Ok(plaintext) => String::from_utf8_lossy(&plaintext).to_string(),
             Err(e) => {
-                eprintln!("[Security] CRITICAL: AES decryption failed - data may be tampered: {:?}", e);
+                eprintln!(
+                    "[Security] CRITICAL: AES decryption failed - data may be tampered: {:?}",
+                    e
+                );
                 String::new()
             }
         }
@@ -2106,17 +2236,23 @@ fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
                         }
                     }
                     meta
-                },
+                }
                 Err(e) => {
-                    eprintln!("[Metadata] Warning: Failed to parse metadata.json: {}. Using default.", e);
+                    eprintln!(
+                        "[Metadata] Warning: Failed to parse metadata.json: {}. Using default.",
+                        e
+                    );
                     ProfilesMetadata::default()
                 }
             }
-        },
+        }
         Err(e) => {
             // Only log warning if file exists but cannot be read
             if meta_path.exists() {
-                eprintln!("[Metadata] Warning: Failed to read metadata.json: {}. Using default.", e);
+                eprintln!(
+                    "[Metadata] Warning: Failed to read metadata.json: {}. Using default.",
+                    e
+                );
             }
             ProfilesMetadata::default()
         }
@@ -2126,10 +2262,13 @@ fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
 fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
     let mut obf_meta = ProfilesMetadata::default();
     for (k, v) in &meta.configs {
-        obf_meta.configs.insert(k.clone(), ConfigMetadata {
-            url: v.url.as_ref().map(|s| obfuscate_string(s)),
-            sub_info: v.sub_info.as_ref().map(|s| obfuscate_string(s)),
-        });
+        obf_meta.configs.insert(
+            k.clone(),
+            ConfigMetadata {
+                url: v.url.as_ref().map(|s| obfuscate_string(s)),
+                sub_info: v.sub_info.as_ref().map(|s| obfuscate_string(s)),
+            },
+        );
     }
 
     let meta_path = paths.profiles_dir.join("metadata.json");
@@ -2142,36 +2281,37 @@ fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
 fn cleanup_metadata_cache(paths: &AppPaths) {
     let mut metadata = load_metadata(paths);
     let mut changed = false;
-    
+
     // Collect all existing config files
-    let existing_configs: std::collections::HashSet<String> = 
-        fs::read_dir(&paths.profiles_dir)
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry.path().extension()
-                    .map(|ext| ext == "yaml" || ext == "yml")
-                    .unwrap_or(false)
-            })
-            .filter_map(|entry| {
-                entry.file_name().to_str().map(|s| s.to_string())
-            })
-            .filter(|name| name != "run_config.yaml")
-            .collect();
-    
+    let existing_configs: std::collections::HashSet<String> = fs::read_dir(&paths.profiles_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "yaml" || ext == "yml")
+                .unwrap_or(false)
+        })
+        .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+        .filter(|name| name != "run_config.yaml")
+        .collect();
+
     // Remove metadata entries for deleted configs
-    let keys_to_remove: Vec<String> = metadata.configs.keys()
+    let keys_to_remove: Vec<String> = metadata
+        .configs
+        .keys()
         .filter(|key| !existing_configs.contains(*key))
         .cloned()
         .collect();
-    
+
     for key in keys_to_remove {
         metadata.configs.remove(&key);
         changed = true;
     }
-    
+
     if changed {
         save_metadata(paths, &metadata);
     }
@@ -2181,21 +2321,24 @@ fn cleanup_metadata_cache(paths: &AppPaths) {
 pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
     let mut configs = Vec::new();
     let paths = ensure_app_storage(&app)?;
-    
+
     // Clean up stale metadata entries
     cleanup_metadata_cache(&paths);
-    
+
     let metadata = load_metadata(&paths);
-    
+
     if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "yaml" || ext == "yml") {
+            if path
+                .extension()
+                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+            {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
                         let mut url = None;
                         let mut sub_info = None;
-                        
+
                         // Migrate old plaintext comments if exist, then remove them?
                         // For safety, just read from metadata first.
                         if let Some(meta) = metadata.configs.get(name) {
@@ -2210,13 +2353,19 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                                     if line.starts_with("# URL: ") {
                                         url = Some(line.replace("# URL: ", "").trim().to_string());
                                     } else if line.starts_with("# SUB_INFO: ") {
-                                        sub_info = Some(line.replace("# SUB_INFO: ", "").trim().to_string());
+                                        sub_info = Some(
+                                            line.replace("# SUB_INFO: ", "").trim().to_string(),
+                                        );
                                     }
                                 }
                             }
                         }
-                        
-                        configs.push(ConfigInfo { name: name.to_string(), url, sub_info });
+
+                        configs.push(ConfigInfo {
+                            name: name.to_string(),
+                            url,
+                            sub_info,
+                        });
                     }
                 }
             }
@@ -2229,34 +2378,40 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {
     if let Some(content_length) = resp.content_length() {
         if content_length as usize > MAX_RESPONSE_SIZE {
-            return Err(format!("Response too large: {} bytes (max {} bytes)", content_length, MAX_RESPONSE_SIZE));
+            return Err(format!(
+                "Response too large: {} bytes (max {} bytes)",
+                content_length, MAX_RESPONSE_SIZE
+            ));
         }
     }
-    
+
     use futures_util::StreamExt;
     let mut bytes = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
         if bytes.len() + chunk.len() > MAX_RESPONSE_SIZE {
-            return Err(format!("Response exceeded size limit of {} bytes", MAX_RESPONSE_SIZE));
+            return Err(format!(
+                "Response exceeded size limit of {} bytes",
+                MAX_RESPONSE_SIZE
+            ));
         }
         bytes.extend_from_slice(&chunk);
     }
-    
+
     Ok(bytes)
 }
 #[tauri::command]
 pub async fn download_sub(
-    app: AppHandle, 
-    url: String, 
-    name: String, 
+    app: AppHandle,
+    url: String,
+    name: String,
     user_agent: Option<String>,
     rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<String, String> {
     // Rate limit: max 1 call per 5 seconds
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
-    
+
     if name.contains("..") || name.contains('/') || name.contains('\\') {
         return Err("Invalid subscription name".to_string());
     }
@@ -2265,45 +2420,53 @@ pub async fn download_sub(
     let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
 
     let do_download = |client: reqwest::Client, url: String| async move {
-        let resp = client.get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    format!("Request timeout: {}", e)
-                } else if e.is_connect() {
-                    format!("Connection failed: {}", e)
-                } else if e.is_request() {
-                    format!("Request error: {}", e)
-                } else if e.is_body() {
-                    format!("Body error: {}", e)
-                } else if e.is_decode() {
-                    format!("Decode error: {}", e)
-                } else {
-                    format!("Network error: {}", e)
-                }
-            })?;
-        
+        let resp = client.get(&url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                format!("Request timeout: {}", e)
+            } else if e.is_connect() {
+                format!("Connection failed: {}", e)
+            } else if e.is_request() {
+                format!("Request error: {}", e)
+            } else if e.is_body() {
+                format!("Body error: {}", e)
+            } else if e.is_decode() {
+                format!("Decode error: {}", e)
+            } else {
+                format!("Network error: {}", e)
+            }
+        })?;
+
         if !resp.status().is_success() {
             let status = resp.status();
             println!("Download failed with status: {}", status);
             return Err("Download failed with error status".to_string());
         }
-        
+
         if let Some(content_length) = resp.content_length() {
             if content_length as usize > MAX_RESPONSE_SIZE {
-                return Err(format!("Response too large: {} bytes (max {} bytes)", content_length, MAX_RESPONSE_SIZE));
+                return Err(format!(
+                    "Response too large: {} bytes (max {} bytes)",
+                    content_length, MAX_RESPONSE_SIZE
+                ));
             }
         }
-        
-        let sub_info_header = resp.headers().get("subscription-userinfo")
-            .and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
 
-        let final_url = resp.headers().get("profile-web-page-url")
-            .and_then(|h| h.to_str().ok()).unwrap_or(&url).to_string();
+        let sub_info_header = resp
+            .headers()
+            .get("subscription-userinfo")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let final_url = resp
+            .headers()
+            .get("profile-web-page-url")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or(&url)
+            .to_string();
 
         let bytes = read_response_body(resp).await?;
-        
+
         Ok::<(Vec<u8>, String, String), String>((bytes, sub_info_header, final_url))
     };
 
@@ -2312,15 +2475,13 @@ pub async fn download_sub(
 
     // Try direct connection first
     match build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None) {
-        Ok(client) => {
-            match do_download(client, url.clone()).await {
-                Ok(data) => result = Some(data),
-                Err(e) => {
-                    println!("[download_sub] Direct connection failed: {}", e);
-                    last_error = e;
-                }
+        Ok(client) => match do_download(client, url.clone()).await {
+            Ok(data) => result = Some(data),
+            Err(e) => {
+                println!("[download_sub] Direct connection failed: {}", e);
+                last_error = e;
             }
-        }
+        },
         Err(e) => {
             println!("[download_sub] Failed to build direct client: {}", e);
             last_error = e;
@@ -2340,9 +2501,13 @@ pub async fn download_sub(
                 }
             })
         };
-        
+
         if let Some(proxy_url) = proxy_url {
-            let client_mihomo = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(proxy_url));
+            let client_mihomo = build_http_client_with_proxy(
+                user_agent.clone(),
+                resolve_pin.clone(),
+                Some(proxy_url),
+            );
             if let Ok(client) = client_mihomo {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
@@ -2358,7 +2523,11 @@ pub async fn download_sub(
     if result.is_none() {
         if let Some(sys_proxy_url) = crate::sys_proxy::get_sys_proxy_address() {
             println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
-            let client_sys = build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), Some(sys_proxy_url));
+            let client_sys = build_http_client_with_proxy(
+                user_agent.clone(),
+                resolve_pin.clone(),
+                Some(sys_proxy_url),
+            );
             if let Ok(client) = client_sys {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
@@ -2395,40 +2564,54 @@ pub async fn download_sub(
             }
         }
     }
-    
+
     if content.contains("proxies:") || content.contains("proxy-groups:") {
         match serde_yaml::from_str::<serde_yaml::Value>(&content) {
             Ok(mut yaml_val) => {
                 // Use module-level function to remove dangerous keys
                 remove_dangerous_keys(&mut yaml_val, false);
-                
+
                 content = serde_yaml::to_string(&yaml_val)
                     .map_err(|e| format!("Failed to serialize sanitized subscription: {}", e))?;
-            },
+            }
             Err(e) => {
                 return Err(format!("Invalid YAML structure in subscription: {}", e));
             }
         }
     } else if !content.trim().starts_with("http") && !content.trim().is_empty() {
-        return Err("The subscription content is neither a valid Clash YAML nor a supported node list".to_string());
+        return Err(
+            "The subscription content is neither a valid Clash YAML nor a supported node list"
+                .to_string(),
+        );
     }
-    
+
     let paths = ensure_app_storage(&app)?;
-    
-    let clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") { name.clone() } else { format!("{}.yaml", name) };
+
+    let clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
+        name.clone()
+    } else {
+        format!("{}.yaml", name)
+    };
     let target_path = paths.profiles_dir.join(&clean_name);
-    
+
     let mut metadata = load_metadata(&paths);
-    metadata.configs.insert(clean_name.clone(), ConfigMetadata {
-        url: Some(final_url.clone()),
-        sub_info: if sub_info_header.is_empty() { None } else { Some(sub_info_header.clone()) },
-    });
+    metadata.configs.insert(
+        clean_name.clone(),
+        ConfigMetadata {
+            url: Some(final_url.clone()),
+            sub_info: if sub_info_header.is_empty() {
+                None
+            } else {
+                Some(sub_info_header.clone())
+            },
+        },
+    );
     save_metadata(&paths, &metadata);
 
     let final_content = content;
 
     write_file_secure(&target_path, &final_content)?;
-    
+
     Ok(format!("Config saved as {}", clean_name))
 }
 
@@ -2444,18 +2627,20 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     };
 
     let name = sanitize_config_file_name(&name)?;
-    if name == "run_config.yaml" { return Err("Cannot delete the active temp config".to_string()); }
-    
+    if name == "run_config.yaml" {
+        return Err("Cannot delete the active temp config".to_string());
+    }
+
     let target_path = paths.profiles_dir.join(&name);
     validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 
     let file_exists = target_path.exists();
-    
-    if !file_exists { 
+
+    if !file_exists {
         // Try with .yml extension as well
         let yml_name = name.replace(".yaml", ".yml");
         let yml_path = paths.profiles_dir.join(&yml_name);
-        
+
         if yml_path.exists() {
             fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {}", e))?;
             let mut metadata = load_metadata(&paths);
@@ -2463,9 +2648,9 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
             save_metadata(&paths, &metadata);
             return Ok(format!("Config {} deleted", yml_name));
         }
-        return Err(format!("File does not exist: {:?}", target_path)); 
+        return Err(format!("File does not exist: {:?}", target_path));
     }
-    
+
     // Remove metadata
     let mut metadata = load_metadata(&paths);
     metadata.configs.remove(&name);
@@ -2473,17 +2658,20 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
 
     // Delete the file and verify
     fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
-    
+
     // Verify deletion (Windows may report success but file remains if locked)
     if target_path.exists() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
-        
+
         if target_path.exists() {
-            return Err(format!("File could not be deleted (locked by another process?): {:?}", target_path));
+            return Err(format!(
+                "File could not be deleted (locked by another process?): {:?}",
+                target_path
+            ));
         }
     }
-    
+
     Ok(format!("Config {} deleted", name))
 }
 
@@ -2492,43 +2680,54 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
     let paths = ensure_app_storage(&app)?;
     let config_file_name = sanitize_config_file_name(&config_path)?;
     let (resolved_path, base_dir) = if config_file_name == "run_config.yaml" {
-        (paths.core_dir.join(&config_file_name), paths.core_dir.clone())
+        (
+            paths.core_dir.join(&config_file_name),
+            paths.core_dir.clone(),
+        )
     } else {
-        (paths.profiles_dir.join(&config_file_name), paths.profiles_dir.clone())
+        (
+            paths.profiles_dir.join(&config_file_name),
+            paths.profiles_dir.clone(),
+        )
     };
-    
+
     validate_path_within_dir(&resolved_path, &base_dir)?;
-    
-    if !resolved_path.exists() { return Err(format!("Config file {:?} not found", resolved_path)); }
-    
+
+    if !resolved_path.exists() {
+        return Err(format!("Config file {:?} not found", resolved_path));
+    }
+
     fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {}", e))
 }
 
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|e| format!("Failed to write to {:?}: {}", path, e))?;
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         // On Windows, use explicit ACL to restrict file access to current user only
         // This is equivalent to Unix 0600 permissions
-        use std::os::windows::ffi::OsStrExt;
         use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
         use std::ptr;
         use windows_sys::Win32::Foundation::*;
         use windows_sys::Win32::Security::Authorization::*;
+        use windows_sys::Win32::Security::*;
         use windows_sys::Win32::Storage::FileSystem::*;
         use windows_sys::Win32::System::Threading::*;
-        use windows_sys::Win32::Security::*;
-        
+
         // Convert path to wide string
-        let wide_path: Vec<u16> = OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
-        
+        let wide_path: Vec<u16> = OsStr::new(path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
         unsafe {
             // Get a handle to the file with WRITE_DAC access
             let handle = CreateFileW(
@@ -2540,13 +2739,13 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
                 FILE_ATTRIBUTE_NORMAL,
                 ptr::null_mut(),
             );
-            
+
             if handle == INVALID_HANDLE_VALUE {
                 #[cfg(debug_assertions)]
                 eprintln!("[SECURITY] Failed to open file for DACL modification");
                 return Ok(()); // Non-fatal: file was written, just permissions not set
             }
-            
+
             // Get current process token to find the user
             let mut token_handle: HANDLE = ptr::null_mut();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) == 0 {
@@ -2555,26 +2754,39 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
                 eprintln!("[SECURITY] Failed to open process token");
                 return Ok(());
             }
-            
+
             // Get token user info size
             let mut size: u32 = 0;
-            GetTokenInformation(token_handle, TokenUser, std::ptr::null_mut::<std::ffi::c_void>(), 0, &mut size);
-            
+            GetTokenInformation(
+                token_handle,
+                TokenUser,
+                std::ptr::null_mut::<std::ffi::c_void>(),
+                0,
+                &mut size,
+            );
+
             // Allocate buffer and get token user
             let mut buffer: Vec<u8> = vec![0u8; size as usize];
-            if GetTokenInformation(token_handle, TokenUser, buffer.as_mut_ptr() as *mut std::ffi::c_void, size, &mut size) == 0 {
+            if GetTokenInformation(
+                token_handle,
+                TokenUser,
+                buffer.as_mut_ptr() as *mut std::ffi::c_void,
+                size,
+                &mut size,
+            ) == 0
+            {
                 CloseHandle(token_handle);
                 CloseHandle(handle);
                 #[cfg(debug_assertions)]
                 eprintln!("[SECURITY] Failed to get token user info");
                 return Ok(());
             }
-            
+
             let token_user = &*(buffer.as_ptr() as *const TOKEN_USER);
-            
+
             // Build explicit access entries: current user + SYSTEM
             let mut ea: [EXPLICIT_ACCESS_W; 2] = [std::mem::zeroed(), std::mem::zeroed()];
-            
+
             // Entry 0: Current user with full access
             ea[0].grfAccessPermissions = GENERIC_ALL;
             ea[0].grfAccessMode = GRANT_ACCESS;
@@ -2582,35 +2794,46 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             ea[0].Trustee.TrusteeForm = TRUSTEE_IS_SID;
             ea[0].Trustee.TrusteeType = TRUSTEE_IS_USER;
             ea[0].Trustee.ptstrName = token_user.User.Sid as *mut _;
-            
+
             // Entry 1: SYSTEM account with full access (required for services)
             // Get SYSTEM SID
             let mut sid_size: u32 = 0;
-            
+
             // First call to get size
-            CreateWellKnownSid(WinLocalSystemSid, ptr::null_mut(), ptr::null_mut(), &mut sid_size);
-            
+            CreateWellKnownSid(
+                WinLocalSystemSid,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut sid_size,
+            );
+
             // Allocate buffer for SYSTEM SID
             let mut system_sid_buffer: Vec<u8> = vec![0u8; sid_size as usize];
             let system_sid: PSID = system_sid_buffer.as_mut_ptr() as PSID;
-            
-            if CreateWellKnownSid(WinLocalSystemSid, ptr::null_mut(), system_sid, &mut sid_size) == 0 {
+
+            if CreateWellKnownSid(
+                WinLocalSystemSid,
+                ptr::null_mut(),
+                system_sid,
+                &mut sid_size,
+            ) == 0
+            {
                 CloseHandle(token_handle);
                 CloseHandle(handle);
                 #[cfg(debug_assertions)]
                 eprintln!("[SECURITY] Failed to create SYSTEM SID");
                 return Ok(());
             }
-            
+
             ea[1].grfAccessPermissions = GENERIC_ALL;
             ea[1].grfAccessMode = GRANT_ACCESS;
             ea[1].grfInheritance = NO_INHERITANCE;
             ea[1].Trustee.TrusteeForm = TRUSTEE_IS_SID;
             ea[1].Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
             ea[1].Trustee.ptstrName = system_sid as *mut _;
-            
+
             CloseHandle(token_handle);
-            
+
             // Create a new ACL with both entries
             let mut new_acl: *mut ACL = ptr::null_mut();
             if SetEntriesInAclW(2, ea.as_ptr(), ptr::null_mut(), &mut new_acl) != ERROR_SUCCESS {
@@ -2619,7 +2842,7 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
                 eprintln!("[SECURITY] Failed to create ACL");
                 return Ok(());
             }
-            
+
             // Apply the security descriptor to the file
             // SetSecurityInfo returns ERROR_SUCCESS (0) on success, non-zero on failure
             if SetSecurityInfo(
@@ -2630,17 +2853,18 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
                 ptr::null_mut(),
                 new_acl,
                 ptr::null_mut(),
-            ) != 0 {
+            ) != 0
+            {
                 LocalFree(new_acl as *mut _);
                 CloseHandle(handle);
                 // Security issue - file written with insecure permissions
                 eprintln!("[SECURITY] WARNING: Failed to set file security info - file may have insecure permissions");
                 return Ok(());
             }
-            
+
             LocalFree(new_acl as *mut _);
             CloseHandle(handle);
-            
+
             // Note: Windows administrators can always take ownership of files.
             // This is equivalent to Unix 0600 - protects against regular users,
             // not against privileged accounts.
@@ -2648,24 +2872,34 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             eprintln!("[SECURITY] Successfully set file permissions (owner-only, equivalent to Unix 0600)");
         }
     }
-    
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn write_config_file(app: AppHandle, config_path: String, content: String) -> Result<String, String> {
+pub fn write_config_file(
+    app: AppHandle,
+    config_path: String,
+    content: String,
+) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
     let config_file_name = sanitize_config_file_name(&config_path)?;
     let (resolved_path, base_dir) = if config_file_name == "run_config.yaml" {
-        (paths.core_dir.join(&config_file_name), paths.core_dir.clone())
+        (
+            paths.core_dir.join(&config_file_name),
+            paths.core_dir.clone(),
+        )
     } else {
-        (paths.profiles_dir.join(&config_file_name), paths.profiles_dir.clone())
+        (
+            paths.profiles_dir.join(&config_file_name),
+            paths.profiles_dir.clone(),
+        )
     };
-    
+
     validate_path_within_dir(&resolved_path, &base_dir)?;
-    
+
     write_file_secure(&resolved_path, &content)?;
-    
+
     Ok(format!("Successfully wrote to {:?}", resolved_path))
 }
 
@@ -2674,18 +2908,18 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
     let resolve_pin = resolved_addr.map(|addr| (host, addr));
     let client = build_http_client(None, resolve_pin)?;
-    
+
     let resp = client.get(&url).send().await.map_err(|e| {
         println!("Fetch failed: {}", e);
         "Network error occurred during fetch".to_string()
     })?;
-    
+
     if !resp.status().is_success() {
         let status = resp.status();
         println!("Fetch failed with status: {}", status);
         return Err("Fetch failed with error status".to_string());
     }
-    
+
     let bytes = read_response_body(resp).await?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -2703,7 +2937,10 @@ pub fn is_private_host_public(host: &str) -> bool {
 /// Tauri command to restart mihomo core with root privileges on macOS for TUN mode
 /// Returns the secret for frontend to update
 #[tauri::command]
-pub async fn restart_core_as_root_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<String, String> {
+pub async fn restart_core_as_root_cmd(
+    app: tauri::AppHandle,
+    enable_tun: bool,
+) -> Result<String, String> {
     restart_core_as_root(&app, enable_tun).await
 }
 
@@ -2726,7 +2963,7 @@ mod tests {
     fn validate_custom_args_rejects_blocked_flags() {
         let args = validate_custom_args(&["--external-controller=0.0.0.0:9090".to_string()]);
         assert!(args.is_err());
-        
+
         let args2 = validate_custom_args(&["-d".to_string(), ".".to_string()]);
         assert!(args2.is_err());
     }
