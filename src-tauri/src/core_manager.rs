@@ -270,7 +270,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let escaped_log_path = log_path.replace("'", "'\\''");
     
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > '{}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > '{}' 2>&1 &" with administrator privileges"#,
         escaped_config_dir, escaped_log_path
     );
     
@@ -350,14 +350,8 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         return Err("root_start_failed".to_string());
     }
     
-    // Set MSL to 1s so all health check connections have short TIME_WAIT (2s instead of 30s)
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "sysctl -w net.inet.tcp.msl=1000 2>/dev/null || true"])
-            .output();
-        eprintln!("[TUN] Set MSL=1000 for short TIME_WAIT");
-    }
+    // MSL is already set in the root osascript above (sysctl needs root)
+    eprintln!("[TUN] Set MSL=1000 for short TIME_WAIT (via root shell)");
     
     // Mark TUN mode as active
     set_tun_mode(true);
@@ -1634,14 +1628,8 @@ pub async fn start_core(
         return Err(err_msg);
     }
     
-    // Restore MSL to default (15000ms) after successful start
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "sysctl -w net.inet.tcp.msl=15000 2>/dev/null || true"])
-            .output();
-        eprintln!("[CORE] Restored MSL to default 15000ms");
-    }
+    // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
+    // Non-TUN mode does not need low MSL, and changing it requires root anyway.
     
     let mut lock = match state.0.lock() {
         Ok(l) => l,
