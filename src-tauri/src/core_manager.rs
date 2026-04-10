@@ -631,7 +631,8 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 // Always ensure executable permission on Unix
                 #[cfg(any(target_os = "macos", target_os = "linux"))]
                 {
-                    if (file_name == core_binary_name() || file_name == "mihomo") && target.exists() {
+                    if (file_name == core_binary_name() || file_name == "mihomo") && target.exists()
+                    {
                         let _ = ensure_executable(&target);
                     }
                 }
