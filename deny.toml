@@ -14,11 +14,6 @@ ignore = [
   { id = "RUSTSEC-2025-0075", reason = "unic-char-range pulled in by Tauri, no safe upgrade available" },
 ]
 
-# Print all advisories instead of failing on the first one
-unmaintained = "warn"
-vulnerability = "deny"
-unsound = "deny"
-
 [licenses]
 allow = [
   "MIT",
