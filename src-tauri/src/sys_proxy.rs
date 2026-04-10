@@ -69,8 +69,8 @@ fn parse_host_port(server: &str) -> Result<(String, String), String> {
         if let Some(end_bracket) = server.rfind(']') {
             let host = server[1..end_bracket].to_string();
             let remainder = &server[end_bracket + 1..];
-            if let Some(port) = remainder.strip_prefix(':') {
-                let port = port.trim().to_string();
+            if let Some(port_str) = remainder.strip_prefix(':') {
+                let port = port_str.trim().to_string();
                 if !port.is_empty() {
                     // Validate port is a valid number
                     if port.parse::<u16>().is_err() {

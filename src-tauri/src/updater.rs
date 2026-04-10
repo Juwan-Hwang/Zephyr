@@ -129,7 +129,7 @@ fn is_trusted_update_url(url: &str) -> bool {
     false
 }
 
-async fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(), String> {
+fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(), String> {
     let mut file = std::fs::File::open(file_path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
@@ -138,7 +138,7 @@ async fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Resu
         if n == 0 {
             break;
         }
-        hasher.update(&buffer[..n]);
+        hasher.update(buffer.get(..n).unwrap_or(&[]));
     }
     let result = hasher.finalize();
     let hex_result = hex::encode(result);
@@ -181,7 +181,9 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
         .await
         .map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
-    let assets = json["assets"]
+    let assets = json
+        .get("assets")
+        .unwrap_or(&serde_json::Value::Null)
         .as_array()
         .ok_or_else(|| "No assets found in release".to_string())?;
 
@@ -262,7 +264,10 @@ async fn download_release_asset(
 
         let progress = if total_size > 0 {
             let ratio = downloaded as f64 / total_size as f64;
-            (24.0 + ratio * 56.0).round().clamp(24.0, 80.0) as u8
+            // clippy: value is already clamped to 24-80, safe for u8
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let p: u8 = (24.0 + ratio * 56.0).round().clamp(24.0, 80.0) as u8;
+            p
         } else {
             52
         };
@@ -352,7 +357,7 @@ fn extract_from_gz(
             return Err("Decompressed gz too large".to_string());
         }
         temp_decompressed
-            .write_all(&buffer[..n])
+            .write_all(buffer.get(..n).unwrap_or(&[]))
             .map_err(|e| e.to_string())?;
     }
     temp_decompressed.sync_all().map_err(|e| e.to_string())?;
@@ -371,8 +376,8 @@ fn extract_from_gz(
             .entries()
             .map_err(|e| format!("Failed to parse tar entries: {}", e))?
         {
-            let mut entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path().map_err(|e| e.to_string())?;
+            let mut entry_inner = entry.map_err(|e| e.to_string())?;
+            let path = entry_inner.path().map_err(|e| e.to_string())?;
             let path_str = path.to_string_lossy().replace('\\', "/");
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if path_str.contains("..") || path_str.starts_with('/') {
@@ -386,7 +391,7 @@ fn extract_from_gz(
             if matched {
                 let mut out_file = std::fs::File::create(exe_path).map_err(|e| e.to_string())?;
                 let written =
-                    std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut entry_inner, &mut out_file).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(&temp_tar_path);
                 if written == 0 {
                     return Err("Extracted core binary is empty".to_string());
@@ -577,13 +582,13 @@ fn parse_github_release_info(url: &str) -> Option<(String, String)> {
         let segments: Vec<&str> = parsed.path_segments()?.collect();
 
         if segments.len() >= 5
-            && segments[0] == "MetaCubeX"
-            && segments[1] == "mihomo"
-            && segments[2] == "releases"
-            && segments[3] == "download"
+            && segments.first().is_some_and(|s| *s == "MetaCubeX")
+            && segments.get(1).is_some_and(|s| *s == "mihomo")
+            && segments.get(2).is_some_and(|s| *s == "releases")
+            && segments.get(3).is_some_and(|s| *s == "download")
         {
-            let version = segments[4].to_string();
-            let asset_name = segments[5].to_string();
+            let version = segments.get(4).map(|s| s.to_string()).unwrap_or_default();
+            let asset_name = segments.get(5).map(|s| s.to_string()).unwrap_or_default();
 
             if !validate_version_format(&version) {
                 return None;
@@ -641,12 +646,10 @@ pub async fn update_core(
 
     emit_core_download_status(&window, "Verifying file integrity...", 82);
     let expected_hash = get_expected_sha256(&version, &asset_name).await?;
-    verify_sha256(&archive_path, &expected_hash)
-        .await
-        .inspect_err(|e| {
-            let _ = std::fs::remove_file(&archive_path);
-            let _ = e;
-        })?;
+    verify_sha256(&archive_path, &expected_hash).inspect_err(|e| {
+        let _ = std::fs::remove_file(&archive_path);
+        let _ = e;
+    })?;
 
     emit_core_download_status(&window, "Download complete, extracting core...", 84);
     let temp_exe_path = paths.core_dir.join(format!(
@@ -834,12 +837,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     }
 
     emit_core_download_status(&window, "Verifying GeoIP...", 45);
-    verify_sha256(&geoip_path, &geoip_expected_hash)
-        .await
-        .inspect_err(|e| {
-            let _ = std::fs::remove_file(&geoip_path);
-            let _ = e;
-        })?;
+    verify_sha256(&geoip_path, &geoip_expected_hash).inspect_err(|e| {
+        let _ = std::fs::remove_file(&geoip_path);
+        let _ = e;
+    })?;
 
     // Download GeoSite
     emit_core_download_status(&window, "Downloading GeoSite...", 50);
@@ -884,12 +885,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     }
 
     emit_core_download_status(&window, "Verifying GeoSite...", 90);
-    verify_sha256(&geosite_path, &geosite_expected_hash)
-        .await
-        .inspect_err(|e| {
-            let _ = std::fs::remove_file(&geosite_path);
-            let _ = e;
-        })?;
+    verify_sha256(&geosite_path, &geosite_expected_hash).inspect_err(|e| {
+        let _ = std::fs::remove_file(&geosite_path);
+        let _ = e;
+    })?;
 
     // Apply updates
     emit_core_download_status(&window, "Applying updates...", 95);

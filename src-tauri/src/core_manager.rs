@@ -378,7 +378,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
 /// On non-macOS platforms, this is a no-op
 #[cfg(not(target_os = "macos"))]
-pub async fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
+pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
     Ok(String::new())
 }
 
@@ -746,17 +746,21 @@ fn url_decode_complete(input: &str) -> String {
         let mut i = 0;
 
         while i < chars.len() {
-            if chars[i] == '%' && i + 2 < chars.len() {
+            if chars.get(i) == Some(&'%') && i + 2 < chars.len() {
                 // Try to decode %XX
-                let hex: String = chars[i + 1..i + 3].iter().collect();
-                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                    decoded.push(byte as char);
-                    i += 3;
-                    changed = true;
-                    continue;
+                if let Some(hex_chars) = chars.get(i + 1..i + 3) {
+                    let hex: String = hex_chars.iter().collect();
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                        decoded.push(byte as char);
+                        i += 3;
+                        changed = true;
+                        continue;
+                    }
                 }
             }
-            decoded.push(chars[i]);
+            if let Some(c) = chars.get(i) {
+                decoded.push(*c);
+            }
             i += 1;
         }
 
@@ -807,7 +811,6 @@ fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
         return Err("Invalid file type: only .yaml and .yml files are permitted".to_string());
     }
 
-    // Additional safety: check filename length
     if config_file_name.len() > 255 {
         return Err("Filename too long: maximum 255 characters allowed".to_string());
     }
@@ -1210,9 +1213,9 @@ fn build_http_client_with_proxy(
         .redirect(redirect_policy)
         .no_proxy();
 
-    if let Some(proxy) = proxy_url {
-        let proxy =
-            reqwest::Proxy::all(&proxy).map_err(|e| format!("Failed to create proxy: {}", e))?;
+    if let Some(proxy_url_inner) = proxy_url {
+        let proxy = reqwest::Proxy::all(proxy_url_inner)
+            .map_err(|e| format!("Failed to create proxy: {}", e))?;
         client_builder = client_builder.proxy(proxy);
     }
 
@@ -1405,7 +1408,7 @@ pub async fn start_core(
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
-        let secret = restart_core_as_root(&app, true).await?;
+        let secret = restart_core_as_root(&app, true)?;
         return Ok(CoreStartResult { secret, port: 9090 });
     }
 
@@ -1481,13 +1484,13 @@ pub async fn start_core(
 
     stop_core(app.clone(), state.clone())?;
 
-    let secret = secret.unwrap_or_else(generate_secret);
+    let resolved_secret = secret.unwrap_or_else(generate_secret);
 
     let (active_config_name, final_config, config_port) = select_runtime_config(
         &paths,
         &resolved_config_name,
         &resolved_config_path,
-        &secret,
+        &resolved_secret,
     )?;
 
     let run_config_path = paths.core_dir.join("run_config.yaml");
@@ -1697,7 +1700,7 @@ pub async fn start_core(
             if stream.write_all(request.as_bytes()).is_ok() {
                 let mut response = [0u8; 256];
                 if let Ok(n) = stream.read(&mut response) {
-                    let resp_str = String::from_utf8_lossy(&response[..n]);
+                    let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
                     if resp_str.starts_with("HTTP/1.1 200")
                         || resp_str.starts_with("HTTP/1.1 401")
                         || resp_str.starts_with("HTTP/1.0 200")
@@ -1735,12 +1738,15 @@ pub async fn start_core(
         }
     };
     lock.process = Some(child);
-    lock.last_secret = secret.clone();
+    lock.last_secret = resolved_secret.clone();
     lock.last_config_path = active_config_name;
     lock.last_custom_args = Some(safe_custom_args);
     lock.last_port = Some(port);
 
-    Ok(CoreStartResult { secret, port })
+    Ok(CoreStartResult {
+        secret: resolved_secret,
+        port,
+    })
 }
 
 #[tauri::command]
@@ -1755,10 +1761,10 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
         lock.process.take()
     };
 
-    if let Some(mut child) = child {
+    if let Some(mut child_process) = child {
         // Force kill the process (cross-platform safe)
-        let _ = child.kill();
-        let _ = child.wait();
+        let _ = child_process.kill();
+        let _ = child_process.wait();
     }
 
     if let Ok(paths) = ensure_app_storage(&app) {
@@ -1999,9 +2005,9 @@ fn compute_machine_key() -> Vec<u8> {
         }
     };
 
-    if let Some(key_path) = key_path {
+    if let Some(key_path_ref) = key_path {
         // Ensure directory exists with secure permissions
-        if let Some(parent) = key_path.parent() {
+        if let Some(parent) = key_path_ref.parent() {
             if !parent.exists() && fs::create_dir_all(parent).is_ok() {
                 // Set directory permissions on Unix
                 #[cfg(unix)]
@@ -2013,13 +2019,13 @@ fn compute_machine_key() -> Vec<u8> {
         }
 
         // Try to read existing key
-        if key_path.exists() {
-            if let Ok(existing_key) = fs::read_to_string(&key_path) {
+        if key_path_ref.exists() {
+            if let Ok(existing_key) = fs::read_to_string(&key_path_ref) {
                 let trimmed = existing_key.trim();
                 if !trimmed.is_empty() && trimmed.len() >= 32 {
                     // Use the stored key directly (already has enough entropy)
                     MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
-                    return trimmed.as_bytes()[..32].to_vec();
+                    return trimmed.as_bytes().get(..32).unwrap_or(&[]).to_vec();
                 }
             }
         }
@@ -2028,7 +2034,7 @@ fn compute_machine_key() -> Vec<u8> {
         let random_key: Vec<u8> = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
 
         // Persist the key (critical for data recovery)
-        if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
+        if write_file_secure(&key_path_ref, &String::from_utf8_lossy(&random_key)).is_ok() {
             MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
             return random_key;
         }
@@ -2049,7 +2055,7 @@ fn compute_machine_key() -> Vec<u8> {
                 let trimmed = existing_key.trim();
                 if !trimmed.is_empty() && trimmed.len() >= 32 {
                     MACHINE_KEY_PERSISTED.store(true, std::sync::atomic::Ordering::SeqCst);
-                    return trimmed.as_bytes()[..32].to_vec();
+                    return trimmed.as_bytes().get(..32).unwrap_or(&[]).to_vec();
                 }
             }
         }
@@ -2156,8 +2162,8 @@ fn deobfuscate_string(s: &str) -> String {
         }
 
         // Extract nonce (bytes 3-15) and ciphertext (bytes 15-)
-        let nonce_bytes = &decoded[3..15];
-        let ciphertext = &decoded[15..];
+        let nonce_bytes = decoded.get(3..15).unwrap_or(&[]);
+        let ciphertext = decoded.get(15..).unwrap_or(&[]);
 
         let key_bytes = get_machine_key();
 
@@ -2363,7 +2369,7 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
 
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {
     if let Some(content_length) = resp.content_length() {
-        if content_length as usize > MAX_RESPONSE_SIZE {
+        if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
             return Err(format!(
                 "Response too large: {} bytes (max {} bytes)",
                 content_length, MAX_RESPONSE_SIZE
@@ -2374,8 +2380,8 @@ async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> 
     use futures_util::StreamExt;
     let mut bytes = Vec::new();
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {}", e))?;
         if bytes.len() + chunk.len() > MAX_RESPONSE_SIZE {
             return Err(format!(
                 "Response exceeded size limit of {} bytes",
@@ -2429,7 +2435,7 @@ pub async fn download_sub(
         }
 
         if let Some(content_length) = resp.content_length() {
-            if content_length as usize > MAX_RESPONSE_SIZE {
+            if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
                 return Err(format!(
                     "Response too large: {} bytes (max {} bytes)",
                     content_length, MAX_RESPONSE_SIZE
@@ -2488,11 +2494,11 @@ pub async fn download_sub(
             })
         };
 
-        if let Some(proxy_url) = proxy_url {
+        if let Some(proxy_url_val) = proxy_url {
             let client_mihomo = build_http_client_with_proxy(
                 user_agent.clone(),
                 resolve_pin.clone(),
-                Some(proxy_url),
+                Some(proxy_url_val),
             );
             if let Ok(client) = client_mihomo {
                 match do_download(client, url.clone()).await {
@@ -2606,18 +2612,18 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     let paths = ensure_app_storage(&app)?;
 
     // Ensure the name has a .yaml extension
-    let name = if name.ends_with(".yaml") || name.ends_with(".yml") {
-        name
+    let mut clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
+        name.clone()
     } else {
         format!("{}.yaml", name)
     };
 
-    let name = sanitize_config_file_name(&name)?;
-    if name == "run_config.yaml" {
+    clean_name = sanitize_config_file_name(&clean_name)?;
+    if clean_name == "run_config.yaml" {
         return Err("Cannot delete the active temp config".to_string());
     }
 
-    let target_path = paths.profiles_dir.join(&name);
+    let target_path = paths.profiles_dir.join(&clean_name);
     validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 
     let file_exists = target_path.exists();
@@ -2927,7 +2933,7 @@ pub async fn restart_core_as_root_cmd(
     app: tauri::AppHandle,
     enable_tun: bool,
 ) -> Result<String, String> {
-    restart_core_as_root(&app, enable_tun).await
+    restart_core_as_root(&app, enable_tun)
 }
 
 #[cfg(test)]

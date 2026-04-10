@@ -202,7 +202,7 @@ pub fn run() {
         .manage(TrayState::default())
         .manage(RateLimiter::new())
         .setup(|app| {
-            ensure_app_storage(app.handle()).map_err(|e| e.to_string())?;
+            ensure_app_storage(app.handle()).map_err(|e| e.clone())?;
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let settings_file = config_dir.join("settings.json");
             let settings = if settings_file.exists() {
@@ -223,7 +223,7 @@ pub fn run() {
             app.manage(SettingsState(Arc::new(Mutex::new(settings.clone()))));
 
             // Init Tray using the new tray module
-            init_tray(app.handle()).map_err(|e| e.to_string())?;
+            init_tray(app.handle()).map_err(|e| e.clone())?;
 
             Ok(())
         })

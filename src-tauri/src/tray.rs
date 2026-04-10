@@ -87,6 +87,7 @@ pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_string())?;
 
+    #[allow(clippy::large_include_file)]
     let icon_bytes: &[u8] = match mode.as_str() {
         "tun" => include_bytes!("../icons/red-icon.png"),
         "sysproxy" => include_bytes!("../icons/yellow-icon.png"),
@@ -238,13 +239,15 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             else if let Some(proxy_name) = id.strip_prefix("proxy_") {
                 let parts: Vec<&str> = proxy_name.splitn(2, ':').collect();
                 if parts.len() == 2 {
-                    let _ = app.emit(
-                        "tray-proxy-changed",
-                        serde_json::json!({
-                            "group": parts[0],
-                            "proxy": parts[1]
-                        }),
-                    );
+                    if let (Some(group), Some(proxy)) = (parts.first(), parts.get(1)) {
+                        let _ = app.emit(
+                            "tray-proxy-changed",
+                            serde_json::json!({
+                                "group": group,
+                                "proxy": proxy
+                            }),
+                        );
+                    }
                 }
             }
         }
