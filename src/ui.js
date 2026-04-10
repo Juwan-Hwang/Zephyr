@@ -4049,22 +4049,37 @@ export async function applyDnsRewrite() {
     }
 }
 
+function isPlainObject(value) {
+    if (typeof value !== 'object' || value === null) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
 function deepMerge(target, source) {
-    if (typeof target !== 'object' || target === null) return source;
-    if (typeof source !== 'object' || source === null) return source;
-    
+    if (!isPlainObject(target)) return source;
+    if (!isPlainObject(source)) return source;
+
     // Arrays are fully replaced (not merged by index).
     // This is intentional: config arrays like nameserver/rules/proxies
     // represent complete lists, not partial patches.
     if (Array.isArray(target) && Array.isArray(source)) return source;
 
-    for (const key in source) {
-        if (Object.prototype.hasOwnProperty.call(source, key)) {
-            if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
-                target[key] = deepMerge(target[key] || {}, source[key]);
-            } else {
-                target[key] = source[key];
-            }
+    const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
+
+    for (const key of Object.keys(source)) {
+        if (blockedKeys.has(key)) continue;
+
+        const sourceValue = source[key];
+        const targetHasOwnKey = Object.prototype.hasOwnProperty.call(target, key);
+        const canRecurse =
+            targetHasOwnKey &&
+            isPlainObject(target[key]) &&
+            isPlainObject(sourceValue);
+
+        if (canRecurse) {
+            target[key] = deepMerge(target[key], sourceValue);
+        } else {
+            target[key] = sourceValue;
         }
     }
     return target;
