@@ -276,6 +276,12 @@ fn toggle_sys_proxy(app: &AppHandle) {
 }
 
 fn toggle_tun(app: &AppHandle) {
+    // Rate limit: prevent concurrent TUN toggles (same protection as main UI)
+    if !crate::core_manager::try_acquire_tun_toggle() {
+        // TUN is already being toggled, ignore duplicate click
+        return;
+    }
+
     let state = app.state::<TrayState>();
     let current = state
         .0
@@ -284,6 +290,7 @@ fn toggle_tun(app: &AppHandle) {
         .unwrap_or(false);
 
     // Emit event to frontend to handle TUN toggle
+    // The lock will be released by the frontend via release_tun_toggle command
     let _ = app.emit("tray-tun-changed", !current);
 }
 

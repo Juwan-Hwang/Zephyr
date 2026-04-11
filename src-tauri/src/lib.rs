@@ -319,6 +319,7 @@ pub fn run() {
             tray::get_tray_proxy_status,
             tray::update_tray_toggle_states,
             core_manager::is_machine_key_persisted,
+            core_manager::release_tun_toggle,
         ]);
 
     let app = builder

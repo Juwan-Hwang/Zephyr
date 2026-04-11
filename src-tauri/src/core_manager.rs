@@ -19,6 +19,9 @@ static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 // Global lock to prevent concurrent core start operations
 static CORE_STARTING: AtomicBool = AtomicBool::new(false);
 
+// Global lock to prevent concurrent TUN toggle operations (from both main UI and tray)
+static TUN_TOGGLING: AtomicBool = AtomicBool::new(false);
+
 /// Recursively remove dangerous keys from YAML structure to prevent code execution
 /// This function is security-critical and used by both production code and tests
 pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
@@ -66,6 +69,24 @@ pub fn set_tun_mode(active: bool) {
 /// Check if TUN mode is currently active
 pub fn is_tun_mode() -> bool {
     TUN_MODE_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Try to acquire TUN toggle lock. Returns true if acquired, false if already toggling.
+pub fn try_acquire_tun_toggle() -> bool {
+    TUN_TOGGLING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+/// Release TUN toggle lock
+#[tauri::command]
+pub fn release_tun_toggle() {
+    TUN_TOGGLING.store(false, Ordering::SeqCst);
+}
+
+/// Check if TUN toggle is in progress
+pub fn is_tun_toggling() -> bool {
+    TUN_TOGGLING.load(Ordering::SeqCst)
 }
 
 #[derive(Serialize)]

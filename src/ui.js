@@ -3166,8 +3166,10 @@ export async function initSettings() {
 
             configsList.appendChild(item);
         });
-    };
 
+        // Always sync tray menu after rendering configs (covers all callers: import, delete, update, switch, drag-drop)
+        updateTrayMenu(true).catch(() => {});
+    };
 
     renderConfigs();
 
@@ -3538,13 +3540,24 @@ export function initTrayEventListeners() {
     
     // Listen for TUN toggle from tray
     const unlisten2 = listen('tray-tun-changed', async (event) => {
+        // Guard: ignore if main UI is already busy with a network operation
+        if (isNetworkUpdating) return;
+
         const enabled = event.payload;
         const toggle = document.getElementById('tun-proxy-toggle');
-        
+
         if (toggle) {
             toggle.checked = enabled;
-            // Trigger the change handler
-            toggle.dispatchEvent(new Event('change'));
+            // Trigger the change handler (which has its own isNetworkUpdating guard)
+            // The lock is released inside initTunToggle on both success and error paths.
+            // Safety net: release after 60s to prevent permanent lock if handler hangs
+            // (macOS TUN with osascript authorization can take 30+ seconds)
+            setTimeout(async () => {
+                try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
+            }, 60000);
+        } else {
+            // No toggle element found (window not ready), release immediately
+            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
         }
     });
     _trayEventUnlisteners.push(unlisten2);
@@ -3612,6 +3625,9 @@ export function initTrayEventListeners() {
                 if (document.querySelector('[data-page="proxies"]').classList.contains('hidden') === false) {
                     renderProxies();
                 }
+
+                // Refresh tray menu to update the check/empty-circle indicator on selected node
+                updateTrayMenu(true).catch(() => {});
             }
         } catch (err) {
             console.error('Failed to switch proxy from tray:', err);
@@ -3708,11 +3724,14 @@ export async function initProxyToggle() {
             
             updateSysProxyUI();
             await updateTrayStatus();
+            // Sync tray menu toggle states
+            updateTrayMenu().catch(() => {});
         } catch (err) {
             console.error('Failed to set sys proxy:', err);
             showNotification(`${translations[currentLang].errorPrefix || 'Error'}: ${err}`, 'error');
             toggle.checked = !enabled;
             await updateTrayStatus();
+            updateTrayMenu().catch(() => {});
         }
     });
 }
@@ -4369,6 +4388,8 @@ export function initModeSelector() {
 
                 isNetworkUpdating = false;
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
+                // Sync tray menu mode indicator
+                updateTrayMenu(true).catch(() => {});
             } catch (err) {
                 showNotification(err.toString(), 'error');
                 isNetworkUpdating = false;
@@ -4511,7 +4532,11 @@ export function initTunToggle() {
             }
             if (spinner) spinner.classList.add('hidden');
             isNetworkUpdating = false;
+            // Release TUN toggle lock (for tray-initiated toggles)
+            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
             await updateTrayStatus();
+            // Sync tray menu toggle states immediately
+            updateTrayMenu(true).catch(() => {});
         } catch (err) {
             // Rollback
             toggle.checked = !enable;
@@ -4523,7 +4548,10 @@ export function initTunToggle() {
             // Show platform-specific error message
             showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             isNetworkUpdating = false;
+            // Release TUN toggle lock on error too
+            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
             await updateTrayStatus();
+            updateTrayMenu(true).catch(() => {});
         }
     };
 }
