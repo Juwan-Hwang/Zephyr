@@ -71,8 +71,26 @@ pub fn is_tun_mode() -> bool {
 #[derive(Serialize)]
 pub struct ConfigInfo {
     pub name: String,
+    #[serde(skip_serializing)]
     pub url: Option<String>,
+    pub url_display: Option<String>,
     pub sub_info: Option<String>,
+}
+
+/// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
+fn mask_url(url: &str) -> String {
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        let host = parsed.host_str().unwrap_or("???");
+        let masked_host = if host.len() > 6 {
+            format!("{}***{}", &host[..3], &host[host.len() - 3..])
+        } else {
+            "***".to_string()
+        };
+        // Only show scheme + masked host; hide path and query entirely
+        format!("{}://{}/***", parsed.scheme(), masked_host)
+    } else {
+        "***".to_string()
+    }
 }
 
 use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
@@ -2352,9 +2370,12 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                             }
                         }
 
+                        let url_display = url.as_ref().map(|u| mask_url(u));
+
                         configs.push(ConfigInfo {
                             name: name.to_string(),
                             url,
+                            url_display,
                             sub_info,
                         });
                     }
@@ -2364,6 +2385,38 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
     }
     configs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(configs)
+}
+
+/// Get the full (unmasked) subscription URL for a given config name.
+/// This is the only endpoint that exposes the raw URL, used exclusively for subscription updates.
+#[tauri::command]
+pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, String> {
+    // Reuse comprehensive sanitization (URL decode, path traversal check, etc.)
+    let safe_name = sanitize_config_file_name(&name)?;
+
+    let paths = ensure_app_storage(&app)?;
+    let metadata = load_metadata(&paths);
+
+    // Look up URL from metadata first
+    if let Some(meta) = metadata.configs.get(&safe_name) {
+        if let Some(ref url) = meta.url {
+            return Ok(url.clone());
+        }
+    }
+
+    // Fallback: read from file comments (legacy format)
+    let path = paths.profiles_dir.join(&safe_name);
+    if let Ok(file) = std::fs::File::open(&path) {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            if line.starts_with("# URL: ") {
+                return Ok(line.replace("# URL: ", "").trim().to_string());
+            }
+        }
+    }
+
+    Err(format!("No subscription URL found for config: {}", name))
 }
 
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {

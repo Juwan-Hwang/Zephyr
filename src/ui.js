@@ -2827,8 +2827,8 @@ export async function initSettings() {
     if (updateAllSubBtn) {
         updateAllSubBtn.onclick = async () => {
             const t = translations[currentLang];
-            const configs = await window.__TAURI__.core.invoke('list_configs');
-            const subConfigs = configs.filter(c => c.url); // Only those with URL
+        const configs = await window.__TAURI__.core.invoke('list_configs');
+        const subConfigs = configs.filter(c => c.url_display); // Only those with URL
             
             if (subConfigs.length === 0) {
                 showNotification(t.notifNoSubToUpdate, 'info');
@@ -2846,7 +2846,8 @@ export async function initSettings() {
             for (const config of subConfigs) {
                 try {
                     const userAgent = getSubscriptionUserAgent();
-                    await window.__TAURI__.core.invoke('download_sub', { url: config.url, name: config.name, userAgent });
+                    const fullUrl = await window.__TAURI__.core.invoke('get_config_url', { name: config.name });
+                    await window.__TAURI__.core.invoke('download_sub', { url: fullUrl, name: config.name, userAgent });
                     successCount++;
                 } catch (err) {
                     failCount++;
@@ -3042,7 +3043,7 @@ export async function initSettings() {
             };
 
             // Update button (only if has URL)
-            if (configInfo.url) {
+            if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
                 updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-zinc-500 hover:text-accent transition-all';
                 updateBtn.innerHTML = SVG_ICONS.refresh;
@@ -3052,7 +3053,8 @@ export async function initSettings() {
                     updateBtn.classList.add('animate-spin');
                     try {
                         const userAgent = getSubscriptionUserAgent();
-                        await window.__TAURI__.core.invoke('download_sub', { url: configInfo.url, name: configInfo.name, userAgent });
+                        const fullUrl = await window.__TAURI__.core.invoke('get_config_url', { name: configInfo.name });
+                        await window.__TAURI__.core.invoke('download_sub', { url: fullUrl, name: configInfo.name, userAgent });
                         // Invalidate configs cache after update
                         invalidateConfigsCache();
                         if (isCurrent) {
@@ -3155,10 +3157,10 @@ export async function initSettings() {
                 }
             }
 
-            if (configInfo.url) {
+            if (configInfo.url_display) {
                 const urlLabel = document.createElement('div');
                 urlLabel.className = 'text-[9px] text-zinc-600 truncate mt-1 w-full';
-                urlLabel.textContent = configInfo.url;
+                urlLabel.textContent = configInfo.url_display;
                 item.appendChild(urlLabel);
             }
 
