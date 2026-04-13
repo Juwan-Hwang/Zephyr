@@ -412,7 +412,7 @@ jobs:
 
       # 6. 一键清空购物车！上传保险柜里的所有文件到 GitHub Release
       - name: Upload All Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
