@@ -34,7 +34,7 @@ flate2 = "1"
 tar = "0.4"
 futures-util = "0.3"
 tempfile = "3"
-rand = "0.8"
+rand = { version = "0.10", features = ["thread_rng", "alloc"] }
 base64 = "0.22"
 serde_yaml = "0.9"  # TODO: Consider migrating to serde_yml when stable
 sha2 = "0.10"

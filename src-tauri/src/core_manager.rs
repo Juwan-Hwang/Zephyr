@@ -1,5 +1,4 @@
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::RngExt;
 use serde::Serialize;
 use std::fs;
 use std::io::{Read, Write};
@@ -1179,11 +1178,15 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn generate_secret() -> String {
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect()
+    let mut buf = [0u8; 32];
+    rand::rng().fill(&mut buf);
+    String::from_utf8(buf.iter().map(|&b| {
+        match b % 62 {
+            0..=9 => b'0' + b,
+            10..=35 => b'a' + (b - 10),
+            _ => b'A' + (b - 36),
+        }
+    }).collect()).unwrap_or_default()
 }
 
 // ==========================================
@@ -2069,7 +2072,9 @@ fn compute_machine_key() -> Vec<u8> {
         }
 
         // Generate new random key (32 bytes is sufficient for AES-256)
-        let random_key: Vec<u8> = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
+        let mut key_buf = [0u8; 32];
+        rand::rng().fill(&mut key_buf);
+        let random_key: Vec<u8> = key_buf.to_vec();
 
         // Persist the key (critical for data recovery)
         if write_file_secure(&key_path_ref, &String::from_utf8_lossy(&random_key)).is_ok() {
@@ -2099,7 +2104,9 @@ fn compute_machine_key() -> Vec<u8> {
         }
 
         // Generate new random key
-        let random_key: Vec<u8> = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
+        let mut key_buf = [0u8; 32];
+        rand::rng().fill(&mut key_buf);
+        let random_key: Vec<u8> = key_buf.to_vec();
 
         // Persist the key
         if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
@@ -2113,7 +2120,9 @@ fn compute_machine_key() -> Vec<u8> {
     eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
     // Session-only key - will not persist
     // Callers should check is_machine_key_persisted() before storing sensitive data
-    thread_rng().sample_iter(&Alphanumeric).take(32).collect()
+    let mut key_buf = [0u8; 32];
+    rand::rng().fill(&mut key_buf);
+    key_buf.to_vec()
 }
 
 /// Check if the machine key was successfully persisted
@@ -2159,7 +2168,7 @@ fn obfuscate_string(s: &str) -> String {
     };
 
     // Generate random nonce
-    let nonce_bytes: [u8; 12] = rand::thread_rng().gen();
+    let nonce_bytes: [u8; 12] = rand::rng().random();
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     // Encrypt
