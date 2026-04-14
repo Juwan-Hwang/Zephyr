@@ -1180,13 +1180,16 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
 fn generate_secret() -> String {
     let mut buf = [0u8; 32];
     rand::rng().fill(&mut buf);
-    String::from_utf8(buf.iter().map(|&b| {
-        match b % 62 {
-            0..=9 => b'0' + b,
-            10..=35 => b'a' + (b - 10),
-            _ => b'A' + (b - 36),
-        }
-    }).collect()).unwrap_or_default()
+    String::from_utf8(
+        buf.iter()
+            .map(|&b| match b % 62 {
+                0..=9 => b'0' + b,
+                10..=35 => b'a' + (b - 10),
+                _ => b'A' + (b - 36),
+            })
+            .collect(),
+    )
+    .unwrap_or_default()
 }
 
 // ==========================================

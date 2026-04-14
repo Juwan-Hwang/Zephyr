@@ -1,0 +1,76 @@
+# Third Party Notices
+
+Zephyr uses the following open source components. We are grateful to all contributors.
+
+## Rust Dependencies (Runtime)
+
+| Crate | Version | License | Homepage |
+|-------|---------|---------|----------|
+| tauri | 2.10.3 | Apache-2.0 / MIT | https://tauri.app |
+| tauri-build | 2.5.6 | Apache-2.0 / MIT | https://tauri.app |
+| tauri-plugin-autostart | 2.5.1 | Apache-2.0 / MIT | https://github.com/tauri-apps/plugins-workspace |
+| tauri-plugin-dialog | 2.7.0 | Apache-2.0 / MIT | https://github.com/tauri-apps/plugins-workspace |
+| tauri-plugin-opener | 2.5.3 | Apache-2.0 / MIT | https://github.com/tauri-apps/plugins-workspace |
+| tokio | 1.51.1 | MIT | https://tokio.rs |
+| reqwest | 0.12.28 | MIT / Apache-2.0 | https://github.com/seanmonstar/reqwest |
+| serde | 1.0.228 | MIT / Apache-2.0 | https://serde.rs |
+| serde_json | 1.0.149 | MIT / Apache-2.0 | https://github.com/serde-rs/json |
+| serde_yaml | 0.9.34+deprecated | MIT / Apache-2.0 | https://github.com/dtolnay/serde-yaml |
+| aes-gcm | 0.10.3 | Apache-2.0 (or MIT) | https://github.com/RustCrypto/AEADs |
+| hmac | 0.12.1 | MIT / Apache-2.0 | https://github.com/RustCrypto/MACs |
+| pbkdf2 | 0.12.2 | MIT / Apache-2.0 | https://github.com/RustCrypto/password-hashes |
+| sha2 | 0.10.9 | Apache-2.0 / MIT | https://github.com/RustCrypto/hashes |
+| rand | 0.10.1 | MIT / Apache-2.0 | https://rust-random.github.io/book |
+| uuid | 1.23.0 | Apache-2.0 / MIT | https://github.com/uuid-rs/uuid |
+| base64 | 0.22.1 | MIT / Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
+| hex | 0.4.3 | MIT / Apache-2.0 | https://github.com/KokaKiwi/rust-hex |
+| zip | 2.4.2 | MIT | https://github.com/zip-rs/zip2 |
+| flate2 | 1.1.9 | MIT / Apache-2.0 | https://github.com/rust-lang/flate2-rs |
+| tar | 0.4.45 | MIT / Apache-2.0 | https://github.com/alexcrichton/tar-rs |
+| regex | 1.12.3 | MIT / Apache-2.0 | https://github.com/rust-lang/regex |
+| tempfile | 3.27.0 | MIT / Apache-2.0 | https://github.com/Stebalien/tempfile |
+| futures-util | 0.3.32 | MIT / Apache-2.0 | https://github.com/rust-lang/futures-rs |
+| thiserror | 1.0.89 | MIT / Apache-2.0 | https://github.com/dtolnay/thiserror |
+| windows-sys | 0.59.0 | MIT / Apache-2.0 | https://github.com/microsoft/windows-rs |
+| winreg | 0.52.0 | MIT | https://github.com/gentoo/winreg |
+| glib | >= 0.20, < 1 | LGPL-2.1 | https://gitlab.gnome.org/GNOME/glib |
+
+## JavaScript Dependencies (Runtime)
+
+| Package | Version | License | Homepage |
+|---------|---------|---------|----------|
+| tailwindcss | 4.2.2 | MIT | https://tailwindcss.com |
+| @tailwindcss/cli | 4.2.2 | MIT | https://tailwindcss.com |
+| @tauri-apps/plugin-autostart | 2.5.1 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
+| js-yaml | 4.x | MIT | https://github.com/nodeca/js-yaml |
+
+## JavaScript Dev Dependencies (Build-time only)
+
+> These packages are not included in distributed builds.
+
+| Package | Version | License | Homepage |
+|---------|---------|---------|----------|
+| @tauri-apps/cli | 2.10.1 | MIT / Apache-2.0 | https://tauri.app |
+| eslint | 10.1.0 | MIT | https://eslint.org |
+| vitest | 4.1.3 | MIT | https://vitest.dev |
+
+## Licenses Summary
+
+| License | Count |
+|---------|-------|
+| MIT / Apache-2.0 (dual) | 18 |
+| MIT | 8 |
+| Apache-2.0 | 5 |
+| LGPL-2.1 | 1 |
+
+Full license texts:
+- **MIT**: https://opensource.org/licenses/MIT
+- **Apache-2.0**: https://www.apache.org/licenses/LICENSE-2.0
+- **LGPL-2.1**: www.gnu.org/licenses/lgpl-2.1.html
+
+> For complete copyright and license information of each dependency,
+> please refer to their respective source repositories linked above.
+> All license texts can be found in the `LICENSE` or `LICENSE-MIT` / `LICENSE-APACHE`
+> files within each repository.
+>
+> Generated from `cargo tree --depth 1` and `package.json`. Last updated: 2026-04-14.
