@@ -45,7 +45,7 @@ tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
-hmac = "0.12"
+hmac = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
