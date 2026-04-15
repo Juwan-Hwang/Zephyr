@@ -5,11 +5,22 @@
 targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [advisories]
-ignore = ["RUSTSEC-2026-0097"]
+ignore = [
+  "RUSTSEC-2026-0097",
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+]
 # RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
 #   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
 #   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
+#
+# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki 0.103.11 name constraints issues
+#   Indirect dependency via reqwest -> hyper-rustls -> tokio-rustls -> rustls -> rustls-webpki
+#   Fix requires rustls >= 0.23.39 (pins webpki >=0.103.12); currently blocked on upstream release
+#   Track:
+#     https://rustsec.org/advisories/RUSTSEC-2026-0098.html
+#     https://rustsec.org/advisories/RUSTSEC-2026-0099.html
 # Only fail on actual security vulnerabilities, warn for unmaintained crates
 unmaintained = "workspace"
 

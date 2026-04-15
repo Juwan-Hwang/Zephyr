@@ -6,4 +6,8 @@
 #   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
 #   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
-ignore = ["RUSTSEC-2026-0097"]
+ignore = [
+  "RUSTSEC-2026-0097",
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+]
