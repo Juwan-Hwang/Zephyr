@@ -774,7 +774,7 @@ function showConnDetail(conn, mode) {
 
         <!-- Details List -->
         <div class="space-y-2.5 text-xs">
-            ${renderDetailRow(t.destCol?.replace('Destination', 'Destination') || 'Destination', `${destIP}:${destPort}`)}
+            ${renderDetailRow(t.destCol || 'Destination', `${destIP}:${destPort}`)}
             ${process !== '-' ? renderDetailRow(t.processLabel || 'Process', process) : ''}
             ${renderDetailRow(t.typeLabel || 'Type', typeVal)}
             ${renderDetailRow(t.sourceLabel || 'Source', `${srcIp}:${srcPort}`)}
