@@ -10,4 +10,7 @@ ignore = [
   "RUSTSEC-2026-0097",
   "RUSTSEC-2026-0098",
   "RUSTSEC-2026-0099",
+  # gtk-rs GTK3 bindings - unmaintained (indirect dep via Tauri's webkit2gtk on Linux)
+  # We cannot upgrade; fix requires Tauri to migrate to GTK4
+  "RUSTSEC-2024-0418",
 ]

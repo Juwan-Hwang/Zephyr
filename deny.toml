@@ -21,6 +21,9 @@ ignore = [
 #   Track:
 #     https://rustsec.org/advisories/RUSTSEC-2026-0098.html
 #     https://rustsec.org/advisories/RUSTSEC-2026-0099.html
+# RUSTSEC-2024-0418: gdk-sys / gtk-rs GTK3 bindings unmaintained
+#   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
+#   Already handled by unmaintained = "warn" but listed for visibility
 # Only fail on actual security vulnerabilities, warn for unmaintained crates
 unmaintained = "workspace"
 
