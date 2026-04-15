@@ -37,10 +37,9 @@ jobs:
         with:
           toolchain: stable
       - name: Run cargo audit
-        working-directory: src-tauri
         run: |
           cargo install cargo-audit --locked
-          cargo audit
+          cargo audit --manifest-path src-tauri/Cargo.toml
 
   # ============================================================
   # Job 2: cargo-deny 许可证/重复crate/来源检查
