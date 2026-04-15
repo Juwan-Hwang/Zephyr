@@ -7,6 +7,3 @@
 #   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
 ignore = ["RUSTSEC-2026-0097"]
-
-[database]
-path = "~/.local/share/rustsec/rustsec.db"
