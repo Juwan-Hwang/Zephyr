@@ -333,7 +333,7 @@ html:not(.dark) .textarea-common {
 html:not(.dark) .select-common:focus,
 html:not(.dark) .input-common:focus,
 html:not(.dark) .textarea-common:focus {
-  border-color: var(--accent-primary) !important;
+  border-color: var(--color-accent) !important;
 }
 
 html:not(.dark) .select-common::placeholder,
@@ -341,3 +341,207 @@ html:not(.dark) .input-common::placeholder,
 html:not(.dark) .textarea-common::placeholder {
   color: #94a3b8 !important;
 }
+
+/* ============================================
+   Connections Page Styles
+   ============================================ */
+
+/* Connection row hover animation */
+#connections-list > div {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#connections-list > div:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Rule badge pill animation */
+#connections-list .group span[class*="bg-"] {
+  transition: all 0.2s ease;
+}
+
+/* Close button reveal on hover */
+.conn-close-btn {
+  transition: opacity 0.2s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.conn-close-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Stats bar number animation */
+#conn-stats-bar span[id^="stat-"] {
+  transition: color 0.3s ease;
+}
+
+/* Search input focus glow */
+#connections-search-input:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+/* Connection list smooth scroll */
+#connections-list {
+  scroll-behavior: smooth;
+}
+
+/* Empty state icon subtle pulse */
+#connections-empty svg {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}
+
+@keyframes gentle-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+/* ============================================
+   Connections Nav Icon Animation
+   ============================================ */
+
+/* Dashed line subtle flow */
+.conn-line-dash {
+  animation: dash-flow 2s linear infinite;
+}
+
+@keyframes dash-flow {
+  to { stroke-dashoffset: -12; }
+}
+
+/* Pulse dots traveling along the connection line */
+.conn-pulse-dot {
+  animation: dot-travel 1.8s ease-in-out infinite;
+}
+
+.conn-dot-1 {
+  animation-delay: 0s;
+}
+
+.conn-dot-2 {
+  animation-delay: 0.9s;
+}
+
+@keyframes dot-travel {
+  0% {
+    opacity: 0.15;
+    transform: translateX(-1.5px);
+  }
+  30% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+    transform: translateX(1.5px);
+  }
+}
+
+/* Pause animations when nav item is inactive (not selected) */
+[data-nav="connections"]:not(.text-white) .conn-line-dash,
+[data-nav="connections"]:not(.text-white) .conn-pulse-dot {
+  animation-play-state: paused;
+}
+
+/* Pause animations when closed tab is selected (no live connections to show) */
+[data-nav="connections"].conn-nav-paused .conn-line-dash,
+[data-nav="connections"].conn-nav-paused .conn-pulse-dot {
+  animation-play-state: paused;
+}
+
+/* Boost animation when active */
+[data-nav="connections"].text-white .conn-pulse-dot {
+  animation-duration: 1.2s;
+}
+
+[data-nav="connections"].text-white .conn-line-dash {
+  animation-duration: 1.2s;
+}
+
+/* ============================================
+   Connections Page - Tab Styles
+   ============================================ */
+
+.conn-tab {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding-bottom: 0.5rem;
+  margin-bottom: -1px;
+}
+
+.conn-tab:hover:not(.active) {
+  color: var(--color-zinc-300, #d4d4d8);
+  background: rgba(255,255,255,0.03);
+}
+
+.conn-tab.active {
+  font-weight: 700;
+}
+
+/* Stats bar subtle animation on data change */
+#conn-stats-bar > div {
+  transition: transform 0.3s ease;
+}
+
+#conn-stats-bar:hover > div {
+  transform: scale(1.03);
+}
+
+/* Closed connection rows dimmed */
+#connections-list [data-conn-id].opacity-60 {
+  opacity: 0.55;
+}
+
+#connections-list [data-conn-id].opacity-60:hover {
+  opacity: 0.8;
+}
+
+/* ============================================
+   Connection Detail Panel
+   ============================================ */
+
+/* Row click hint */
+.conn-row {
+  cursor: pointer;
+}
+
+.conn-row:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Detail panel backdrop */
+#conn-detail-bg {
+  align-items: center;
+  justify-content: center;
+}
+
+/* Detail panel stat cards hover */
+#conn-detail-panel .grid > div:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Detail close button animation */
+#detail-close-btn {
+  transition: all 0.2s ease;
+}
+
+#detail-close-btn:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.2) !important;
+  border-color: rgba(244, 63, 94, 0.4) !important;
+}
+
+#detail-close-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Extended grid columns (beyond Tailwind default 12) ── */
+.grid-cols-13 { grid-template-columns: repeat(13, minmax(0, 1fr)); }
+.grid-cols-14 { grid-template-columns: repeat(14, minmax(0, 1fr)); }
+.grid-cols-15 { grid-template-columns: repeat(15, minmax(0, 1fr)); }

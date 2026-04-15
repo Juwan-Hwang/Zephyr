@@ -123,6 +123,34 @@ export async function closeAllConnections() {
   }
 }
 
+/**
+ * 获取活跃连接列表
+ * @returns {Promise<Object>} mihomo connections API 响应
+ */
+export async function getConnections() {
+  const res = await fetch(`${BASE_URL}/connections`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * 关闭指定连接
+ * @param {string} id 连接 ID
+ */
+export async function closeConnection(id) {
+  try {
+    const ids = typeof id === 'string' ? [id] : id;
+    const body = JSON.stringify({ ids });
+    await fetch(`${BASE_URL}/connections`, {
+      method: 'DELETE',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body
+    });
+  } catch (err) {
+    console.error('[Core] Close connection error:', err);
+  }
+}
+
 let latencyTestController = new AbortController();
 
 export function abortLatencyTests() {

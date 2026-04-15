@@ -1,14 +1,15 @@
 import { setSecret, setBaseUrl, reloadConfig } from './api.js';
 import { setWsSecret, connectTraffic, setWsBaseUrl } from './websocket.js';
-import { 
-  initChart, updateTrafficData, initNavigation, 
-  initProxyToggle, initProxyControls, initSettings, 
+import {
+  initChart, updateTrafficData, initNavigation,
+  initProxyToggle, initProxyControls, initSettings,
   initWindowControls, applyTranslations, initModeSelector, initTunToggle,
   syncCoreConfig, initUwpExemption, initDnsRewriteToggle, initNodeWheel, updateTrayStatus,
   startUnifiedSync, initTrayEventListeners, updateTrayMenu, cleanupTrayEventListeners, stopUnifiedSync,
-  showNotification, currentLang
+  showNotification, currentLang, escapeHtml
 } from './ui.js';
 import { cleanupChart } from './modules/traffic-chart.js';
+import { initConnectionsPage, destroyConnectionsPage } from './modules/connections.js';
 import { translations } from './i18n.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -17,6 +18,10 @@ const { invoke } = window.__TAURI__.core;
 window.showNotification = showNotification;
 window.translations = translations;
 window.currentLang = currentLang;
+window.escapeHtml = escapeHtml;
+window.applyTranslations = applyTranslations;
+window.initConnectionsPage = initConnectionsPage;
+window.destroyConnectionsPage = destroyConnectionsPage;
 
 /**
  * Initialize UI and bind data

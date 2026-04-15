@@ -1182,10 +1182,13 @@ fn generate_secret() -> String {
     rand::rng().fill(&mut buf);
     String::from_utf8(
         buf.iter()
-            .map(|&b| match b % 62 {
-                0..=9 => b'0' + b,
-                10..=35 => b'a' + (b - 10),
-                _ => b'A' + (b - 36),
+            .map(|&b| {
+                let v = (b as usize) % 62;
+                match v {
+                    0..=9 => b'0' + v as u8,
+                    10..=35 => b'a' + (v as u8) - 10,
+                    _ => b'A' + (v as u8) - 36,
+                }
             })
             .collect(),
     )

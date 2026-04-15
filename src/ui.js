@@ -1,5 +1,5 @@
 import { translations } from './i18n.js';
-import { getProxies, switchProxy, getConfig, patchConfig, testProxy, abortLatencyTests, setSecret, closeAllConnections, reloadConfig, enableAutoStart, disableAutoStart, isAutoStartEnabled, openConfigFolder, setBaseUrl, restartCore } from './api.js';
+import { getProxies, switchProxy, getConfig, patchConfig, testProxy, abortLatencyTests, setSecret, closeAllConnections, reloadConfig, enableAutoStart, disableAutoStart, isAutoStartEnabled, openConfigFolder, setBaseUrl, restartCore, getConnections, closeConnection } from './api.js';
 import { setWsSecret, setWsBaseUrl } from './websocket.js';
 import { fetchAndConvertSRRules } from './rules.js';
 import { initChart, updateTrafficData, clearTrafficHistory } from './modules/traffic-chart.js';
@@ -97,12 +97,21 @@ function sortProxiesByLatency(proxies, data) {
 }
 
 // --- HTML Escape Utility (XSS Prevention) ---
-function escapeHtml(str) {
+// --- HTML Escape (with LRU cache for performance) ---
+const _escapeCache = new Map();
+export function escapeHtml(str) {
     if (!str) return '';
+    if (_escapeCache.has(str)) return _escapeCache.get(str);
     const div = document.createElement('div');
     div.textContent = String(str);
-    return div.innerHTML;
+    const escaped = div.innerHTML;
+    if (_escapeCache.size > 500) { const keys = [..._escapeCache.keys()]; for (let i = 0; i < 100; i++) _escapeCache.delete(keys[i]); }
+    _escapeCache.set(str, escaped);
+    return escaped;
 }
+
+// Mount escapeHtml to window for cross-module access (connections.js)
+window.escapeHtml = escapeHtml;
 
 // --- Proxy Groups Fetch Utility ---
 /**
@@ -339,6 +348,9 @@ export function applyTranslations() {
             tunEnabled: tunEnabled
         }).catch(e => console.warn("Failed to update tray menu:", e));
     }
+
+    // Notify modules that need to restore dynamic UI state (e.g. sort arrows)
+    window.dispatchEvent(new CustomEvent('i18n-applied'));
 }
 
 let currentTheme = 'purple';
@@ -608,6 +620,10 @@ export function initNavigation() {
                 updateSysProxyUI();
             } else if (targetPage === 'rules') {
                 initRulesPage();
+            } else if (targetPage === 'connections') {
+                // initConnectionsPage is imported from ./modules/connections.js
+                // Called via main.js which re-exports it to window
+                window.initConnectionsPage?.();
             }
         });
     });
@@ -2450,6 +2466,8 @@ export async function initSettings() {
         }
         updateThemeModeUI(mode);
         applyDarkMode(resolveThemeModeToDark(mode));
+        // Notify modules (e.g. connections sort arrows) to re-render
+        window.dispatchEvent(new CustomEvent('theme-mode-changed'));
     };
 
     setThemeMode(getStoredThemeMode(), false);
@@ -2468,6 +2486,7 @@ export async function initSettings() {
     const systemThemeListener = (event) => {
         if (currentThemeMode === 'auto') {
             applyDarkMode(event.matches);
+            window.dispatchEvent(new CustomEvent('theme-mode-changed'));
         }
     };
     if (typeof systemThemeMedia.addEventListener === 'function') {
@@ -4594,3 +4613,5 @@ export async function syncCoreConfig() {
         console.warn("Failed to sync current node display", e);
     }
 }
+
+// Connections page logic has been extracted to src/modules/connections.js
