@@ -1178,23 +1178,11 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn generate_secret() -> String {
-    let mut buf = [0u8; 32];
-    rand::rng().fill(&mut buf);
-    String::from_utf8(
-        buf.iter()
-            .map(|&b| {
-                let v = (b as usize) % 62;
-                // SAFETY: v is always 0..=61, fits in u8; cast truncation and safety comment both intentional
-                #[allow(clippy::cast_possible_truncation, clippy::unnecessary_safety_comment)]
-                match v {
-                    0..=9 => b'0' + v as u8,
-                    10..=35 => b'a' + (v as u8) - 10,
-                    _ => b'A' + (v as u8) - 36,
-                }
-            })
-            .collect(),
-    )
-    .unwrap_or_default()
+    rand::rng()
+        .sample_iter(rand::distr::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect()
 }
 
 // ==========================================

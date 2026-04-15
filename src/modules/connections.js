@@ -891,10 +891,10 @@ function refreshDetailPanel(connId, mode) {
 function renderDetailRow(label, value, rowId) {
     const idAttr = rowId ? ` id="${rowId}"` : '';
     return `
-    <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0"${idAttr}>
-        <span class="text-zinc-500 shrink-0">${_esc(label)}</span>
-        <span class="text-zinc-300 font-mono text-right truncate ml-4">${value}</span>
-    </div>`;
+  <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0"${idAttr}>
+    <span class="text-zinc-500 shrink-0">${_esc(label)}</span>
+    <span class="text-zinc-300 font-mono text-right truncate ml-4">${_esc(value)}</span>
+  </div>`;
 }
 
 /** Format milliseconds to human-readable duration */
