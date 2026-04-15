@@ -5,7 +5,11 @@
 targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [advisories]
-ignore = []
+ignore = ["RUSTSEC-2026-0097"]
+# RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
+#   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
+#   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
 # Only fail on actual security vulnerabilities, warn for unmaintained crates
 unmaintained = "workspace"
 

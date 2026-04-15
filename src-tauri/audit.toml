@@ -1,0 +1,12 @@
+# cargo-audit configuration
+# https://rustsec.org/
+
+[advisories]
+# RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
+#   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
+#   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
+ignore = ["RUSTSEC-2026-0097"]
+
+[database]
+path = "~/.local/share/rustsec/rustsec.db"
