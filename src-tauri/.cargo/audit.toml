@@ -1,0 +1,12 @@
+# cargo-audit configuration
+# https://rustsec.org/
+# This file is at src-tauri/.cargo/audit.toml because CI runs `cargo audit`
+# from the src-tauri working directory. Mirror of .cargo/audit.toml (project root).
+
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0097",
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+  "RUSTSEC-2024-0418",
+]
