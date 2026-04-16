@@ -1,4 +1,4 @@
-import { setSecret, setBaseUrl, reloadConfig } from './api.js';
+import { setSecret, setBaseUrl, reloadConfig, invoke, listen } from './api.js';
 import { setWsSecret, connectTraffic, setWsBaseUrl } from './websocket.js';
 import {
   initChart, updateTrafficData, initNavigation,
@@ -11,8 +11,6 @@ import {
 import { cleanupChart } from './modules/traffic-chart.js';
 import { initConnectionsPage, destroyConnectionsPage } from './modules/connections.js';
 import { translations } from './i18n.js';
-
-const { invoke } = window.__TAURI__.core;
 
 // Mount functions to window for cross-module access
 window.showNotification = showNotification;
@@ -86,7 +84,7 @@ async function initApp() {
 
   // Check if encryption key is properly persisted
   try {
-    const keyPersisted = await window.__TAURI__.core.invoke('is_machine_key_persisted');
+    const keyPersisted = await invoke('is_machine_key_persisted');
     if (!keyPersisted) {
       console.error('[Security] Machine key not persisted - encrypted data will be lost on restart');
       // Get current language and show notification
@@ -113,7 +111,7 @@ async function initApp() {
 
   // Listen for config parse errors from backend (only once)
   if (!window._configParseErrorListener) {
-    window._configParseErrorListener = await window.__TAURI__.event.listen('config-parse-error', (event) => {
+    window._configParseErrorListener = await listen('config-parse-error', (event) => {
       const t = translations[window.currentLang] || translations.en;
       showNotification(
         t.configParseErrorMsg || 'Configuration file could not be parsed. Using empty config.',

@@ -1,6 +1,8 @@
 /**
  * Shadowrocket to Clash Rule Converter
  */
+import { invoke } from './api.js';
+
 export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
     try {
         // Validate URL format - only allow http/https
@@ -15,7 +17,7 @@ export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
         }
 
         // Use Tauri command to bypass CSP and reuse SSRF protection
-        const text = await window.__TAURI__.core.invoke('fetch_text', { url });
+        const text = await invoke('fetch_text', { url });
         
         return convertSRToClash(text, targetProxy);
     } catch (error) {

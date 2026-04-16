@@ -1,5 +1,5 @@
 import { translations } from './i18n.js';
-import { getProxies, switchProxy, getConfig, patchConfig, testProxy, abortLatencyTests, setSecret, closeAllConnections, reloadConfig, enableAutoStart, disableAutoStart, isAutoStartEnabled, openConfigFolder, setBaseUrl, restartCore, getConnections, closeConnection } from './api.js';
+import { getProxies, switchProxy, getConfig, patchConfig, testProxy, abortLatencyTests, setSecret, closeAllConnections, reloadConfig, enableAutoStart, disableAutoStart, isAutoStartEnabled, openConfigFolder, setBaseUrl, restartCore, getConnections, closeConnection, invoke, listen, openUrl, getCurrentWindow } from './api.js';
 import { setWsSecret, setWsBaseUrl } from './websocket.js';
 import { fetchAndConvertSRRules } from './rules.js';
 import { initChart, updateTrafficData, clearTrafficHistory } from './modules/traffic-chart.js';
@@ -43,11 +43,11 @@ async function getProxiesCached() {
 }
 
 async function getSettingsCached() {
-    return getCached('settings', () => window.__TAURI__.core.invoke('get_settings'));
+    return getCached('settings', () => invoke('get_settings'));
 }
 
 async function getConfigsCached() {
-    return getCached('configs', () => window.__TAURI__.core.invoke('list_configs'));
+    return getCached('configs', () => invoke('list_configs'));
 }
 
 // Invalidate specific caches
@@ -335,7 +335,7 @@ export function applyTranslations() {
     });
     
     // Update Tray Menu - read current states from UI controls (most reliable)
-    if (window.__TAURI__ && window.__TAURI__.core) {
+    if (typeof invoke === 'function') {
         // Read directly from UI controls - the source of truth
         const sysProxyToggle = document.querySelector('#sys-proxy-toggle');
         const tunToggle = document.querySelector('#tun-proxy-toggle');
@@ -343,7 +343,7 @@ export function applyTranslations() {
         const sysProxyEnabled = sysProxyToggle?.checked ?? window._currentSysProxyEnabled ?? false;
         const tunEnabled = tunToggle?.checked ?? window._currentTunEnabled ?? false;
         
-        window.__TAURI__.core.invoke('update_tray_toggle_states', {
+        invoke('update_tray_toggle_states', {
             sysProxyEnabled: sysProxyEnabled,
             tunEnabled: tunEnabled
         }).catch(e => console.warn("Failed to update tray menu:", e));
@@ -634,7 +634,7 @@ async function updateSysProxyUI() {
     const toggle = document.getElementById('sys-proxy-toggle');
     
     try {
-        const isActive = await window.__TAURI__.core.invoke('get_sys_proxy');
+        const isActive = await invoke('get_sys_proxy');
 
         if (toggle && toggle.checked !== isActive) {
             toggle.checked = isActive;
@@ -1313,9 +1313,9 @@ export async function initRulesPage() {
     // Fetch initial original rules state silently without UI updates
     if (!originalConfigRules || originalConfigRules.length === 0) {
         try {
-            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const settings = await invoke('get_settings');
             const configName = settings.last_config || 'config.yaml';
-            const content = await window.__TAURI__.core.invoke('read_config_file', { configPath: configName });
+            const content = await invoke('read_config_file', { configPath: configName });
             if (typeof jsyaml !== 'undefined') {
                 const config = jsyaml.load(content);
                 originalConfigRules = config.rules || [];
@@ -1399,17 +1399,17 @@ export async function initRulesPage() {
 }
 
 async function getActiveConfigContent() {
-    const settings = await window.__TAURI__.core.invoke('get_settings');
+    const settings = await invoke('get_settings');
     let configName = settings.last_config || 'config.yaml';
     let content = '';
     try {
-        content = await window.__TAURI__.core.invoke('read_config_file', { configPath: configName });
+        content = await invoke('read_config_file', { configPath: configName });
         return { configName, content };
     } catch (e) {
-        const configs = await window.__TAURI__.core.invoke('list_configs');
+        const configs = await invoke('list_configs');
         if (configs && configs.length > 0) {
             configName = configs[0].name;
-            content = await window.__TAURI__.core.invoke('read_config_file', { configPath: configName });
+            content = await invoke('read_config_file', { configPath: configName });
             return { configName, content };
         } else {
             return null;
@@ -1593,7 +1593,7 @@ async function saveRules() {
         
         // Use backend update_config to patch the core rules dynamically to avoid 400 error.
         // It will automatically update run_config.yaml and the original profile.
-        const result = await window.__TAURI__.core.invoke('update_config', { patch: { rules: currentConfigRules } });
+        const result = await invoke('update_config', { patch: { rules: currentConfigRules } });
         await closeAllConnections();
         
         originalConfigRules = [...currentConfigRules];
@@ -2120,7 +2120,7 @@ export function initUwpExemption() {
             spinner?.classList.remove('hidden');
             
             try {
-                const result = await window.__TAURI__.core.invoke('exempt_uwp_apps');
+                const result = await invoke('exempt_uwp_apps');
                 showNotification(translations[currentLang].notifUwpSuccess || 'UWP Loopback exemption process started. Please check the UAC prompt.', 'success');
                 // Removed debug log
             } catch (err) {
@@ -2177,7 +2177,7 @@ export async function initSettings() {
     const gotoGithubBtn = document.getElementById('btn-goto-github');
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = () => {
-            window.__TAURI__.opener.openUrl('https://github.com/Juwan-Hwang/Zephyr');
+            openUrl('https://github.com/Juwan-Hwang/Zephyr');
         };
     }
 
@@ -2190,7 +2190,7 @@ export async function initSettings() {
     if (applyArgsBtn) {
         applyArgsBtn.onclick = async () => {
             const argsStr = customArgsInput.value.trim();
-            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const settings = await invoke('get_settings');
             const configPath = settings.last_config || 'config.yaml';
             const customArgs = argsStr.split('\n').filter(a => a.trim() !== '');
             
@@ -2229,7 +2229,7 @@ export async function initSettings() {
     }
 
     // Load current settings
-    const settings = await window.__TAURI__.core.invoke('get_settings');
+    const settings = await invoke('get_settings');
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autostartToggle) autostartToggle.checked = await isAutoStartEnabled();
@@ -2367,7 +2367,7 @@ export async function initSettings() {
 
                 // 9. Save app settings to disk
                 await trackResult('appSettings', async () => {
-                    await window.__TAURI__.core.invoke('save_settings', { settings });
+                    await invoke('save_settings', { settings });
                 });
                 invalidateSettingsCache();
 
@@ -2507,13 +2507,13 @@ export async function initSettings() {
 
     const save = async () => {
         try {
-            const currentSettings = await window.__TAURI__.core.invoke('get_settings');
+            const currentSettings = await invoke('get_settings');
             currentSettings.close_to_tray = closeTrayToggle.checked;
             currentSettings.auto_update = autoUpdateToggle.checked;
             currentSettings.autostart = autostartToggle.checked;
             currentSettings.theme = currentTheme;
             currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
-            await window.__TAURI__.core.invoke('save_settings', { settings: currentSettings });
+            await invoke('save_settings', { settings: currentSettings });
             invalidateSettingsCache();
         } catch (err) {
             console.error('Failed to save settings:', err);
@@ -2542,7 +2542,7 @@ export async function initSettings() {
 
     const saveConfigToCore = async (patch) => {
         try {
-            const result = await window.__TAURI__.core.invoke('update_config', { patch });
+            const result = await invoke('update_config', { patch });
             await syncCoreConfig();
             
             // Show appropriate notification based on hot reload success
@@ -2584,10 +2584,10 @@ export async function initSettings() {
         showNotification(translations[currentLang].notifGeoUpdating || "Updating Geo databases...");
         
         try {
-            await window.__TAURI__.core.invoke('update_geo_data');
+            await invoke('update_geo_data');
             showNotification(translations[currentLang].notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
             
-            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const settings = await invoke('get_settings');
             const configPath = settings.last_config || 'config.yaml';
             const customArgs = settings.custom_args || [];
             await restartCore(configPath, customArgs);
@@ -2750,7 +2750,7 @@ export async function initSettings() {
 
     const loadSettingsFromCore = async () => {
         try {
-            const config = await window.__TAURI__.core.invoke('read_config');
+            const config = await invoke('read_config');
             if (unifiedDelayToggle) unifiedDelayToggle.checked = config['unified-delay'] !== false; // Default true as requested
             if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
             if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
@@ -2778,8 +2778,8 @@ export async function initSettings() {
     if (window._dropUnlisten) {
         window._dropUnlisten();
     }
-    if (window.__TAURI__ && window.__TAURI__.event) {
-        window.__TAURI__.event.listen('profiles-imported', (event) => {
+if (typeof listen === 'function') {
+listen('profiles-imported', (event) => {
             const importedCount = event.payload;
             if (importedCount > 0) {
                 showNotification(`${t.profilesImported?.replace('{count}', importedCount) || `Successfully imported ${importedCount} profile(s)`}`, 'success');
@@ -2822,12 +2822,12 @@ export async function initSettings() {
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
-                await window.__TAURI__.core.invoke('download_sub', invokeArgs);
+                await invoke('download_sub', invokeArgs);
                 
                 // Invalidate configs cache after downloading new subscription
                 invalidateConfigsCache();
                 
-                const settings = await window.__TAURI__.core.invoke('get_settings');
+                const settings = await invoke('get_settings');
                 const currentConfig = settings.last_config || 'config.yaml';
                 if (name === currentConfig || name === currentConfig + '.yaml') {
                     await reloadConfig();
@@ -2846,7 +2846,7 @@ export async function initSettings() {
     if (updateAllSubBtn) {
         updateAllSubBtn.onclick = async () => {
             const t = translations[currentLang];
-        const configs = await window.__TAURI__.core.invoke('list_configs');
+        const configs = await invoke('list_configs');
         const subConfigs = configs.filter(c => c.url_display); // Only those with URL
             
             if (subConfigs.length === 0) {
@@ -2865,8 +2865,8 @@ export async function initSettings() {
             for (const config of subConfigs) {
                 try {
                     const userAgent = getSubscriptionUserAgent();
-                    const fullUrl = await window.__TAURI__.core.invoke('get_config_url', { name: config.name });
-                    await window.__TAURI__.core.invoke('download_sub', { url: fullUrl, name: config.name, userAgent });
+                    const fullUrl = await invoke('get_config_url', { name: config.name });
+                    await invoke('download_sub', { url: fullUrl, name: config.name, userAgent });
                     successCount++;
                 } catch (err) {
                     failCount++;
@@ -2878,7 +2878,7 @@ export async function initSettings() {
             invalidateConfigsCache();
 
             // Reload once if current config was updated
-            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const settings = await invoke('get_settings');
             const currentConfig = settings.last_config || 'config.yaml';
             const wasCurrentUpdated = subConfigs.some(c => c.name === currentConfig);
             
@@ -2901,7 +2901,7 @@ export async function initSettings() {
 
     const loadCoreVersion = async () => {
         try {
-            currentCoreVersion = await window.__TAURI__.core.invoke('get_core_version');
+            currentCoreVersion = await invoke('get_core_version');
             if (versionText) versionText.textContent = currentCoreVersion.startsWith('v') ? currentCoreVersion : `v${currentCoreVersion}`;
         } catch (err) {
             console.error('Failed to get core version:', err);
@@ -2916,7 +2916,7 @@ export async function initSettings() {
         const confirmed = await showConfirmModal(t.notifUpdateFound, latestVersion);
         if (confirmed) {
             showNotification(t.notifUpdating);
-            const coreResult = await window.__TAURI__.core.invoke('update_core', { 
+            const coreResult = await invoke('update_core', { 
                 url: downloadUrl
             });
             setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
@@ -2941,7 +2941,7 @@ export async function initSettings() {
             const t = translations[currentLang];
             showNotification(t.notifUpdateCheck);
             try {
-                const latest = await window.__TAURI__.core.invoke('get_latest_version');
+                const latest = await invoke('get_latest_version');
                 const latestVersion = latest.version;
                 
                 // Compare versions (simple string compare for now as both should be like v1.2.3)
@@ -3051,7 +3051,7 @@ export async function initSettings() {
                 if (!confirmed) return;
                 
                 try {
-                    await window.__TAURI__.core.invoke('delete_config', { name });
+                    await invoke('delete_config', { name });
                     // Invalidate configs cache after deletion
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
@@ -3072,8 +3072,8 @@ export async function initSettings() {
                     updateBtn.classList.add('animate-spin');
                     try {
                         const userAgent = getSubscriptionUserAgent();
-                        const fullUrl = await window.__TAURI__.core.invoke('get_config_url', { name: configInfo.name });
-                        await window.__TAURI__.core.invoke('download_sub', { url: fullUrl, name: configInfo.name, userAgent });
+                        const fullUrl = await invoke('get_config_url', { name: configInfo.name });
+                        await invoke('download_sub', { url: fullUrl, name: configInfo.name, userAgent });
                         // Invalidate configs cache after update
                         invalidateConfigsCache();
                         if (isCurrent) {
@@ -3106,9 +3106,9 @@ export async function initSettings() {
                         showNotification(t.configSuccess, 'success');
                         
                         // Save last_config to settings
-                        const s = await window.__TAURI__.core.invoke('get_settings');
+                        const s = await invoke('get_settings');
                         s.last_config = name;
-                        await window.__TAURI__.core.invoke('save_settings', { settings: s });
+                        await invoke('save_settings', { settings: s });
                         invalidateSettingsCache();
 
                         await new Promise(r => setTimeout(r, 1000));
@@ -3196,7 +3196,7 @@ export async function initSettings() {
     if (settings.auto_update) {
         setTimeout(async () => {
             try {
-                const latest = await window.__TAURI__.core.invoke('get_latest_version');
+                const latest = await invoke('get_latest_version');
                 const latestVersion = latest.version;
                 if (latestVersion && currentCoreVersion && latestVersion !== currentCoreVersion) {
                     await performCoreUpdate(latestVersion, latest.download_url);
@@ -3283,7 +3283,7 @@ function initFakeClient() {
         spinner.classList.remove('hidden');
 
         try {
-            const versions = await window.__TAURI__.core.invoke('get_latest_client_versions');
+            const versions = await invoke('get_latest_client_versions');
             
             // Update native select options (source of truth)
             const vergeOpt = select.querySelector('option[value^="clash-verge"]');
@@ -3370,7 +3370,7 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-            window.__TAURI__.window.getCurrentWindow().close();
+            getCurrentWindow().close();
         });
     }
 
@@ -3400,7 +3400,7 @@ export async function updateTrayStatus() {
     const mode = tunToggle?.checked ? 'tun' : (sysProxyToggle?.checked ? 'sysproxy' : 'default');
 
     try {
-        await window.__TAURI__.core.invoke('change_tray_icon', { mode });
+        await invoke('change_tray_icon', { mode });
     } catch (err) {
         console.error('Failed to update tray icon:', err);
     }
@@ -3439,9 +3439,9 @@ export async function updateTrayMenu(forceRefresh = false) {
         // Batch ALL API calls in parallel
         const [config, configsList, proxyData, settings] = await Promise.all([
             getConfig(),
-            window.__TAURI__.core.invoke('list_configs'),
+            invoke('list_configs'),
             getProxies(),
-            window.__TAURI__.core.invoke('get_settings')
+            invoke('get_settings')
         ]);
         
         currentMode = config?.mode || 'rule';
@@ -3494,7 +3494,7 @@ export async function updateTrayMenu(forceRefresh = false) {
     }
     
     try {
-        await window.__TAURI__.core.invoke('update_tray_full_menu', {
+        await invoke('update_tray_full_menu', {
             showText: t.trayShow || "Show Zephyr",
             quitText: t.trayQuit || "Quit",
             sysProxyText: t.traySysProxy || "System Proxy",
@@ -3523,7 +3523,7 @@ export async function updateTrayMenu(forceRefresh = false) {
 export function initTrayEventListeners() {
     if (_trayEventUnlisteners.length > 0) return; // Already initialized
     
-    const { listen } = window.__TAURI__.event;
+    // listen is already imported from api.js
     
     // Listen for sys proxy toggle from tray
     const unlisten1 = listen('tray-sysproxy-changed', async (event) => {
@@ -3540,12 +3540,12 @@ export function initTrayEventListeners() {
             const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
             
             if (enabled) {
-                await window.__TAURI__.core.invoke('enable_sysproxy', { 
+                await invoke('enable_sysproxy', { 
                     server: `127.0.0.1:${currentPort}`,
                     bypass: null 
                 });
             } else {
-                await window.__TAURI__.core.invoke('disable_sysproxy');
+                await invoke('disable_sysproxy');
             }
             
             updateSysProxyUI();
@@ -3572,11 +3572,11 @@ export function initTrayEventListeners() {
             // Safety net: release after 60s to prevent permanent lock if handler hangs
             // (macOS TUN with osascript authorization can take 30+ seconds)
             setTimeout(async () => {
-                try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
+                try { await invoke('release_tun_toggle'); } catch (_) {}
             }, 60000);
         } else {
             // No toggle element found (window not ready), release immediately
-            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke('release_tun_toggle'); } catch (_) {}
         }
     });
     _trayEventUnlisteners.push(unlisten2);
@@ -3603,7 +3603,7 @@ export function initTrayEventListeners() {
             showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
             
             // Get current custom args
-            const settings = await window.__TAURI__.core.invoke('get_settings');
+            const settings = await invoke('get_settings');
             const customArgs = settings.custom_args || [];
             
             // Restart core with new config
@@ -3611,7 +3611,7 @@ export function initTrayEventListeners() {
             if (coreResult && coreResult.secret) {
                 // Save last_config to settings
                 settings.last_config = subName;
-                await window.__TAURI__.core.invoke('save_settings', { settings });
+                await invoke('save_settings', { settings });
                 invalidateSettingsCache();
                 
                 await new Promise(r => setTimeout(r, 500));
@@ -3677,8 +3677,8 @@ export function startUnifiedSync() {
             
             // Batch both API calls in parallel
             const [realSysProxyState, actualMode] = await Promise.all([
-                window.__TAURI__.core.invoke('get_sys_proxy'),
-                window.__TAURI__.core.invoke('get_tray_status')
+                invoke('get_sys_proxy'),
+                invoke('get_tray_status')
             ]);
             
             // Check sys proxy state
@@ -3714,7 +3714,7 @@ export async function initProxyToggle() {
 
     // Fetch initial status
     try {
-        const isEnabled = await window.__TAURI__.core.invoke('get_sys_proxy');
+        const isEnabled = await invoke('get_sys_proxy');
         toggle.checked = isEnabled;
         updateSysProxyUI();
         await updateTrayStatus();
@@ -3733,12 +3733,12 @@ export async function initProxyToggle() {
             const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
 
             if (enabled) {
-                await window.__TAURI__.core.invoke('enable_sysproxy', { 
+                await invoke('enable_sysproxy', { 
                     server: `127.0.0.1:${currentPort}`,
                     bypass: null 
                 });
             } else {
-                await window.__TAURI__.core.invoke('disable_sysproxy');
+                await invoke('disable_sysproxy');
             }
             
             updateSysProxyUI();
@@ -3772,7 +3772,7 @@ const DEFAULT_DNS_CONFIG = {
 // Get DNS configuration from settings or use defaults
 async function getDnsConfig() {
     try {
-        const settings = await window.__TAURI__.core.invoke('get_settings');
+        const settings = await invoke('get_settings');
         return {
             nameserver: settings.dns_nameservers || DEFAULT_DNS_CONFIG.nameserver,
             fallback: settings.dns_fallbacks || DEFAULT_DNS_CONFIG.fallback
@@ -4138,7 +4138,7 @@ export async function persistConfigChanges(payload) {
         deepMerge(config, payload);
         
         const newYaml = jsyaml.dump(config, { indent: 2, lineWidth: -1 });
-        await window.__TAURI__.core.invoke('write_config_file', { configPath: configName, content: newYaml });
+        await invoke('write_config_file', { configPath: configName, content: newYaml });
         return true;
     } catch (err) {
         console.error('[Core] Failed to persist config:', err);
@@ -4309,10 +4309,10 @@ export async function initDnsRewriteToggle() {
             }
 
             try {
-                const settings = await window.__TAURI__.core.invoke('get_settings');
+                const settings = await invoke('get_settings');
                 settings.dns_nameservers = nameservers;
                 settings.dns_fallbacks = fallbacks.length > 0 ? fallbacks : null;
-                await window.__TAURI__.core.invoke('save_settings', { settings });
+                await invoke('save_settings', { settings });
                 invalidateSettingsCache();
                 
                 closeModal();
@@ -4468,7 +4468,7 @@ export function initTunToggle() {
                 if (enable) {
                     // Enable TUN: restart core with root (backend will update config)
                     try {
-                        const result = await window.__TAURI__.core.invoke('restart_core_as_root_cmd', { enableTun: true });
+                        const result = await invoke('restart_core_as_root_cmd', { enableTun: true });
                         // Update secret from the new core
                         if (result) {
                             setSecret(result);
@@ -4483,7 +4483,7 @@ export function initTunToggle() {
                             // Root process failed to start, recover with regular user
                             showNotification(t.tunStartFailed || 'TUN failed to start, recovering...', 'error');
                             try {
-                                const settings = await window.__TAURI__.core.invoke('get_settings');
+                                const settings = await invoke('get_settings');
                                 const currentConfig = settings.last_config || 'config.yaml';
                                 const customArgs = settings.custom_args || [];
                                 await restartCore(currentConfig, customArgs);
@@ -4506,16 +4506,16 @@ export function initTunToggle() {
                     // Disable TUN: update config, kill root mihomo, then restart as regular user
                     try {
                         // 1. Update config to disable TUN (write file first)
-                        await window.__TAURI__.core.invoke('set_tun_enabled', { enable: false });
+                        await invoke('set_tun_enabled', { enable: false });
                         
                         // 2. Disable TUN (clears flag + kills root mihomo + cleans routes)
-                        await window.__TAURI__.core.invoke('disable_tun_cmd');
+                        await invoke('disable_tun_cmd');
                         
                         // Wait for OS to release the port (root mihomo was kill -9'd)
                         await new Promise(r => setTimeout(r, 1500));
                         
                         // 3. Restart as regular user
-                        const settings = await window.__TAURI__.core.invoke('get_settings');
+                        const settings = await invoke('get_settings');
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
                         
@@ -4552,7 +4552,7 @@ export function initTunToggle() {
             if (spinner) spinner.classList.add('hidden');
             isNetworkUpdating = false;
             // Release TUN toggle lock (for tray-initiated toggles)
-            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke('release_tun_toggle'); } catch (_) {}
             await updateTrayStatus();
             // Sync tray menu toggle states immediately
             updateTrayMenu(true).catch(() => {});
@@ -4568,7 +4568,7 @@ export function initTunToggle() {
             showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             isNetworkUpdating = false;
             // Release TUN toggle lock on error too
-            try { await window.__TAURI__.core.invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke('release_tun_toggle'); } catch (_) {}
             await updateTrayStatus();
             updateTrayMenu(true).catch(() => {});
         }

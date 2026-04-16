@@ -1,19 +1,61 @@
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 
+// ── Tauri API bridge (withGlobalTauri: false) ──
+// When withGlobalTauri is false, Tauri v2 still injects __TAURI_INTERNALS__
+// into the webview. Unlike __TAURI__, the internal object has a FLAT structure:
+//   invoke / transformCallback / metadata are directly on the root — NOT under .core
+const _t = window.__TAURI_INTERNALS__;
+
+/** Raw IPC invoke: sends a command to the Rust backend */
+function invoke(cmd, args) {
+  if (!_t?.invoke) throw new Error('[API] Tauri IPC not available');
+  return _t.invoke(cmd, args);
+}
+
+/** Listen to a Tauri event emitted from Rust backend.
+ *  Since the event plugin's JS shim isn't loaded without global Tauri,
+ *  we manually wire up via transformCallback + raw IPC. */
+async function listen(event, handler) {
+  if (!_t?.transformCallback) throw new Error('[API] Tauri IPC not available');
+  const callbackId = _t.transformCallback(handler);
+  const eventId = await invoke('plugin:event|listen', {
+    event,
+    target: { kind: 'Any' },
+    handler: callbackId,
+  });
+  return async () => {
+    _t.transformCallback(undefined, false, callbackId);
+    await invoke('plugin:event|unlisten', { event, eventId });
+  };
+}
+
+/** Open URL in system default browser */
+async function openUrl(url) {
+  return invoke('plugin:opener|open_url', { url });
+}
+
+/** Get a lightweight current-window handle (manual IPC wrapper) */
+function getCurrentWindow() {
+  const label = _t?.metadata?.currentWindow?.label ?? 'main';
+  return {
+    label,
+    hide:        () => invoke('plugin:window|set_visible', { label, value: false }),
+    show:        () => invoke('plugin:window|set_visible', { label, value: true }),
+    close:       () => invoke('plugin:window|close',           { label }),
+    minimize:    () => invoke('plugin:window|minimize',         { label }),
+    maximize:    () => invoke('plugin:window|maximize',         { label }),
+    setTitle: (t) => invoke('plugin:window|set_title',         { label, value: t }),
+  };
+}
+
+// Re-export for all other modules
+export { invoke, listen, openUrl, getCurrentWindow };
+
 let BASE_URL = 'http://127.0.0.1:9090';
 const _state = Object.seal({ secret: '' });
-const { invoke } = window.__TAURI__.core;
-const autostartApi = window.__TAURI__.autostart;
 
 export function setBaseUrl(url) {
   BASE_URL = url;
-}
-
-function getAutostartApi() {
-  if (!autostartApi) {
-    throw new Error('Autostart plugin is not available');
-  }
-  return autostartApi;
 }
 
 function isMissingAutostartEntryError(err) {
@@ -237,7 +279,7 @@ export async function reloadConfig(path = 'run_config.yaml') {
 
 export async function enableAutoStart() {
   try {
-    await getAutostartApi().enable();
+    await invoke('plugin:autostart|enable');
     return true;
   } catch (err) {
     console.error('[API] Failed to enable autostart:', err);
@@ -248,15 +290,11 @@ export async function enableAutoStart() {
 export async function disableAutoStart() {
   try {
     const enabled = await isAutoStartEnabled();
-    if (!enabled) {
-      return false;
-    }
-    await getAutostartApi().disable();
+    if (!enabled) return false;
+    await invoke('plugin:autostart|disable');
     return true;
   } catch (err) {
-    if (isMissingAutostartEntryError(err)) {
-      return false;
-    }
+    if (isMissingAutostartEntryError(err)) return false;
     console.error('[API] Failed to disable autostart:', err);
     throw err;
   }
@@ -264,7 +302,7 @@ export async function disableAutoStart() {
 
 export async function isAutoStartEnabled() {
   try {
-    return await getAutostartApi().isEnabled();
+    return await invoke('plugin:autostart|is_enabled');
   } catch (err) {
     console.error('[API] Failed to get autostart state:', err);
     return false;
