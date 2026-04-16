@@ -759,6 +759,13 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
         }
     }
 
+    // S-03: Tighten profiles directory permissions on Unix (owner-only rwx------)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&paths.profiles_dir, fs::Permissions::from_mode(0o700));
+    }
+
     migrate_legacy_assets(app, &paths)?;
     Ok(paths)
 }
