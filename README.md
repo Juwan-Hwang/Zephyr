@@ -617,7 +617,7 @@ SOFTWARE.
 
 <div align="center">
 
-**Made by Juwan**
+**Conjured by Juwan**
 
 [⬆ Back to Top](#zephyr)
 
