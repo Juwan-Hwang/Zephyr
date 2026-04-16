@@ -1457,7 +1457,9 @@ pub async fn start_core(
     }
 
     // Kill any existing mihomo processes before starting a new one
+    eprintln!("[CORE] start_core: killing existing mihomo processes...");
     kill_mihomo();
+    eprintln!("[CORE] start_core: kill_mihomo done");
 
     let paths = ensure_app_storage(&app)?;
 
@@ -1633,6 +1635,7 @@ pub async fn start_core(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
+    eprintln!("[CORE] mihomo spawned, pid={}", child.id());
 
     // Check if process exits immediately
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1732,10 +1735,11 @@ pub async fn start_core(
 
     // Use config port directly, rely on health check to verify
     let port = config_port;
+    eprintln!("[CORE] health check starting on port {} ...", port);
 
     // HTTP Health Check via raw TCP
     let mut is_healthy = false;
-    for _ in 0..20 {
+    for i in 0..20 {
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             let request = format!(
                 "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
@@ -1751,10 +1755,17 @@ pub async fn start_core(
                         || resp_str.starts_with("HTTP/1.0 401")
                     {
                         is_healthy = true;
+                        eprintln!("[CORE] health check PASSED at attempt {} ({}ms)", i + 1, (i + 1) * 1000);
                         break;
+                    } else {
+                        eprintln!("[CORE] health check attempt {}: got response (non-200/401)", i + 1);
                     }
+                } else {
+                    eprintln!("[CORE] health check attempt {}: TCP connected but read failed", i + 1);
                 }
             }
+        } else {
+            eprintln!("[CORE] health check attempt {}: TCP connect refused on port {}", i + 1, port);
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
             std::thread::sleep(std::time::Duration::from_millis(1000));

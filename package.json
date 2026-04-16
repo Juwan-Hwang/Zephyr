@@ -8,13 +8,15 @@
     "build:css": "tailwindcss -i src/styles.css -o src/tailwind.css --minify",
     "dev:css": "tailwindcss -i src/styles.css -o src/tailwind.css --watch",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc -p jsconfig.json --noEmit"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.2.2",
     "@tauri-apps/cli": "2.10.1",
     "eslint": "10.1.0",
     "tailwindcss": "4.2.2",
+    "typescript": "^6.0.2",
     "vitest": "4.1.3"
   },
   "dependencies": {

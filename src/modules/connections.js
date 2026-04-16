@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Connections Module
  * 
@@ -6,8 +7,11 @@
  * 
  * Dependencies (imported):
  *   - getConnections, closeConnection, closeAllConnections from ./api.js
- *   - showNotification, translations, currentLang from global window object
- *   - escapeHtml from ui.js (global function with LRU cache)
+ *   - showNotification from ../ui/notifications.js
+ *   - translations, currentLang, applyTranslations from ../i18n.js
+ *   - escapeHtml from ../utils/sanitize.js
+ *   - formatBytes, formatSpeed from ../utils/format.js
+ *   - connectionsLogger from ../utils/logger.js
  * 
  * Exports:
  *   - initConnectionsPage()
@@ -15,26 +19,37 @@
  */
 
 import { getConnections, closeConnection, closeAllConnections } from '../api.js';
+import { showNotification } from '../ui/notifications.js';
+import { translations, currentLang, applyTranslations } from '../i18n.js';
+import { escapeHtml } from '../utils/sanitize.js';
+import { formatBytes, formatSpeed } from '../utils/format.js';
+import { connectionsLogger } from '../utils/logger.js';
 
 // ============================================
 // State
 // ============================================
 
+/** @type {number|null} */
 let connectionsPollTimer = null;
 let connectionsSearchQuery = '';
+/** @type {any[]} */
 let cachedConnections = [];
+/** @type {any[]} */
 let closedConnections = [];
 let currentConnTab = 'active'; // 'active' | 'closed'
 const MAX_CLOSED_CONNS = 200;
 
 /** Sort state: { key: string, dir: 'asc'|'desc' } or null */
+/** @type {{ key: string, dir: string } | null} */
 let connSortState = null;
 
-/** @type {Object<string, {dl: number, ul: number, prevDl: number, prevUl: number, seenAt: number, prevTs: number, dlSpeed: number, ulSpeed: number}>} */
+/** @type {Record<string, {dl: number, ul: number, prevDl: number, prevUl: number, seenAt: number, prevTs: number, dlSpeed: number, ulSpeed: number}>} */
 let connAccumulators = {};
 
 /** Currently viewed connection in detail panel (for live refresh) */
+/** @type {string|null} */
 let activeDetailConnId = null;
+/** @type {string|null} */
 let activeDetailMode = null;
 
 /** Grand totals across all connections (active + archived) */
@@ -63,12 +78,12 @@ const PAGE_HTML = `
             <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
         </div>
         <!-- Close All / Clear All Button -->
-        <button id="close-all-conns-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider">
+        <button id="close-all-conns-btn" class="btn-danger">
             <svg id="action-btn-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             <span id="action-btn-text" data-i18n="closeAll">Close All</span>
         </button>
         <!-- Refresh Button -->
-        <button id="refresh-conns-btn" class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[10px] font-bold text-zinc-300 hover:bg-white/10 hover:text-white transition-all uppercase tracking-wider">
+        <button id="refresh-conns-btn" class="btn-ghost">
             <svg id="conns-refresh-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
             <span data-i18n="refresh">Refresh</span>
         </button>
@@ -79,19 +94,19 @@ const PAGE_HTML = `
 <div id="conn-stats-bar" class="glass-card p-4 relative z-10 shrink-0 grid grid-cols-4 gap-4">
     <div class="flex flex-col items-center justify-center">
         <span id="stat-total" class="text-xl font-extralight text-zinc-100 tabular-nums">0</span>
-        <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="totalConn">Total</span>
+        <span class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="totalConn">Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-dl-total" class="text-lg font-semibold text-purple-400 tabular-nums">0 B</span>
-        <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
+        <span class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-ul-total" class="text-lg font-semibold text-blue-400 tabular-nums">0 B</span>
-        <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
+        <span class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-active" class="text-lg font-semibold text-emerald-400 tabular-nums">0</span>
-        <span class="text-[9px] text-zinc-500 uppercase tracking-wider" data-i18n="activeConn">Active</span>
+        <span class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="activeConn">Active</span>
     </div>
 </div>
 
@@ -101,10 +116,10 @@ const PAGE_HTML = `
     <div class="shrink-0 border-b border-white/5">
         <!-- Tabs -->
         <div class="flex items-center px-4 pt-3 pb-0 gap-1">
-            <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-[11px] font-bold uppercase tracking-wider rounded-t-lg transition-all duration-200 text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
-            <button id="conn-tab-closed" class="conn-tab px-4 py-2 text-[11px] font-bold uppercase tracking-wider rounded-t-lg transition-all duration-200 text-zinc-500 hover:text-zinc-300 border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
+            <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-all duration-200 text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
+            <button id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-all duration-200 text-zinc-500 hover:text-zinc-300 border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
             <div class="flex-1"></div>
-            <span id="closed-count-badge" class="hidden text-[9px] text-zinc-600 tabular-nums"></span>
+            <span id="closed-count-badge" class="hidden text-2xs text-zinc-600 tabular-nums"></span>
         </div>
         <!-- Table Header (clickable for sort) -->
         <div style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.625rem 1rem; user-select:none;" id="conn-table-header">
@@ -123,13 +138,13 @@ const PAGE_HTML = `
         <div id="connections-empty" class="flex flex-col items-center justify-center h-full py-16 gap-3">
             <svg class="w-12 h-12 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="17" r="4"/><path d="M4 17l6-6-6-6"/><path d="M13 11h8"/></svg>
             <p class="text-sm text-zinc-600" data-i18n="noConnections">No active connections</p>
-            <p class="text-[10px] text-zinc-700" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
+            <p class="text-2xs text-zinc-700" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
         </div>
         <!-- Empty State (Closed) -->
         <div id="connections-closed-empty" class="hidden flex flex-col items-center justify-center h-full py-16 gap-3">
             <svg class="w-12 h-12 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             <p class="text-sm text-zinc-600" data-i18n="noClosedConns">No closed connections yet</p>
-            <p class="text-[10px] text-zinc-700" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
+            <p class="text-2xs text-zinc-700" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
         </div>
     </div>
 </div>
@@ -151,7 +166,7 @@ export function initConnectionsPage() {
     if (!document.getElementById('conn-stats-bar')) {
         container.innerHTML = PAGE_HTML;
         // Apply i18n translations to newly injected DOM elements
-        window.applyTranslations?.();
+        applyTranslations();
     }
 
     // Clear any existing poll
@@ -200,6 +215,7 @@ function bindConnTabEvents() {
     if (closedClone) closedClone.addEventListener('click', () => switchConnTab('closed'));
 }
 
+/** @param {string} tab */
 function switchConnTab(tab) {
     currentConnTab = tab;
     const activeTab = document.getElementById('conn-tab-active');
@@ -207,7 +223,7 @@ function switchConnTab(tab) {
     const actionBtn = document.getElementById('close-all-conns-btn');
     const actionIcon = document.getElementById('action-btn-icon');
     const actionText = document.getElementById('action-btn-text');
-    const t = window.translations?.[window.currentLang] ?? {};
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
 
     // Control nav icon animation: play on active, pause on closed
     const navEl = document.querySelector('[data-nav="connections"]');
@@ -222,7 +238,7 @@ function switchConnTab(tab) {
         closedTab?.classList.add('text-zinc-500', 'border-transparent');
 
         if (actionBtn) {
-            actionBtn.className = 'flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider';
+            actionBtn.className = 'btn-danger';
             if (actionIcon) actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>';
             if (actionText) { actionText.textContent = t.closeAll || 'Close All'; actionText.setAttribute('data-i18n', 'closeAll'); }
         }
@@ -233,7 +249,7 @@ function switchConnTab(tab) {
         activeTab?.classList.add('text-zinc-500', 'border-transparent');
 
         if (actionBtn) {
-            actionBtn.className = 'flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10px] font-bold text-amber-400 hover:bg-amber-500/20 transition-all uppercase tracking-wider';
+            actionBtn.className = 'btn-warning';
             if (actionIcon) actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>';
             if (actionText) { actionText.textContent = t.clearAll || 'Clear All'; actionText.setAttribute('data-i18n', 'clearAll'); }
         }
@@ -256,7 +272,8 @@ function bindConnectionsEvents() {
 
     if (searchClone) {
         searchClone.addEventListener('input', (e) => {
-            connectionsSearchQuery = e.target.value.trim().toLowerCase();
+            const target = /** @type {HTMLInputElement} */ (e.target);
+            connectionsSearchQuery = target.value.trim().toLowerCase();
             renderConnectionList(
                 currentConnTab === 'active' ? cachedConnections : closedConnections,
                 currentConnTab
@@ -289,10 +306,10 @@ async function fetchAndRenderConnections() {
 
     try {
         const data = await getConnections();
-        const incomingConns = data.connections || [];
+        const incomingConns = (/** @type {any} */ (data)).connections || [];
 
         // ── Phase 1: Detect dead connections & archive them ──
-        const aliveIds = new Set(incomingConns.map(c => c.id));
+        const aliveIds = new Set(incomingConns.map(/** @param {any} c */ (c) => c.id));
         const now = Date.now();
 
         for (const oldConn of cachedConnections) {
@@ -355,17 +372,18 @@ async function fetchAndRenderConnections() {
 
         // ── Phase 3.5: Live-refresh detail panel if open ──
         if (activeDetailConnId) {
-            refreshDetailPanel(activeDetailConnId, activeDetailMode);
+            refreshDetailPanel(activeDetailConnId, /** @type {string} */ (activeDetailMode));
         }
 
     } catch (err) {
         const metaEl = document.getElementById('connections-meta');
-        const t = window.translations?.[window.currentLang] ?? {};
+        const t = /** @type {any} */ (translations)[currentLang] ?? {};
         if (metaEl) {
             metaEl.textContent = t.loadFailed || 'Failed to load connections';
         }
-        if (!err.message?.includes('Failed to fetch') && !err.message?.includes('NetworkError')) {
-            console.warn('[Connections] Fetch error:', err);
+        const _err = err instanceof Error ? err : new Error(String(err));
+        if (!_err.message?.includes('Failed to fetch') && !_err.message?.includes('NetworkError')) {
+            connectionsLogger.warn('Fetch error', err);
         }
     } finally {
         isFetching = false;
@@ -376,6 +394,7 @@ async function fetchAndRenderConnections() {
 // Stats Computation
 // ============================================
 
+/** @param {any[]} conns */
 function updateConnStats(conns) {
     const totalEl = document.getElementById('stat-total');
     const dlTotalEl = document.getElementById('stat-dl-total');
@@ -383,7 +402,7 @@ function updateConnStats(conns) {
     const activeEl = document.getElementById('stat-active');
 
     const total = conns.length;
-    const active = conns.filter(c => (c.download ?? 0) > 0 || (c.upload ?? 0) > 0).length;
+    const active = conns.filter(/** @param {any} c */ (c) => (c.download ?? 0) > 0 || (c.upload ?? 0) > 0).length;
 
     let grandDl = 0, grandUl = 0;
     for (const acc of Object.values(connAccumulators)) {
@@ -408,7 +427,12 @@ function updateConnStats(conns) {
 // Rendering
 // ============================================
 
-function renderConnectionList(connections, mode) {
+/**
+ * @param {any[]} connections
+ * @param {string} mode
+ * @param {string} [searchQuery]
+ */
+function renderConnectionList(connections, mode, searchQuery) {
     const container = document.getElementById('connections-list');
     const emptyState = document.getElementById('connections-empty');
     const closedEmptyState = document.getElementById('connections-closed-empty');
@@ -417,7 +441,7 @@ function renderConnectionList(connections, mode) {
     let filtered = connections;
     if (connectionsSearchQuery) {
         const q = connectionsSearchQuery;
-        filtered = connections.filter(c => {
+        filtered = connections.filter(/** @param {any} c */ (c) => {
             const m = c.metadata ?? {};
             return (m.host ?? '').toLowerCase().includes(q)
                 || (m.destinationIP ?? '').toLowerCase().includes(q)
@@ -432,7 +456,7 @@ function renderConnectionList(connections, mode) {
         container.innerHTML = '';
         const tpl = mode === 'active' ? emptyState : closedEmptyState;
         if (tpl) {
-            const clone = tpl.cloneNode(true);
+            const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
             container.appendChild(clone);
         }
@@ -444,7 +468,7 @@ function renderConnectionList(connections, mode) {
         const { key, dir } = connSortState;
         const mul = dir === 'desc' ? -1 : 1;
         const isText = SORT_TEXT_KEYS.has(key);
-        filtered.sort((a, b) => {
+        filtered.sort((/** @type {any} */ a, /** @type {any} */ b) => {
             const va = getConnSortValue(a, key, mode);
             const vb = getConnSortValue(b, key, mode);
             if (isText) {
@@ -456,16 +480,16 @@ function renderConnectionList(connections, mode) {
         });
     }
 
-    container.innerHTML = filtered.map(conn => buildConnectionRow(conn, mode)).join('');
+    container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join('');
 
     // Bind row click → open detail panel
     for (const row of container.querySelectorAll('.conn-row')) {
-        row.addEventListener('click', () => {
-            const connId = row.dataset.connId;
-            const connMode = row.dataset.mode;
+        /** @type {HTMLElement} */ (row).addEventListener('click', () => {
+            const connId = /** @type {HTMLElement} */ (row).dataset.connId;
+            const connMode = /** @type {HTMLElement} */ (row).dataset.mode;
             const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
             const conn = sourceList.find(c => c.id === connId);
-            if (conn) showConnDetail(conn, connMode);
+            if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
         });
     }
 
@@ -484,6 +508,11 @@ function renderConnectionList(connections, mode) {
 /**
  * Extract a numeric sort value from a connection for the given sort key.
  * Returns raw numbers for correct ordering.
+ */
+/**
+ * @param {any} conn
+ * @param {string} key
+ * @param {string} mode
  */
 function getConnSortValue(conn, key, mode) {
     switch (key) {
@@ -509,7 +538,7 @@ function updateSortIndicators() {
     const header = document.getElementById('conn-table-header');
     if (!header) return;
     for (const cell of header.querySelectorAll('.sortable')) {
-        const sortKey = cell.dataset.sort;
+        const sortKey = /** @type {HTMLElement} */ (cell).dataset.sort;
 
         // Each column's original color (matches the inline style in PAGE_HTML)
         const originalColors = {
@@ -517,38 +546,38 @@ function updateSortIndicators() {
             dlSpeed: 'rgba(168,85,247,0.7)', dlTotal: 'rgba(168,85,247,0.5)',
             ulSpeed: 'rgba(59,130,246,0.7)',  ulTotal: 'rgba(59,130,246,0.5)',
         };
-        const origColor = originalColors[sortKey] || '';
+        const origColor = (/** @type {Record<string, string>} */ (originalColors))[/** @type {string} */ (sortKey)] || '';
 
         if (connSortState && sortKey === connSortState.key) {
             // Active column: show text + arrow
             // CRITICAL: always derive base from i18n dict, NEVER from cell.textContent
             // (which may contain a stale arrow from previous render)
             const isAsc = connSortState.dir === 'asc';
-            const i18nKey = cell.getAttribute('data-i18n');
-            const t = window.translations?.[window.currentLang] ?? {};
+            const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
             let base = '';
             if (i18nKey && t[i18nKey]) {
                 base = t[i18nKey];
             } else {
                 // Fallback: strip any existing arrow from current text
-                base = cell.textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
+                base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
-            cell.textContent = base + ' ' + (isAsc ? '\u25B2' : '\u25BC');
+            (/** @type {HTMLElement} */ (cell)).textContent = base + ' ' + (isAsc ? '\u25B2' : '\u25BC');
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
-                cell.style.color = '#facc15';  /* yellow-400: bright gold */
+                (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
             } else if (sortKey.startsWith('dl')) {
-                cell.style.color = '#c084fc';  /* purple-400: vivid violet */
+                (/** @type {HTMLElement} */ (cell)).style.color = '#c084fc';  /* purple-400: vivid violet */
             } else {
-                cell.style.color = '#60a5fa';  /* blue-400: vivid sky-blue */
+                (/** @type {HTMLElement} */ (cell)).style.color = '#60a5fa';  /* blue-400: vivid sky-blue */
             }
         } else {
             // Inactive: restore original color and clean text
-            cell.style.color = origColor;
-            const i18nKey = cell.getAttribute('data-i18n');
+            (/** @type {HTMLElement} */ (cell)).style.color = origColor;
+            const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
-                const t = window.translations?.[window.currentLang] ?? {};
-                if (t[i18nKey]) cell.textContent = t[i18nKey];
+                const t = /** @type {any} */ (translations)[currentLang] ?? {};
+                if (t[i18nKey]) (/** @type {HTMLElement} */ (cell)).textContent = t[i18nKey];
             }
         }
     }
@@ -571,15 +600,16 @@ function bindHeaderSortEvents() {
 
     // Clone the entire header to wipe any stale listeners, then rebind fresh
     const freshHeader = bindOnce(header);
+    if (!freshHeader) return;
     for (const cell of freshHeader.querySelectorAll('.sortable')) {
         cell.addEventListener('click', () => {
-            const key = cell.dataset.sort;
+            const key = /** @type {HTMLElement} */ (cell).dataset.sort;
             if (!connSortState) {
                 // No active sort → set this column, default descending
-                connSortState = { key, dir: 'desc' };
+                connSortState = { key: /** @type {string} */ (key), dir: 'desc' };
             } else if (connSortState.key !== key) {
                 // Different column → switch to new column, default descending
-                connSortState = { key, dir: 'desc' };
+                connSortState = { key: /** @type {string} */ (key), dir: 'desc' };
             } else {
                 // Same column → cycle: desc → asc → null (off)
                 if (connSortState.dir === 'desc') {
@@ -603,16 +633,20 @@ function bindHeaderSortEvents() {
 // Row Builder
 // ============================================
 
-/** Use global escapeHtml from ui.js (mounted on window) */
-const _esc = (str) => (window.escapeHtml ? window.escapeHtml(str) : str);
+/** Use escapeHtml from ../utils/sanitize.js */
+const _esc = /** @param {string} str */ (str) => escapeHtml(str);
 
+/**
+ * @param {any} conn
+ * @param {string} mode
+ */
 function buildConnectionRow(conn, mode) {
     const id = _esc(conn.id ?? '');
     const meta = conn.metadata ?? {};
     const host = _esc(meta.host ?? '-');
     const process = _esc(meta.process ?? '');
     const destIP = _esc(meta.destinationIP ?? '-');
-    const destPort = meta.destinationPort ?? '-';
+    const destPort = _esc(meta.destinationPort ?? '-');
     const rule = _esc(conn.rule ?? 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ');
 
@@ -628,7 +662,7 @@ function buildConnectionRow(conn, mode) {
 
     // Subtitle: destination + process info under host
     const destHtml = (destIP && destIP !== '-')
-        ? `<span class="text-[10px] text-zinc-500 truncate block">→ ${destIP}:${destPort}</span>`
+        ? `<span class="text-2xs text-zinc-500 truncate block">→ ${destIP}:${destPort}</span>`
         : '';
     const subtitleHtml = process || destHtml
         ? `<div class="flex items-center gap-2 mt-0.5">
@@ -646,7 +680,7 @@ function buildConnectionRow(conn, mode) {
         </div>
         <!-- Rule -->
         <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex px-2 py-0.5 rounded-md text-[10px] font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+            <span class="inline-flex px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
         </div>
         <!-- Chains -->
         <div style="text-align:right; min-width:0;">
@@ -671,6 +705,7 @@ function buildConnectionRow(conn, mode) {
     </div>`;
 }
 
+/** @param {string} rule */
 function getRuleColorClass(rule) {
     const r = (rule ?? '').toLowerCase();
     if (r.includes('direct') || r === 'direct') return 'bg-emerald-500/15 text-emerald-400';
@@ -688,14 +723,18 @@ function getRuleColorClass(rule) {
  * Reuses glass-card styling from the app's design system.
  * For active connections, includes a Close button.
  */
+/**
+ * @param {any} conn
+ * @param {string} mode
+ */
 function showConnDetail(conn, mode) {
-    const t = window.translations?.[window.currentLang] ?? {};
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
     const meta = conn.metadata ?? {};
     const id = _esc(conn.id ?? '');
     const host = _esc(meta.host ?? '-');
     const process = _esc(meta.process ?? '-');
     const destIP = _esc(meta.destinationIP ?? '-');
-    const destPort = meta.destinationPort ?? '-';
+    const destPort = _esc(meta.destinationPort ?? '-');
     const rule = _esc(conn.rule ?? 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ') || '-';
     const ruleColorClass = getRuleColorClass(rule);
@@ -721,7 +760,7 @@ function showConnDetail(conn, mode) {
 
     // Build close button HTML (only for active connections)
     const closeBtnHtml = mode === 'active'
-        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider">
+        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-2xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider">
              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
              <span>${t.closeConn || 'Close Connection'}</span>
            </button>`
@@ -733,7 +772,7 @@ function showConnDetail(conn, mode) {
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pr-4">
                 <h3 class="text-lg font-light text-zinc-100 truncate">${host}</h3>
-                <p class="text-[11px] text-zinc-500 mt-1 font-mono truncate">${id}</p>
+                <p class="text-xs text-zinc-500 mt-1 font-mono truncate">${id}</p>
             </div>
             <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-lg bg-white/5 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-all">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -750,24 +789,24 @@ function showConnDetail(conn, mode) {
         <div class="grid grid-cols-2 gap-3 mb-5">
             <div class="bg-white/[0.03] rounded-xl p-3 border border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-[9px] text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
+                    <span class="text-2xs text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
                     <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
                 </div>
                 <span class="text-sm font-semibold text-purple-400 tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-white/5">
                     <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
-                    <span class="text-[10px] text-zinc-400 tabular-nums" id="detail-dl-total">${dlTotal}</span>
+                    <span class="text-2xs text-zinc-400 tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
             <div class="bg-white/[0.03] rounded-xl p-3 border border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-[9px] text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
+                    <span class="text-2xs text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
                     <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
                 </div>
                 <span class="text-sm font-semibold text-blue-400 tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-white/5">
                     <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
-                    <span class="text-[10px] text-zinc-400 tabular-nums" id="detail-ul-total">${ulTotal}</span>
+                    <span class="text-2xs text-zinc-400 tabular-nums" id="detail-ul-total">${ulTotal}</span>
                 </div>
             </div>
         </div>
@@ -844,11 +883,11 @@ function showConnDetail(conn, mode) {
                 delete connAccumulators[conn.id];
 
                 await closeConnection(id);
-                window.showNotification?.(t.connClosed || 'Connection closed', 'success');
+                showNotification(t.connClosed || 'Connection closed', 'success');
                 dismiss();
                 await fetchAndRenderConnections();
             } catch (err) {
-                window.showNotification?.(t.closeConnFailed || 'Failed to close connection', 'error');
+                showNotification(t.closeConnFailed || 'Failed to close connection', 'error');
                 resetButton(closeBtn, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', t.closeConn || 'Close Connection');
             }
         });
@@ -858,6 +897,10 @@ function showConnDetail(conn, mode) {
 /**
  * Live-refresh the detail panel's speed & total values on each poll cycle.
  * Only updates the numeric spans — does not re-render the entire panel.
+ */
+/**
+ * @param {string} connId
+ * @param {string} mode
  */
 function refreshDetailPanel(connId, mode) {
     const dlSpeedEl = document.getElementById('detail-dl-speed');
@@ -888,6 +931,11 @@ function refreshDetailPanel(connId, mode) {
 }
 
 /** Helper: render a key-value detail row */
+/**
+ * @param {string} label
+ * @param {string} value
+ * @param {string} [rowId]
+ */
 function renderDetailRow(label, value, rowId) {
     const idAttr = rowId ? ` id="${rowId}"` : '';
     return `
@@ -898,6 +946,7 @@ function renderDetailRow(label, value, rowId) {
 }
 
 /** Format milliseconds to human-readable duration */
+/** @param {number} ms */
 function fmtDuration(ms) {
     if (!ms || ms <= 0) return '< 1s';
     if (ms < 1000) return `${ms}ms`;
@@ -915,7 +964,7 @@ async function handleCloseAllConnections() {
     const btn = document.getElementById('close-all-conns-btn');
     if (!btn) return;
 
-    const t = window.translations?.[window.currentLang] ?? {};
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
     setButtonLoading(btn, t, 'closing');
 
     try {
@@ -926,10 +975,10 @@ async function handleCloseAllConnections() {
         connAccumulators = {};
 
         await closeAllConnections();
-        window.showNotification?.(t.connsClosed || 'All connections closed', 'success');
+        showNotification(t.connsClosed || 'All connections closed', 'success');
         await fetchAndRenderConnections();
     } catch (err) {
-        window.showNotification?.(t.closeConnsFailed || 'Failed to close connections', 'error');
+        showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
     }
 
     switchConnTab(currentConnTab);
@@ -939,18 +988,18 @@ async function handleClearClosedConnections() {
     const btn = document.getElementById('close-all-conns-btn');
     if (!btn) return;
 
-    const t = window.translations?.[window.currentLang] ?? {};
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
     setButtonLoading(btn, t, 'clearing');
 
     try {
         closedConnections = [];
-        window.showNotification?.(t.connsCleared || 'Closed history cleared', 'success');
+        showNotification(t.connsCleared || 'Closed history cleared', 'success');
         renderConnectionList([], 'closed');
 
         const badge = document.getElementById('closed-count-badge');
         if (badge) badge.classList.add('hidden');
     } catch (err) {
-        window.showNotification?.(t.clearConnsFailed || 'Failed to clear history', 'error');
+        showNotification(t.clearConnsFailed || 'Failed to clear history', 'error');
     }
 
     switchConnTab(currentConnTab);
@@ -963,7 +1012,7 @@ async function handleClearClosedConnections() {
 function updateClosedBadge() {
     const badge = document.getElementById('closed-count-badge');
     if (!badge) return;
-    const t = window.translations?.[window.currentLang] ?? {};
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
     if (closedConnections.length > 0) {
         badge.textContent = `${closedConnections.length} ${t.closedItems ?? ''}`;
         badge.classList.remove('hidden');
@@ -982,10 +1031,14 @@ function updateClosedBadge() {
  * Clone a DOM node and replace the original — prevents duplicate event listeners.
  * Returns the new clone for binding.
  */
+/**
+ * @param {Element|null} el
+ * @returns {Element|null}
+ */
 function bindOnce(el) {
     if (!el) return null;
-    const clone = el.cloneNode(true);
-    el.parentNode.replaceChild(clone, el);
+    const clone = /** @type {Element} */ (el.cloneNode(true));
+    el.parentNode?.replaceChild(clone, el);
     return clone;
 }
 
@@ -995,9 +1048,14 @@ function bindOnce(el) {
  * @param {object} t - i18n translations
  * @param {string} loadingText - translation key or fallback text
  */
+/**
+ * @param {HTMLElement} btn
+ * @param {any} t
+ * @param {string} loadingText
+ */
 function setButtonLoading(btn, t, loadingText) {
     if (!btn) return;
-    btn.disabled = true;
+    /** @type {HTMLButtonElement} */ (btn).disabled = true;
     btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>${t[loadingText] || loadingText}</span>`;
 }
 
@@ -1007,9 +1065,14 @@ function setButtonLoading(btn, t, loadingText) {
  * @param {string} iconSvg - innerHTML for the <svg> element
  * @param {string} text - button label text
  */
+/**
+ * @param {HTMLElement} btn
+ * @param {string} iconSvg
+ * @param {string} text
+ */
 function resetButton(btn, iconSvg, text) {
     if (!btn) return;
-    btn.disabled = false;
+    /** @type {HTMLButtonElement} */ (btn).disabled = false;
     btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`;
 }
 
@@ -1019,6 +1082,10 @@ function resetButton(btn, iconSvg, text) {
  * @param {object} conn - raw connection object
  * @param {number} closedAt - timestamp
  * @returns {object} archived connection with dlTotal/ulTotal/dlSpeed/ulSpeed/isClosed
+ */
+/**
+ * @param {any} conn
+ * @param {number} closedAt
  */
 function archiveConnection(conn, closedAt) {
     const acc = connAccumulators[conn.id] ?? { dl: 0, ul: 0, dlSpeed: 0, ulSpeed: 0 };
@@ -1042,6 +1109,10 @@ function archiveConnection(conn, closedAt) {
  * @param {string} mode - 'active' | 'closed'
  * @returns {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }}
  */
+/**
+ * @param {any} conn
+ * @param {string} mode
+ */
 function resolveConnStats(conn, mode) {
     if (mode === 'closed') {
         return {
@@ -1060,28 +1131,4 @@ function resolveConnStats(conn, mode) {
     };
 }
 
-// ============================================
-// Formatting Utilities
-// ============================================
 
-/**
- * Unified size formatter — handles both bytes (storage) and bytes/sec (speed).
- * @param {number} value - numeric value to format
- * @param {'bytes'|'speed'} mode - 'bytes' → B/KB/MB, 'speed' → B/s/KB/s/MB/s
- */
-function formatSize(value, mode = 'bytes') {
-    if (value <= 0) return mode === 'speed' ? '0 B/s' : '0 B';
-    const units = mode === 'speed'
-        ? ['B/s', 'KB/s', 'MB/s', 'GB/s']
-        : ['B', 'KB', 'MB', 'GB', 'TB'];
-    const k = 1024;
-    const i = Math.min(Math.floor(Math.log(value) / Math.log(k)), units.length - 1);
-    const val = value / Math.pow(k, i);
-    return val >= 100 ? `${val.toFixed(0)} ${units[i]}` : `${val.toFixed(1)} ${units[i]}`;
-}
-
-/** @see formatSize — convenience wrapper for speed */
-const formatSpeed = (v) => formatSize(v, 'speed');
-
-/** @see formatSize — convenience wrapper for bytes */
-const formatBytes = (v) => formatSize(v, 'bytes');

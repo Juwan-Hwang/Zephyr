@@ -1,47 +1,103 @@
-const _wsState = Object.seal({ secret: '' });
+// @ts-check
+/**
+ * @module websocket
+ *
+ * Traffic stream connection manager using Fetch Stream API.
+ *
+ * Provides a resilient, auto-reconnecting stream client for real-time
+ * traffic data.  Exposes a finite state machine (DISCONNECTED / CONNECTING /
+ * CONNECTED / RECONNECTING) so the UI can reflect live connection status.
+ *
+ * Features:
+ *  - Exponential back-off reconnection (base 1 s, max 30 s, 15 attempts)
+ *  - Heartbeat detection (30 s silence => dead connection)
+ *  - Structured logging via {@link wsLogger}
+ */
+
+import { wsLogger as log } from './utils/logger.js';
+
+/* ------------------------------------------------------------------ */
+/*  Connection state enum                                             */
+/* ------------------------------------------------------------------ */
 
 /**
- * 设置 WebSocket 使用的 Secret
+ * Enum-like connection states for UI consumption.
+ *
+ * @readonly
+ * @enum {number}
+ */
+export const ConnectionState = Object.freeze({
+  /** No active connection, not attempting to connect. */
+  DISCONNECTED: 0,
+  /** A connection attempt is in progress. */
+  CONNECTING: 1,
+  /** Stream is open and receiving data. */
+  CONNECTED: 2,
+  /** A previous connection was lost; reconnection is in progress. */
+  RECONNECTING: 3,
+});
+
+/* ------------------------------------------------------------------ */
+/*  Internal shared state                                             */
+/* ------------------------------------------------------------------ */
+
+/** @type {{ secret: string }} */
+const _wsState = Object.seal({ secret: '' });
+
+/** @type {string} */
+let wsBaseUrl = 'ws://127.0.0.1:9090';
+
+/** @type {ConnectionState} */
+let _connectionState = ConnectionState.DISCONNECTED;
+
+/** @type {{close: Function, reconnect: Function, isMaxRetriesReached: Function} | null} */
+let globalConnectionHandle = null;
+
+/** @type {Function | null} */
+let connectionLostCallback = null;
+
+/* ------------------------------------------------------------------ */
+/*  Public helpers                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Set the secret used for Bearer authentication on the stream endpoint.
+ *
+ * @param {string} s - Authentication secret
  */
 export function setWsSecret(s) {
   _wsState.secret = s || '';
 }
 
+/** @alias setWsSecret — kept for backward compatibility with main.js */
+export { setWsSecret as setSecret };
+
 /**
- * 格式化速度显示
- * @param {number} bytes - 每秒字节数
- * @returns {string} - 格式化后的字符串
+ * Set the base URL of the traffic stream server.
+ *
+ * @param {string} url - WebSocket-style URL (ws:// or wss://);
+ *                       the protocol is automatically converted to http(s).
  */
-function formatSpeed(bytes) {
-  if (bytes < 1024) {
-    return `${bytes.toFixed(0)} B/s`;
-  } else if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(2)} KB/s`;
-  } else {
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB/s`;
-  }
-}
-
-let wsBaseUrl = 'ws://127.0.0.1:9090';
-
 export function setWsBaseUrl(url) {
   wsBaseUrl = url;
 }
 
-// Global state for connection management
-let globalConnectionHandle = null;
-let connectionLostCallback = null;
+/** @alias setWsBaseUrl — kept for backward compatibility with main.js */
+export { setWsBaseUrl as setBaseUrl };
 
 /**
- * Register a callback to be notified when connection is lost permanently
- * @param {Function} callback - Function to call when max retries are reached
+ * Register a callback invoked when the maximum number of reconnection
+ * attempts is exhausted.
+ *
+ * @param {Function} callback - No-arg notification callback
  */
 export function onConnectionLost(callback) {
   connectionLostCallback = callback;
 }
 
 /**
- * Manually trigger reconnection after connection was lost
+ * Programmatically trigger a reconnection attempt.
+ * Resets retry counters and aborts the current stream.
  */
 export function forceReconnect() {
   if (globalConnectionHandle) {
@@ -50,87 +106,199 @@ export function forceReconnect() {
 }
 
 /**
- * Check if traffic connection is currently active
+ * Check whether the traffic stream is currently connected (or attempting
+ * to reconnect and has not yet exhausted retries).
+ *
+ * @returns {boolean}
  */
 export function isTrafficConnected() {
-  return globalConnectionHandle !== null && !globalConnectionHandle.isMaxRetriesReached();
+  return (
+    globalConnectionHandle !== null &&
+    !globalConnectionHandle.isMaxRetriesReached()
+  );
 }
 
 /**
- * 连接流量统计 WebSocket / Stream
- * @param {Function} callback - 接收格式化数据后的回调函数
+ * Read-only snapshot of the current connection state.
+ *
+ * @returns {ConnectionState}
+ */
+export function getConnectionState() {
+  return _connectionState;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Internal utilities                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Format a byte-rate into a human-readable speed string.
+ *
+ * @param {number} bytes - Bytes per second
+ * @returns {string} Formatted speed (e.g. "1.50 MB/s")
+ */
+function formatSpeed(bytes) {
+  if (bytes < 1024) return `${bytes.toFixed(0)} B/s`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB/s`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB/s`;
+}
+
+/**
+ * Transition the global connection state and log the change.
+ *
+ * @param {ConnectionState} newState
+ */
+function setState(newState) {
+  if (_connectionState === newState) return;
+  const labels = Object.entries(ConnectionState)
+    .find(([, v]) => v === newState)?.[0] ?? 'UNKNOWN';
+  log.info(`state => ${labels}`);
+  _connectionState = newState;
+}
+
+/* ------------------------------------------------------------------ */
+/*  connectTraffic                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Open a persistent traffic stream and feed formatted data to `callback`.
+ *
+ * The stream uses the Fetch ReadableStream API (not WebSocket).  On
+ * disconnection it automatically reconnects with exponential back-off.
+ * A 30-second heartbeat timeout treats a silent connection as dead.
+ *
+ * @param {Function} callback - Receives `{ up: string, down: string, raw: Object }`
+ * @returns {{ close: Function, reconnect: Function, isMaxRetriesReached: Function }}
  */
 export function connectTraffic(callback) {
+  /** @type {AbortController} */
   let abortController = new AbortController();
+
+  /** @type {number | null} */
   let retryTimer = null;
+
+  /** @type {number} */
   let retryCount = 0;
+
+  /** @type {boolean} */
   let isClosed = false;
+
+  /** @type {boolean} */
   let maxRetriesReached = false;
-  let isForceReconnecting = false;  // Guard flag to prevent double connection
+
+  /** @type {boolean} Guard against double connection during force-reconnect */
+  let isForceReconnecting = false;
+
+  /* ---- constants ---- */
   const MAX_RETRIES = 15;
   const BASE_DELAY = 1000;
   const MAX_DELAY = 30000;
+  const HEARTBEAT_TIMEOUT = 30_000; // 30 s
 
+  /* ---- heartbeat timer ---- */
+  /** @type {number|null} */
+  let heartbeatTimer = null;
+
+  /** Reset the heartbeat countdown. */
+  const touchHeartbeat = () => {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    heartbeatTimer = setTimeout(() => {
+      log.warn('heartbeat timeout — no data for 30 s, reconnecting');
+      abortController.abort(); // triggers catch => handleClose
+    }, HEARTBEAT_TIMEOUT);
+  };
+
+  /** Stop the heartbeat timer. */
+  const stopHeartbeat = () => {
+    if (heartbeatTimer) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Core connection routine.
+   * @private
+   */
   const connect = async () => {
     if (retryTimer) clearTimeout(retryTimer);
     if (isClosed) return;
-    
-    // We use http/https for fetch instead of ws/wss
-    const httpUrl = wsBaseUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+
+    setState(
+      retryCount > 0
+        ? ConnectionState.RECONNECTING
+        : ConnectionState.CONNECTING,
+    );
+
+    // Convert ws(s) to http(s) for the Fetch API
+    const httpUrl = wsBaseUrl
+      .replace('ws://', 'http://')
+      .replace('wss://', 'https://');
     const streamUrl = `${httpUrl}/traffic`;
-    
+
     abortController = new AbortController();
-    
+
     try {
+      /** @type {HeadersInit} */
       const headers = {};
       if (_wsState.secret) {
         headers['Authorization'] = `Bearer ${_wsState.secret}`;
       }
-      
+
+      log.debug(`fetching ${streamUrl} ...`);
+
       const response = await fetch(streamUrl, {
         headers,
-        signal: abortController.signal
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      retryCount = 0; // 连接成功，重置重试计数
-      maxRetriesReached = false; // Reset max retries flag on successful connection
-      
+      // --- stream established ---
+      retryCount = 0;
+      maxRetriesReached = false;
+      setState(ConnectionState.CONNECTED);
+      touchHeartbeat();
+
+      if (!response.body) throw new Error('Response body is null');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      /** @type {string} */
       let buffer = '';
-
       let parseErrorCount = 0;
       let lastCallbackTime = 0;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
+        touchHeartbeat(); // any data counts as a heartbeat
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep the incomplete line
-        
+        buffer = /** @type {string} */ (lines.pop()); // keep incomplete tail
+
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          
+
           try {
             const data = JSON.parse(trimmed);
-            parseErrorCount = 0; // reset on success
+            parseErrorCount = 0;
 
             const now = Date.now();
             if (now - lastCallbackTime >= 500) {
               const formatted = {
                 up: formatSpeed(data.up),
                 down: formatSpeed(data.down),
-                raw: data 
+                raw: data,
               };
-              
-              if (callback && typeof callback === 'function') {
+
+              if (typeof callback === 'function') {
                 callback(formatted);
                 lastCallbackTime = now;
               }
@@ -138,77 +306,101 @@ export function connectTraffic(callback) {
           } catch (err) {
             parseErrorCount++;
             if (parseErrorCount > 10) {
-              console.error('[Stream] Too many parse errors, reconnecting...');
+              log.error('too many parse errors — reconnecting');
               throw new Error('Too many parse errors');
             }
           }
         }
       }
-      
-      // If we exit the loop, the stream was closed
+
+      // Stream ended gracefully
       handleClose();
     } catch (err) {
-      if (err.name === 'AbortError') return;
-      console.error('[Stream] Traffic monitor error:', err);
+      const error = /** @type {Error} */ (err);
+      if (error.name === 'AbortError') return;
+      log.error('stream error:', error.message || error);
       handleClose();
     }
   };
 
+  /**
+   * Handle disconnection — schedule retry or notify permanent failure.
+   * @private
+   */
   const handleClose = () => {
-    // Don't auto-reconnect if we're force reconnecting
-    if (isForceReconnecting) return;
-    if (isClosed) return;
+    stopHeartbeat();
+
+    if (isForceReconnecting || isClosed) return;
+
     if (retryCount < MAX_RETRIES) {
       retryCount++;
-      const delay = Math.min(MAX_DELAY, BASE_DELAY * Math.pow(2, retryCount - 1));
+      const delay = Math.min(
+        MAX_DELAY,
+        BASE_DELAY * Math.pow(2, retryCount - 1),
+      );
+      log.warn(`reconnect #${retryCount} in ${delay} ms`);
+      setState(ConnectionState.RECONNECTING);
       retryTimer = setTimeout(connect, delay);
     } else {
-      console.warn('[Stream] Max reconnection attempts reached, stopping reconnection.');
+      log.error('max reconnection attempts reached — giving up');
       maxRetriesReached = true;
-      
-      // Notify about connection loss
-      if (window.showNotification) {
-          const t = window.translations?.[window.currentLang] || {};
-          window.showNotification(t.connectionLost || 'Lost connection to core traffic monitor. Click to reconnect.', 'warning');
-      }
-      
-      // Call registered callback if any
-      if (connectionLostCallback) {
+      setState(ConnectionState.DISCONNECTED);
+
+      // User-facing notification
+      /** @type {any} */ (window).showNotification?.(
+        'Lost connection to core traffic monitor. Click to reconnect.',
+        'warning',
+      );
+
+      if (typeof connectionLostCallback === 'function') {
         connectionLostCallback();
       }
     }
   };
 
+  /* ---- kick off ---- */
   connect();
 
+  /* ---- handle object ---- */
   const handle = {
-    close: () => {
+    /**
+     * Permanently close the connection and release resources.
+     */
+    close() {
       isClosed = true;
       maxRetriesReached = false;
+      stopHeartbeat();
       if (retryTimer) clearTimeout(retryTimer);
       abortController.abort();
-      // Clear global handle to prevent stale references
+      setState(ConnectionState.DISCONNECTED);
       if (globalConnectionHandle === handle) {
         globalConnectionHandle = null;
       }
     },
-    reconnect: () => {
-        // Clear any pending retry timer first to prevent double connection
-        if (retryTimer) clearTimeout(retryTimer);
-        maxRetriesReached = false;
-        retryCount = 0;
-        // Set guard flag to prevent handleClose from triggering connect
-        isForceReconnecting = true;
-        abortController.abort();
-        abortController = new AbortController();
-        isForceReconnecting = false;
-        connect();
+
+    /**
+     * Force an immediate reconnection (resets retry counters).
+     */
+    reconnect() {
+      if (retryTimer) clearTimeout(retryTimer);
+      stopHeartbeat();
+      maxRetriesReached = false;
+      retryCount = 0;
+      isForceReconnecting = true;
+      abortController.abort();
+      abortController = new AbortController();
+      isForceReconnecting = false;
+      connect();
     },
-    isMaxRetriesReached: () => maxRetriesReached
+
+    /**
+     * @returns {boolean} Whether the max retry limit has been reached.
+     */
+    isMaxRetriesReached() {
+      return maxRetriesReached;
+    },
   };
-  
-  // Store handle globally for manual reconnection
+
   globalConnectionHandle = handle;
-  
   return handle;
 }

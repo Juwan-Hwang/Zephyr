@@ -1,3 +1,32 @@
+// @ts-check
+/**
+ * Zephyr i18n System
+ *
+ * Features: interpolation (@@var@@), CLDR pluralization via Intl.PluralRules,
+ * fallback chain, QA mode, RTL detection, ja/ko skeletons,
+ * HTML lang/dir attributes, locale attribute introspection.
+ */
+
+import { invoke } from './api.js';
+import { i18nLogger } from './utils/logger.js';
+
+// ---------------------------------------------------------------------------
+// RTL language detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a language code is right-to-left.
+ * @param {string} lang - ISO 639-1 language code.
+ * @returns {boolean}
+ */
+export function isRTL(lang) {
+    return ['ar', 'he', 'fa', 'ur'].includes(lang);
+}
+
+// ---------------------------------------------------------------------------
+// Translation data
+// ---------------------------------------------------------------------------
+
 export const translations = {
     en: {
         home: "Home",
@@ -25,7 +54,7 @@ export const translations = {
         autoCheckUpdateDesc: "Automatically check for core updates on startup",
         confirm: "Confirm",
         cancel: "Cancel",
-        
+
         // Network & Routing
         networkRouting: "Network & Routing",
         unifiedDelay: "Unified Delay",
@@ -37,7 +66,7 @@ export const translations = {
         geoData: "Geo Databases",
         geoDataDesc: "Update GeoIP and GeoSite routing databases",
         updateNow: "Update Now",
-        
+
         // Core update status messages (keys match Rust backend)
         statusDownloadingCore: "Downloading core from GitHub...",
         statusDownloadingProgress: "Downloading core... {progress}%",
@@ -54,7 +83,7 @@ export const translations = {
         statusVerifyingGeoSite: "Verifying GeoSite...",
         statusApplyingUpdates: "Applying updates...",
         statusGeoUpdateComplete: "Geo database update complete",
-        
+
         // Tunnels
         tunnels: "Port Forwarding",
         add: "Add",
@@ -65,7 +94,7 @@ export const translations = {
         invalidProtocol: "Invalid protocol. Use tcp, udp, or both.",
         invalidAddressFormat: "Invalid listen address format. Use host:port",
         invalidTargetFormat: "Invalid target address format. Use host:port",
-        
+
         core: "Mihomo Core",
         curVersion: "Current Version",
         checking: "Checking...",
@@ -167,7 +196,6 @@ export const translations = {
         value: "Value",
         policy: "Policy",
         valueEmpty: "Value cannot be empty",
-        cancel: "Cancel",
         confirmAdd: "Confirm Add",
         updateAll: "Update All",
         notifRulesSaved: "Rules saved and applied",
@@ -193,13 +221,8 @@ export const translations = {
         timeout: "Timeout",
         unknown: "Unknown",
         switching: "Switching...",
-        tunnelNetwork: "Listen Address",
-        tunnelTarget: "Target Address",
-        invalidProtocol: "Invalid protocol. Use tcp, udp, or both.",
-        invalidAddressFormat: "Invalid listen address format. Use host:port",
-        invalidTargetFormat: "Invalid target address format. Use host:port",
         addPortForwarding: "Add Port Forwarding",
-                // Tray Menu
+        // Tray Menu
         trayShow: "Show Zephyr",
         trayQuit: "Quit",
         traySysProxy: "System Proxy",
@@ -207,7 +230,7 @@ export const translations = {
         trayProxyMode: "Proxy Mode",
         traySubscriptions: "Subscriptions",
         trayProxies: "Proxies",
-        
+
         // Rule buttons
         moveToTop: "Move to Top",
         moveToBottom: "Move to Bottom",
@@ -221,24 +244,7 @@ export const translations = {
         confirmDelete: "Are you sure you want to delete this configuration?",
         githubHomepage: "GitHub Homepage",
         githubHomepageDesc: "Star & Contribute",
-        
-        // Core update status messages (keys match Rust backend)
-        statusDownloadingCore: "Downloading core from GitHub...",
-        statusDownloadingProgress: "Downloading core... {progress}%",
-        statusPreparingUpdate: "Preparing to update Mihomo core...",
-        statusVerifyingFile: "Verifying file integrity...",
-        statusExtractingCore: "Download complete, extracting core...",
-        statusWritingFiles: "Writing core files...",
-        statusRestartingCore: "Update complete, restarting core...",
-        statusCoreReady: "Core ready",
-        statusFetchingVerify: "Fetching verification info...",
-        statusDownloadingGeoIP: "Downloading GeoIP...",
-        statusVerifyingGeoIP: "Verifying GeoIP...",
-        statusDownloadingGeoSite: "Downloading GeoSite...",
-        statusVerifyingGeoSite: "Verifying GeoSite...",
-        statusApplyingUpdates: "Applying updates...",
-        statusGeoUpdateComplete: "Geo database update complete",
-        
+
         // Error messages
         connectionLost: "Lost connection to core traffic monitor. Click to reconnect.",
         invalidJson: "Invalid JSON format",
@@ -250,14 +256,14 @@ export const translations = {
         restoreFailed: "Failed to restore defaults",
         configParseErrorTitle: "Configuration Parse Error",
         configParseErrorMsg: "Configuration file could not be parsed. Using empty config.",
-        
+
         // Storage
         usedSpace: "used",
         totalSpace: "total",
-        
+
         // Tunnel
         listen: "Listen",
-        
+
         // Status
         loading: "Loading...",
 
@@ -268,18 +274,18 @@ export const translations = {
         closeAll: "Close All",
         refresh: "Refresh",
         totalConn: "Total",
-        dlTotal: "↓ Total",
-        ulTotal: "↑ Total",
+        dlTotal: "\u2193 Total",
+        ulTotal: "\u2191 Total",
         activeConn: "Active",
-hostCol: "Host",
+        hostCol: "Host",
         ruleCol: "Rule",
         chainsCol: "Chains",
-        dlCol: "↓ Download",
-        ulCol: "↑ Upload",
-        dlSpeedCol: "↓ Download Speed",
-        dlTotalCol: "↓ Download Total",
-        ulSpeedCol: "↑ Upload Speed",
-        ulTotalCol: "↑ Upload Total",
+        dlCol: "\u2193 Download",
+        ulCol: "\u2191 Upload",
+        dlSpeedCol: "\u2193 Download Speed",
+        dlTotalCol: "\u2193 Download Total",
+        ulSpeedCol: "\u2191 Upload Speed",
+        ulTotalCol: "\u2191 Upload Total",
         dlSpeedLabel: "Download Speed",
         ulSpeedLabel: "Upload Speed",
         totalLabel: "Total",
@@ -300,14 +306,15 @@ hostCol: "Host",
         loadFailed: "Failed to load connections",
         closing: "Closing...",
         processLabel: "Process",
-    typeLabel: "Type",
-    sourceLabel: "Source",
-    networkLabel: "Network",
-    durationLabel: "Duration",
-    closedAtLabel: "Closed at",
-    connsClosed: "All connections closed",
+        typeLabel: "Type",
+        sourceLabel: "Source",
+        networkLabel: "Network",
+        durationLabel: "Duration",
+        closedAtLabel: "Closed at",
+        connsClosed: "All connections closed",
         closeConnsFailed: "Failed to close connections",
     },
+
     zh: {
         home: "首页",
         proxies: "代理节点",
@@ -334,7 +341,7 @@ hostCol: "Host",
         autoCheckUpdateDesc: "启动时自动检查核心更新",
         confirm: "确定",
         cancel: "取消",
-        
+
         // Network & Routing
         networkRouting: "网络与路由",
         unifiedDelay: "统一延迟",
@@ -346,7 +353,7 @@ hostCol: "Host",
         geoData: "Geo 数据库",
         geoDataDesc: "更新 GeoIP 和 GeoSite 路由数据库",
         updateNow: "立即更新",
-        
+
         // Core update status messages (keys match Rust backend)
         statusDownloadingCore: "正在从 GitHub 下载核心...",
         statusDownloadingProgress: "正在下载核心... {progress}%",
@@ -363,7 +370,7 @@ hostCol: "Host",
         statusVerifyingGeoSite: "正在验证 GeoSite...",
         statusApplyingUpdates: "正在应用更新...",
         statusGeoUpdateComplete: "Geo 数据库更新完成",
-        
+
         // Tunnels
         tunnels: "代理端口转发",
         add: "添加",
@@ -474,7 +481,6 @@ hostCol: "Host",
         value: "值",
         policy: "策略",
         valueEmpty: "值不能为空",
-        cancel: "取消",
         confirmAdd: "确认添加",
         updateAll: "全部更新",
         notifRulesSaved: "规则已保存并热重载",
@@ -500,8 +506,6 @@ hostCol: "Host",
         timeout: "超时",
         unknown: "未知",
         switching: "切换中...",
-        tunnelNetwork: "监听地址",
-        tunnelTarget: "目标地址",
         addPortForwarding: "添加端口转发",
         // Tray Menu
         trayShow: "显示主界面",
@@ -511,7 +515,7 @@ hostCol: "Host",
         trayProxyMode: "代理模式",
         traySubscriptions: "订阅选择",
         trayProxies: "节点选择",
-        
+
         // Rule buttons
         moveToTop: "移至顶部",
         moveToBottom: "移至底部",
@@ -525,7 +529,7 @@ hostCol: "Host",
         confirmDelete: "确定要删除此配置文件吗？",
         githubHomepage: "GitHub 主页",
         githubHomepageDesc: "Star 与贡献",
-        
+
         // Error messages
         connectionLost: "核心流量监控连接丢失，点击重连。",
         invalidJson: "JSON 格式无效",
@@ -537,14 +541,14 @@ hostCol: "Host",
         restoreFailed: "恢复默认设置失败",
         configParseErrorTitle: "配置文件解析错误",
         configParseErrorMsg: "配置文件解析失败，将使用空配置。",
-        
+
         // Storage
         usedSpace: "已用",
         totalSpace: "总计",
-        
+
         // Tunnel
         listen: "监听",
-        
+
         // Status
         loading: "加载中...",
 
@@ -555,18 +559,18 @@ hostCol: "Host",
         closeAll: "全部关闭",
         refresh: "刷新",
         totalConn: "总数",
-        dlTotal: "↓ 下载总量",
-        ulTotal: "↑ 上传总量",
+        dlTotal: "\u2193 下载总量",
+        ulTotal: "\u2191 上传总量",
         activeConn: "活跃",
-hostCol: "主机",
+        hostCol: "主机",
         ruleCol: "规则",
         chainsCol: "链路",
-        dlCol: "↓ 下载量",
-        ulCol: "↑ 上传量",
-        dlSpeedCol: "↓ 下载速率",
-        dlTotalCol: "↓ 下载总量",
-        ulSpeedCol: "↑ 上传速率",
-        ulTotalCol: "↑ 上传总量",
+        dlCol: "\u2193 下载量",
+        ulCol: "\u2191 上传量",
+        dlSpeedCol: "\u2193 下载速率",
+        dlTotalCol: "\u2193 下载总量",
+        ulSpeedCol: "\u2191 上传速率",
+        ulTotalCol: "\u2191 上传总量",
         dlSpeedLabel: "下载速率",
         ulSpeedLabel: "上传速率",
         totalLabel: "总量",
@@ -587,29 +591,352 @@ hostCol: "主机",
         loadFailed: "加载连接失败",
         closing: "正在关闭...",
         processLabel: "进程",
-    typeLabel: "类型",
-    sourceLabel: "来源",
-    networkLabel: "网络",
-    durationLabel: "持续时间",
-    closedAtLabel: "关闭时间",
-    connsClosed: "已关闭所有连接",
+        typeLabel: "类型",
+        sourceLabel: "来源",
+        networkLabel: "网络",
+        durationLabel: "持续时间",
+        closedAtLabel: "关闭时间",
+        connsClosed: "已关闭所有连接",
         closeConnsFailed: "关闭连接失败",
-    }
+    },
+
+    ja: {
+        home: "ホーム",
+        proxies: "プロキシ",
+        settings: "設定",
+        confirm: "確認",
+        cancel: "キャンセル",
+        language: "言語",
+        languageDesc: "表示言語を選択",
+        loading: "読み込み中...",
+        errorPrefix: "エラー",
+        unknown: "不明",
+    },
+
+    ko: {
+        home: "홈",
+        proxies: "프록시",
+        settings: "설정",
+        confirm: "확인",
+        cancel: "취소",
+        language: "언어",
+        languageDesc: "표시 언어 선택",
+        loading: "로딩 중...",
+        errorPrefix: "오류",
+        unknown: "알 수 없음",
+    },
 };
 
+// ---------------------------------------------------------------------------
+// Language state
+// ---------------------------------------------------------------------------
+
 /**
- * Map backend status messages to localized strings
- * Backend sends English status as key, frontend maps to current language
+ * Detect system language from navigator.
+ * @returns {string} Detected language code, defaults to 'en'.
+ */
+export function detectSystemLanguage() {
+    const lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+    // Only return a language that we actually have translations for
+    const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(lang);
+    return translations[langKey] ? lang : 'en';
+}
+
+/**
+ * Current active language. Initialized from localStorage or system detection.
+ * Mutable so UI modules can react to language changes.
+ */
+const _savedLang = typeof localStorage !== 'undefined' ? localStorage.getItem('lang') : null;
+export let currentLang = _savedLang || detectSystemLanguage();
+if (_savedLang === null && typeof localStorage !== 'undefined') {
+    localStorage.setItem('lang', currentLang);
+}
+
+// ---------------------------------------------------------------------------
+// QA mode
+// ---------------------------------------------------------------------------
+
+let _qaMode = false;
+
+/**
+ * Enable or disable QA mode. When enabled, `t()` returns the raw key
+ * wrapped in `**` markers so translators can spot untranslated strings.
+ * @param {boolean} enabled
+ */
+export function setQAMode(enabled) {
+    _qaMode = !!enabled;
+}
+
+/**
+ * @returns {boolean} Whether QA mode is currently active.
+ */
+export function isQAMode() {
+    return _qaMode;
+}
+
+// ---------------------------------------------------------------------------
+// CLDR plural category resolver (Intl.PluralRules)
+// ---------------------------------------------------------------------------
+
+/** @type {Map<string, Intl.PluralRules>} */
+const _pluralRulesCache = new Map();
+
+/**
+ * Obtain a cached Intl.PluralRules instance for the given locale.
+ * Falls back to 'en' if the locale is unsupported.
+ * @param {string} lang
+ * @returns {Intl.PluralRules}
+ */
+function _getPluralRules(lang) {
+    let rules = _pluralRulesCache.get(lang);
+    if (!rules) {
+        try {
+            rules = new Intl.PluralRules(lang);
+        } catch {
+            rules = new Intl.PluralRules('en');
+        }
+        _pluralRulesCache.set(lang, rules);
+    }
+    return rules;
+}
+
+/**
+ * Determine the CLDR plural category for a given count + language.
+ * Uses Intl.PluralRules for full CLDR-compliant pluralization across all locales.
+ * @param {number} count
+ * @param {string} lang
+ * @returns {'zero'|'one'|'two'|'few'|'many'|'other'}
+ */
+function pluralCategory(count, lang) {
+    const n = Math.abs(Number(count));
+    if (!Number.isFinite(n)) return 'other';
+    return _getPluralRules(lang).select(n);
+}
+
+// ---------------------------------------------------------------------------
+// Interpolation engine
+// ---------------------------------------------------------------------------
+
+const INTERPOLATE_RE = /@@(\w+)@@/g;
+
+/**
+ * Replace all `@@variable@@` placeholders in a template string.
+ * Logs a warning for any unresolved placeholders.
+ * @param {string} template
+ * @param {Object<string, *>} vars
+ * @param {string} [key] - Translation key (used in warning messages)
+ * @returns {string}
+ */
+function interpolate(template, vars, key) {
+    if (!vars || typeof template !== 'string') return template;
+    return template.replace(INTERPOLATE_RE, (_match, varName) => {
+        if (Object.prototype.hasOwnProperty.call(vars, varName)) {
+            return vars[varName];
+        }
+        i18nLogger.warn(`Missing interpolation: key="${key}", variable="${varName}"`);
+        return _match;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Fallback chain resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a translation key through the fallback chain: currentLang -> en.
+ * @param {string} key
+ * @returns {{ value: string, found: boolean }}
+ */
+function resolveKey(key) {
+    const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+    const primary = /** @type {Record<string, string>} */(translations[langKey]);
+    if (primary && Object.prototype.hasOwnProperty.call(primary, key)) {
+        return { value: primary[key], found: true };
+    }
+    const fallback = /** @type {Record<string, string>} */(translations.en);
+    if (fallback && Object.prototype.hasOwnProperty.call(fallback, key)) {
+        return { value: fallback[key], found: true };
+    }
+    return { value: key, found: false };
+}
+
+// ---------------------------------------------------------------------------
+// Core translation function
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate a key with optional interpolation and pluralization.
+ *
+ * Usage:
+ *   t('hello')                                    // simple lookup
+ *   t('greeting', { name: 'World' })              // interpolation
+ *   t('items', 5)                                 // plural: one/other
+ *   t('items', 5, { type: 'file' })               // plural + interpolation
+ *
+ * @param {string} key - Translation key.
+ * @param {Object<string, *>|number} [optionsOrCount] - Interpolation vars OR a numeric count for pluralization.
+ * @param {Object<string, *>} [extraVars] - Additional interpolation vars (used with count).
+ * @returns {string}
+ */
+export function t(key, optionsOrCount, extraVars) {
+    // QA mode: return raw key wrapped in markers
+    if (_qaMode) {
+        return `**${key}**`;
+    }
+
+    // Resolve the raw value through fallback chain
+    const { value } = resolveKey(key);
+
+    // Pluralization path: second argument is a number
+    if (typeof optionsOrCount === 'number') {
+        const count = optionsOrCount;
+        // value must be a plural object like { one: "...", other: "..." }
+        if (typeof value === 'object' && value !== null) {
+            const category = pluralCategory(count, currentLang);
+            /** @type {Record<string, string>} */
+            const pluralObj = value;
+            const template = pluralObj[category] || pluralObj.other || pluralObj.one || '';
+            return interpolate(template, { count, ...extraVars }, key);
+        }
+        // Fallback: value is a plain string, inject count as @@count@@
+        return interpolate(value, { count, ...extraVars }, key);
+    }
+
+    // Interpolation path: second argument is an object
+    if (optionsOrCount && typeof optionsOrCount === 'object') {
+        return interpolate(value, optionsOrCount, key);
+    }
+
+    // Simple lookup
+    return value;
+}
+
+// ---------------------------------------------------------------------------
+// HTML lang / dir attribute management
+// ---------------------------------------------------------------------------
+
+/**
+ * Set `lang` and `dir` attributes on the <html> element for a given language.
+ * Uses BCP 47 format for the lang attribute and detects RTL/LTR direction.
+ * @param {string} language - ISO 639-1 language code (e.g. 'en', 'zh', 'ar')
+ */
+export function setHTMLAttributes(language) {
+    const html = document.documentElement;
+    html.setAttribute('lang', language);
+    html.setAttribute('dir', isRTL(language) ? 'rtl' : 'ltr');
+}
+
+/**
+ * Get locale attributes for a given locale string.
+ * Returns an object with `dir` and `lang` properties, useful for
+ * programmatic attribute application (e.g. in React, Vue, or SSR contexts).
+ * @param {string} locale - BCP 47 locale string (e.g. 'en-US', 'ar-SA')
+ * @returns {{ dir: 'rtl'|'ltr', lang: string }}
+ */
+export function getLocAttributes(locale) {
+    const lang = locale.slice(0, 2).toLowerCase();
+    return {
+        dir: isRTL(lang) ? 'rtl' : 'ltr',
+        lang: locale,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Language setter
+// ---------------------------------------------------------------------------
+
+/**
+ * Set the active language, persist to localStorage, update HTML attributes,
+ * and re-apply DOM translations.
+ * @param {string} lang
+ */
+export function setLanguage(lang) {
+    const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(lang);
+    if (!translations[langKey]) {
+        i18nLogger.warn(`Unknown language "${lang}", falling back to "en"`);
+        lang = 'en';
+    }
+    currentLang = lang;
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('lang', lang);
+    }
+    setHTMLAttributes(lang);
+    applyTranslations();
+}
+
+// ---------------------------------------------------------------------------
+// DOM translation applier
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk all `[data-i18n]` and `[data-i18n-placeholder]` elements and replace
+ * their text content / placeholder with the corresponding translated string.
+ * Updates HTML lang/dir attributes and dispatches an `i18n-applied` CustomEvent when done.
+ */
+export function applyTranslations() {
+    setHTMLAttributes(currentLang);
+
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+        const key = el.getAttribute('data-i18n');
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            el.textContent = translated;
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+        const inputEl = /** @type {HTMLInputElement} */ (el);
+        const key = inputEl.getAttribute('data-i18n-placeholder');
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            inputEl.placeholder = translated;
+        }
+    });
+
+    document.querySelectorAll('[data-latency-label]').forEach(el => {
+        el.textContent = t('latency');
+    });
+
+    if (typeof invoke === 'function') {
+        /** @type {HTMLInputElement|null} */
+        const sysProxyToggle = document.querySelector('#sys-proxy-toggle');
+        /** @type {HTMLInputElement|null} */
+        const tunToggle = document.querySelector('#tun-proxy-toggle');
+
+        /** @type {any} */
+        const win = window;
+        const sysProxyEnabled = sysProxyToggle?.checked ?? win._currentSysProxyEnabled ?? false;
+        const tunEnabled = tunToggle?.checked ?? win._currentTunEnabled ?? false;
+
+        invoke('update_tray_toggle_states', {
+            sysProxyEnabled,
+            tunEnabled,
+        }).catch(e => i18nLogger.warn("Failed to update tray menu", e));
+    }
+
+    window.dispatchEvent(new CustomEvent('i18n-applied'));
+}
+
+// ---------------------------------------------------------------------------
+// Backend status message mapper (preserved for backward compatibility)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map backend status messages to localized strings.
+ * Backend sends English status as key, frontend maps to current language.
+ * @param {string} statusText
+ * @param {number|null} [progress]
+ * @returns {string}
  */
 export function mapStatusMessage(statusText, progress = null) {
-    const t = translations[currentLang] || translations.en;
-    
     // Handle progress messages
     if (statusText.includes('Downloading core...') && progress !== null) {
-        return (t.statusDownloadingProgress || statusText).replace('{progress}', progress);
+        return t('statusDownloadingProgress').replace('{progress}', String(progress));
     }
-    
-    // Map status messages to translation keys
+
+    /** @type {Record<string, string>} */
     const statusMap = {
         'Downloading core from GitHub...': 'statusDownloadingCore',
         'Preparing to update Mihomo core...': 'statusPreparingUpdate',
@@ -626,7 +953,7 @@ export function mapStatusMessage(statusText, progress = null) {
         'Applying updates...': 'statusApplyingUpdates',
         'Geo database update complete': 'statusGeoUpdateComplete',
     };
-    
+
     const key = statusMap[statusText];
-    return key ? (t[key] || statusText) : statusText;
+    return key ? t(key) : statusText;
 }

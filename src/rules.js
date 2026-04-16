@@ -1,8 +1,15 @@
+// @ts-check
 /**
  * Shadowrocket to Clash Rule Converter
  */
 import { invoke } from './api.js';
+import { rulesLogger } from './utils/logger.js';
 
+/**
+ * @param {string} url
+ * @param {string} [targetProxy='Proxy']
+ * @returns {Promise<string[]>}
+ */
 export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
     try {
         // Validate URL format - only allow http/https
@@ -18,14 +25,19 @@ export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
 
         // Use Tauri command to bypass CSP and reuse SSRF protection
         const text = await invoke('fetch_text', { url });
-        
+
         return convertSRToClash(text, targetProxy);
     } catch (error) {
-        console.error('[Rules] Failed to fetch SR rules:', error);
+        rulesLogger.error('Failed to fetch SR rules', error);
         throw error;
     }
 }
 
+/**
+ * @param {string} srText
+ * @param {string} [targetProxy='Proxy']
+ * @returns {string[]}
+ */
 export function convertSRToClash(srText, targetProxy = 'Proxy') {
     const lines = srText.split('\n');
     const clashRules = [];
@@ -50,7 +62,7 @@ export function convertSRToClash(srText, targetProxy = 'Proxy') {
         }
 
         // Basic parser for type,value,policy
-        const parts = line.split(',').map(p => p.trim());
+        const parts = line.split(',').map(/** @param {string} p */ p => p.trim());
         if (parts.length >= 2) {
             const type = parts[0].toUpperCase();
             const value = parts[1];
@@ -64,7 +76,7 @@ export function convertSRToClash(srText, targetProxy = 'Proxy') {
 
             // Supported types mapping
             const supportedTypes = ['DOMAIN', 'DOMAIN-SUFFIX', 'DOMAIN-KEYWORD', 'IP-CIDR', 'IP-CIDR6', 'GEOIP', 'USER-AGENT', 'PROCESS-NAME', 'DST-PORT', 'SRC-PORT', 'SRC-IP-CIDR', 'GEOSITE', 'RULE-SET', 'MATCH'];
-            
+
             // Map SR specific types to Clash
             let clashType = type;
             if (type === 'FINAL') clashType = 'MATCH';
