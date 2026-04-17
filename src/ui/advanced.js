@@ -44,11 +44,10 @@ function deepMerge(target, source) {
 
     for (const key of Object.keys(source)) {
         if (blockedKeys.has(key)) continue;
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        if (!isPlainObject(target)) continue;
 
         const sourceValue = source[key];
-        // Skip inherited prototype properties to prevent pollution
-        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-
         const targetHasOwnKey = Object.prototype.hasOwnProperty.call(target, key);
         const canRecurse =
             targetHasOwnKey &&
@@ -57,6 +56,15 @@ function deepMerge(target, source) {
 
         if (canRecurse) {
             target[key] = deepMerge(target[key], sourceValue);
+        } else if (isPlainObject(sourceValue)) {
+            // Avoid assigning attacker-controlled object references directly.
+            const nextTarget = targetHasOwnKey && isPlainObject(target[key]) ? target[key] : {};
+            Object.defineProperty(target, key, {
+                value: deepMerge(nextTarget, sourceValue),
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            });
         } else {
             // Use Object.defineProperty to avoid triggering setters on the prototype chain
             Object.defineProperty(target, key, {
