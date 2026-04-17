@@ -254,7 +254,7 @@
                     </div>
                 </header>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
-                <div id="proxies-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -m-4 custom-scrollbar relative z-10">
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -m-4 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
                 </div>
             </div>
@@ -872,10 +872,10 @@
     </div>
 
     <!-- Notifications Container -->
-    <div id="notif-container" class="fixed bottom-6 right-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
+    <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 right-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
 
     <!-- Modal Background -->
-    <div id="modal-bg" class="fixed inset-0 bg-black/40 backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-300 opacity-0 pointer-events-auto">
+    <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-black/40 backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-300 opacity-0 pointer-events-auto">
         <div id="modal-container" class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-300">
             <h3 id="modal-title" class="text-xl font-light text-zinc-100 mb-6">Subscription Name</h3>
             <div class="space-y-6">
@@ -892,7 +892,7 @@
     </div>
 
     <!-- DNS Configuration Modal -->
-    <div id="dns-config-modal" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-black/40 backdrop-blur-md">
+    <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-black/40 backdrop-blur-md">
         <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
             <h3 class="text-xl font-light text-zinc-100 mb-6" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-zinc-400 mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>

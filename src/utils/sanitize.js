@@ -21,6 +21,7 @@
  */
 export function escapeHtml(str) {
     if (typeof str !== 'string') return '';
+    str = str.normalize('NFKC');
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
@@ -109,6 +110,7 @@ function isSafeUrl(url, allowDataImages) {
  */
 export function sanitizeHtml(input, options = {}) {
     if (typeof input !== 'string' || !input) return '';
+    input = input.normalize('NFKC');
 
     if (!IS_BROWSER) {
         // SSR fallback: strip all tags, return plain text

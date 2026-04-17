@@ -601,6 +601,7 @@ export async function renderProxies() {
             (/** @type {HTMLElement} */ (wrapper)).dataset.baseOrder = `${index}`;
             (/** @type {HTMLElement} */ (wrapper)).style.order = String(index);
             (/** @type {HTMLElement} */ (wrapper)).dataset.selected = isSelected ? '1' : '0';
+            (/** @type {HTMLElement} */ (wrapper)).setAttribute('aria-selected', isSelected ? 'true' : 'false');
             const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
             if ((/** @type {HTMLElement} */ (wrapper)).dataset.pending !== '1') {
                 (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String((lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay);
@@ -784,6 +785,8 @@ export async function renderProxies() {
         const proxy = (/** @type {any} */ (data)).proxies[name];
         const isSelected = name === current;
         wrapper.dataset.selected = isSelected ? '1' : '0';
+        wrapper.setAttribute('role', 'option');
+        wrapper.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String((lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
