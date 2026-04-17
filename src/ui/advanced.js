@@ -28,35 +28,51 @@ function isPlainObject(value) {
 }
 
 /**
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isSafeMergeKey(key) {
+    return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
+
+/**
  * @param {*} target
  * @param {*} source
  * @returns {*}
  */
 function deepMerge(target, source) {
-    if (!isPlainObject(target)) return source;
-    if (!isPlainObject(source)) return source;
-
-    // Arrays are fully replaced (not merged by index).
-    if (Array.isArray(target) && Array.isArray(source)) return source;
-
-    // Block prototype pollution keys
-    const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
+    if (!isPlainObject(target) || Array.isArray(target)) return source;
+    if (!isPlainObject(source) || Array.isArray(source)) return source;
 
     for (const key of Object.keys(source)) {
-        if (blockedKeys.has(key)) continue;
+        if (!isSafeMergeKey(key)) continue;
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        if (!isPlainObject(target) || Array.isArray(target)) continue;
 
         const sourceValue = source[key];
-        // Skip inherited prototype properties to prevent pollution
-        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-
         const targetHasOwnKey = Object.prototype.hasOwnProperty.call(target, key);
+        const targetValue = targetHasOwnKey ? target[key] : undefined;
         const canRecurse =
             targetHasOwnKey &&
-            isPlainObject(target[key]) &&
-            isPlainObject(sourceValue);
+            isPlainObject(targetValue) &&
+            !Array.isArray(targetValue) &&
+            isPlainObject(sourceValue) &&
+            !Array.isArray(sourceValue);
 
         if (canRecurse) {
-            target[key] = deepMerge(target[key], sourceValue);
+            target[key] = deepMerge(targetValue, sourceValue);
+        } else if (isPlainObject(sourceValue) && !Array.isArray(sourceValue)) {
+            // Avoid assigning attacker-controlled object references directly.
+            const nextTarget =
+                targetHasOwnKey && isPlainObject(targetValue) && !Array.isArray(targetValue)
+                    ? targetValue
+                    : Object.create(null);
+            Object.defineProperty(target, key, {
+                value: deepMerge(nextTarget, sourceValue),
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            });
         } else {
             // Use Object.defineProperty to avoid triggering setters on the prototype chain
             Object.defineProperty(target, key, {
