@@ -48,15 +48,23 @@ const DEFAULT_ALLOWED_TAGS = new Set([
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
     'table', 'tr', 'td', 'th', 'hr',
+    // Form elements (needed for modal custom content)
+    'input', 'label', 'button', 'textarea', 'select', 'option',
 ]);
 
 /** Default per-tag attribute whitelist */
 const DEFAULT_ALLOWED_ATTRS = {
-    a:    new Set(['href']),
-    img:  new Set(['src', 'alt', 'width', 'height']),
-    span: new Set(['style']),
-    td:   new Set(['colspan', 'rowspan']),
-    th:   new Set(['colspan', 'rowspan']),
+    a:      new Set(['href']),
+    img:    new Set(['src', 'alt', 'width', 'height']),
+    span:   new Set(['style']),
+    td:     new Set(['colspan', 'rowspan']),
+    th:     new Set(['colspan', 'rowspan']),
+    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step']),
+    label:  new Set(['for', 'class']),
+    button: new Set(['type', 'id', 'class', 'disabled']),
+    textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols']),
+    select: new Set(['id', 'name', 'class', 'disabled', 'multiple']),
+    option: new Set(['value', 'selected', 'disabled']),
 };
 
 /** Regex matching any on* event handler attribute */

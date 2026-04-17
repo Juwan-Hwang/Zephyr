@@ -128,6 +128,8 @@ async function initApp() {
     onHome: () => { updateSysProxyUI(); },
     onRules: () => { import('./ui/rules.js').then(m => m.initRulesPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
+    onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
+    onLeaveLogs: () => { import('./ui/logs.js').then(m => m.destroyLogsPage()).catch(() => {}); },
   });
   initChart();
   initTrayEventListeners();

@@ -1,9 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Type Guards — Runtime type narrowing utilities
 // ═══════════════════════════════════════════════════════════════════════════════
-//  Inspired by Claude Code's defensive programming patterns and
-//  Apple's input validation philosophy.
-// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Check if a value is a non-null object.

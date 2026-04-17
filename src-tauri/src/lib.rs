@@ -198,6 +198,7 @@ pub fn run() {
             last_config_path: None,
             last_custom_args: None,
             last_port: None,
+            last_log_path: None,
         })))
         .manage(TrayState::default())
         .manage(RateLimiter::new())
@@ -320,6 +321,7 @@ pub fn run() {
             tray::update_tray_toggle_states,
             core_manager::is_machine_key_persisted,
             core_manager::release_tun_toggle,
+            core_manager::read_core_log,
         ]);
 
     let app = builder

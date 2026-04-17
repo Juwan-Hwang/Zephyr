@@ -30,13 +30,16 @@ export function switchPage(pageId) {
  * Sets up click handlers on [data-nav] items and applies 3D hover effects.
  * When a nav item is clicked, it updates active styling and switches pages.
  * Page-specific initialization callbacks are triggered on navigation.
+ * Page-specific destroy callbacks are triggered when leaving a page.
  *
- * @param {Object} [callbacks] - Optional page-specific init callbacks
+ * @param {Object} [callbacks] - Optional page-specific init/destroy callbacks
  * @param {Function} [callbacks.onProxies] - Called when navigating to proxies page
  * @param {Function} [callbacks.onAdvanced] - Called when navigating to advanced page
  * @param {Function} [callbacks.onHome] - Called when navigating to home page
  * @param {Function} [callbacks.onRules] - Called when navigating to rules page
  * @param {Function} [callbacks.onConnections] - Called when navigating to connections page
+ * @param {Function} [callbacks.onLogs] - Called when navigating to logs page
+ * @param {Function} [callbacks.onLeaveLogs] - Called when navigating away from logs page
  */
 export function initNavigation(callbacks = {}) {
     const navItems = document.querySelectorAll('[data-nav]');
@@ -44,9 +47,17 @@ export function initNavigation(callbacks = {}) {
     // Apply 3D effect to sidebar icons
     setup3DEffect(navItems);
 
+    /** @type {string|null} Track the current page for leave callbacks */
+    let currentPage = null;
+
     navItems.forEach(item => {
         item.addEventListener('click', () => {
             const targetPage = item.getAttribute('data-nav');
+
+            // Fire leave callback for the previous page
+            if (currentPage === 'logs' && targetPage !== 'logs' && callbacks.onLeaveLogs) {
+                callbacks.onLeaveLogs();
+            }
 
             // Update nav item active styling
             navItems.forEach(i => {
@@ -58,6 +69,7 @@ export function initNavigation(callbacks = {}) {
 
             // Switch page
             if (targetPage) switchPage(targetPage);
+            currentPage = targetPage;
 
             // Trigger page-specific callbacks
             if (targetPage === 'proxies' && callbacks.onProxies) {
@@ -70,6 +82,8 @@ export function initNavigation(callbacks = {}) {
                 callbacks.onRules();
             } else if (targetPage === 'connections' && callbacks.onConnections) {
                 callbacks.onConnections();
+            } else if (targetPage === 'logs' && callbacks.onLogs) {
+                callbacks.onLogs();
             }
         });
     });

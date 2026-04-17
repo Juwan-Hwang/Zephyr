@@ -492,3 +492,13 @@ export async function restartCore(configPath, customArgs = []) {
   setWsSecret(coreResult.secret);
   return coreResult;
 }
+
+/**
+ * Read mihomo core log (incremental)
+ * @param {number} [offset=0] - Byte offset to start reading from
+ * @param {number} [limit=500] - Max lines to read
+ * @returns {Promise<{lines: string[], next_offset: number, file_size: number, has_more: boolean}>}
+ */
+export async function readCoreLog(offset = 0, limit = 500) {
+  return invoke('read_core_log', { offset, limit });
+}

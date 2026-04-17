@@ -282,10 +282,10 @@ export const translations = {
         chainsCol: "Chains",
         dlCol: "\u2193 Download",
         ulCol: "\u2191 Upload",
-        dlSpeedCol: "\u2193 Download Speed",
-        dlTotalCol: "\u2193 Download Total",
-        ulSpeedCol: "\u2191 Upload Speed",
-        ulTotalCol: "\u2191 Upload Total",
+        dlSpeedCol: "\u2193 DL Speed",
+        dlTotalCol: "\u2193 DL Total",
+        ulSpeedCol: "\u2191 UL Speed",
+        ulTotalCol: "\u2191 UL Total",
         dlSpeedLabel: "Download Speed",
         ulSpeedLabel: "Upload Speed",
         totalLabel: "Total",
@@ -313,6 +313,21 @@ export const translations = {
         closedAtLabel: "Closed at",
         connsClosed: "All connections closed",
         closeConnsFailed: "Failed to close connections",
+
+        // Logs Page
+        logs: "Logs",
+        logsTitle: "Core Logs",
+        noLogs: "No log entries yet. Start the core to see logs.",
+        autoScroll: "Auto Scroll",
+        searchLogs: "Search logs...",
+        clearFilter: "Show All",
+        logLevelAll: "All",
+        logLevelDebug: "Debug",
+        logLevelInfo: "Info",
+        logLevelWarn: "Warn",
+        logLevelError: "Error",
+        logPaused: "Paused",
+        logLines: "lines",
     },
 
     zh: {
@@ -598,6 +613,21 @@ export const translations = {
         closedAtLabel: "关闭时间",
         connsClosed: "已关闭所有连接",
         closeConnsFailed: "关闭连接失败",
+
+        // Logs Page
+        logs: "运行日志",
+        logsTitle: "核心日志",
+        noLogs: "暂无日志，启动核心后即可查看。",
+        autoScroll: "自动滚动",
+        searchLogs: "搜索日志...",
+        clearFilter: "显示全部",
+        logLevelAll: "全部",
+        logLevelDebug: "调试",
+        logLevelInfo: "信息",
+        logLevelWarn: "警告",
+        logLevelError: "错误",
+        logPaused: "已暂停",
+        logLines: "行",
     },
 
     ja: {
@@ -611,6 +641,21 @@ export const translations = {
         loading: "読み込み中...",
         errorPrefix: "エラー",
         unknown: "不明",
+
+        // Logs Page
+        logs: "ログ",
+        logsTitle: "コアログ",
+        noLogs: "ログがありません。コアを起動してください。",
+        autoScroll: "自動スクロール",
+        searchLogs: "ログを検索...",
+        clearFilter: "すべて表示",
+        logLevelAll: "すべて",
+        logLevelDebug: "デバッグ",
+        logLevelInfo: "情報",
+        logLevelWarn: "警告",
+        logLevelError: "エラー",
+        logPaused: "一時停止",
+        logLines: "行",
     },
 
     ko: {
@@ -624,6 +669,21 @@ export const translations = {
         loading: "로딩 중...",
         errorPrefix: "오류",
         unknown: "알 수 없음",
+
+        // Logs Page
+        logs: "로그",
+        logsTitle: "코어 로그",
+        noLogs: "로그가 없습니다. 코어를 시작하세요.",
+        autoScroll: "자동 스크롤",
+        searchLogs: "로그 검색...",
+        clearFilter: "모두 보기",
+        logLevelAll: "전체",
+        logLevelDebug: "디버그",
+        logLevelInfo: "정보",
+        logLevelWarn: "경고",
+        logLevelError: "오류",
+        logPaused: "일시 정지",
+        logLines: "줄",
     },
 };
 

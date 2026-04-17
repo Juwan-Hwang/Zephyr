@@ -121,6 +121,7 @@ pub struct CoreData {
     pub last_config_path: Option<String>,
     pub last_custom_args: Option<Vec<String>>,
     pub last_port: Option<u16>,
+    pub last_log_path: Option<String>,
 }
 pub struct MihomoState(pub Mutex<CoreData>);
 
@@ -1457,9 +1458,7 @@ pub async fn start_core(
     }
 
     // Kill any existing mihomo processes before starting a new one
-    eprintln!("[CORE] start_core: killing existing mihomo processes...");
     kill_mihomo();
-    eprintln!("[CORE] start_core: kill_mihomo done");
 
     let paths = ensure_app_storage(&app)?;
 
@@ -1635,7 +1634,6 @@ pub async fn start_core(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
-    eprintln!("[CORE] mihomo spawned, pid={}", child.id());
 
     // Check if process exits immediately
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1735,11 +1733,10 @@ pub async fn start_core(
 
     // Use config port directly, rely on health check to verify
     let port = config_port;
-    eprintln!("[CORE] health check starting on port {} ...", port);
 
     // HTTP Health Check via raw TCP
     let mut is_healthy = false;
-    for i in 0..20 {
+    for _ in 0..20 {
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             let request = format!(
                 "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
@@ -1755,17 +1752,10 @@ pub async fn start_core(
                         || resp_str.starts_with("HTTP/1.0 401")
                     {
                         is_healthy = true;
-                        eprintln!("[CORE] health check PASSED at attempt {} ({}ms)", i + 1, (i + 1) * 1000);
                         break;
-                    } else {
-                        eprintln!("[CORE] health check attempt {}: got response (non-200/401)", i + 1);
                     }
-                } else {
-                    eprintln!("[CORE] health check attempt {}: TCP connected but read failed", i + 1);
                 }
             }
-        } else {
-            eprintln!("[CORE] health check attempt {}: TCP connect refused on port {}", i + 1, port);
         }
         let _ = tauri::async_runtime::spawn_blocking(|| {
             std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -1797,6 +1787,8 @@ pub async fn start_core(
     lock.last_config_path = active_config_name;
     lock.last_custom_args = Some(safe_custom_args);
     lock.last_port = Some(port);
+    lock.last_log_path = Some(log_path.to_string_lossy().to_string());
+    drop(lock);
 
     Ok(CoreStartResult {
         secret: resolved_secret,
@@ -1832,6 +1824,78 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
     }
 
     Ok("Core stopped and cleaned up".to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct ReadLogResult {
+    pub lines: Vec<String>,
+    pub next_offset: u64,
+    pub file_size: u64,
+    pub has_more: bool,
+    /// True when the log file was rotated (new file, smaller than requested offset).
+    /// Frontend should reset its buffer and offset on receiving this signal.
+    pub rotated: bool,
+}
+
+#[tauri::command]
+pub fn read_core_log(
+    state: State<'_, MihomoState>,
+    offset: Option<u64>,
+    limit: Option<usize>,
+) -> Result<ReadLogResult, String> {
+    let lock = state.0.lock().map_err(|e| e.to_string())?;
+    let log_path = lock
+        .last_log_path
+        .as_ref()
+        .ok_or("No log file available (core not started)")?;
+    let log_path = log_path.clone();
+    drop(lock);
+
+    let file = std::fs::File::open(&log_path)
+        .map_err(|e| format!("Failed to open log file: {}", e))?;
+
+    let metadata = std::fs::metadata(&log_path)
+        .map_err(|e| format!("Failed to read log metadata: {}", e))?;
+    let file_size = metadata.len();
+
+    let offset = offset.unwrap_or(0);
+
+    // Detect log rotation: if the requested offset exceeds the current file size,
+    // the file was likely rotated. Signal the frontend to reset.
+    let rotated = offset > file_size;
+
+    use std::io::{BufRead, Seek, SeekFrom};
+    let mut reader = std::io::BufReader::new(file);
+
+    if offset > 0 && !rotated {
+        reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
+    }
+
+    let limit = limit.unwrap_or(500).min(2000);
+    let mut lines = Vec::with_capacity(limit);
+    let mut bytes_read = if rotated { 0 } else { offset };
+
+    for _ in 0..limit {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(n) => {
+                bytes_read += n as u64;
+                lines.push(line);
+            }
+            Err(e) => return Err(format!("Failed to read log: {}", e)),
+        }
+    }
+
+    Ok(ReadLogResult {
+        lines,
+        next_offset: bytes_read,
+        file_size,
+        has_more: bytes_read < file_size,
+        rotated,
+    })
 }
 
 #[tauri::command]
@@ -2591,9 +2655,11 @@ pub async fn download_sub(
         };
 
         if let Some(proxy_url_val) = proxy_url {
+            // When using proxy, skip DNS pre-resolve pinning to let the proxy
+            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
             let client_mihomo = build_http_client_with_proxy(
                 user_agent.clone(),
-                resolve_pin.clone(),
+                None,
                 Some(proxy_url_val),
             );
             if let Ok(client) = client_mihomo {
@@ -2611,9 +2677,11 @@ pub async fn download_sub(
     if result.is_none() {
         if let Some(sys_proxy_url) = crate::sys_proxy::get_sys_proxy_address() {
             println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
+            // When using proxy, skip DNS pre-resolve pinning to let the proxy
+            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
             let client_sys = build_http_client_with_proxy(
                 user_agent.clone(),
-                resolve_pin.clone(),
+                None,
                 Some(sys_proxy_url),
             );
             if let Ok(client) = client_sys {

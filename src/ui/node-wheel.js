@@ -127,6 +127,11 @@ export function initNodeWheel() {
         if (isWheelOpen) return;
         isWheelOpen = true;
 
+        // Re-enable scrolling BEFORE populating content
+        if (scrollContainer) {
+            scrollContainer.style.overflowY = 'auto';
+        }
+
         try {
             const proxyGroupsResult = await fetchProxyGroups();
             if (!proxyGroupsResult) return;
@@ -244,8 +249,10 @@ export function initNodeWheel() {
             /** @type {HTMLElement} */ (trigger).style.opacity = '0';
             /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'none';
 
-            // Scroll to current
+            // Scroll to current — wait for scroll-snap to re-activate after overflowY change
             if (currentEl && scrollContainer) {
+                // Force reflow so scroll-snap CSS takes effect after overflowY: auto
+                void /** @type {HTMLElement} */ (scrollContainer).offsetHeight;
                 /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'auto';
                 /** @type {HTMLElement} */ (currentEl).scrollIntoView({ block: 'center' });
                 setTimeout(() => { /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'smooth'; }, 50);
@@ -267,6 +274,10 @@ export function initNodeWheel() {
         /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(0.92)';
         /** @type {HTMLElement} */ (trigger).style.opacity = '1';
         /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'auto';
+        // Disable scrolling on the container when closed
+        if (scrollContainer) {
+            scrollContainer.style.overflowY = 'hidden';
+        }
         hoveredItem = null;
         if (wheelHoverTimer) clearTimeout(wheelHoverTimer);
     };
@@ -295,18 +306,27 @@ export function initNodeWheel() {
         });
     }
 
-    // Prevent underlying pages from scrolling when wheel is open
+    // Prevent underlying pages from scrolling when wheel is open.
+    // When closed, overflowY: hidden on scrollContainer prevents ghost scrolling.
+    // We use capture phase on the scroll container to allow native scroll (for CSS snap)
+    // while stopping propagation to prevent underlying page scroll.
     /** @type {any} */
     const win = window;
     if (!win._wheelListenerAdded) {
+        // Capture phase on scroll container: allow native scroll, stop propagation
+        if (scrollContainer) {
+            scrollContainer.addEventListener('wheel', (e) => {
+                if (isWheelOpen) {
+                    // Let native scroll happen, just don't bubble to document
+                    e.stopPropagation();
+                }
+            }, { passive: true, capture: true });
+        }
+
+        // Document-level handler: block wheel on underlying pages when open
         document.addEventListener('wheel', (e) => {
             if (!isWheelOpen) return;
             e.preventDefault();
-            e.stopPropagation();
-
-            if (scrollContainer && scrollContainer.contains(/** @type {Node} */ (e.target))) {
-                scrollContainer.scrollTop += e.deltaY;
-            }
         }, { passive: false });
         win._wheelListenerAdded = true;
     }

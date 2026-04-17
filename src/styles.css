@@ -208,6 +208,14 @@ input[type="range"],
     -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
 }
 
+/* Hide scrollbar on node wheel dropdown */
+#node-wheel-scroll::-webkit-scrollbar {
+    display: none;
+}
+#node-wheel-scroll {
+    -ms-overflow-style: none;
+}
+
 .scrolling-text {
     display: inline-block;
     white-space: nowrap;
@@ -231,9 +239,9 @@ input[type="range"],
   --text-tertiary: rgba(255, 255, 255, 0.4);
   --border-primary: hsla(0, 0%, 100%, 0.1);
   --app-opacity: 0.6;
-  --accent-primary: #8b5cf6;
-  --accent-rgb: 139 92 246;
-  --accent-glow: rgba(139, 92, 246, 0.2);
+  --accent-primary: #AF52DE;
+  --accent-rgb: 175 82 222;
+  --accent-glow: rgba(175, 82, 222, 0.2);
 
   /* Brightness control for glass effects */
   --brightness: 0.95;
@@ -281,11 +289,11 @@ input[type=number] {
   appearance: textfield; /* standard */
   -moz-appearance: textfield; /* Firefox */
 }
-body.theme-blue { --color-accent: #0A84FF; --color-accent-glow: rgba(10, 132, 255, 0.2); --accent-rgb: 10 132 255; }
+body.theme-blue { --color-accent: #007AFF; --color-accent-glow: rgba(0, 122, 255, 0.2); --accent-rgb: 0 122 255; }
 body.theme-green { --color-accent: #34C759; --color-accent-glow: rgba(52, 199, 89, 0.2); --accent-rgb: 52 199 89; }
 body.theme-orange { --color-accent: #FF9500; --color-accent-glow: rgba(255, 149, 0, 0.2); --accent-rgb: 255 149 0; }
 body.theme-pink { --color-accent: #FF2D55; --color-accent-glow: rgba(255, 45, 85, 0.2); --accent-rgb: 255 45 85; }
-body.theme-purple { --color-accent: #8b5cf6; --color-accent-glow: rgba(139, 92, 246, 0.2); --accent-rgb: 139 92 246; }
+body.theme-purple { --color-accent: #AF52DE; --color-accent-glow: rgba(175, 82, 222, 0.2); --accent-rgb: 175 82 222; }
 
 .glass-card {
   background: rgba(255, 255, 255, 0.02);
@@ -347,8 +355,8 @@ body.theme-purple { --color-accent: #8b5cf6; --color-accent-glow: rgba(139, 92, 
     left: 2px;
     bottom: 2px;
 } 
-input:checked + .switch-slider { 
-    background-color: #28cd41; 
+input:checked + .switch-slider {
+    background-color: var(--color-accent);
 } 
 
 /* Default size: 40x24 */
@@ -616,6 +624,8 @@ html:not(.dark) [id$="-menu"] button.active {
 /* Light mode overrides for common inputs */
 html:not(.dark) .select-common,
 html:not(.dark) .input-common,
+html:not(.dark) .input-mono,
+html:not(.dark) .input-modal,
 html:not(.dark) .textarea-common {
   background-color: rgba(255, 255, 255, 0.8);
   border-color: rgba(30, 41, 59, 0.1);
@@ -624,12 +634,16 @@ html:not(.dark) .textarea-common {
 
 html:not(.dark) .select-common:focus,
 html:not(.dark) .input-common:focus,
+html:not(.dark) .input-mono:focus,
+html:not(.dark) .input-modal:focus,
 html:not(.dark) .textarea-common:focus {
   border-color: var(--color-accent);
 }
 
 html:not(.dark) .select-common::placeholder,
 html:not(.dark) .input-common::placeholder,
+html:not(.dark) .input-mono::placeholder,
+html:not(.dark) .input-modal::placeholder,
 html:not(.dark) .textarea-common::placeholder {
   color: #94a3b8;
 }
@@ -778,7 +792,6 @@ html:not(.dark) .textarea-common::placeholder {
 .conn-tab.active {
   font-weight: 700;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--text-primary);
 }
 
 /* Stats bar subtle animation on data change */
@@ -909,4 +922,76 @@ button:focus-visible,
 #modal-container,
 #dns-config-modal > .glass-card {
   box-shadow: var(--shadow-dialog);
+}
+
+/* ============================================
+   Logs Page Styles
+   ============================================ */
+
+/* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
+.log-level-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-xl, 24px);
+    font-size: 0.625rem;
+    line-height: 1.4;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
+    transition-property: all;
+    transition-duration: 0.21s;
+    transition-timing-function: ease-out;
+    cursor: pointer;
+}
+.log-level-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--text-primary);
+}
+.log-level-btn.active {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+.log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.15); border-color: rgba(107, 114, 128, 0.25); }
+.log-level-btn[data-level="info"].active { color: #60a5fa; background: rgba(96, 165, 250, 0.15); border-color: rgba(96, 165, 250, 0.25); }
+.log-level-btn[data-level="warn"].active { color: #f59e0b; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.25); }
+.log-level-btn[data-level="error"].active { color: #ef4444; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.25); }
+
+/* ── Log Content Area ── */
+.log-line {
+    padding: 1px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    transition: background 0.15s ease;
+}
+.log-line:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+/* ============================================
+   Logs Page — Light Mode Overrides
+   ============================================ */
+
+html:not(.dark) .log-level-btn {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+html:not(.dark) .log-level-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+html:not(.dark) .log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.12); border-color: rgba(107, 114, 128, 0.20); }
+html:not(.dark) .log-level-btn[data-level="info"].active { color: #2563eb; background: rgba(37, 99, 235, 0.12); border-color: rgba(37, 99, 235, 0.20); }
+html:not(.dark) .log-level-btn[data-level="warn"].active { color: #d97706; background: rgba(217, 119, 6, 0.12); border-color: rgba(217, 119, 6, 0.20); }
+html:not(.dark) .log-level-btn[data-level="error"].active { color: #dc2626; background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.20); }
+
+html:not(.dark) .log-line {
+    border-bottom-color: rgba(0, 0, 0, 0.04);
+}
+html:not(.dark) .log-line:hover {
+    background: rgba(0, 0, 0, 0.03);
 }

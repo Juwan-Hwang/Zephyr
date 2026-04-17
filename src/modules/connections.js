@@ -113,7 +113,7 @@ const PAGE_HTML = `
 <!-- Connection List Container with Tabs -->
 <div id="connections-list-container" class="glass-card flex-1 overflow-hidden relative z-10 flex flex-col min-h-0">
     <!-- Tab Bar + Table Header -->
-    <div class="shrink-0 border-b border-white/5">
+    <div class="shrink-0">
         <!-- Tabs -->
         <div class="flex items-center px-4 pt-3 pb-0 gap-1">
             <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-all duration-200 text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
@@ -647,7 +647,7 @@ function buildConnectionRow(conn, mode) {
     const process = _esc(meta.process ?? '');
     const destIP = _esc(meta.destinationIP ?? '-');
     const destPort = _esc(meta.destinationPort ?? '-');
-    const rule = _esc(conn.rule ?? 'Match');
+    const rule = _esc(conn.rule || 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ');
 
     const ruleColorClass = getRuleColorClass(rule);
@@ -680,7 +680,7 @@ function buildConnectionRow(conn, mode) {
         </div>
         <!-- Rule -->
         <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
         </div>
         <!-- Chains -->
         <div style="text-align:right; min-width:0;">
@@ -735,7 +735,7 @@ function showConnDetail(conn, mode) {
     const process = _esc(meta.process ?? '-');
     const destIP = _esc(meta.destinationIP ?? '-');
     const destPort = _esc(meta.destinationPort ?? '-');
-    const rule = _esc(conn.rule ?? 'Match');
+    const rule = _esc(conn.rule || 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ') || '-';
     const ruleColorClass = getRuleColorClass(rule);
 
@@ -939,9 +939,9 @@ function refreshDetailPanel(connId, mode) {
 function renderDetailRow(label, value, rowId) {
     const idAttr = rowId ? ` id="${rowId}"` : '';
     return `
-  <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0"${idAttr}>
-    <span class="text-zinc-500 shrink-0">${_esc(label)}</span>
-    <span class="text-zinc-300 font-mono text-right truncate ml-4">${_esc(value)}</span>
+  <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
+    <span class="text-zinc-500 shrink-0 mr-4">${_esc(label)}</span>
+    <span${idAttr} class="text-zinc-300 font-mono text-right truncate min-w-0 tabular-nums">${_esc(value)}</span>
   </div>`;
 }
 

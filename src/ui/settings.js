@@ -1090,6 +1090,9 @@ export async function initSettings() {
     nodeScrollToggle?.addEventListener('change', () => {
         if (!nodeScrollToggle) return;
         localStorage.setItem('nodeScroll', String(nodeScrollToggle.checked));
+        // Clear the container to force full re-render (in-place update won't update CSS classes)
+        const container = document.getElementById('proxies-list');
+        if (container) container.innerHTML = '';
         renderProxies();
     });
 
