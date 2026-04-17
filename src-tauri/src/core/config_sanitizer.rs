@@ -148,7 +148,10 @@ pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
 }
 
 /// Validates that the resolved path is within the expected base directory
-pub(super) fn validate_path_within_dir(resolved_path: &Path, base_dir: &Path) -> Result<(), String> {
+pub(super) fn validate_path_within_dir(
+    resolved_path: &Path,
+    base_dir: &Path,
+) -> Result<(), String> {
     // If the file exists, use canonicalize for definitive check
     if resolved_path.exists() {
         let canonical_resolved = resolved_path

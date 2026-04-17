@@ -172,6 +172,9 @@ fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
 mod lib_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// rust-analyzer cannot resolve proc-macro `tauri::generate_context!()` without OUT_DIR at IDE analysis time.
+// This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
+#[allow(rust_analyzer::proc_macro_unresolved)]
 pub fn run() {
     // Setup panic hook to cleanup child processes
     let default_panic = std::panic::take_hook();
@@ -319,9 +322,10 @@ pub fn run() {
             tray::set_tray_menu_state,
             tray::get_tray_proxy_status,
             tray::update_tray_toggle_states,
-            core_manager::is_machine_key_persisted,
-            core_manager::release_tun_toggle,
-            core_manager::read_core_log,
+            // Core commands — full path required for generate_handler! macro (__cmd_ symbol resolution)
+            core_manager::core::crypto::is_machine_key_persisted,
+            core_manager::core::tun_manager::release_tun_toggle,
+            core_manager::core::core_log::read_core_log,
         ]);
 
     let app = builder

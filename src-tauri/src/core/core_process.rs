@@ -9,13 +9,11 @@ use tauri::{AppHandle, Manager, State};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt;
 
-use super::config_sanitizer::{
-    sanitize_config_file_name, validate_path_within_dir,
-};
+use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
 #[cfg(target_os = "macos")]
 use super::tun_manager::{is_tun_mode, restart_core_as_root, set_tun_mode};
-use super::{AppPaths, CoreStartResult, CORE_STARTING, MihomoState};
+use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;

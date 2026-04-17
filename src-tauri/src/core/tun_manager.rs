@@ -1,11 +1,11 @@
 use std::sync::atomic::Ordering;
 use tauri::AppHandle;
 
-use super::{TUN_MODE_ACTIVE, TUN_TOGGLING};
-#[cfg(target_os = "macos")]
-use super::core_process::{ensure_executable, generate_secret, resolve_app_paths};
 #[cfg(not(target_os = "macos"))]
 use super::core_process::resolve_app_paths;
+#[cfg(target_os = "macos")]
+use super::core_process::{ensure_executable, generate_secret, resolve_app_paths};
+use super::{TUN_MODE_ACTIVE, TUN_TOGGLING};
 
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {

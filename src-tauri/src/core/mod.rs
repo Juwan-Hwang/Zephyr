@@ -61,33 +61,33 @@ pub struct ReadLogResult {
     pub rotated: bool,
 }
 
-pub mod config_sanitizer;
-pub mod secure_io;
-pub mod crypto;
-pub mod tun_manager;
-pub mod core_process;
-pub mod core_log;
 pub mod config_manager;
+pub mod config_sanitizer;
+pub mod core_log;
+pub mod core_process;
+pub mod crypto;
+pub mod secure_io;
 pub mod subscription;
+pub mod tun_manager;
 
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
-pub use secure_io::write_file_secure;
-pub use crypto::is_machine_key_persisted;
-pub use tun_manager::{
-    disable_tun_cmd, is_tun_mode, is_tun_toggling, kill_all_mihomo_as_root_cmd,
-    release_tun_toggle, restart_core_as_root_cmd, set_tun_enabled, set_tun_mode,
-    smart_kill_all_mihomo_as_root, try_acquire_tun_toggle,
-};
-pub use core_process::{
-    core_binary_name, ensure_app_storage, ensure_executable, get_core_version, kill_mihomo,
-    start_core, stop_core,
-};
-pub use core_log::read_core_log;
 pub use config_manager::{
     delete_config, get_config_url, list_configs, open_config_folder, read_config_file,
     write_config_file,
 };
+pub use core_log::read_core_log;
+pub use core_process::{
+    core_binary_name, ensure_app_storage, ensure_executable, get_core_version, kill_mihomo,
+    start_core, stop_core,
+};
+pub use crypto::is_machine_key_persisted;
+pub use secure_io::write_file_secure;
 pub use subscription::{download_sub, fetch_text};
+pub use tun_manager::{
+    disable_tun_cmd, is_tun_mode, is_tun_toggling, kill_all_mihomo_as_root_cmd, release_tun_toggle,
+    restart_core_as_root_cmd, set_tun_enabled, set_tun_mode, smart_kill_all_mihomo_as_root,
+    try_acquire_tun_toggle,
+};
 
 // Re-export test helpers
 #[cfg(test)]
