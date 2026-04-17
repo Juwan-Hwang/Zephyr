@@ -23,8 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Core data (contains credentials, configs, binaries, cache)
-core/
+# Legacy: core/ was the old monolithic core_manager — now replaced by src-tauri/src/core/
+# (kept here as a reminder; remove if no longer needed)
 # Runtime generated
 run_config.yaml
 *.db
