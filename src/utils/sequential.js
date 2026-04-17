@@ -53,16 +53,12 @@ export function createSequential() {
                 pending.delete(key);
                 return result;
             }
-            // Stale — discard result
+            // Stale — discard silently
             pending.delete(key);
-            return Promise.reject(new Error('STALE'));
         }).catch((err) => {
             pending.delete(key);
-            // Re-throw real errors; swallow STALE discards
-            if (err && err.message === 'STALE') {
-                return Promise.reject(err);
-            }
-            throw err;
+            // Always re-throw real errors so callers can handle them
+            if (err && err.message !== 'STALE') throw err;
         }));
 
         return /** @type {Promise<any>} */ (pending.get(key));

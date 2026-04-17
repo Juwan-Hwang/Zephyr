@@ -16,6 +16,7 @@ import { translations, currentLang } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
+import { createRovingTabindex } from '../utils/roving-tabindex.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -33,6 +34,9 @@ let currentSortMode = localStorage.getItem('sortMode') || 'default'; // 'default
 /** @type {number|null} */
 let latencySortTimer = null;
 let isTestingLatency = false;
+
+/** @type {ReturnType<typeof createRovingTabindex>|null} */
+let _rovingInstance = null;
 
 // --- Sorting ---
 
@@ -502,6 +506,19 @@ export function initProxyControls() {
             renderProxies();
         };
     }
+
+    // Keyboard navigation for proxy list
+    const proxyList = document.getElementById('proxies-list');
+    if (proxyList) {
+        _rovingInstance?.destroy();
+        _rovingInstance = createRovingTabindex(proxyList, {
+            itemSelector: '[role="option"]',
+            onActivate: (item) => {
+                const card = item.querySelector('.glass-card');
+                if (card instanceof HTMLElement) card.click();
+            },
+        });
+    }
 }
 
 // --- Render Proxies ---
@@ -574,6 +591,13 @@ export async function renderProxies() {
         proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));
     } else if (currentSortMode === 'latency') {
         sortProxiesByLatency(proxies, data);
+    }
+
+    // Sync sort label with current mode (may be reset by applyTranslations)
+    const sortLabelEl = document.getElementById('sort-label');
+    if (sortLabelEl) {
+        const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
+        sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[currentSortMode] || sortLabels['default'];
     }
 
     // Store virtual data for lazy card creation

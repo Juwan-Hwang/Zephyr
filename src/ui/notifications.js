@@ -5,6 +5,7 @@
  */
 
 import { sanitizeHtml } from '../utils/sanitize.js';
+import { createFocusTrap } from '../utils/focus-trap.js';
 
 /**
  * Show a toast notification.
@@ -108,17 +109,22 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
             unlockScroll();
+            trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
                 resolve(val);
             }, 300);
         };
 
+        // Focus trap: Tab cycles inside modal, Escape closes
+        const trap = createFocusTrap(bg, { onEscape: () => close(null) });
+
         bg.classList.remove('hidden');
         lockScroll();
         requestAnimationFrame(() => {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
+            trap.activate();
         });
 
         confirmBtn.onclick = () => {
@@ -140,7 +146,7 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
                 /** @type {HTMLInputElement} */ (currentInput).focus();
                 currentInput.onkeydown = (e) => {
                     if (e.key === 'Enter') close(/** @type {HTMLInputElement} */(currentInput).value);
-                    if (e.key === 'Escape') close(null);
+                    // Escape handled by focus trap
                 };
             }
         }
@@ -178,29 +184,34 @@ export function showConfirmModal(title, message = '') {
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
             unlockScroll();
+            trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
                 resolve(val);
             }, 300);
         };
 
+        // Focus trap: Tab cycles inside modal, Escape closes
+        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+
         bg.classList.remove('hidden');
         lockScroll();
         requestAnimationFrame(() => {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
+            trap.activate();
         });
 
         confirmBtn.onclick = () => close(true);
         cancelBtn.onclick = () => close(false);
         bg.onclick = (e) => { if (e.target === bg) close(false); };
-        confirmBtn.focus();
+        // Focus managed by trap.activate() — no need for manual confirmBtn.focus()
         confirmBtn.onkeydown = (e) => {
             if (e.key === 'Enter') close(true);
-            if (e.key === 'Escape') close(false);
+            // Escape handled by focus trap
         };
         cancelBtn.onkeydown = (e) => {
-            if (e.key === 'Escape') close(false);
+            // Escape handled by focus trap
         };
     });
 }
