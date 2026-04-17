@@ -13,9 +13,26 @@ import { createFocusTrap } from '../utils/focus-trap.js';
  * @param {'info'|'success'|'error'|'warning'} type
  * @param {string|null} title
  */
+/** @type {Record<string, number>} Priority map — lower = higher priority */
+const NOTIFICATION_PRIORITY = {
+    error: 0,
+    warning: 1,
+    info: 2,
+    success: 3,
+};
+
+/** @type {number} Max simultaneous notifications */
+const MAX_NOTIFICATIONS = 5;
+
 export function showNotification(message, type = 'info', title = null) {
     const container = document.getElementById('notif-container');
     if (!container) return;
+
+    // Evict oldest when at capacity
+    while (container.children.length >= MAX_NOTIFICATIONS) {
+        const oldest = container.firstElementChild;
+        if (oldest) oldest.remove();
+    }
 
     const notif = document.createElement('div');
     notif.className = 'glass-card py-3 px-5 border-l-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-[200px] max-w-[400px]';
@@ -27,6 +44,7 @@ export function showNotification(message, type = 'info', title = null) {
         warning: 'border-amber-500 text-amber-400',
     };
     notif.className += ` ${colors[type] || colors.info}`;
+    notif.dataset.priority = String(NOTIFICATION_PRIORITY[type] ?? 2);
 
     if (title) {
         const titleDiv = document.createElement('div');
@@ -40,7 +58,18 @@ export function showNotification(message, type = 'info', title = null) {
     msgDiv.textContent = message;
     notif.appendChild(msgDiv);
 
-    container.appendChild(notif);
+    // Priority insert — higher priority notifications appear first
+    const priority = NOTIFICATION_PRIORITY[type] ?? 2;
+    const existing = Array.from(container.children);
+    const insertBefore = existing.find(
+        (el) => Number(el.dataset.priority) > priority
+    );
+
+    if (insertBefore) {
+        container.insertBefore(notif, insertBefore);
+    } else {
+        container.appendChild(notif);
+    }
 
     requestAnimationFrame(() => {
         notif.classList.remove('translate-x-full', 'opacity-0');

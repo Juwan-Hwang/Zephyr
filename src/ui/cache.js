@@ -85,16 +85,28 @@ function _backgroundRefresh(key, fetcher) {
     if (_bgRefreshing.has(key) || inFlight.has(key)) return;
     _bgRefreshing.add(key);
 
+    // Identity Guard: snapshot current entry reference for later comparison
+    const entrySnapshot = apiCache.get(key);
+
     fetcher().then((data) => {
-        _ensureEntry(key);
-        const e = apiCache.get(key);
-        if (e) {
-            e.data = data;
-            e.time = Date.now();
-            _lruTouch(key);
+        // Identity Guard: only update if the entry hasn't been replaced
+        // (e.g. invalidateXxxCache() was called during refresh)
+        if (apiCache.get(key) === entrySnapshot) {
+            _ensureEntry(key);
+            const e = apiCache.get(key);
+            if (e) {
+                e.data = data;
+                e.time = Date.now();
+                _lruTouch(key);
+            }
         }
     }).catch(() => {
-        // Silently ignore — stale data remains valid
+        // Refresh failed — only clear if entry hasn't been replaced
+        if (apiCache.get(key) === entrySnapshot) {
+            apiCache.delete(key);
+            const idx = _lruKeys.indexOf(key);
+            if (idx !== -1) _lruKeys.splice(idx, 1);
+        }
     }).finally(() => {
         _bgRefreshing.delete(key);
     });

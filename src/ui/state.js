@@ -144,6 +144,29 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
         },
 
         /**
+         * Functional update — compute new value from previous value atomically.
+         * Eliminates race conditions when multiple async operations derive
+         * state from the same key. Skips notification when updater returns
+         * the same reference (Object.is identity check).
+         *
+         * @param {string} key
+         * @param {(prev: any) => any} updater - Pure function: (prev) => next
+         */
+        update(key, updater) {
+            if (frozen) return;
+            if (!(key in state)) return;
+
+            const prev = state[key];
+            const next = updater(prev);
+
+            if (Object.is(next, prev)) return;
+
+            state[key] = next;
+            scheduleNotify(key);
+            schedulePersist();
+        },
+
+        /**
          * Subscribe to changes on a specific key.
          * Use '*' to subscribe to all changes.
          *

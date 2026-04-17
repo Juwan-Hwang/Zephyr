@@ -819,6 +819,8 @@ html:not(.dark) .textarea-common::placeholder {
 /* Row click hint */
 .conn-row {
   cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 44px;
 }
 
 .conn-row:hover {

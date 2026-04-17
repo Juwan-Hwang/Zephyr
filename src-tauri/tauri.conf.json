@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* ipc://localhost http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* ipc://localhost http://ipc.localhost; frame-ancestors 'none'; form-action 'none'; base-uri 'self'"
     }
   },
   "bundle": {
