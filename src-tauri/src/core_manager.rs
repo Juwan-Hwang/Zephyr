@@ -1848,36 +1848,36 @@ pub fn read_core_log(
         .last_log_path
         .as_ref()
         .ok_or("No log file available (core not started)")?;
-    let log_path = log_path.clone();
+    let log_path_owned = log_path.clone();
     drop(lock);
 
-    let file = std::fs::File::open(&log_path)
+    let file = std::fs::File::open(&log_path_owned)
         .map_err(|e| format!("Failed to open log file: {}", e))?;
 
-    let metadata = std::fs::metadata(&log_path)
+    let metadata = std::fs::metadata(&log_path_owned)
         .map_err(|e| format!("Failed to read log metadata: {}", e))?;
     let file_size = metadata.len();
 
-    let offset = offset.unwrap_or(0);
+    let start_offset = offset.unwrap_or(0);
 
     // Detect log rotation: if the requested offset exceeds the current file size,
     // the file was likely rotated. Signal the frontend to reset.
-    let rotated = offset > file_size;
+    let rotated = start_offset > file_size;
 
     use std::io::{BufRead, Seek, SeekFrom};
     let mut reader = std::io::BufReader::new(file);
 
-    if offset > 0 && !rotated {
+    if start_offset > 0 && !rotated {
         reader
-            .seek(SeekFrom::Start(offset))
+            .seek(SeekFrom::Start(start_offset))
             .map_err(|e| e.to_string())?;
     }
 
-    let limit = limit.unwrap_or(500).min(2000);
-    let mut lines = Vec::with_capacity(limit);
-    let mut bytes_read = if rotated { 0 } else { offset };
+    let max_lines = limit.unwrap_or(500).min(2000);
+    let mut lines = Vec::with_capacity(max_lines);
+    let mut bytes_read = if rotated { 0 } else { start_offset };
 
-    for _ in 0..limit {
+    for _ in 0..max_lines {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) => break,
@@ -2657,11 +2657,8 @@ pub async fn download_sub(
         if let Some(proxy_url_val) = proxy_url {
             // When using proxy, skip DNS pre-resolve pinning to let the proxy
             // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
-            let client_mihomo = build_http_client_with_proxy(
-                user_agent.clone(),
-                None,
-                Some(proxy_url_val),
-            );
+            let client_mihomo =
+                build_http_client_with_proxy(user_agent.clone(), None, Some(proxy_url_val));
             if let Ok(client) = client_mihomo {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
@@ -2679,11 +2676,8 @@ pub async fn download_sub(
             println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
             // When using proxy, skip DNS pre-resolve pinning to let the proxy
             // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
-            let client_sys = build_http_client_with_proxy(
-                user_agent.clone(),
-                None,
-                Some(sys_proxy_url),
-            );
+            let client_sys =
+                build_http_client_with_proxy(user_agent.clone(), None, Some(sys_proxy_url));
             if let Ok(client) = client_sys {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
