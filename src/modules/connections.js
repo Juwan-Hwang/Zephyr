@@ -180,9 +180,11 @@ export function initConnectionsPage() {
     fetchAndRenderConnections();
 
 // Re-apply sort arrows when i18n/theme changes wipe header text
-window.addEventListener('i18n-applied', () => updateSortIndicators());
+const _onI18nApplied = () => updateSortIndicators();
+const _onThemeChanged = () => updateSortIndicators();
+window.addEventListener('i18n-applied', _onI18nApplied);
 // Also re-apply on theme mode change (dark/light toggle doesn't fire i18n-applied)
-window.addEventListener('theme-mode-changed', () => updateSortIndicators());
+window.addEventListener('theme-mode-changed', _onThemeChanged);
 
     // Auto-refresh every 2 seconds (only when page is visible)
     connectionsPollTimer = setInterval(() => {
@@ -201,6 +203,8 @@ export function destroyConnectionsPage() {
         clearInterval(connectionsPollTimer);
         connectionsPollTimer = null;
     }
+    window.removeEventListener('i18n-applied', _onI18nApplied);
+    window.removeEventListener('theme-mode-changed', _onThemeChanged);
 }
 
 // ============================================
