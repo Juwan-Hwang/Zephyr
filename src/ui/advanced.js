@@ -39,12 +39,16 @@ function deepMerge(target, source) {
     // Arrays are fully replaced (not merged by index).
     if (Array.isArray(target) && Array.isArray(source)) return source;
 
+    // Block prototype pollution keys
     const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
 
     for (const key of Object.keys(source)) {
         if (blockedKeys.has(key)) continue;
 
         const sourceValue = source[key];
+        // Skip inherited prototype properties to prevent pollution
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+
         const targetHasOwnKey = Object.prototype.hasOwnProperty.call(target, key);
         const canRecurse =
             targetHasOwnKey &&
@@ -54,7 +58,13 @@ function deepMerge(target, source) {
         if (canRecurse) {
             target[key] = deepMerge(target[key], sourceValue);
         } else {
-            target[key] = sourceValue;
+            // Use Object.defineProperty to avoid triggering setters on the prototype chain
+            Object.defineProperty(target, key, {
+                value: sourceValue,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            });
         }
     }
     return target;

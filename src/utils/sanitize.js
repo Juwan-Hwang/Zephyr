@@ -112,7 +112,14 @@ export function sanitizeHtml(input, options = {}) {
 
     if (!IS_BROWSER) {
         // SSR fallback: strip all tags, return plain text
-        return input.replace(/<[^>]*>/g, '');
+        // Loop until stable to prevent reassembly attacks (e.g. <<script>> → <script>)
+        let sanitized = input;
+        let prev = '';
+        while (sanitized !== prev) {
+            prev = sanitized;
+            sanitized = sanitized.replace(/<[^>]*>/g, '');
+        }
+        return sanitized;
     }
 
     // Resolve options
