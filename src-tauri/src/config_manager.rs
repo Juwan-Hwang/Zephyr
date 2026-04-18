@@ -3,37 +3,38 @@ use crate::core_manager::MihomoState;
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter as _, Manager as _, State};
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
     let paths = ensure_app_storage(&app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
 
     if !run_config_path.exists() {
-        return Err("run_config.yaml not found".to_string());
+        return Err("run_config.yaml not found".to_owned());
     }
 
     let content = fs::read_to_string(&run_config_path)
-        .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
+        .map_err(|e| format!("Failed to read run_config.yaml: {e}"))?;
 
     let mut yaml_val: YamlValue =
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {}", e))?;
+        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))?;
 
     // Security mitigation: Strip secret and external-controller to prevent credential leakage
     if let YamlValue::Mapping(ref mut map) = yaml_val {
-        map.remove(YamlValue::String("secret".to_string()));
+        map.remove(YamlValue::String("secret".to_owned()));
     }
 
     let json_val: JsonValue = serde_json::to_value(yaml_val)
-        .map_err(|e| format!("Failed to convert YAML to JSON: {}", e))?;
+        .map_err(|e| format!("Failed to convert YAML to JSON: {e}"))?;
 
     Ok(json_val)
 }
 
 fn merge_yaml(base: &mut YamlValue, patch: &YamlValue, depth: usize) -> Result<(), String> {
     if depth > 50 {
-        return Err("YAML nesting depth exceeded limit".to_string());
+        return Err("YAML nesting depth exceeded limit".to_owned());
     }
     match (base, patch) {
         (YamlValue::Mapping(a), YamlValue::Mapping(b)) => {
@@ -77,20 +78,19 @@ pub async fn update_config(
     // 1. Read existing config
     let mut current_yaml: YamlValue = if run_config_path.exists() {
         let content = fs::read_to_string(&run_config_path)
-            .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
+            .map_err(|e| format!("Failed to read run_config.yaml: {e}"))?;
 
         match serde_yaml::from_str(&content) {
             Ok(yaml) => yaml,
             Err(e) => {
-                eprintln!("[Config] WARNING: Failed to parse run_config.yaml: {}. Starting with empty config.", e);
+                eprintln!("[Config] WARNING: Failed to parse run_config.yaml: {e}. Starting with empty config.");
 
                 // Notify user about parse failure
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit(
                         "config-parse-error",
                         format!(
-                            "Configuration file could not be parsed. Using empty config. Error: {}",
-                            e
+                            "Configuration file could not be parsed. Using empty config. Error: {e}"
                         ),
                     );
                 }
@@ -104,22 +104,22 @@ pub async fn update_config(
 
     // 2. Convert patch to YAML
     let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
-        .map_err(|e| format!("Failed to convert JSON patch to YAML: {}", e))?;
+        .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
 
     // 3. Merge patch into current config
     // SECURITY: Save critical settings before merge to restore after
     let original_external_controller = current_yaml
         .get("external-controller")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::borrow::ToOwned::to_owned);
     let original_secret = current_yaml
         .get("secret")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::borrow::ToOwned::to_owned);
     let tun_enabled_before = current_yaml
         .get("tun")
         .and_then(|tun| tun.get("enable"))
-        .and_then(|v| v.as_bool())
+        .and_then(serde_yaml::Value::as_bool)
         .unwrap_or(false);
 
     merge_yaml(&mut current_yaml, &patch_yaml, 0)?;
@@ -128,25 +128,25 @@ pub async fn update_config(
     // These settings must never be changed by user config or subscriptions
     if let YamlValue::Mapping(ref mut map) = current_yaml {
         // Restore external-controller to localhost binding
-        if let Some(ref original) = original_external_controller {
+        if let Some(original) = &original_external_controller {
             // Extract port and ensure it binds to localhost only
             let port = original.split(':').next_back().unwrap_or("9090");
             map.insert(
-                YamlValue::String("external-controller".to_string()),
-                YamlValue::String(format!("127.0.0.1:{}", port)),
+                YamlValue::String("external-controller".to_owned()),
+                YamlValue::String(format!("127.0.0.1:{port}")),
             );
         } else {
             // No original, set secure default
             map.insert(
-                YamlValue::String("external-controller".to_string()),
-                YamlValue::String("127.0.0.1:9090".to_string()),
+                YamlValue::String("external-controller".to_owned()),
+                YamlValue::String("127.0.0.1:9090".to_owned()),
             );
         }
 
         // Restore original secret - never allow removal
-        if let Some(ref secret) = original_secret {
+        if let Some(secret) = &original_secret {
             map.insert(
-                YamlValue::String("secret".to_string()),
+                YamlValue::String("secret".to_owned()),
                 YamlValue::String(secret.clone()),
             );
         }
@@ -156,10 +156,10 @@ pub async fn update_config(
         if !tun_enabled_before {
             // TUN was disabled before patch, ensure it stays disabled
             if let Some(YamlValue::Mapping(ref mut tun_map)) =
-                map.get_mut(YamlValue::String("tun".to_string()))
+                map.get_mut(YamlValue::String("tun".to_owned()))
             {
                 tun_map.insert(
-                    YamlValue::String("enable".to_string()),
+                    YamlValue::String("enable".to_owned()),
                     YamlValue::Bool(false),
                 );
             }
@@ -168,7 +168,7 @@ pub async fn update_config(
 
     // 4. Write back to run_config.yaml
     let new_content = serde_yaml::to_string(&current_yaml)
-        .map_err(|e| format!("Failed to serialize YAML: {}", e))?;
+        .map_err(|e| format!("Failed to serialize YAML: {e}"))?;
     crate::core_manager::write_file_secure(&run_config_path, &new_content)?;
 
     // 5. Update original profile if it exists
@@ -176,7 +176,7 @@ pub async fn update_config(
         let lock = state
             .0
             .lock()
-            .map_err(|_| "Failed to lock state".to_string())?;
+            .map_err(|e| format!("Failed to lock state: {e}"))?;
         (
             lock.last_config_path.clone(),
             lock.last_port.unwrap_or(9090),
@@ -218,12 +218,13 @@ pub async fn update_config(
         port
     };
 
+    #[allow(clippy::expect_used)]
     let client = reqwest::Client::builder()
         .no_proxy() // Force direct connection to local core, bypass system proxy
         .build()
-        .unwrap();
+        .expect("failed to build HTTP client");
     // For Mihomo, /configs requires PATCH for partial updates.
-    let url = format!("http://127.0.0.1:{}/configs?force=true", actual_port);
+    let url = format!("http://127.0.0.1:{actual_port}/configs?force=true");
     let mut req = client.patch(&url).json(&patch_yaml);
 
     if !secret.is_empty() {
@@ -241,27 +242,26 @@ pub async fn update_config(
                 hot_reload_success = true;
             } else {
                 let text = res.text().await.unwrap_or_default();
-                println!("Warning: Core reload API returned non-success: {}", text);
-                hot_reload_message = format!("Hot reload returned status {}", status);
+                println!("Warning: Core reload API returned non-success: {text}");
+                hot_reload_message = format!("Hot reload returned status {status}");
             }
         }
         Err(e) => {
-            println!("Warning: Failed to reload core via API: {}", e);
-            hot_reload_message = "Core API unavailable for hot reload".to_string();
+            println!("Warning: Failed to reload core via API: {e}");
+            "Core API unavailable for hot reload".clone_into(&mut hot_reload_message);
         }
     }
 
     // Return detailed result so frontend can inform user appropriately
     let files_saved = true;
     let message = if hot_reload_success {
-        "Configuration saved and applied successfully".to_string()
+        "Configuration saved and applied successfully".to_owned()
     } else if !hot_reload_message.is_empty() {
         format!(
-            "Configuration saved. {} - restart core to apply changes.",
-            hot_reload_message
+            "Configuration saved. {hot_reload_message} - restart core to apply changes."
         )
     } else {
-        "Configuration saved. Restart core to apply changes.".to_string()
+        "Configuration saved. Restart core to apply changes.".to_owned()
     };
 
     Ok(ConfigUpdateResult {

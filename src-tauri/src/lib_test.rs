@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use crate::core_manager;
@@ -80,53 +81,53 @@ mod tests {
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(serde_yaml::Value::String("script".to_string())));
+                .contains_key(serde_yaml::Value::String("script".to_owned())));
             assert!(value
                 .as_mapping()
                 .unwrap()
-                .contains_key(serde_yaml::Value::String("port".to_string())));
+                .contains_key(serde_yaml::Value::String("port".to_owned())));
         }
 
         #[test]
         fn test_nested_script_in_proxy_group_removed() {
-            let yaml = r#"
+            let yaml = r"
 proxy-groups:
   - name: test
     type: select
     script: malicious.js
     proxies:
       - proxy1
-"#;
+";
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
 
             let groups = value.get("proxy-groups").unwrap().as_sequence().unwrap();
             let group = groups.first().unwrap().as_mapping().unwrap();
-            assert!(!group.contains_key(serde_yaml::Value::String("script".to_string())));
-            assert!(group.contains_key(serde_yaml::Value::String("name".to_string())));
+            assert!(!group.contains_key(serde_yaml::Value::String("script".to_owned())));
+            assert!(group.contains_key(serde_yaml::Value::String("name".to_owned())));
         }
 
         #[test]
         fn test_provider_path_removed() {
-            let yaml = r#"
+            let yaml = r"
 proxy-providers:
   my-provider:
     type: http
     url: https://example.com/proxies.yaml
     path: /etc/passwd
     interval: 3600
-"#;
+";
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
 
             let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
             let provider = providers
-                .get(serde_yaml::Value::String("my-provider".to_string()))
+                .get(serde_yaml::Value::String("my-provider".to_owned()))
                 .unwrap()
                 .as_mapping()
                 .unwrap();
-            assert!(!provider.contains_key(serde_yaml::Value::String("path".to_string())));
-            assert!(provider.contains_key(serde_yaml::Value::String("type".to_string())));
+            assert!(!provider.contains_key(serde_yaml::Value::String("path".to_owned())));
+            assert!(provider.contains_key(serde_yaml::Value::String("type".to_owned())));
         }
 
         #[test]
@@ -150,7 +151,7 @@ proxies:
             let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
             let proxy = proxies.first().unwrap().as_mapping().unwrap();
             // 'port' is different from 'path', should be preserved
-            assert!(proxy.contains_key(serde_yaml::Value::String("port".to_string())));
+            assert!(proxy.contains_key(serde_yaml::Value::String("port".to_owned())));
         }
 
         #[test]
@@ -169,38 +170,38 @@ script:
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(serde_yaml::Value::String("script".to_string())));
+                .contains_key(serde_yaml::Value::String("script".to_owned())));
         }
 
         #[test]
         fn test_script_path_removed() {
-            let yaml = r#"
+            let yaml = r"
 script-path: /malicious/script.js
 mode: rule
-"#;
+";
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
 
             assert!(!value
                 .as_mapping()
                 .unwrap()
-                .contains_key(serde_yaml::Value::String("script-path".to_string())));
+                .contains_key(serde_yaml::Value::String("script-path".to_owned())));
         }
 
         #[test]
         fn test_provider_without_path_preserved() {
-            let yaml = r#"
+            let yaml = r"
 rule-providers:
   my-rules:
     type: http
     url: https://example.com/rules.yaml
     interval: 86400
-"#;
+";
             let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut value, false);
 
             let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
-            assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_string())));
+            assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));
         }
     }
 }

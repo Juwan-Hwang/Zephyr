@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter as _, Manager as _};
 
 /// Payload sent to the frontend when a deep link is received.
 #[derive(Debug, Clone, Serialize)]
@@ -36,6 +36,7 @@ fn sanitize_name(raw: &str) -> String {
 ///
 /// S6: Uses `url::Url::parse()` for protocol validation instead of `starts_with`.
 /// S3: Sanitizes the `name` parameter to prevent path traversal attacks.
+#[must_use] 
 pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     let parsed = url::Url::parse(raw).ok()?;
 
@@ -45,7 +46,7 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     }
 
     // Action is the host part (e.g. "install-config" in clash://install-config?...)
-    let action = parsed.host_str()?.to_string();
+    let action = parsed.host_str()?.to_owned();
 
     let params = parsed.query_pairs();
 
@@ -80,7 +81,7 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
 
     Some(DeepLinkPayload {
         action,
-        url: safe_url.to_string(),
+        url: safe_url.to_owned(),
         name,
     })
 }
@@ -102,7 +103,7 @@ pub fn handle_cli_deep_links(app: &tauri::AppHandle) {
 }
 
 /// Emit a deep link event to the main window.
-/// Can be called from any context where we have an AppHandle.
+/// Can be called from any context where we have an `AppHandle`.
 pub fn emit_deep_link(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(payload) = parse_deep_link(raw_url) {
         if let Some(window) = app.get_webview_window("main") {
@@ -112,6 +113,7 @@ pub fn emit_deep_link(app: &tauri::AppHandle, raw_url: &str) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

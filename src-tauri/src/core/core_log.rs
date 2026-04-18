@@ -3,6 +3,7 @@ use tauri::State;
 use super::{MihomoState, ReadLogResult};
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn read_core_log(
     state: State<'_, MihomoState>,
     offset: Option<u64>,
@@ -17,10 +18,10 @@ pub fn read_core_log(
     drop(lock);
 
     let file = std::fs::File::open(&log_path_owned)
-        .map_err(|e| format!("Failed to open log file: {}", e))?;
+        .map_err(|e| format!("Failed to open log file: {e}"))?;
 
     let metadata = std::fs::metadata(&log_path_owned)
-        .map_err(|e| format!("Failed to read log metadata: {}", e))?;
+        .map_err(|e| format!("Failed to read log metadata: {e}"))?;
     let file_size = metadata.len();
 
     let start_offset = offset.unwrap_or(0);
@@ -29,7 +30,7 @@ pub fn read_core_log(
     // the file was likely rotated. Signal the frontend to reset.
     let rotated = start_offset > file_size;
 
-    use std::io::{BufRead, Seek, SeekFrom};
+    use std::io::{BufRead as _, Seek as _, SeekFrom};
     let mut reader = std::io::BufReader::new(file);
 
     if start_offset > 0 && !rotated {
@@ -50,7 +51,7 @@ pub fn read_core_log(
                 bytes_read += n as u64;
                 lines.push(line);
             }
-            Err(e) => return Err(format!("Failed to read log: {}", e)),
+            Err(e) => return Err(format!("Failed to read log: {e}")),
         }
     }
 

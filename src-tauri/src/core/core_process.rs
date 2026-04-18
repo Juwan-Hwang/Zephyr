@@ -1,13 +1,13 @@
-use rand::RngExt;
+use rand::RngExt as _;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager as _, State};
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::PermissionsExt as _;
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
@@ -18,7 +18,8 @@ use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
 
-pub fn core_binary_name() -> &'static str {
+#[must_use] 
+pub const fn core_binary_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
         "mihomo.exe"
@@ -44,7 +45,7 @@ pub fn kill_mihomo() {
     }
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
+        use std::os::windows::process::CommandExt as _;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "mihomo.exe"])
             .creation_flags(CREATE_NO_WINDOW)
@@ -55,15 +56,15 @@ pub fn kill_mihomo() {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn ensure_executable(path: &Path) -> Result<(), String> {
     let metadata =
-        fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {}", e))?;
+        fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {e}"))?;
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)
-        .map_err(|e| format!("Failed to set executable permissions: {}", e))
+        .map_err(|e| format!("Failed to set executable permissions: {e}"))
 }
 
 #[cfg(target_os = "windows")]
-pub fn ensure_executable(_path: &Path) -> Result<(), String> {
+pub const fn ensure_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -113,11 +114,7 @@ fn legacy_core_candidates() -> Result<Vec<PathBuf>, String> {
 fn get_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
     let bundled_dir = resource_dir.join("bundled");
-    if bundled_dir.exists() {
-        Some(bundled_dir)
-    } else {
-        None
-    }
+    bundled_dir.exists().then_some(bundled_dir)
 }
 
 fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
@@ -150,7 +147,7 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 // Only copy if target doesn't exist
                 if !target.exists() {
                     if let Err(e) = fs::copy(&source, &target) {
-                        eprintln!("Warning: Failed to copy bundled file {}: {}", file_name, e);
+                        eprintln!("Warning: Failed to copy bundled file {file_name}: {e}");
                     }
                 }
 
@@ -208,7 +205,7 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
             }
 
             fs::copy(&source, &target)
-                .map_err(|e| format!("Failed to migrate {:?}: {}", source, e))?;
+                .map_err(|e| format!("Failed to migrate {source:?}: {e}"))?;
         }
     }
 
@@ -218,25 +215,28 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
 pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
     let paths = resolve_app_paths(app)?;
 
+    #[cfg(target_os = "windows")]
+    let is_new = !paths.app_data_dir.exists();
+    #[cfg(not(target_os = "windows"))]
     let _is_new = !paths.app_data_dir.exists();
 
     fs::create_dir_all(&paths.app_data_dir)
-        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
-    fs::create_dir_all(&paths.core_dir).map_err(|e| format!("Failed to create core dir: {}", e))?;
+        .map_err(|e| format!("Failed to create app data dir: {e}"))?;
+    fs::create_dir_all(&paths.core_dir).map_err(|e| format!("Failed to create core dir: {e}"))?;
     fs::create_dir_all(&paths.profiles_dir)
-        .map_err(|e| format!("Failed to create profiles dir: {}", e))?;
+        .map_err(|e| format!("Failed to create profiles dir: {e}"))?;
 
     #[cfg(target_os = "windows")]
     {
-        if _is_new {
-            use std::os::windows::process::CommandExt;
+        if is_new {
+            use std::os::windows::process::CommandExt as _;
             use std::process::Command;
             if let Ok(username) = std::env::var("USERNAME") {
                 let _ = Command::new("icacls")
                     .arg(&paths.app_data_dir)
                     .arg("/inheritance:r")
                     .arg("/grant:r")
-                    .arg(format!("{}:(OI)(CI)(F)", username))
+                    .arg(format!("{username}:(OI)(CI)(F)"))
                     .arg("/grant:r")
                     .arg("SYSTEM:(OI)(CI)(F)")
                     .arg("/grant:r")
@@ -250,7 +250,7 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
     // S-03: Tighten profiles directory permissions on Unix (owner-only rwx------)
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::PermissionsExt as _;
         let _ = fs::set_permissions(&paths.profiles_dir, fs::Permissions::from_mode(0o700));
     }
 
@@ -261,7 +261,7 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
 fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, PathBuf), String> {
     let config_file_name = sanitize_config_file_name(config_path)?;
     if config_file_name == "run_config.yaml" {
-        return Err("Cannot switch to run_config.yaml directly".to_string());
+        return Err("Cannot switch to run_config.yaml directly".to_owned());
     }
 
     let resolved_path = paths.profiles_dir.join(&config_file_name);
@@ -273,24 +273,24 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
         return Ok((config_file_name, resolved_path));
     }
 
-    if let Some(fallback) = first_available_profile(paths)? {
+    if let Some(fallback) = first_available_profile(paths) {
         let fallback_name = fallback
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or("Invalid fallback config filename encoding")?
-            .to_string();
+            .to_owned();
         return Ok((fallback_name, fallback));
     }
 
     // No config file found - create a default one
     let default_path = paths.profiles_dir.join("config.yaml");
     create_default_config(&default_path)?;
-    Ok(("config.yaml".to_string(), default_path))
+    Ok(("config.yaml".to_owned(), default_path))
 }
 
 /// Create a minimal default configuration file for first-time users
 fn create_default_config(path: &PathBuf) -> Result<(), String> {
-    let default_config = r#"# Zephyr Default Configuration
+    let default_config = r"# Zephyr Default Configuration
 # This is a minimal config file created for first-time setup.
 # Please add your proxy nodes or import a subscription.
 
@@ -326,20 +326,20 @@ proxy-groups: []
 rules:
   - GEOIP,CN,DIRECT
   - MATCH,DIRECT
-"#;
+";
 
     fs::write(path, default_config)
-        .map_err(|e| format!("Failed to create default config: {}", e))?;
+        .map_err(|e| format!("Failed to create default config: {e}"))?;
 
-    println!("Created default config at {:?}", path);
+    println!("Created default config at {path:?}");
     Ok(())
 }
 
-fn first_available_profile(paths: &AppPaths) -> Result<Option<PathBuf>, String> {
+fn first_available_profile(paths: &AppPaths) -> Option<PathBuf> {
     let mut configs = Vec::new();
     let entries = match fs::read_dir(&paths.profiles_dir) {
         Ok(entries) => entries,
-        Err(_) => return Ok(None),
+        Err(_) => return None,
     };
 
     for entry in entries.flatten() {
@@ -360,7 +360,7 @@ fn first_available_profile(paths: &AppPaths) -> Result<Option<PathBuf>, String> 
     }
 
     configs.sort();
-    Ok(configs.into_iter().next())
+    configs.into_iter().next()
 }
 
 fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
@@ -395,21 +395,21 @@ fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
         let arg_lower = trimmed.to_lowercase();
         let is_blocked = blocked_args
             .iter()
-            .any(|&b| arg_lower == b || arg_lower.starts_with(&format!("{}=", b)));
+            .any(|&b| arg_lower == b || arg_lower.starts_with(&format!("{b}=")));
 
         if is_blocked {
             return Err(format!(
-                "Argument '{}' is not allowed for security reasons",
-                trimmed
+                "Argument '{trimmed}' is not allowed for security reasons"
             ));
         }
 
-        safe_custom_args.push(trimmed.to_string());
+        safe_custom_args.push(trimmed.to_owned());
     }
 
     Ok(safe_custom_args)
 }
 
+#[must_use] 
 pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u16)> {
     let mut yaml_val = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
     if !yaml_val.is_mapping() {
@@ -419,16 +419,16 @@ pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u1
     let config_port = parse_external_controller_port(&yaml_val);
     if let Some(mapping) = yaml_val.as_mapping_mut() {
         mapping.insert(
-            serde_yaml::Value::String("external-controller".to_string()),
-            serde_yaml::Value::String(format!("127.0.0.1:{}", config_port)),
+            serde_yaml::Value::String("external-controller".to_owned()),
+            serde_yaml::Value::String(format!("127.0.0.1:{config_port}")),
         );
         mapping.insert(
-            serde_yaml::Value::String("secret".to_string()),
-            serde_yaml::Value::String(secret.to_string()),
+            serde_yaml::Value::String("secret".to_owned()),
+            serde_yaml::Value::String(secret.to_owned()),
         );
 
         // Default unified-delay to true if missing
-        let unified_delay_key = serde_yaml::Value::String("unified-delay".to_string());
+        let unified_delay_key = serde_yaml::Value::String("unified-delay".to_owned());
         if !mapping.contains_key(&unified_delay_key) {
             mapping.insert(unified_delay_key, serde_yaml::Value::Bool(true));
         }
@@ -442,8 +442,7 @@ pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u1
 fn build_minimal_runtime_config(secret: &str) -> (String, u16) {
     (
         format!(
-            "mixed-port: 7890\nmode: rule\nlog-level: info\nunified-delay: true\nexternal-controller: 127.0.0.1:9090\nsecret: {}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n",
-            secret
+            "mixed-port: 7890\nmode: rule\nlog-level: info\nunified-delay: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
         9090,
     )
@@ -456,18 +455,17 @@ fn select_runtime_config(
     secret: &str,
 ) -> Result<(Option<String>, String, u16), String> {
     let preferred_content = fs::read_to_string(preferred_path)
-        .map_err(|e| format!("Failed to read config {:?}: {}", preferred_path, e))?;
+        .map_err(|e| format!("Failed to read config {preferred_path:?}: {e}"))?;
     if let Some((final_config, config_port)) = prepare_runtime_config(&preferred_content, secret) {
-        return Ok((Some(preferred_name.to_string()), final_config, config_port));
+        return Ok((Some(preferred_name.to_owned()), final_config, config_port));
     }
 
     let mut fallback_profiles = Vec::new();
-    let entries = match fs::read_dir(&paths.profiles_dir) {
-        Ok(entries) => entries,
-        Err(_) => {
-            let (config, port) = build_minimal_runtime_config(secret);
-            return Ok((None, config, port));
-        }
+    let entries = if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
+        entries
+    } else {
+        let (config, port) = build_minimal_runtime_config(secret);
+        return Ok((None, config, port));
     };
 
     for entry in entries.flatten() {
@@ -499,18 +497,16 @@ fn select_runtime_config(
                 .file_name()
                 .and_then(|name| name.to_str())
                 .ok_or("Invalid fallback config filename encoding")?
-                .to_string();
+                .to_owned();
             println!(
-                "Requested config {} is not a valid Clash YAML profile, falling back to {}",
-                preferred_name, file_name
+                "Requested config {preferred_name} is not a valid Clash YAML profile, falling back to {file_name}"
             );
             return Ok((Some(file_name), final_config, config_port));
         }
     }
 
     println!(
-        "Requested config {} is not a valid Clash YAML profile, falling back to generated minimal config",
-        preferred_name
+        "Requested config {preferred_name} is not a valid Clash YAML profile, falling back to generated minimal config"
     );
     let (final_config, config_port) = build_minimal_runtime_config(secret);
     Ok((None, final_config, config_port))
@@ -524,8 +520,7 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
     }
 
     Err(format!(
-        "Could not find {} in app data core directory",
-        binary_name
+        "Could not find {binary_name} in app data core directory"
     ))
 }
 
@@ -606,13 +601,13 @@ pub async fn start_core(
     {
         for i in 0..50 {
             if std::net::TcpListener::bind("127.0.0.1:9090").is_ok() {
-                eprintln!("[CORE] port 9090 confirmed free after {}ms", i * 100);
+                eprintln!("[CORE] port 9090 confirmed free after {i * 100}ms");
                 break;
             }
             if i == 49 {
                 eprintln!("[CORE] WARNING: port 9090 still occupied after 5s, proceeding anyway");
             } else {
-                eprintln!("[CORE] waiting for port 9090... {}ms", (i + 1) * 100);
+                eprintln!("[CORE] waiting for port 9090... {(i + 1) * 100}ms");
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
@@ -630,7 +625,7 @@ pub async fn start_core(
     if test {
         let mut cmd = Command::new(&exe_path);
         #[cfg(target_os = "windows")]
-        use std::os::windows::process::CommandExt;
+        use std::os::windows::process::CommandExt as _;
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
@@ -641,23 +636,22 @@ pub async fn start_core(
         }
         let output = cmd
             .output()
-            .map_err(|e| format!("Failed to run test: {}", e))?;
+            .map_err(|e| format!("Failed to run test: {e}"))?;
 
         if output.status.success() {
             return Ok(CoreStartResult {
-                secret: "test_ok".to_string(),
+                secret: "test_ok".to_owned(),
                 port: 0,
             });
-        } else {
-            let mut err_msg = String::from_utf8_lossy(&output.stderr).to_string();
-            // Basic path redaction
-            err_msg = err_msg.replace(paths.core_dir.to_str().unwrap_or(""), "[CORE_DIR]");
-            err_msg = err_msg.replace(paths.profiles_dir.to_str().unwrap_or(""), "[PROFILES_DIR]");
-            println!("Config test failed: {}", err_msg);
-            return Err(
-                "Config test failed. Please check the config file for syntax errors.".to_string(),
-            );
         }
+        let mut err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
+        // Basic path redaction
+        err_msg = err_msg.replace(paths.core_dir.to_str().unwrap_or(""), "[CORE_DIR]");
+        err_msg = err_msg.replace(paths.profiles_dir.to_str().unwrap_or(""), "[PROFILES_DIR]");
+        println!("Config test failed: {err_msg}");
+        return Err(
+            "Config test failed. Please check the config file for syntax errors.".to_owned(),
+        );
     }
 
     stop_core(app.clone(), state.clone())?;
@@ -676,7 +670,7 @@ pub async fn start_core(
 
     let mut cmd = Command::new(&exe_path);
     #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
+    use std::os::windows::process::CommandExt as _;
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
@@ -697,24 +691,19 @@ pub async fn start_core(
             .output()
             .ok();
         if let Some(o) = ps {
-            eprintln!(
-                "[CORE] mihomo processes before spawn:\n{}",
-                String::from_utf8_lossy(&o.stdout)
-            );
+            eprintln!("[CORE] mihomo processes before spawn:\n{String::from_utf8_lossy(&o.stdout)}");
         }
     }
 
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
     // Use temp directory with unique filename per process to avoid multi-instance conflicts
     // Prefix with app name to avoid conflicts with other applications
-    let log_path = std::env::temp_dir().join(format!(
-        "zephyr-mihomo-{}-{}.log",
+    let log_path = std::env::temp_dir().join(format!("zephyr-mihomo-{}-{}.log",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
+            .unwrap_or(0)));
 
     // Cleanup old zephyr-mihomo log files (older than 1 hour) to prevent accumulation
     // Only scan for files matching our specific prefix to avoid interfering with other apps
@@ -746,27 +735,24 @@ pub async fn start_core(
     }
 
     // Create or truncate log file
-    match std::fs::File::create(&log_path) {
-        Ok(log_file) => {
-            // Clone the handle for stderr before converting to Stdio
-            let stderr_handle = log_file.try_clone();
-            cmd.stdout(std::process::Stdio::from(log_file));
-            cmd.stderr(
-                stderr_handle
-                    .map(std::process::Stdio::from)
-                    .unwrap_or_else(|_| std::process::Stdio::null()),
-            );
-        }
-        Err(_) => {
-            // Fallback to null if log file cannot be created
-            cmd.stdout(std::process::Stdio::null());
-            cmd.stderr(std::process::Stdio::null());
-        }
+    if let Ok(log_file) = std::fs::File::create(&log_path) {
+        // Clone the handle for stderr before converting to Stdio
+        let stderr_handle = log_file.try_clone();
+        cmd.stdout(std::process::Stdio::from(log_file));
+        cmd.stderr(
+            stderr_handle
+                .map(std::process::Stdio::from)
+                .unwrap_or_else(|_| std::process::Stdio::null()),
+        );
+    } else {
+        // Fallback to null if log file cannot be created
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
     }
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn mihomo: {}", e))?;
+        .map_err(|e| format!("Failed to spawn mihomo: {e}"))?;
 
     // Check if process exits immediately
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -789,7 +775,7 @@ pub async fn start_core(
                 let mut retry_cmd = Command::new(&exe_path);
                 #[cfg(target_os = "windows")]
                 {
-                    use std::os::windows::process::CommandExt;
+                    use std::os::windows::process::CommandExt as _;
                     const CREATE_NO_WINDOW: u32 = 0x08000000;
                     retry_cmd.creation_flags(CREATE_NO_WINDOW);
                 }
@@ -801,28 +787,23 @@ pub async fn start_core(
                 retry_cmd.current_dir(&paths.core_dir);
 
                 // Setup log file for retry
-                let retry_log_path = std::env::temp_dir().join(format!(
-                    "zephyr-mihomo-{}-{}-retry.log",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or(0)
-                ));
-                match std::fs::File::create(&retry_log_path) {
-                    Ok(log_file) => {
-                        let stderr_handle = log_file.try_clone();
-                        retry_cmd.stdout(std::process::Stdio::from(log_file));
-                        retry_cmd.stderr(
-                            stderr_handle
-                                .map(std::process::Stdio::from)
-                                .unwrap_or_else(|_| std::process::Stdio::null()),
-                        );
-                    }
-                    Err(_) => {
-                        retry_cmd.stdout(std::process::Stdio::null());
-                        retry_cmd.stderr(std::process::Stdio::null());
-                    }
+                let retry_log_path = std::env::temp_dir().join(format!("zephyr-mihomo-{}-{}-retry.log",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0)));
+                if let Ok(log_file) = std::fs::File::create(&retry_log_path) {
+                    let stderr_handle = log_file.try_clone();
+                    retry_cmd.stdout(std::process::Stdio::from(log_file));
+                    retry_cmd.stderr(
+                        stderr_handle
+                            .map(std::process::Stdio::from)
+                            .unwrap_or_else(|_| std::process::Stdio::null()),
+                    );
+                } else {
+                    retry_cmd.stdout(std::process::Stdio::null());
+                    retry_cmd.stderr(std::process::Stdio::null());
                 }
 
                 match retry_cmd.spawn() {
@@ -838,29 +819,27 @@ pub async fn start_core(
                                 let retry_log =
                                     std::fs::read_to_string(&retry_log_path).unwrap_or_default();
                                 return Err(format!(
-                                    "mihomo retry also failed: {:?}, log: {}",
-                                    retry_status, retry_log
+                                    "mihomo retry also failed: {retry_status:?}, log: {retry_log}"
                                 ));
                             }
                             Err(e) => {
-                                return Err(format!("retry try_wait error: {}", e));
+                                return Err(format!("retry try_wait error: {e}"));
                             }
                         }
                     }
                     Err(e) => {
-                        return Err(format!("Failed to spawn mihomo on retry: {}", e));
+                        return Err(format!("Failed to spawn mihomo on retry: {e}"));
                     }
                 }
             } else {
                 return Err(format!(
-                    "mihomo exited immediately: {:?}, log: {}",
-                    status, log
+                    "mihomo exited immediately: {status:?}, log: {log}"
                 ));
             }
         }
         Ok(None) => {}
         Err(e) => {
-            return Err(format!("try_wait error: {}", e));
+            return Err(format!("try_wait error: {e}"));
         }
     }
 
@@ -870,10 +849,9 @@ pub async fn start_core(
     // HTTP Health Check via raw TCP
     let mut is_healthy = false;
     for _ in 0..20 {
-        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
+        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
             let request = format!(
-                "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
-                port
+                "GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
             );
             if stream.write_all(request.as_bytes()).is_ok() {
                 let mut response = [0u8; 256];
@@ -898,7 +876,7 @@ pub async fn start_core(
 
     if !is_healthy {
         let err_msg =
-            "Core started but health check failed. Check the logs for details.".to_string();
+            "Core started but health check failed. Check the logs for details.".to_owned();
         let _ = child.kill();
         let _ = child.wait();
         return Err(err_msg);
@@ -907,20 +885,19 @@ pub async fn start_core(
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
 
-    let mut lock = match state.0.lock() {
-        Ok(l) => l,
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("Failed to lock state".to_string());
-        }
+    let mut lock = if let Ok(l) = state.0.lock() {
+        l
+    } else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("Failed to lock state".to_owned());
     };
     lock.process = Some(child);
-    lock.last_secret = resolved_secret.clone();
+    lock.last_secret.clone_from(&resolved_secret);
     lock.last_config_path = active_config_name;
     lock.last_custom_args = Some(safe_custom_args);
     lock.last_port = Some(port);
-    lock.last_log_path = Some(log_path.to_string_lossy().to_string());
+    lock.last_log_path = Some(log_path.to_string_lossy().into_owned());
     drop(lock);
 
     Ok(CoreStartResult {
@@ -930,13 +907,14 @@ pub async fn start_core(
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
     // Take the child process
     let child = {
         let mut lock = state
             .0
             .lock()
-            .map_err(|_| "Failed to lock state".to_string())?;
+            .map_err(|e| format!("Failed to lock state: {e}"))?;
         lock.last_port = None;
         lock.process.take()
     };
@@ -951,12 +929,12 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
         let run_config_path = paths.core_dir.join("run_config.yaml");
         if run_config_path.exists() {
             if let Err(e) = fs::remove_file(&run_config_path) {
-                println!("Warning: Failed to remove run_config.yaml: {}", e);
+                println!("Warning: Failed to remove run_config.yaml: {e}");
             }
         }
     }
 
-    Ok("Core stopped and cleaned up".to_string())
+    Ok("Core stopped and cleaned up".to_owned())
 }
 
 #[tauri::command]
@@ -967,28 +945,29 @@ pub async fn get_core_version(app: AppHandle) -> Result<String, String> {
 
     let mut cmd = Command::new(&exe_path);
     #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
+    use std::os::windows::process::CommandExt as _;
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.arg("-v");
 
     let output = cmd
         .output()
-        .map_err(|e| format!("Failed to run version check: {}", e))?;
+        .map_err(|e| format!("Failed to run version check: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     if let Some(v_idx) = stdout.find('v') {
         let after_v = &stdout[v_idx..];
         if let Some(space_idx) = after_v.find(' ') {
-            return Ok(after_v[..space_idx].to_string());
+            return Ok(after_v[..space_idx].to_owned());
         }
-        return Ok(after_v.to_string());
+        return Ok(after_v.to_owned());
     }
 
-    Ok(stdout.trim().to_string())
+    Ok(stdout.trim().to_owned())
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{prepare_runtime_config, validate_custom_args};
 
@@ -1005,16 +984,16 @@ mod tests {
 
     #[test]
     fn validate_custom_args_rejects_blocked_flags() {
-        let args = validate_custom_args(&["--external-controller=0.0.0.0:9090".to_string()]);
+        let args = validate_custom_args(&["--external-controller=0.0.0.0:9090".to_owned()]);
         assert!(args.is_err());
 
-        let args2 = validate_custom_args(&["-d".to_string(), ".".to_string()]);
+        let args2 = validate_custom_args(&["-d".to_owned(), ".".to_owned()]);
         assert!(args2.is_err());
     }
 
     #[test]
     fn validate_custom_args_keeps_allowed_flags() {
-        let args = validate_custom_args(&["  -t  ".to_string(), "--version".to_string()]).unwrap();
-        assert_eq!(args, vec!["-t".to_string(), "--version".to_string()]);
+        let args = validate_custom_args(&["  -t  ".to_owned(), "--version".to_owned()]).unwrap();
+        assert_eq!(args, vec!["-t".to_owned(), "--version".to_owned()]);
     }
 }

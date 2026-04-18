@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager as _};
 
 #[cfg(target_os = "windows")]
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::DialogExt as _;
 
 #[allow(dead_code)]
 // Rate limiting: Maximum 1 UWP exemption operation per 5 minutes
@@ -15,7 +15,7 @@ const UWP_OPERATION_COOLDOWN_SECS: u64 = 300; // 5 minutes
 fn check_rate_limit() -> Result<(), String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("System time error: {}", e))?
+        .map_err(|e| format!("System time error: {e}"))?
         .as_secs();
 
     let last_op = LAST_UWP_OPERATION.load(Ordering::SeqCst);
@@ -23,8 +23,7 @@ fn check_rate_limit() -> Result<(), String> {
     if last_op > 0 && now < last_op + UWP_OPERATION_COOLDOWN_SECS {
         let remaining = (last_op + UWP_OPERATION_COOLDOWN_SECS) - now;
         return Err(format!(
-            "Rate limit: Please wait {} seconds before requesting UWP exemption again",
-            remaining
+            "Rate limit: Please wait {remaining} seconds before requesting UWP exemption again"
         ));
     }
 
@@ -51,7 +50,7 @@ fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
 
     // Additional check: ensure we have a window (prevents headless calls)
     if app.get_webview_window("main").is_none() {
-        return Err("Invalid call source: Main window not found".to_string());
+        return Err("Invalid call source: Main window not found".to_owned());
     }
 
     Ok(())
@@ -80,7 +79,7 @@ pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
 
         let confirmed = rx.recv().unwrap_or(false);
         if !confirmed {
-            return Err("Operation cancelled by user".to_string());
+            return Err("Operation cancelled by user".to_owned());
         }
 
         // Step 4: Update rate limit timestamp
@@ -90,8 +89,8 @@ pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
             .unwrap_or(0);
         LAST_UWP_OPERATION.store(now, Ordering::SeqCst);
 
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        use std::os::windows::process::CommandExt;
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use std::os::windows::process::CommandExt as _;
         use std::process::Command;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -105,14 +104,11 @@ Get-AppxPackage | Where-Object {
 "#;
         let utf16: Vec<u8> = inner_script
             .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
+            .flat_map(u16::to_le_bytes)
             .collect();
         let encoded = STANDARD.encode(&utf16);
 
-        let outer_script = format!(
-            "Start-Process powershell -ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','{}' -Verb RunAs -WindowStyle Hidden -Wait",
-            encoded
-        );
+        let outer_script = format!("Start-Process powershell -ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','{encoded}' -Verb RunAs -WindowStyle Hidden -Wait");
 
         let mut cmd = Command::new("powershell");
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -123,21 +119,21 @@ Get-AppxPackage | Where-Object {
                 eprintln!("[Security] UWP exemption completed successfully");
                 Ok(
                     "UWP Loopback exemption process started. Please check the UAC prompt."
-                        .to_string(),
+                        .to_owned(),
                 )
             }
             Ok(status) => {
-                eprintln!("[Security] UWP exemption failed with status: {}", status);
-                Err(format!("PowerShell exited with status: {}", status))
+                eprintln!("[Security] UWP exemption failed with status: {status}");
+                Err(format!("PowerShell exited with status: {status}"))
             }
             Err(e) => {
-                eprintln!("[Security] UWP exemption failed with error: {}", e);
-                Err(format!("Failed to execute PowerShell: {}", e))
+                eprintln!("[Security] UWP exemption failed with error: {e}");
+                Err(format!("Failed to execute PowerShell: {e}"))
             }
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Err("UWP Loopback exemption is only available on Windows".to_string())
+        Err("UWP Loopback exemption is only available on Windows".to_owned())
     }
 }

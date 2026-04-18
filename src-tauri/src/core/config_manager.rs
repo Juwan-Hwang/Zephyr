@@ -15,12 +15,12 @@ pub(super) fn mask_url(url: &str) -> String {
         let masked_host = if host.len() > 6 {
             format!("{}***{}", &host[..3], &host[host.len() - 3..])
         } else {
-            "***".to_string()
+            "***".to_owned()
         };
         // Only show scheme + masked host; hide path and query entirely
-        format!("{}://{}/***", parsed.scheme(), masked_host)
+        format!("{}://{masked_host}/***", parsed.scheme())
     } else {
-        "***".to_string()
+        "***".to_owned()
     }
 }
 
@@ -43,35 +43,32 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
-                        let mut url = None;
-                        let mut sub_info = None;
-
-                        // Migrate old plaintext comments if exist, then remove them?
-                        // For safety, just read from metadata first.
-                        if let Some(meta) = metadata.configs.get(name) {
-                            url = meta.url.clone();
-                            sub_info = meta.sub_info.clone();
+                        let (url, sub_info) = if let Some(meta) = metadata.configs.get(name) {
+                            (meta.url.clone(), meta.sub_info.clone())
                         } else {
                             // Fallback to reading old comments
+                            let mut url = None;
+                            let mut sub_info = None;
                             if let Ok(file) = std::fs::File::open(&path) {
-                                use std::io::{BufRead, BufReader};
+                                use std::io::{BufRead as _, BufReader};
                                 let reader = BufReader::new(file);
                                 for line in reader.lines().take(50).map_while(Result::ok) {
                                     if line.starts_with("# URL: ") {
-                                        url = Some(line.replace("# URL: ", "").trim().to_string());
+                                        url = Some(line.replace("# URL: ", "").trim().to_owned());
                                     } else if line.starts_with("# SUB_INFO: ") {
                                         sub_info = Some(
-                                            line.replace("# SUB_INFO: ", "").trim().to_string(),
+                                            line.replace("# SUB_INFO: ", "").trim().to_owned(),
                                         );
                                     }
                                 }
                             }
-                        }
+                            (url, sub_info)
+                        };
 
                         let url_display = url.as_ref().map(|u| mask_url(u));
 
                         configs.push(ConfigInfo {
-                            name: name.to_string(),
+                            name: name.to_owned(),
                             url,
                             url_display,
                             sub_info,
@@ -97,7 +94,7 @@ pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, Stri
 
     // Look up URL from metadata first
     if let Some(meta) = metadata.configs.get(&safe_name) {
-        if let Some(ref url) = meta.url {
+        if let Some(url) = &meta.url {
             return Ok(url.clone());
         }
     }
@@ -105,16 +102,16 @@ pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, Stri
     // Fallback: read from file comments (legacy format)
     let path = paths.profiles_dir.join(&safe_name);
     if let Ok(file) = std::fs::File::open(&path) {
-        use std::io::{BufRead, BufReader};
+        use std::io::{BufRead as _, BufReader};
         let reader = BufReader::new(file);
         for line in reader.lines().map_while(Result::ok) {
             if line.starts_with("# URL: ") {
-                return Ok(line.replace("# URL: ", "").trim().to_string());
+                return Ok(line.replace("# URL: ", "").trim().to_owned());
             }
         }
     }
 
-    Err(format!("No subscription URL found for config: {}", name))
+    Err(format!("No subscription URL found for config: {name}"))
 }
 
 #[tauri::command]
@@ -125,12 +122,12 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     let mut clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
         name.clone()
     } else {
-        format!("{}.yaml", name)
+        format!("{name}.yaml")
     };
 
     clean_name = sanitize_config_file_name(&clean_name)?;
     if clean_name == "run_config.yaml" {
-        return Err("Cannot delete the active temp config".to_string());
+        return Err("Cannot delete the active temp config".to_owned());
     }
 
     let target_path = paths.profiles_dir.join(&clean_name);
@@ -144,13 +141,13 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
         let yml_path = paths.profiles_dir.join(&yml_name);
 
         if yml_path.exists() {
-            fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {}", e))?;
+            fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
             let mut metadata = load_metadata(&paths);
             metadata.configs.remove(&yml_name);
             save_metadata(&paths, &metadata);
-            return Ok(format!("Config {} deleted", yml_name));
+            return Ok(format!("Config {yml_name} deleted"));
         }
-        return Err(format!("File does not exist: {:?}", target_path));
+        return Err(format!("File does not exist: {target_path:?}"));
     }
 
     // Remove metadata
@@ -159,25 +156,25 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     save_metadata(&paths, &metadata);
 
     // Delete the file and verify
-    fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
+    fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
 
     // Verify deletion (Windows may report success but file remains if locked)
     if target_path.exists() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
+        fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
 
         if target_path.exists() {
             return Err(format!(
-                "File could not be deleted (locked by another process?): {:?}",
-                target_path
+                "File could not be deleted (locked by another process?): {target_path:?}"
             ));
         }
     }
 
-    Ok(format!("Config {} deleted", name))
+    Ok(format!("Config {name} deleted"))
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
     let config_file_name = sanitize_config_file_name(&config_path)?;
@@ -196,13 +193,14 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
     validate_path_within_dir(&resolved_path, &base_dir)?;
 
     if !resolved_path.exists() {
-        return Err(format!("Config file {:?} not found", resolved_path));
+        return Err(format!("Config file {resolved_path:?} not found"));
     }
 
-    fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {}", e))
+    fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {e}"))
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn write_config_file(
     app: AppHandle,
     config_path: String,
@@ -226,10 +224,11 @@ pub fn write_config_file(
 
     write_file_secure(&resolved_path, &content)?;
 
-    Ok(format!("Successfully wrote to {:?}", resolved_path))
+    Ok(format!("Successfully wrote to {resolved_path:?}"))
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
     let target = paths.profiles_dir;
@@ -239,7 +238,7 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
         Command::new("explorer")
             .arg(&target)
             .spawn()
-            .map_err(|e| format!("Failed to open config folder: {}", e))?;
+            .map_err(|e| format!("Failed to open config folder: {e}"))?;
     }
 
     #[cfg(target_os = "macos")]
@@ -247,7 +246,7 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
         Command::new("open")
             .arg(&target)
             .spawn()
-            .map_err(|e| format!("Failed to open config folder: {}", e))?;
+            .map_err(|e| format!("Failed to open config folder: {e}"))?;
     }
 
     #[cfg(target_os = "linux")]
@@ -255,8 +254,8 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
         Command::new("xdg-open")
             .arg(&target)
             .spawn()
-            .map_err(|e| format!("Failed to open config folder: {}", e))?;
+            .map_err(|e| format!("Failed to open config folder: {e}"))?;
     }
 
-    Ok(target.to_string_lossy().to_string())
+    Ok(target.to_string_lossy().into_owned())
 }

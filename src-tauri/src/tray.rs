@@ -11,7 +11,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter as _, Manager as _,
 };
 
 use crate::core_manager::MihomoState;
@@ -62,30 +62,34 @@ pub struct ProxyInfo {
 
 /// Get current tray state
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn get_tray_menu_state(app: AppHandle) -> Result<TrayMenuState, String> {
     let state = app.state::<TrayState>();
-    let guard = state.0.lock().map_err(|_| "Failed to lock tray state")?;
+    let guard = state.0.lock().map_err(|e| format!("Failed to lock tray state: {e}"))?;
     Ok(guard.clone())
 }
 
 /// Update tray menu state
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn set_tray_menu_state(app: AppHandle, new_state: TrayMenuState) -> Result<(), String> {
     let tray_state = app.state::<TrayState>();
     let mut guard = tray_state
         .0
         .lock()
-        .map_err(|_| "Failed to lock tray state")?;
+        .map_err(|e| format!("Failed to lock tray state: {e}"))?;
     *guard = new_state;
+    drop(guard);
     Ok(())
 }
 
 /// Change tray icon based on mode
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
-        .ok_or_else(|| "Tray icon not found".to_string())?;
+        .ok_or_else(|| "Tray icon not found".to_owned())?;
 
     #[allow(clippy::large_include_file)]
     let icon_bytes: &[u8] = match mode.as_str() {
@@ -94,16 +98,17 @@ pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
         _ => include_bytes!("../icons/icon.png"),
     };
 
-    let image = Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load icon: {}", e))?;
+    let image = Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
 
     tray.set_icon(Some(image))
-        .map_err(|e| format!("Failed to set icon: {}", e))?;
+        .map_err(|e| format!("Failed to set icon: {e}"))?;
 
     Ok(())
 }
 
 /// Get current proxy mode for tray status
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     let state = app.state::<MihomoState>();
     let core_running = state
@@ -113,7 +118,7 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
         .unwrap_or(false);
 
     if !core_running {
-        return Ok("stopped".to_string());
+        return Ok("stopped".to_owned());
     }
 
     let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
@@ -123,16 +128,16 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     let tun_enabled = get_tun_status_from_config(&app).unwrap_or(false);
 
     if tun_enabled {
-        Ok("tun".to_string())
+        Ok("tun".to_owned())
     } else if sys_proxy_enabled {
-        Ok("sysproxy".to_string())
+        Ok("sysproxy".to_owned())
     } else {
-        Ok("running".to_string())
+        Ok("running".to_owned())
     }
 }
 
 /// Get TUN status from config file (authoritative source)
-/// run_config.yaml is what Mihomo actually loads, so it's the truth
+/// `run_config.yaml` is what Mihomo actually loads, so it's the truth
 fn get_tun_status_from_config(app: &AppHandle) -> Result<bool, String> {
     let paths = crate::core_manager::ensure_app_storage(app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
@@ -142,16 +147,16 @@ fn get_tun_status_from_config(app: &AppHandle) -> Result<bool, String> {
     }
 
     let content = std::fs::read_to_string(&run_config_path)
-        .map_err(|e| format!("Failed to read run_config.yaml: {}", e))?;
+        .map_err(|e| format!("Failed to read run_config.yaml: {e}"))?;
 
     let yaml: serde_yaml::Value =
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {}", e))?;
+        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))?;
 
     // Check tun.enable in config
     Ok(yaml
         .get("tun")
         .and_then(|tun| tun.get("enable"))
-        .and_then(|enable| enable.as_bool())
+        .and_then(serde_yaml::Value::as_bool)
         .unwrap_or(false))
 }
 
@@ -159,20 +164,20 @@ fn get_tun_status_from_config(app: &AppHandle) -> Result<bool, String> {
 pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     // Build initial simple menu using MenuBuilder
     let show_i = MenuItem::with_id(app, "show", "Show", true, None::<&str>)
-        .map_err(|e| format!("Failed to create show menu item: {}", e))?;
+        .map_err(|e| format!("Failed to create show menu item: {e}"))?;
 
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)
-        .map_err(|e| format!("Failed to create quit menu item: {}", e))?;
+        .map_err(|e| format!("Failed to create quit menu item: {e}"))?;
 
     let sep = PredefinedMenuItem::separator(app)
-        .map_err(|e| format!("Failed to create separator: {}", e))?;
+        .map_err(|e| format!("Failed to create separator: {e}"))?;
 
     let menu = MenuBuilder::new(app)
         .item(&show_i)
         .item(&sep)
         .item(&quit_i)
         .build()
-        .map_err(|e| format!("Failed to create menu: {}", e))?;
+        .map_err(|e| format!("Failed to create menu: {e}"))?;
 
     let mut tray_builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
@@ -199,7 +204,7 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
 
     tray_builder
         .build(app)
-        .map_err(|e| format!("Failed to build tray: {}", e))?;
+        .map_err(|e| format!("Failed to build tray: {e}"))?;
 
     Ok(())
 }
@@ -267,7 +272,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
             .lock()
             .map(|guard| guard.last_port.unwrap_or(7890))
             .unwrap_or(7890);
-        let server = format!("127.0.0.1:{}", port);
+        let server = format!("127.0.0.1:{port}");
         let _ = sys_proxy::enable_sysproxy(server, None);
     }
 
@@ -297,6 +302,7 @@ fn toggle_tun(app: &AppHandle) {
 /// Update tray menu with new configuration
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_pass_by_value)]
 pub fn update_tray_full_menu(
     app: AppHandle,
     show_text: String,
@@ -315,36 +321,33 @@ pub fn update_tray_full_menu(
     current_mode: String,
 ) -> Result<(), String> {
     println!("[Tray] update_tray_full_menu called");
-    println!(
-        "[Tray] configs count: {}, proxy_groups count: {}",
-        configs.len(),
-        proxy_groups.len()
-    );
+    println!("[Tray] configs count: {}, proxy_groups count: {}",
+        configs.len(), proxy_groups.len());
 
     let tray = app
         .tray_by_id("main")
-        .ok_or_else(|| "Tray icon not found".to_string())?;
+        .ok_or_else(|| "Tray icon not found".to_owned())?;
 
     // Update internal state
     let state = app.state::<TrayState>();
     if let Ok(mut guard) = state.0.lock() {
         guard.sys_proxy_enabled = sys_proxy_enabled;
         guard.tun_enabled = tun_enabled;
-        guard.current_mode = current_mode.clone();
+        guard.current_mode.clone_from(&current_mode);
     }
 
     // Build menu items
     let show_i = MenuItem::with_id(&app, "show", &show_text, true, None::<&str>)
-        .map_err(|e| format!("Failed to create show item: {}", e))?;
+        .map_err(|e| format!("Failed to create show item: {e}"))?;
 
     let sep1 = PredefinedMenuItem::separator(&app)
-        .map_err(|e| format!("Failed to create separator: {}", e))?;
+        .map_err(|e| format!("Failed to create separator: {e}"))?;
 
     // System Proxy toggle - use MenuItem with circle indicator instead of CheckMenuItem
     let sys_proxy_label = if sys_proxy_enabled {
-        format!("● {}", sys_proxy_text)
+        format!("● {sys_proxy_text}")
     } else {
-        format!("○ {}", sys_proxy_text)
+        format!("○ {sys_proxy_text}")
     };
     let sys_proxy_i = MenuItem::with_id(
         &app,
@@ -353,41 +356,41 @@ pub fn update_tray_full_menu(
         true,
         None::<&str>,
     )
-    .map_err(|e| format!("Failed to create sys proxy item: {}", e))?;
+    .map_err(|e| format!("Failed to create sys proxy item: {e}"))?;
 
     // TUN Mode toggle - use MenuItem with circle indicator instead of CheckMenuItem
     let tun_label = if tun_enabled {
-        format!("● {}", tun_text)
+        format!("● {tun_text}")
     } else {
-        format!("○ {}", tun_text)
+        format!("○ {tun_text}")
     };
     let tun_i = MenuItem::with_id(&app, "toggle_tun", &tun_label, true, None::<&str>)
-        .map_err(|e| format!("Failed to create tun item: {}", e))?;
+        .map_err(|e| format!("Failed to create tun item: {e}"))?;
 
     // Mode items - use MenuItem with circle indicator
     let mode_sep = PredefinedMenuItem::separator(&app)
-        .map_err(|e| format!("Failed to create separator: {}", e))?;
+        .map_err(|e| format!("Failed to create separator: {e}"))?;
     let rule_label = if current_mode.to_lowercase() == "rule" {
-        format!("● {}", rule_text)
+        format!("● {rule_text}")
     } else {
-        format!("○ {}", rule_text)
+        format!("○ {rule_text}")
     };
     let global_label = if current_mode.to_lowercase() == "global" {
-        format!("● {}", global_text)
+        format!("● {global_text}")
     } else {
-        format!("○ {}", global_text)
+        format!("○ {global_text}")
     };
     let direct_label = if current_mode.to_lowercase() == "direct" {
-        format!("● {}", direct_text)
+        format!("● {direct_text}")
     } else {
-        format!("○ {}", direct_text)
+        format!("○ {direct_text}")
     };
     let rule_i = MenuItem::with_id(&app, "mode_rule", &rule_label, true, None::<&str>)
-        .map_err(|e| format!("Failed to create rule item: {}", e))?;
+        .map_err(|e| format!("Failed to create rule item: {e}"))?;
     let global_i = MenuItem::with_id(&app, "mode_global", &global_label, true, None::<&str>)
-        .map_err(|e| format!("Failed to create global item: {}", e))?;
+        .map_err(|e| format!("Failed to create global item: {e}"))?;
     let direct_i = MenuItem::with_id(&app, "mode_direct", &direct_label, true, None::<&str>)
-        .map_err(|e| format!("Failed to create direct item: {}", e))?;
+        .map_err(|e| format!("Failed to create direct item: {e}"))?;
 
     // Build main menu items
     let mut builder = MenuBuilder::new(&app)
@@ -406,7 +409,7 @@ pub fn update_tray_full_menu(
 
     if has_configs || has_proxies {
         let sub_sep = PredefinedMenuItem::separator(&app)
-            .map_err(|e| format!("Failed to create separator: {}", e))?;
+            .map_err(|e| format!("Failed to create separator: {e}"))?;
         builder = builder.item(&sub_sep);
 
         // Build Subscriptions submenu
@@ -421,13 +424,13 @@ pub fn update_tray_full_menu(
                 };
                 let switch_id = format!("sub_{}", config.name);
                 let item = MenuItem::with_id(&app, &switch_id, &sub_label, true, None::<&str>)
-                    .map_err(|e| format!("Failed to create subscription item: {}", e))?;
+                    .map_err(|e| format!("Failed to create subscription item: {e}"))?;
                 sub_menu_builder = sub_menu_builder.item(&item);
             }
 
             let subscriptions_submenu = sub_menu_builder
                 .build()
-                .map_err(|e| format!("Failed to build subscriptions submenu: {}", e))?;
+                .map_err(|e| format!("Failed to build subscriptions submenu: {e}"))?;
             builder = builder.item(&subscriptions_submenu);
         }
 
@@ -445,39 +448,40 @@ pub fn update_tray_full_menu(
                         format!("○ {}", proxy.name)
                     };
                     let item = MenuItem::with_id(&app, &id, &proxy_label, true, None::<&str>)
-                        .map_err(|e| format!("Failed to create proxy item: {}", e))?;
+                        .map_err(|e| format!("Failed to create proxy item: {e}"))?;
                     proxy_menu_builder = proxy_menu_builder.item(&item);
                 }
             }
 
             let proxies_submenu = proxy_menu_builder
                 .build()
-                .map_err(|e| format!("Failed to build proxies submenu: {}", e))?;
+                .map_err(|e| format!("Failed to build proxies submenu: {e}"))?;
             builder = builder.item(&proxies_submenu);
         }
     }
 
     // Separator and Quit
     let sep2 = PredefinedMenuItem::separator(&app)
-        .map_err(|e| format!("Failed to create separator: {}", e))?;
+        .map_err(|e| format!("Failed to create separator: {e}"))?;
     let quit_i = MenuItem::with_id(&app, "quit", &quit_text, true, None::<&str>)
-        .map_err(|e| format!("Failed to create quit item: {}", e))?;
+        .map_err(|e| format!("Failed to create quit item: {e}"))?;
 
     builder = builder.item(&sep2).item(&quit_i);
 
     // Build menu
     let menu = builder
         .build()
-        .map_err(|e| format!("Failed to build menu: {}", e))?;
+        .map_err(|e| format!("Failed to build menu: {e}"))?;
 
     tray.set_menu(Some(menu))
-        .map_err(|e| format!("Failed to set tray menu: {}", e))?;
+        .map_err(|e| format!("Failed to set tray menu: {e}"))?;
 
     Ok(())
 }
 
 /// Update just the toggle states (lightweight update)
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn update_tray_toggle_states(
     app: AppHandle,
     sys_proxy_enabled: bool,

@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
 use std::net::IpAddr;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager as _, State};
 
 use super::config_sanitizer::remove_dangerous_keys;
 use super::core_process::ensure_app_storage;
@@ -10,14 +10,14 @@ use super::secure_io::write_file_secure;
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 
 fn build_http_client(
-    user_agent: Option<String>,
+    user_agent: Option<&str>,
     resolve_pin: Option<(String, std::net::SocketAddr)>,
 ) -> Result<reqwest::Client, String> {
     build_http_client_with_proxy(user_agent, resolve_pin, None)
 }
 
 fn build_http_client_with_proxy(
-    user_agent: Option<String>,
+    user_agent: Option<&str>,
     resolve_pin: Option<(String, std::net::SocketAddr)>,
     proxy_url: Option<String>,
 ) -> Result<reqwest::Client, String> {
@@ -30,22 +30,22 @@ fn build_http_client_with_proxy(
 
         let scheme = url.scheme();
         if scheme != "http" && scheme != "https" {
-            return attempt.error(format!("Invalid redirect scheme: {}", scheme));
+            return attempt.error(format!("Invalid redirect scheme: {scheme}"));
         }
 
         let host = match url.host_str() {
-            Some(h) => h.to_string(),
+            Some(h) => h.to_owned(),
             None => return attempt.error("Redirect URL has no host"),
         };
 
         if is_private_host(&host) {
-            return attempt.error(format!("Redirect to private host blocked: {}", host));
+            return attempt.error(format!("Redirect to private host blocked: {host}"));
         }
 
         let port = url
             .port()
             .unwrap_or(if scheme == "https" { 443 } else { 80 });
-        match std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, port)) {
+        match std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{port}")) {
             Ok(addrs) => {
                 for addr in addrs {
                     if is_private_ip(addr.ip()) {
@@ -58,7 +58,7 @@ fn build_http_client_with_proxy(
                 }
             }
             Err(e) => {
-                return attempt.error(format!("Failed to resolve redirect host {}: {}", host, e))
+                return attempt.error(format!("Failed to resolve redirect host {host}: {e}"))
             }
         }
 
@@ -73,7 +73,7 @@ fn build_http_client_with_proxy(
 
     if let Some(proxy_url_inner) = proxy_url {
         let proxy = reqwest::Proxy::all(proxy_url_inner)
-            .map_err(|e| format!("Failed to create proxy: {}", e))?;
+            .map_err(|e| format!("Failed to create proxy: {e}"))?;
         client_builder = client_builder.proxy(proxy);
     }
 
@@ -83,11 +83,11 @@ fn build_http_client_with_proxy(
 
     // Determine User-Agent: use provided UA, or default to Zephyr
     let ua_to_use = match user_agent {
-        Some(ref ua) if !ua.trim().is_empty() => ua.trim().to_string(),
+        Some(ua) if !ua.trim().is_empty() => ua.trim().to_owned(),
         _ => {
             // Default Zephyr User-Agent with version
             let version = env!("CARGO_PKG_VERSION");
-            format!("Zephyr/{}", version)
+            format!("Zephyr/{version}")
         }
     };
 
@@ -121,7 +121,7 @@ fn build_http_client_with_proxy(
 }
 
 /// Check if an IP address is private or local
-fn is_private_ip(ip: IpAddr) -> bool {
+const fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
             ipv4.is_private()
@@ -167,19 +167,19 @@ fn is_private_host(host: &str) -> bool {
 fn validate_subscription_url_with_ip(
     url: &str,
 ) -> Result<(String, Option<std::net::SocketAddr>), String> {
-    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     // Only allow http and https schemes
     let scheme = parsed_url.scheme();
     if scheme != "http" && scheme != "https" {
-        return Err("Only HTTP and HTTPS URLs are allowed".to_string());
+        return Err("Only HTTP and HTTPS URLs are allowed".to_owned());
     }
 
     // Extract host
     let host = parsed_url.host_str().ok_or("URL must have a host")?;
 
     if is_private_host(host) {
-        return Err("Access to private/local addresses is not allowed".to_string());
+        return Err("Access to private/local addresses is not allowed".to_owned());
     }
 
     // Fix Med-3: DNS Rebinding / SSRF TOCTOU
@@ -187,12 +187,12 @@ fn validate_subscription_url_with_ip(
     let mut resolved_addr = None;
     // Use the correct port based on URL scheme
     let default_port = if scheme == "https" { 443 } else { 80 };
-    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:{}", host, default_port))
-        .map_err(|e| format!("Failed to resolve host: {}", e))?;
+    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+        .map_err(|e| format!("Failed to resolve host: {e}"))?;
 
     for addr in addrs {
         if is_private_ip(addr.ip()) {
-            return Err("Access to private/local resolved addresses is not allowed".to_string());
+            return Err("Access to private/local resolved addresses is not allowed".to_owned());
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(addr);
@@ -200,31 +200,29 @@ fn validate_subscription_url_with_ip(
     }
 
     if resolved_addr.is_none() {
-        return Err("Could not resolve any IP address for the host".to_string());
+        return Err("Could not resolve any IP address for the host".to_owned());
     }
 
-    Ok((host.to_string(), resolved_addr))
+    Ok((host.to_owned(), resolved_addr))
 }
 
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {
     if let Some(content_length) = resp.content_length() {
         if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
             return Err(format!(
-                "Response too large: {} bytes (max {} bytes)",
-                content_length, MAX_RESPONSE_SIZE
+                "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
             ));
         }
     }
 
-    use futures_util::StreamExt;
+    use futures_util::StreamExt as _;
     let mut bytes = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {}", e))?;
+        let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {e}"))?;
         if bytes.len() + chunk.len() > MAX_RESPONSE_SIZE {
             return Err(format!(
-                "Response exceeded size limit of {} bytes",
-                MAX_RESPONSE_SIZE
+                "Response exceeded size limit of {MAX_RESPONSE_SIZE} bytes"
             ));
         }
         bytes.extend_from_slice(&chunk);
@@ -245,7 +243,7 @@ pub async fn download_sub(
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
 
     if name.contains("..") || name.contains('/') || name.contains('\\') {
-        return Err("Invalid subscription name".to_string());
+        return Err("Invalid subscription name".to_owned());
     }
 
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
@@ -254,31 +252,30 @@ pub async fn download_sub(
     let do_download = |client: reqwest::Client, url: String| async move {
         let resp = client.get(&url).send().await.map_err(|e| {
             if e.is_timeout() {
-                format!("Request timeout: {}", e)
+                format!("Request timeout: {e}")
             } else if e.is_connect() {
-                format!("Connection failed: {}", e)
+                format!("Connection failed: {e}")
             } else if e.is_request() {
-                format!("Request error: {}", e)
+                format!("Request error: {e}")
             } else if e.is_body() {
-                format!("Body error: {}", e)
+                format!("Body error: {e}")
             } else if e.is_decode() {
-                format!("Decode error: {}", e)
+                format!("Decode error: {e}")
             } else {
-                format!("Network error: {}", e)
+                format!("Network error: {e}")
             }
         })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
-            println!("Download failed with status: {}", status);
-            return Err("Download failed with error status".to_string());
+            println!("Download failed with status: {status}");
+            return Err("Download failed with error status".to_owned());
         }
 
         if let Some(content_length) = resp.content_length() {
             if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
                 return Err(format!(
-                    "Response too large: {} bytes (max {} bytes)",
-                    content_length, MAX_RESPONSE_SIZE
+                    "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
                 ));
             }
         }
@@ -288,14 +285,14 @@ pub async fn download_sub(
             .get("subscription-userinfo")
             .and_then(|h| h.to_str().ok())
             .unwrap_or("")
-            .to_string();
+            .to_owned();
 
         let final_url = resp
             .headers()
             .get("profile-web-page-url")
             .and_then(|h| h.to_str().ok())
             .unwrap_or(&url)
-            .to_string();
+            .to_owned();
 
         let bytes = read_response_body(resp).await?;
 
@@ -306,16 +303,16 @@ pub async fn download_sub(
     let mut result: Option<(Vec<u8>, String, String)> = None;
 
     // Try direct connection first
-    match build_http_client_with_proxy(user_agent.clone(), resolve_pin.clone(), None) {
+    match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
         Ok(client) => match do_download(client, url.clone()).await {
             Ok(data) => result = Some(data),
             Err(e) => {
-                println!("[download_sub] Direct connection failed: {}", e);
+                println!("[download_sub] Direct connection failed: {e}");
                 last_error = e;
             }
         },
         Err(e) => {
-            println!("[download_sub] Failed to build direct client: {}", e);
+            println!("[download_sub] Failed to build direct client: {e}");
             last_error = e;
         }
     }
@@ -326,11 +323,7 @@ pub async fn download_sub(
             let state = app.state::<MihomoState>();
             let guard = state.0.lock().ok();
             guard.and_then(|g| {
-                if g.process.is_some() {
-                    Some(format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
-                } else {
-                    None
-                }
+                g.process.is_some().then(|| format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
             })
         };
 
@@ -338,12 +331,12 @@ pub async fn download_sub(
             // When using proxy, skip DNS pre-resolve pinning to let the proxy
             // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
             let client_mihomo =
-                build_http_client_with_proxy(user_agent.clone(), None, Some(proxy_url_val));
+                build_http_client_with_proxy(user_agent.as_deref(), None, Some(proxy_url_val));
             if let Ok(client) = client_mihomo {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        println!("[download_sub] Mihomo proxy failed: {}", e);
+                        println!("[download_sub] Mihomo proxy failed: {e}");
                         last_error = e;
                     }
                 }
@@ -353,16 +346,16 @@ pub async fn download_sub(
 
     if result.is_none() {
         if let Some(sys_proxy_url) = crate::sys_proxy::get_sys_proxy_address() {
-            println!("[download_sub] Trying system proxy: {}", sys_proxy_url);
+            println!("[download_sub] Trying system proxy: {sys_proxy_url}");
             // When using proxy, skip DNS pre-resolve pinning to let the proxy
             // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
             let client_sys =
-                build_http_client_with_proxy(user_agent.clone(), None, Some(sys_proxy_url));
+                build_http_client_with_proxy(user_agent.as_deref(), None, Some(sys_proxy_url));
             if let Ok(client) = client_sys {
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        println!("[download_sub] System proxy failed: {}", e);
+                        println!("[download_sub] System proxy failed: {e}");
                         last_error = e;
                     }
                 }
@@ -372,13 +365,13 @@ pub async fn download_sub(
 
     let (bytes, sub_info_header, final_url) = result.ok_or_else(|| {
         if last_error.is_empty() {
-            "Network error occurred during download".to_string()
+            "Network error occurred during download".to_owned()
         } else {
             last_error
         }
     })?;
 
-    let mut content = String::from_utf8_lossy(&bytes).to_string();
+    let mut content = String::from_utf8_lossy(&bytes).into_owned();
 
     if !content.contains("proxies:") && !content.contains("port:") {
         let trimmed_content = content.replace(&['\r', '\n', ' ', '\t'][..], "");
@@ -402,16 +395,16 @@ pub async fn download_sub(
                 remove_dangerous_keys(&mut yaml_val, false);
 
                 content = serde_yaml::to_string(&yaml_val)
-                    .map_err(|e| format!("Failed to serialize sanitized subscription: {}", e))?;
+                    .map_err(|e| format!("Failed to serialize sanitized subscription: {e}"))?;
             }
             Err(e) => {
-                return Err(format!("Invalid YAML structure in subscription: {}", e));
+                return Err(format!("Invalid YAML structure in subscription: {e}"));
             }
         }
     } else if !content.trim().starts_with("http") && !content.trim().is_empty() {
         return Err(
             "The subscription content is neither a valid Clash YAML nor a supported node list"
-                .to_string(),
+                .to_owned(),
         );
     }
 
@@ -420,7 +413,7 @@ pub async fn download_sub(
     let clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
         name.clone()
     } else {
-        format!("{}.yaml", name)
+        format!("{name}.yaml")
     };
     let target_path = paths.profiles_dir.join(&clean_name);
 
@@ -428,11 +421,11 @@ pub async fn download_sub(
     metadata.configs.insert(
         clean_name.clone(),
         super::crypto::ConfigMetadata {
-            url: Some(final_url.clone()),
+            url: Some(final_url),
             sub_info: if sub_info_header.is_empty() {
                 None
             } else {
-                Some(sub_info_header.clone())
+                Some(sub_info_header)
             },
         },
     );
@@ -442,7 +435,7 @@ pub async fn download_sub(
 
     write_file_secure(&target_path, &final_content)?;
 
-    Ok(format!("Config saved as {}", clean_name))
+    Ok(format!("Config saved as {clean_name}"))
 }
 
 #[tauri::command]
@@ -452,14 +445,14 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
     let client = build_http_client(None, resolve_pin)?;
 
     let resp = client.get(&url).send().await.map_err(|e| {
-        println!("Fetch failed: {}", e);
-        "Network error occurred during fetch".to_string()
+        println!("Fetch failed: {e}");
+        "Network error occurred during fetch".to_owned()
     })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        println!("Fetch failed with status: {}", status);
-        return Err("Fetch failed with error status".to_string());
+        println!("Fetch failed with status: {status}");
+        return Err("Fetch failed with error status".to_owned());
     }
 
     let bytes = read_response_body(resp).await?;
@@ -467,6 +460,7 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[must_use] 
 pub fn is_private_host_public(host: &str) -> bool {
     is_private_host(host)
 }

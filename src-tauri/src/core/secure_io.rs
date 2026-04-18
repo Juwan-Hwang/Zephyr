@@ -2,11 +2,11 @@ use std::fs;
 use std::path::Path;
 
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("Failed to write to {:?}: {}", path, e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::PermissionsExt as _;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
 
@@ -15,13 +15,25 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
         // On Windows, use explicit ACL to restrict file access to current user only
         // This is equivalent to Unix 0600 permissions
         use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::OsStrExt as _;
         use std::ptr;
-        use windows_sys::Win32::Foundation::*;
-        use windows_sys::Win32::Security::Authorization::*;
-        use windows_sys::Win32::Security::*;
-        use windows_sys::Win32::Storage::FileSystem::*;
-        use windows_sys::Win32::System::Threading::*;
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, GENERIC_ALL, HANDLE, ERROR_SUCCESS, INVALID_HANDLE_VALUE, LocalFree,
+        };
+        use windows_sys::Win32::Security::Authorization::{
+            EXPLICIT_ACCESS_W, GRANT_ACCESS, SetEntriesInAclW, SetSecurityInfo, SE_FILE_OBJECT,
+            TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_IS_WELL_KNOWN_GROUP,
+        };
+        use windows_sys::Win32::Security::{
+            ACL, DACL_SECURITY_INFORMATION, CreateWellKnownSid, GetTokenInformation,
+            NO_INHERITANCE, PSID, PROTECTED_DACL_SECURITY_INFORMATION,
+            TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
+        };
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+            READ_CONTROL, WRITE_DAC,
+        };
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
         // Convert path to wide string
         let wide_path: Vec<u16> = OsStr::new(path)
@@ -29,6 +41,10 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             .chain(std::iter::once(0))
             .collect();
 
+        // SAFETY: This block calls Windows security APIs to set file DACL.
+        // All pointer parameters are obtained from valid Windows API calls.
+        // The operations are logically atomic — partial failure is handled by early returns.
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
         unsafe {
             // Get a handle to the file with WRITE_DAC access
             let handle = CreateFileW(

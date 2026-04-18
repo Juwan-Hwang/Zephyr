@@ -1,8 +1,8 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tauri::{command, AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri::{command, AppHandle, Emitter as _, Manager as _, State};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt as _, Shortcut, ShortcutState};
 
 /// Maximum number of global shortcuts allowed.
 const MAX_SHORTCUTS: usize = 20;
@@ -30,6 +30,7 @@ const MAX_ACTION_LEN: usize = 64;
 const MAX_ACCELERATOR_LEN: usize = 128;
 
 #[command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn register_shortcut(
     app: AppHandle,
     state: State<'_, ShortcutRegistry>,
@@ -38,12 +39,11 @@ pub fn register_shortcut(
 ) -> Result<(), String> {
     // Input validation
     if action.len() > MAX_ACTION_LEN {
-        return Err(format!("Action too long (max {} chars)", MAX_ACTION_LEN));
+        return Err(format!("Action too long (max {MAX_ACTION_LEN} chars)"));
     }
     if accelerator.len() > MAX_ACCELERATOR_LEN {
         return Err(format!(
-            "Accelerator too long (max {} chars)",
-            MAX_ACCELERATOR_LEN
+            "Accelerator too long (max {MAX_ACCELERATOR_LEN} chars)"
         ));
     }
 
@@ -52,18 +52,17 @@ pub fn register_shortcut(
         let map = state
             .0
             .lock()
-            .map_err(|e| format!("Failed to lock state: {}", e))?;
+            .map_err(|e| format!("Failed to lock state: {e}"))?;
         if map.len() >= MAX_SHORTCUTS && !map.contains_key(&action) {
             return Err(format!(
-                "Maximum number of shortcuts ({}) reached. Unregister a shortcut first.",
-                MAX_SHORTCUTS
+                "Maximum number of shortcuts ({MAX_SHORTCUTS}) reached. Unregister a shortcut first."
             ));
         }
     }
 
     let shortcut: Shortcut = accelerator
         .parse::<Shortcut>()
-        .map_err(|e| format!("Invalid shortcut: {}", e))?;
+        .map_err(|e| format!("Invalid shortcut: {e}"))?;
 
     // Unregister previous binding for this action if any
     if let Ok(map) = state.0.lock() {
@@ -76,9 +75,9 @@ pub fn register_shortcut(
 
     let action_clone = action.clone();
     app.global_shortcut()
-        .on_shortcut(shortcut, move |_app_handle, _shortcut, event| {
+        .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
             if event.state() == ShortcutState::Pressed {
-                if let Some(window) = _app_handle.get_webview_window("main") {
+                if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.emit(
                         "global-shortcut",
                         ShortcutPayload {
@@ -88,18 +87,19 @@ pub fn register_shortcut(
                 }
             }
         })
-        .map_err(|e| format!("Failed to register shortcut: {}", e))?;
+        .map_err(|e| format!("Failed to register shortcut: {e}"))?;
 
     state
         .0
         .lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?
+        .map_err(|e| format!("Failed to lock state: {e}"))?
         .insert(action, accelerator);
     Ok(())
 }
 
 /// Unregister a previously registered global shortcut by action name.
 #[command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn unregister_shortcut(
     app: AppHandle,
     state: State<'_, ShortcutRegistry>,
@@ -108,17 +108,17 @@ pub fn unregister_shortcut(
     let accelerator = state
         .0
         .lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?
+        .map_err(|e| format!("Failed to lock state: {e}"))?
         .remove(&action)
-        .ok_or_else(|| format!("Shortcut '{}' not registered", action))?;
+        .ok_or_else(|| format!("Shortcut '{action}' not registered"))?;
 
     let shortcut: Shortcut = accelerator
         .parse()
-        .map_err(|e| format!("Invalid shortcut: {}", e))?;
+        .map_err(|e| format!("Invalid shortcut: {e}"))?;
 
     app.global_shortcut()
         .unregister(shortcut)
-        .map_err(|e| format!("Failed to unregister shortcut: {}", e))?;
+        .map_err(|e| format!("Failed to unregister shortcut: {e}"))?;
 
     Ok(())
 }

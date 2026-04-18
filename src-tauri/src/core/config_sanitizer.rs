@@ -2,6 +2,7 @@ use std::path::Path;
 
 /// Recursively remove dangerous keys from YAML structure to prevent code execution
 /// This function is security-critical and used by both production code and tests
+#[allow(clippy::wildcard_enum_match_arm)]
 pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
     match value {
         serde_yaml::Value::Mapping(map) => {
@@ -9,19 +10,19 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
             // script: can execute arbitrary JavaScript
             // script-path: can load external script files
             for key in ["script", "script-path"] {
-                map.remove(serde_yaml::Value::String(key.to_string()));
+                map.remove(serde_yaml::Value::String(key.to_owned()));
             }
 
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
-            let is_provider = map.contains_key(serde_yaml::Value::String("type".to_string()))
-                && (map.contains_key(serde_yaml::Value::String("url".to_string()))
-                    || map.contains_key(serde_yaml::Value::String("path".to_string())));
+            let is_provider = map.contains_key(serde_yaml::Value::String("type".to_owned()))
+                && (map.contains_key(serde_yaml::Value::String("url".to_owned()))
+                    || map.contains_key(serde_yaml::Value::String("path".to_owned())));
 
             // Remove 'path' only in provider context to prevent path traversal
             // while allowing legitimate 'path' fields elsewhere
             if in_provider_context || is_provider {
-                map.remove(serde_yaml::Value::String("path".to_string()));
+                map.remove(serde_yaml::Value::String("path".to_owned()));
             }
 
             // Recursively process all values in the mapping
@@ -42,7 +43,7 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
 pub(super) fn url_decode_complete(input: &str) -> String {
-    let mut result = input.to_string();
+    let mut result = input.to_owned();
 
     // Decode iteratively until no more changes (handles nested encoding)
     let mut changed = true;
@@ -91,41 +92,41 @@ pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
     // Step 2: Extract just the filename
     let config_file_name = Path::new(&decoded_path)
         .file_name()
-        .ok_or_else(|| "Invalid config path: no filename component".to_string())?
+        .ok_or_else(|| "Invalid config path: no filename component".to_owned())?
         .to_str()
         .ok_or("Invalid config filename encoding")?
-        .to_string();
+        .to_owned();
 
     // Step 3: Security checks
 
     // Check for path traversal attempts
     if config_file_name.contains("..") {
-        return Err("Path traversal detected: '..' is not allowed".to_string());
+        return Err("Path traversal detected: '..' is not allowed".to_owned());
     }
 
     // Check for directory separators
     if config_file_name.contains('/') || config_file_name.contains('\\') {
-        return Err("Path traversal detected: directory separators are not allowed".to_string());
+        return Err("Path traversal detected: directory separators are not allowed".to_owned());
     }
 
     // Check for null bytes (could be used to bypass extension checks)
     if config_file_name.contains('\0') {
-        return Err("Invalid character in filename: null byte detected".to_string());
+        return Err("Invalid character in filename: null byte detected".to_owned());
     }
 
     // Check for control characters
-    if config_file_name.chars().any(|c| c.is_control()) {
-        return Err("Invalid character in filename: control characters not allowed".to_string());
+    if config_file_name.chars().any(char::is_control) {
+        return Err("Invalid character in filename: control characters not allowed".to_owned());
     }
 
     // Validate extension
     let lower_name = config_file_name.to_lowercase();
     if !lower_name.ends_with(".yaml") && !lower_name.ends_with(".yml") {
-        return Err("Invalid file type: only .yaml and .yml files are permitted".to_string());
+        return Err("Invalid file type: only .yaml and .yml files are permitted".to_owned());
     }
 
     if config_file_name.len() > 255 {
-        return Err("Filename too long: maximum 255 characters allowed".to_string());
+        return Err("Filename too long: maximum 255 characters allowed".to_owned());
     }
 
     // Check for reserved Windows names (even on other platforms for consistency)
@@ -139,8 +140,7 @@ pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
     ];
     if reserved_names.contains(&base_name) {
         return Err(format!(
-            "Reserved filename: '{}' is not allowed",
-            config_file_name
+            "Reserved filename: '{config_file_name}' is not allowed"
         ));
     }
 
@@ -156,14 +156,14 @@ pub(super) fn validate_path_within_dir(
     if resolved_path.exists() {
         let canonical_resolved = resolved_path
             .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize resolved path: {}", e))?;
+            .map_err(|e| format!("Failed to canonicalize resolved path: {e}"))?;
         let canonical_base = base_dir
             .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
+            .map_err(|e| format!("Failed to canonicalize base directory: {e}"))?;
 
         if !canonical_resolved.starts_with(&canonical_base) {
             return Err(
-                "Path traversal detected: resolved path is outside allowed directory".to_string(),
+                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
             );
         }
     } else {
@@ -178,7 +178,7 @@ pub(super) fn validate_path_within_dir(
 
         if !resolved_normalized.starts_with(&*base_normalized) {
             return Err(
-                "Path traversal detected: resolved path is outside allowed directory".to_string(),
+                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
             );
         }
     }

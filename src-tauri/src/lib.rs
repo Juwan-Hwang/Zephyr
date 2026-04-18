@@ -22,7 +22,7 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use sys_proxy::{clear_sys_proxy, disable_sysproxy, enable_sysproxy, get_sys_proxy};
-use tauri::Manager;
+use tauri::Manager as _;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
@@ -44,6 +44,7 @@ impl Default for RateLimiter {
 }
 
 impl RateLimiter {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             calls: Mutex::new(HashMap::new()),
@@ -52,8 +53,9 @@ impl RateLimiter {
 
     /// Check if a command can be executed (returns true if allowed, false if rate limited)
     /// Also cleans up expired entries to prevent unbounded memory growth
+    #[allow(clippy::expect_used)]
     pub fn check_rate_limit(&self, command: &str, min_interval_ms: u64) -> bool {
-        let mut calls = self.calls.lock().unwrap();
+        let mut calls = self.calls.lock().expect("rate limiter mutex not poisoned");
         let now = Instant::now();
 
         // Clean up entries older than 1 minute to prevent unbounded growth
@@ -66,7 +68,7 @@ impl RateLimiter {
             }
         }
 
-        calls.insert(command.to_string(), now);
+        calls.insert(command.to_owned(), now);
         true
     }
 }
@@ -101,11 +103,13 @@ struct Settings {
 struct SettingsState(Arc<Mutex<Settings>>);
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn get_settings(state: tauri::State<SettingsState>) -> Settings {
-    state.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    state.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn save_settings(
     app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
@@ -117,23 +121,24 @@ fn save_settings(
     let path = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
     if !path.exists() {
-        fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
+        fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {e}"))?;
     }
     let file_path = path.join("settings.json");
     let json_str = serde_json::to_string(&settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-    fs::write(&file_path, json_str).map_err(|e| format!("Failed to write settings.json: {}", e))?;
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
+    fs::write(&file_path, json_str).map_err(|e| format!("Failed to write settings.json: {e}"))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::PermissionsExt as _;
         let _ = fs::set_permissions(&file_path, fs::Permissions::from_mode(0o600));
     }
     Ok(())
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn show_main_window(window: tauri::Window) {
     let _ = window.show();
     let _ = window.set_focus();
@@ -141,7 +146,8 @@ fn show_main_window(window: tauri::Window) {
 
 /// Get current system proxy and core status for tray state determination
 #[tauri::command]
-fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
+#[allow(clippy::needless_pass_by_value)]
+fn get_tray_status(app: tauri::AppHandle) -> String {
     // Check if core is running
     let state = app.state::<MihomoState>();
     let core_running = state
@@ -152,7 +158,7 @@ fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
 
     if !core_running {
         // Core not running, return default state
-        return Ok("default".to_string());
+        return "default".to_owned();
     }
 
     // Check system proxy status using existing function
@@ -167,14 +173,14 @@ fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
         .unwrap_or(false);
 
     if tun_enabled {
-        return Ok("tun".to_string());
+        return "tun".to_owned();
     }
 
     if sys_proxy_enabled {
-        return Ok("sysproxy".to_string());
+        return "sysproxy".to_owned();
     }
 
-    Ok("default".to_string())
+    "default".to_owned()
 }
 
 #[cfg(test)]
@@ -220,7 +226,7 @@ async fn rate_limited_unregister_shortcut(
 
 #[tauri::command]
 fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    env!("CARGO_PKG_VERSION").to_owned()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -265,11 +271,14 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 use std::ffi::OsStr;
-                use std::os::windows::ffi::OsStrExt;
+                use std::os::windows::ffi::OsStrExt as _;
                 let app_id: Vec<u16> = OsStr::new("com.zephyr.desktop")
                     .encode_wide()
                     .chain(std::iter::once(0))
                     .collect();
+                // SAFETY: SetCurrentProcessExplicitAppUserModelID is a Windows API that
+                // takes a null-terminated wide string pointer. app_id is constructed with
+                // a trailing zero via .chain(std::iter::once(0)), so it is valid.
                 unsafe {
                     windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
                         app_id.as_ptr(),
@@ -277,7 +286,7 @@ pub fn run() {
                 }
             }
 
-            ensure_app_storage(app.handle()).map_err(|e| e.clone())?;
+            ensure_app_storage(app.handle())?;
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let settings_file = config_dir.join("settings.json");
             let settings = if settings_file.exists() {
@@ -296,10 +305,10 @@ pub fn run() {
                     dns_fallbacks: None,
                 }
             };
-            app.manage(SettingsState(Arc::new(Mutex::new(settings.clone()))));
+            app.manage(SettingsState(Arc::new(Mutex::new(settings))));
 
             // Init Tray using the new tray module
-            init_tray(app.handle()).map_err(|e| e.clone())?;
+            init_tray(app.handle())?;
 
             // Handle deep link URLs from command-line arguments
             // (protocol associations on Windows/macOS pass URLs via argv)
@@ -307,7 +316,9 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| match event {
+        .on_window_event(|window, event| {
+            #[allow(clippy::wildcard_enum_match_arm)]
+            match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let settings_state = window.state::<SettingsState>();
                 let close_to_tray = settings_state
@@ -354,12 +365,13 @@ pub fn run() {
                         }
                     }
                     if imported_count > 0 {
-                        use tauri::Emitter;
+                        use tauri::Emitter as _;
                         let _ = window.emit("profiles-imported", imported_count);
                     }
                 }
             }
             _ => {}
+        }
         })
         .invoke_handler(tauri::generate_handler![
             start_core,
@@ -412,12 +424,13 @@ pub fn run() {
             get_app_version,
         ]);
 
+    #[allow(clippy::expect_used)]
     let app = builder
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|_handle, event| {
-        if let tauri::RunEvent::Exit = event {
+        if matches!(event, tauri::RunEvent::Exit) {
             kill_mihomo();
             // Smart kill: only prompts for password if there's actually a root mihomo running
             let _ = smart_kill_all_mihomo_as_root();

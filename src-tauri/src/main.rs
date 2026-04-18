@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    my_clash_gui_lib::run()
+    my_clash_gui_lib::run();
 }

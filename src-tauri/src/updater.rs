@@ -1,12 +1,12 @@
 use crate::core_manager::{self, MihomoState};
 use flate2::read::GzDecoder;
-use futures_util::StreamExt;
+use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{command, Emitter, Manager, State, Window};
+use tauri::{command, Emitter as _, Manager as _, State, Window};
 
-use sha2::{Digest, Sha256};
-use std::io::Read;
+use sha2::{Digest as _, Sha256};
+use std::io::Read as _;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateInfo {
@@ -53,7 +53,7 @@ fn current_platform_tags() -> Result<(&'static str, &'static str), String> {
         "openbsd" => "openbsd",
         "netbsd" => "netbsd",
         "dragonfly" => "dragonfly",
-        _ => return Err(format!("Unsupported OS: {}", os)),
+        _ => return Err(format!("Unsupported OS: {os}")),
     };
     let arch_tag = match arch {
         "x86_64" => "amd64",
@@ -67,7 +67,7 @@ fn current_platform_tags() -> Result<(&'static str, &'static str), String> {
         "riscv64" => "riscv64",
         "s390x" => "s390x",
         "loongarch64" => "loongarch64",
-        _ => return Err(format!("Unsupported ARCH: {}", arch)),
+        _ => return Err(format!("Unsupported ARCH: {arch}")),
     };
     Ok((os_tag, arch_tag))
 }
@@ -75,7 +75,7 @@ fn current_platform_tags() -> Result<(&'static str, &'static str), String> {
 fn build_github_client() -> Result<reqwest::Client, String> {
     let version = env!("CARGO_PKG_VERSION");
     reqwest::Client::builder()
-        .user_agent(format!("Zephyr/{}", version))
+        .user_agent(format!("Zephyr/{version}"))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
         .build()
@@ -94,8 +94,7 @@ fn emit_core_download_status(window: &Window, status_text: impl Into<String>, pr
 
 fn build_asset_download_url(version: &str, asset_name: &str) -> String {
     format!(
-        "https://github.com/MetaCubeX/mihomo/releases/download/{}/{}",
-        version, asset_name
+        "https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}"
     )
 }
 
@@ -106,7 +105,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, String> {
         .get(MIHOMO_RELEASE_API)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch release info: {}", e))?;
+        .map_err(|e| format!("Failed to fetch release info: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -115,7 +114,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, String> {
     response
         .json::<GithubRelease>()
         .await
-        .map_err(|e| format!("Failed to parse release info: {}", e))
+        .map_err(|e| format!("Failed to parse release info: {e}"))
 }
 
 fn is_trusted_update_url(url: &str) -> bool {
@@ -123,7 +122,7 @@ fn is_trusted_update_url(url: &str) -> bool {
         if let Some(host) = parsed.host_str() {
             return TRUSTED_HOSTS
                 .iter()
-                .any(|&h| host == h || host.ends_with(&format!(".{}", h)));
+                .any(|&h| host == h || host.ends_with(&format!(".{h}")));
         }
     }
     false
@@ -146,8 +145,7 @@ fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(),
         Ok(())
     } else {
         Err(format!(
-            "SHA256 mismatch: expected {}, got {}",
-            expected_hash, hex_result
+            "SHA256 mismatch: expected {expected_hash}, got {hex_result}"
         ))
     }
 }
@@ -159,18 +157,17 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
         .connect_timeout(Duration::from_secs(10))
         .user_agent("Zephyr-Update-Checker")
         .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
+        .map_err(|e| format!("Failed to build client: {e}"))?;
 
     let api_url = format!(
-        "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{}",
-        version
+        "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}"
     );
 
     let response = client
         .get(&api_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch release info: {}", e))?;
+        .map_err(|e| format!("Failed to fetch release info: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -179,13 +176,13 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
     let json: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        .map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     let assets = json
         .get("assets")
         .unwrap_or(&serde_json::Value::Null)
         .as_array()
-        .ok_or_else(|| "No assets found in release".to_string())?;
+        .ok_or_else(|| "No assets found in release".to_owned())?;
 
     for asset in assets {
         if let Some(name) = asset["name"].as_str() {
@@ -203,8 +200,7 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
     }
 
     Err(format!(
-        "Could not find SHA256 hash for {}. Verification is required for security.",
-        asset_name
+        "Could not find SHA256 hash for {asset_name}. Verification is required for security."
     ))
 }
 
@@ -214,7 +210,7 @@ async fn download_release_asset(
     dest_path: &std::path::Path,
 ) -> Result<(), String> {
     if !is_trusted_update_url(url) {
-        return Err("Untrusted download URL: only github.com is allowed".to_string());
+        return Err("Untrusted download URL: only github.com is allowed".to_owned());
     }
 
     let client = build_github_client()?;
@@ -224,24 +220,21 @@ async fn download_release_asset(
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("Failed to download: {}", e))?;
+        .map_err(|e| format!("Failed to download: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Download failed with status: {}",
-            response.status()
-        ));
+        return Err(format!("Download failed with status: {}", response.status()));
     }
 
     let total_size = response.content_length().unwrap_or(0);
     if total_size > 100 * 1024 * 1024 {
-        return Err(format!("Update package too large: {} bytes", total_size));
+        return Err(format!("Update package too large: {total_size} bytes"));
     }
 
     let mut downloaded = 0_u64;
     let mut stream = response.bytes_stream();
     let mut file = std::fs::File::create(dest_path)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        .map_err(|e| format!("Failed to create temp file: {e}"))?;
 
     while let Some(item) = stream.next().await {
         let chunk = match item {
@@ -254,12 +247,12 @@ async fn download_release_asset(
         downloaded += chunk.len() as u64;
         if downloaded > 100 * 1024 * 1024 {
             let _ = std::fs::remove_file(dest_path);
-            return Err("Update package exceeded size limit".to_string());
+            return Err("Update package exceeded size limit".to_owned());
         }
-        use std::io::Write;
+        use std::io::Write as _;
         if let Err(e) = file.write_all(&chunk) {
             let _ = std::fs::remove_file(dest_path);
-            return Err(format!("Failed to write chunk: {}", e));
+            return Err(format!("Failed to write chunk: {e}"));
         }
 
         let progress = if total_size > 0 {
@@ -273,7 +266,7 @@ async fn download_release_asset(
         };
         emit_core_download_status(
             window,
-            format!("Downloading core... {}%", progress),
+            format!("Downloading core... {progress}%"),
             progress,
         );
     }
@@ -287,7 +280,7 @@ async fn download_release_asset(
 
 fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     let (os_tag, arch_tag) = current_platform_tags()?;
-    let key = format!("mihomo-{}-{}", os_tag, arch_tag);
+    let key = format!("mihomo-{os_tag}-{arch_tag}");
     let is_windows = os_tag == "windows";
     let mut candidates = assets
         .iter()
@@ -299,7 +292,7 @@ fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> 
     candidates
         .into_iter()
         .next()
-        .ok_or_else(|| format!("Could not find release asset for {}-{}", os_tag, arch_tag))
+        .ok_or_else(|| format!("Could not find release asset for {os_tag}-{arch_tag}"))
 }
 
 fn extract_from_zip(
@@ -308,14 +301,14 @@ fn extract_from_zip(
 ) -> Result<(), String> {
     let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
     let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {}", e))?;
+        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {e}"))?;
     let expected = core_manager::core_binary_name();
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name();
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
-            return Err(format!("Malicious ZIP path detected: {}", name));
+            return Err(format!("Malicious ZIP path detected: {name}"));
         }
         let lower = name.to_lowercase();
         #[cfg(target_os = "windows")]
@@ -326,12 +319,12 @@ fn extract_from_zip(
             let mut out_file = std::fs::File::create(exe_path).map_err(|e| e.to_string())?;
             let written = std::io::copy(&mut file, &mut out_file).map_err(|e| e.to_string())?;
             if written == 0 {
-                return Err("Extracted core binary is empty".to_string());
+                return Err("Extracted core binary is empty".to_owned());
             }
             return Ok(());
         }
     }
-    Err("No executable found in ZIP".to_string())
+    Err("No executable found in ZIP".to_owned())
 }
 
 fn extract_from_gz(
@@ -345,7 +338,7 @@ fn extract_from_gz(
     let mut temp_decompressed = std::fs::File::create(&temp_tar_path).map_err(|e| e.to_string())?;
     let mut total_decompressed = 0_u64;
     let mut buffer = [0u8; 8192];
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
     loop {
         let n = decoder.read(&mut buffer).map_err(|e| e.to_string())?;
         if n == 0 {
@@ -354,7 +347,7 @@ fn extract_from_gz(
         total_decompressed += n as u64;
         if total_decompressed > 200 * 1024 * 1024 {
             let _ = std::fs::remove_file(&temp_tar_path);
-            return Err("Decompressed gz too large".to_string());
+            return Err("Decompressed gz too large".to_owned());
         }
         temp_decompressed
             .write_all(buffer.get(..n).unwrap_or(&[]))
@@ -374,7 +367,7 @@ fn extract_from_gz(
         let expected = core_manager::core_binary_name();
         for entry in archive
             .entries()
-            .map_err(|e| format!("Failed to parse tar entries: {}", e))?
+            .map_err(|e| format!("Failed to parse tar entries: {e}"))?
         {
             let mut entry_inner = entry.map_err(|e| e.to_string())?;
             let path = entry_inner.path().map_err(|e| e.to_string())?;
@@ -382,7 +375,7 @@ fn extract_from_gz(
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if path_str.contains("..") || path_str.starts_with('/') {
                 let _ = std::fs::remove_file(&temp_tar_path);
-                return Err(format!("Malicious TAR path detected: {}", path_str));
+                return Err(format!("Malicious TAR path detected: {path_str}"));
             }
             #[cfg(target_os = "windows")]
             let matched = file_name.eq_ignore_ascii_case(expected);
@@ -394,13 +387,13 @@ fn extract_from_gz(
                     std::io::copy(&mut entry_inner, &mut out_file).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(&temp_tar_path);
                 if written == 0 {
-                    return Err("Extracted core binary is empty".to_string());
+                    return Err("Extracted core binary is empty".to_owned());
                 }
                 return Ok(());
             }
         }
         let _ = std::fs::remove_file(&temp_tar_path);
-        Err("No executable found in tar.gz".to_string())
+        Err("No executable found in tar.gz".to_owned())
     } else {
         let mut out_file = std::fs::File::create(exe_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut decomp_file, &mut out_file).map_err(|e| e.to_string())?;
@@ -420,16 +413,19 @@ fn extract_core_binary(
     if url.ends_with(".gz") {
         return extract_from_gz(archive_path, exe_path);
     }
-    Err("Unsupported asset format, expected .zip or .gz".to_string())
+    Err("Unsupported asset format, expected .zip or .gz".to_owned())
 }
 
-fn install_core_binary(_app: &tauri::AppHandle) -> Result<(), String> {
+#[allow(clippy::missing_const_for_fn, clippy::unnecessary_wraps)]
+fn install_core_binary(app: &tauri::AppHandle) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        let paths = core_manager::ensure_app_storage(_app)?;
+        let paths = core_manager::ensure_app_storage(app)?;
         let core_path = paths.core_dir.join(core_manager::core_binary_name());
         core_manager::ensure_executable(&core_path)?;
     }
+    #[cfg(target_os = "windows")]
+    let _ = app;
     Ok(())
 }
 
@@ -461,10 +457,10 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
                 }
                 tag
             } else {
-                "1.7.5".to_string()
+                "1.7.5".to_owned()
             }
         }
-        _ => "1.7.5".to_string(),
+        _ => "1.7.5".to_owned(),
     };
 
     let party_res = match client
@@ -480,10 +476,10 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
                 }
                 tag
             } else {
-                "1.0.0".to_string()
+                "1.0.0".to_owned()
             }
         }
-        _ => "1.0.0".to_string(),
+        _ => "1.0.0".to_owned(),
     };
 
     let flclash_res = match client
@@ -499,16 +495,16 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
                 }
                 tag
             } else {
-                "0.8.92".to_string()
+                "0.8.92".to_owned()
             }
         }
-        _ => "0.8.92".to_string(),
+        _ => "0.8.92".to_owned(),
     };
 
     Ok(ClientVersions {
-        verge: format!("clash-verge/{}", verge_res),
-        mihomo_party: format!("mihomo-party/{}", party_res),
-        flclash: format!("Flclash/{}", flclash_res),
+        verge: format!("clash-verge/{verge_res}"),
+        mihomo_party: format!("mihomo-party/{party_res}"),
+        flclash: format!("Flclash/{flclash_res}"),
     })
 }
 
@@ -587,8 +583,8 @@ fn parse_github_release_info(url: &str) -> Option<(String, String)> {
             && segments.get(2).is_some_and(|s| *s == "releases")
             && segments.get(3).is_some_and(|s| *s == "download")
         {
-            let version = segments.get(4).map(|s| s.to_string()).unwrap_or_default();
-            let asset_name = segments.get(5).map(|s| s.to_string()).unwrap_or_default();
+            let version = segments.get(4).map(|s| (*s).to_owned()).unwrap_or_default();
+            let asset_name = segments.get(5).map(|s| (*s).to_owned()).unwrap_or_default();
 
             if !validate_version_format(&version) {
                 return None;
@@ -628,16 +624,16 @@ pub async fn update_core(
 
     let (version, asset_name) = parse_github_release_info(&url).ok_or_else(|| {
         "Invalid update URL: only official MetaCubeX/mihomo GitHub releases are supported"
-            .to_string()
+            .to_owned()
     })?;
 
     let paths = core_manager::ensure_app_storage(app)?;
 
     // Use unpredictable temp file names to prevent TOCTOU attacks
-    let temp_suffix = uuid::Uuid::new_v4().to_string();
+    let temp_suffix = uuid::Uuid::new_v4().to_owned();
     let archive_path = paths
         .core_dir
-        .join(format!("core_update_{}.tmp", temp_suffix));
+        .join(format!("core_update_{temp_suffix}.tmp"));
 
     if let Err(e) = download_release_asset(&window, &url, &archive_path).await {
         let _ = std::fs::remove_file(&archive_path);
@@ -652,11 +648,8 @@ pub async fn update_core(
     })?;
 
     emit_core_download_status(&window, "Download complete, extracting core...", 84);
-    let temp_exe_path = paths.core_dir.join(format!(
-        "{}_{}.tmp",
-        core_manager::core_binary_name(),
-        temp_suffix
-    ));
+    let temp_exe_path = paths.core_dir.join(format!("{}_{}.tmp",
+        core_manager::core_binary_name(), temp_suffix));
     if let Err(e) = extract_core_binary(&archive_path, &temp_exe_path, &url) {
         let _ = std::fs::remove_file(&archive_path);
         let _ = std::fs::remove_file(&temp_exe_path);
@@ -682,7 +675,7 @@ pub async fn update_core(
                 retries -= 1;
                 if retries == 0 {
                     let _ = std::fs::remove_file(&temp_exe_path);
-                    return Err(format!("Failed to replace core binary: {}. Please close any running mihomo processes and try again.", e2));
+                    return Err(format!("Failed to replace core binary: {e2}. Please close any running mihomo processes and try again."));
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             } else {
@@ -698,11 +691,11 @@ pub async fn update_core(
     install_core_binary(app)?;
 
     let (last_config, last_args, last_secret) = {
-        let lock = state.0.lock().map_err(|_| "Failed to lock state")?;
+        let lock = state.0.lock().map_err(|e| format!("Failed to lock state: {e}"))?;
         let config = lock
             .last_config_path
             .clone()
-            .unwrap_or_else(|| "config.yaml".to_string());
+            .unwrap_or_else(|| "config.yaml".to_owned());
         let args = lock.last_custom_args.clone().unwrap_or_default();
         let secret = if lock.last_secret.is_empty() {
             None
@@ -753,68 +746,59 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .get(geoip_sha_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch GeoIP hash: {}", e))?;
+        .map_err(|e| format!("Failed to fetch GeoIP hash: {e}"))?;
     if !geoip_sha_res.status().is_success() {
-        return Err(format!(
-            "Failed to fetch GeoIP hash: HTTP {}",
-            geoip_sha_res.status()
-        ));
+        return Err(format!("Failed to fetch GeoIP hash: HTTP {}", geoip_sha_res.status()));
     }
     let geoip_sha_text = geoip_sha_res
         .text()
         .await
-        .map_err(|e| format!("Failed to read GeoIP hash: {}", e))?;
+        .map_err(|e| format!("Failed to read GeoIP hash: {e}"))?;
     let geoip_expected_hash = geoip_sha_text
         .split_whitespace()
         .next()
         .ok_or("Invalid GeoIP hash format")?
-        .to_string();
+        .to_owned();
 
     let geosite_sha_res = client
         .get(geosite_sha_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch GeoSite hash: {}", e))?;
+        .map_err(|e| format!("Failed to fetch GeoSite hash: {e}"))?;
     if !geosite_sha_res.status().is_success() {
-        return Err(format!(
-            "Failed to fetch GeoSite hash: HTTP {}",
-            geosite_sha_res.status()
-        ));
+        return Err(format!("Failed to fetch GeoSite hash: HTTP {}", geosite_sha_res.status()));
     }
     let geosite_sha_text = geosite_sha_res
         .text()
         .await
-        .map_err(|e| format!("Failed to read GeoSite hash: {}", e))?;
+        .map_err(|e| format!("Failed to read GeoSite hash: {e}"))?;
     let geosite_expected_hash = geosite_sha_text
         .split_whitespace()
         .next()
         .ok_or("Invalid GeoSite hash format")?
-        .to_string();
+        .to_owned();
 
     // Use unpredictable temp file names to prevent TOCTOU attacks
-    let temp_suffix = uuid::Uuid::new_v4().to_string();
+    let temp_suffix = uuid::Uuid::new_v4().to_owned();
 
     // Download GeoIP
     emit_core_download_status(&window, "Downloading GeoIP...", 10);
     let geoip_path = paths
         .core_dir
-        .join(format!("geoip_{}.dat.tmp", temp_suffix));
+        .join(format!("geoip_{temp_suffix}.dat.tmp"));
     let response = client
         .get(geoip_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to download GeoIP: {}", e))?;
+        .map_err(|e| format!("Failed to download GeoIP: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download GeoIP: HTTP {}",
-            response.status()
-        ));
+        return Err(format!("Failed to download GeoIP: HTTP {}", response.status()));
     }
 
     let mut stream = response.bytes_stream();
     let mut file = std::fs::File::create(&geoip_path)
-        .map_err(|e| format!("Failed to create geoip temp file: {}", e))?;
+        .map_err(|e| format!("Failed to create geoip temp file: {e}"))?;
 
     while let Some(item) = stream.next().await {
         let chunk = match item {
@@ -824,10 +808,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
                 return Err(e.to_string());
             }
         };
-        use std::io::Write;
+        use std::io::Write as _;
         if let Err(e) = file.write_all(&chunk) {
             let _ = std::fs::remove_file(&geoip_path);
-            return Err(format!("Failed to write geoip chunk: {}", e));
+            return Err(format!("Failed to write geoip chunk: {e}"));
         }
     }
 
@@ -846,23 +830,20 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     emit_core_download_status(&window, "Downloading GeoSite...", 50);
     let geosite_path = paths
         .core_dir
-        .join(format!("geosite_{}.dat.tmp", temp_suffix));
+        .join(format!("geosite_{temp_suffix}.dat.tmp"));
     let response = client
         .get(geosite_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to download GeoSite: {}", e))?;
+        .map_err(|e| format!("Failed to download GeoSite: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download GeoSite: HTTP {}",
-            response.status()
-        ));
+        return Err(format!("Failed to download GeoSite: HTTP {}", response.status()));
     }
 
     let mut stream = response.bytes_stream();
     let mut file = std::fs::File::create(&geosite_path)
-        .map_err(|e| format!("Failed to create geosite temp file: {}", e))?;
+        .map_err(|e| format!("Failed to create geosite temp file: {e}"))?;
 
     while let Some(item) = stream.next().await {
         let chunk = match item {
@@ -872,10 +853,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
                 return Err(e.to_string());
             }
         };
-        use std::io::Write;
+        use std::io::Write as _;
         if let Err(e) = file.write_all(&chunk) {
             let _ = std::fs::remove_file(&geosite_path);
-            return Err(format!("Failed to write geosite chunk: {}", e));
+            return Err(format!("Failed to write geosite chunk: {e}"));
         }
     }
 
@@ -903,12 +884,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     }
 
     std::fs::rename(&geoip_path, &final_geoip)
-        .map_err(|e| format!("Failed to apply geoip: {}", e))?;
+        .map_err(|e| format!("Failed to apply geoip: {e}"))?;
     std::fs::rename(&geosite_path, &final_geosite)
-        .map_err(|e| format!("Failed to apply geosite: {}", e))?;
+        .map_err(|e| format!("Failed to apply geosite: {e}"))?;
 
     emit_core_download_status(&window, "Geo database update complete", 100);
-    Ok("Geo databases updated successfully".to_string())
+    Ok("Geo databases updated successfully".to_owned())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -926,7 +907,7 @@ pub struct ClientUpdateInfo {
 }
 
 /// Determine the expected asset extension for the current platform.
-fn platform_asset_extensions() -> &'static [&'static str] {
+const fn platform_asset_extensions() -> &'static [&'static str] {
     if cfg!(target_os = "windows") {
         &[".exe", ".msi"]
     } else if cfg!(target_os = "macos") {
@@ -939,8 +920,7 @@ fn platform_asset_extensions() -> &'static [&'static str] {
 /// Select the best installer asset from a GitHub release for the current platform.
 fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     let extensions = platform_asset_extensions();
-    let target_triple = format!(
-        "{}-{}",
+    let target_triple = format!("{}-{}",
         std::env::consts::OS,
         if std::env::consts::ARCH == "x86_64" {
             "x86_64"
@@ -967,7 +947,7 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
         }
     }
 
-    Err("No suitable installer asset found for this platform".to_string())
+    Err("No suitable installer asset found for this platform".to_owned())
 }
 
 /// Check for the latest Zephyr client version.
@@ -979,7 +959,7 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
         .get(ZEPHYR_RELEASE_API)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch Zephyr release info: {}", e))?;
+        .map_err(|e| format!("Failed to fetch Zephyr release info: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -988,13 +968,11 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
     let release: GithubRelease = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse Zephyr release info: {}", e))?;
+        .map_err(|e| format!("Failed to parse Zephyr release info: {e}"))?;
 
     let asset = select_client_asset(&release.assets)?;
-    let download_url = format!(
-        "https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
-        release.tag_name, asset.name
-    );
+    let download_url = format!("https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
+        release.tag_name, asset.name);
 
     let mut version = release.tag_name;
     if version.starts_with('v') || version.starts_with('V') {
@@ -1018,14 +996,14 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     // Compare with current version
     let current = env!("CARGO_PKG_VERSION");
     if info.version == current {
-        return Ok("Already up to date".to_string());
+        return Ok("Already up to date".to_owned());
     }
 
     emit_core_download_status(&window, "Downloading Zephyr update...", 10);
 
     // Create temp directory for the installer
     let temp_dir = std::env::temp_dir().join(format!("zephyr_update_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {e}"))?;
 
     // Determine file extension from download URL
     let asset_name = info
@@ -1042,12 +1020,9 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Open the installer with the system default application
     tauri_plugin_opener::open_path(&dest_path, None::<&str>)
-        .map_err(|e| format!("Failed to open installer: {}", e))?;
+        .map_err(|e| format!("Failed to open installer: {e}"))?;
 
     emit_core_download_status(&window, "Installer launched", 100);
 
-    Ok(format!(
-        "Zephyr {} installer downloaded and opened",
-        info.version
-    ))
+    Ok(format!("Zephyr {} installer downloaded and opened", info.version))
 }

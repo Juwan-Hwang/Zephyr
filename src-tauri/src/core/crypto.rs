@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
-use rand::RngExt;
+use rand::RngExt as _;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,14 +41,14 @@ pub(super) fn get_machine_key() -> Vec<u8> {
     })
 }
 
-/// Compute the machine key (expensive operation - use get_machine_key() for cached access)
+/// Compute the machine key (expensive operation - use `get_machine_key()` for cached access)
 fn compute_machine_key() -> Vec<u8> {
     let mut seed_parts: Vec<String> = Vec::new();
 
     // Collect system machine ID
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
+        use std::os::windows::process::CommandExt as _;
         if let Ok(hklm) = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
             .open_subkey("SOFTWARE\\Microsoft\\Cryptography")
         {
@@ -68,7 +68,7 @@ fn compute_machine_key() -> Vec<u8> {
             if let Some(idx) = vol_output.find("Volume Serial Number is ") {
                 let serial = &vol_output[idx + 24..];
                 if let Some(end) = serial.find('\n') {
-                    seed_parts.push(serial[..end].trim().to_string());
+                    seed_parts.push(serial[..end].trim().to_owned());
                 }
             }
         }
@@ -83,7 +83,7 @@ fn compute_machine_key() -> Vec<u8> {
         {
             let out_str = String::from_utf8_lossy(&output.stdout);
             if let Some(idx) = out_str.find("IOPlatformUUID") {
-                seed_parts.push(out_str[idx..].to_string());
+                seed_parts.push(out_str[idx..].to_owned());
             }
         }
         // Additional macOS fingerprint: Hardware UUID
@@ -100,7 +100,7 @@ fn compute_machine_key() -> Vec<u8> {
                 if let Some(serial_start) = out_str[idx..].find('"') {
                     let rest = &out_str[idx + serial_start + 1..];
                     if let Some(serial_end) = rest.find('"') {
-                        seed_parts.push(rest[..serial_end].to_string());
+                        seed_parts.push(rest[..serial_end].to_owned());
                     }
                 }
             }
@@ -109,7 +109,7 @@ fn compute_machine_key() -> Vec<u8> {
     #[cfg(target_os = "linux")]
     {
         if let Ok(id) = fs::read_to_string("/etc/machine-id") {
-            seed_parts.push(id.trim().to_string());
+            seed_parts.push(id.trim().to_owned());
         }
         // Additional Linux fingerprint: board serial if available
         if let Ok(output) = std::process::Command::new("cat")
@@ -119,7 +119,7 @@ fn compute_machine_key() -> Vec<u8> {
             let board_serial = String::from_utf8_lossy(&output.stdout);
             let trimmed = board_serial.trim();
             if !trimmed.is_empty() && trimmed != "None" && trimmed.len() > 2 {
-                seed_parts.push(trimmed.to_string());
+                seed_parts.push(trimmed.to_owned());
             }
         }
     }
@@ -211,7 +211,7 @@ fn compute_machine_key() -> Vec<u8> {
                 // Set directory permissions on Unix
                 #[cfg(unix)]
                 {
-                    use std::os::unix::fs::PermissionsExt;
+                    use std::os::unix::fs::PermissionsExt as _;
                     let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
                 }
             }
@@ -246,7 +246,7 @@ fn compute_machine_key() -> Vec<u8> {
         .ok()
         .as_ref()
         .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf())
+        .map(std::path::Path::to_path_buf)
     {
         let key_path = app_data_dir.join(MACHINE_KEY_FILE);
 
@@ -298,7 +298,7 @@ pub fn is_machine_key_persisted() -> bool {
 /// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
 pub(super) fn obfuscate_string(s: &str) -> String {
     use aes_gcm::{
-        aead::{Aead, KeyInit},
+        aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
     };
 
@@ -307,10 +307,7 @@ pub(super) fn obfuscate_string(s: &str) -> String {
     // Key should already be 32 bytes from PBKDF2 or random generation
     // If not exactly 32 bytes, something is wrong - fail closed
     if key_bytes.len() != 32 {
-        eprintln!(
-            "[Security] CRITICAL: Invalid key length {}, expected 32",
-            key_bytes.len()
-        );
+        eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
         return String::new();
     }
 
@@ -318,8 +315,7 @@ pub(super) fn obfuscate_string(s: &str) -> String {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
-                "[Security] CRITICAL: Failed to initialize AES cipher: {:?}",
-                e
+                "[Security] CRITICAL: Failed to initialize AES cipher: {e:?}"
             );
             return String::new();
         }
@@ -339,7 +335,7 @@ pub(super) fn obfuscate_string(s: &str) -> String {
             base64_standard.encode(&result)
         }
         Err(e) => {
-            eprintln!("[Security] CRITICAL: AES encryption failed: {:?}", e);
+            eprintln!("[Security] CRITICAL: AES encryption failed: {e:?}");
             String::new()
         }
     }
@@ -349,7 +345,7 @@ pub(super) fn obfuscate_string(s: &str) -> String {
 /// Expects base64-encoded ciphertext with "v2:" prefix
 pub(super) fn deobfuscate_string(s: &str) -> String {
     use aes_gcm::{
-        aead::{Aead, KeyInit},
+        aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
     };
 
@@ -385,8 +381,7 @@ pub(super) fn deobfuscate_string(s: &str) -> String {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
-                    "[Security] CRITICAL: Failed to initialize AES cipher: {:?}",
-                    e
+                    "[Security] CRITICAL: Failed to initialize AES cipher: {e:?}"
                 );
                 return String::new();
             }
@@ -395,11 +390,10 @@ pub(super) fn deobfuscate_string(s: &str) -> String {
         let nonce = Nonce::from_slice(nonce_bytes);
 
         match cipher.decrypt(nonce, ciphertext) {
-            Ok(plaintext) => String::from_utf8_lossy(&plaintext).to_string(),
+            Ok(plaintext) => String::from_utf8_lossy(&plaintext).into_owned(),
             Err(e) => {
                 eprintln!(
-                    "[Security] CRITICAL: AES decryption failed - data may be tampered: {:?}",
-                    e
+                    "[Security] CRITICAL: AES decryption failed - data may be tampered: {e:?}"
                 );
                 String::new()
             }
@@ -416,7 +410,8 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
         Ok(data) => {
             match serde_json::from_str::<ProfilesMetadata>(&data) {
                 Ok(mut meta) => {
-                    for (_, config) in meta.configs.iter_mut() {
+                    #[allow(clippy::iter_over_hash_type)]
+                    for config in meta.configs.values_mut() {
                         if let Some(url) = &config.url {
                             // URL should start with http, if not it's obfuscated
                             if !url.starts_with("http") {
@@ -436,8 +431,7 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
                 }
                 Err(e) => {
                     eprintln!(
-                        "[Metadata] Warning: Failed to parse metadata.json: {}. Using default.",
-                        e
+                        "[Metadata] Warning: Failed to parse metadata.json: {e}. Using default."
                     );
                     ProfilesMetadata::default()
                 }
@@ -447,8 +441,7 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
             // Only log warning if file exists but cannot be read
             if meta_path.exists() {
                 eprintln!(
-                    "[Metadata] Warning: Failed to read metadata.json: {}. Using default.",
-                    e
+                    "[Metadata] Warning: Failed to read metadata.json: {e}. Using default."
                 );
             }
             ProfilesMetadata::default()
@@ -458,6 +451,7 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
 
 pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
     let mut obf_meta = ProfilesMetadata::default();
+    #[allow(clippy::iter_over_hash_type)]
     for (k, v) in &meta.configs {
         obf_meta.configs.insert(
             k.clone(),
@@ -484,7 +478,7 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
         .ok()
         .into_iter()
         .flatten()
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|entry| {
             entry
                 .path()
@@ -492,7 +486,7 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
                 .map(|ext| ext == "yaml" || ext == "yml")
                 .unwrap_or(false)
         })
-        .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+        .filter_map(|entry| entry.file_name().to_str().map(std::borrow::ToOwned::to_owned))
         .filter(|name| name != "run_config.yaml")
         .collect();
 

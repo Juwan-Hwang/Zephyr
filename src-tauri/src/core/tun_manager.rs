@@ -41,7 +41,7 @@ fn extract_secret_from_yaml(content: &str) -> Option<String> {
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("secret:") {
-            return trimmed.split(':').nth(1).map(|s| s.trim().to_string());
+            return trimmed.split(':').nth(1).map(|s| s.trim().to_owned());
         }
     }
     None
@@ -59,8 +59,8 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
                 if line.trim().starts_with("tun:") {
                     in_tun_block = true;
                 } else if in_tun_block
-                    && !line.starts_with(" ")
-                    && !line.starts_with("\t")
+                    && !line.starts_with(' ')
+                    && !line.starts_with('\t')
                     && !line.is_empty()
                 {
                     in_tun_block = false;
@@ -71,9 +71,9 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
                         .chars()
                         .take_while(|c| c.is_whitespace())
                         .collect::<String>();
-                    format!("{}enable: {}", indent, enable)
+                    format!("{indent}enable: {enable}")
                 } else {
-                    line.to_string()
+                    line.to_owned()
                 }
             })
             .collect();
@@ -107,7 +107,7 @@ fn extract_tun_enabled_from_yaml(content: &str) -> bool {
                     .unwrap_or(false);
             }
             // Exit tun block when we hit a non-indented line
-            if !line.starts_with(" ") && !line.starts_with("\t") && !line.is_empty() {
+            if !line.starts_with(' ') && !line.starts_with('\t') && !line.is_empty() {
                 in_tun_block = false;
             }
         }
@@ -132,7 +132,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
+            .map_err(|e| format!("Failed to read config: {e}"))?;
 
         // Extract current secret from config or generate new one
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
@@ -151,21 +151,21 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
                         .chars()
                         .take_while(|c| c.is_whitespace())
                         .collect::<String>();
-                    format!("{}secret: {}", indent, secret)
+                    format!("{indent}secret: {secret}")
                 } else {
-                    line.to_string()
+                    line.to_owned()
                 }
             })
             .collect();
 
         if !found_secret {
-            lines.push(format!("secret: {}", secret));
+            lines.push(format!("secret: {secret}"));
         }
 
         updated = lines.join("\n");
 
         std::fs::write(&config_file, &updated)
-            .map_err(|e| format!("Failed to write config: {}", e))?;
+            .map_err(|e| format!("Failed to write config: {e}"))?;
     }
 
     // Build the command: kill all mihomo (including root), wait, then start new
@@ -174,17 +174,17 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let log_path = std::env::var("HOME")
         .map(|h| {
             // macOS: ~/Library/Logs/ - user-specific, other users cannot access
-            let path = format!("{}/Library/Logs", h);
+            let path = format!("{h}/Library/Logs");
             // Create directory if it doesn't exist
             if let Err(e) = std::fs::create_dir_all(&path) {
-                eprintln!("[TUN] Failed to create log directory: {}", e);
+                eprintln!("[TUN] Failed to create log directory: {e}");
             }
-            format!("{}/mihomo-tun.log", path)
+            format!("{path}/mihomo-tun.log")
         })
         .unwrap_or_else(|_| {
             // Fallback to user temp directory with fixed name
             let temp = std::env::temp_dir();
-            temp.join("mihomo-tun.log").to_string_lossy().to_string()
+            temp.join("mihomo-tun.log").to_string_lossy().into_owned()
         });
 
     // CRITICAL: Escape paths for shell single-quote context to prevent command injection
@@ -193,8 +193,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let escaped_log_path = log_path.replace("'", "'\\''");
 
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{}' && './mihomo' -d '.' -f 'run_config.yaml' > '{}' 2>&1 &" with administrator privileges"#,
-        escaped_config_dir, escaped_log_path
+        r#"do shell script "killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './mihomo' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
@@ -207,7 +206,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
+        .map_err(|e| format!("Failed to spawn osascript: {e}"))?;
 
     // Wait a bit for osascript to potentially show errors (like user cancel)
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
@@ -222,11 +221,11 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
                     let mut err = String::new();
                     let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
                     if err.contains("canceled") || err.contains("User canceled") {
-                        return Err("canceled".to_string());
+                        return Err("canceled".to_owned());
                     }
-                    return Err(format!("osascript failed: {}", err));
+                    return Err(format!("osascript failed: {err}"));
                 }
-                return Err("osascript failed".to_string());
+                return Err("osascript failed".to_owned());
             }
         }
         Ok(None) => {
@@ -243,7 +242,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         // Check if user canceled (osascript exited with failure)
         if let Ok(Some(status)) = child.try_wait() {
             if !status.success() {
-                return Err("canceled".to_string());
+                return Err("canceled".to_owned());
             }
         }
 
@@ -256,7 +255,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     if !started {
         // Kill osascript if still running
         let _ = child.kill();
-        return Err("Root mihomo failed to start within 30 seconds".to_string());
+        return Err("Root mihomo failed to start within 30 seconds".to_owned());
     }
 
     // Wait for port to be bound
@@ -270,7 +269,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     }
 
     if !bound {
-        return Err("root_start_failed".to_string());
+        return Err("root_start_failed".to_owned());
     }
 
     // MSL is already set in the root osascript above (sysctl needs root)
@@ -285,7 +284,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 /// On non-macOS platforms, this is a no-op
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-pub fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
+pub const fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
     Ok(String::new())
 }
 
@@ -306,7 +305,7 @@ fn has_root_mihomo() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-fn has_root_mihomo() -> bool {
+const fn has_root_mihomo() -> bool {
     false
 }
 
@@ -320,16 +319,16 @@ pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
-        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+        .map_err(|e| format!("Failed to run osascript: {e}"))?;
 
     if !status.success() {
-        return Err(format!("osascript exit code: {}", status));
+        return Err(format!("osascript exit code: {status}"));
     }
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn kill_all_mihomo_as_root() -> Result<(), String> {
+pub const fn kill_all_mihomo_as_root() -> Result<(), String> {
     Ok(())
 }
 
@@ -344,7 +343,7 @@ pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
+pub const fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
     Ok(())
 }
 
@@ -385,6 +384,7 @@ pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
 /// TUN mode is handled differently on Windows/Linux and doesn't require root
 #[tauri::command]
 #[cfg(not(target_os = "macos"))]
+#[allow(clippy::needless_pass_by_value)]
 pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
     set_tun_mode(false);
     // On Windows/Linux, TUN is handled via config change, no need for root kill
@@ -392,27 +392,28 @@ pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
     set_tun_enabled_internal(&app, false)
 }
 
-/// Update TUN enable setting in run_config.yaml (without restarting core)
+/// Update TUN enable setting in `run_config.yaml` (without restarting core)
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
     let config_file = paths.core_dir.join("run_config.yaml");
 
     if !config_file.exists() {
-        return Err("Config file not found".to_string());
+        return Err("Config file not found".to_owned());
     }
 
     let content = std::fs::read_to_string(&config_file)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+        .map_err(|e| format!("Failed to read config: {e}"))?;
 
     let updated = update_tun_in_yaml(&content, enable);
 
-    std::fs::write(&config_file, updated).map_err(|e| format!("Failed to write config: {}", e))?;
+    std::fs::write(&config_file, updated).map_err(|e| format!("Failed to write config: {e}"))?;
 
     Ok(())
 }
 
 /// Tauri command to set TUN enabled in config (without restarting)
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
     set_tun_enabled_internal(&app, enable)
 }
@@ -428,13 +429,13 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     }
 
     let content = std::fs::read_to_string(&config_file)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+        .map_err(|e| format!("Failed to read config: {e}"))?;
 
     // Check if TUN is enabled in config
     let tun_enabled = extract_tun_enabled_from_yaml(&content);
 
     set_tun_mode(tun_enabled);
-    eprintln!("[CORE] TUN mode initialized from config: {}", tun_enabled);
+    eprintln!("[CORE] TUN mode initialized from config: {tun_enabled}");
 
     Ok(())
 }
