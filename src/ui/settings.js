@@ -31,7 +31,7 @@ import { translations, setLanguage } from '../i18n.js';
 import { debounce } from '../utils/debounce.js';
 import { formatFileSize } from '../utils/format.js';
 import { settingsLogger } from '../utils/logger.js';
-import { showNotification, showModal, showConfirmModal } from './notifications.js';
+import { showNotification, showModal, showConfirmModal, showUpdateNotesModal } from './notifications.js';
 import { applyTheme } from './theme.js';
 import { AppState } from './state.js';
 import { Bus, Events } from './events.js';
@@ -382,6 +382,7 @@ export async function initSettings() {
     const langSelect = /** @type {HTMLSelectElement} */ (document.getElementById('setting-lang'));
     const closeTrayToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-close-tray'));
     const autoUpdateToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-auto-update'));
+    const autoUpdateClientToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-auto-update-client'));
     const autostartToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-autostart'));
     const unifiedDelayToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-unified-delay'));
     const ipv6Toggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-ipv6'));
@@ -484,6 +485,7 @@ export async function initSettings() {
     const settings = await invoke('get_settings');
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
+    if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle) autostartToggle.checked = await isAutoStartEnabled();
     if (nodeScrollToggle) nodeScrollToggle.checked = localStorage.getItem('nodeScroll') === 'true';
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
@@ -551,6 +553,10 @@ export async function initSettings() {
                 if (autoUpdateToggle) {
                     autoUpdateToggle.checked = false;
                     settings.auto_update = false;
+                }
+                if (autoUpdateClientToggle) {
+                    autoUpdateClientToggle.checked = false;
+                    settings.auto_update_client = false;
                 }
                 if (nodeScrollToggle) {
                     nodeScrollToggle.checked = false;
@@ -783,6 +789,7 @@ export async function initSettings() {
             const currentSettings = await invoke('get_settings');
             if (closeTrayToggle) currentSettings.close_to_tray = closeTrayToggle.checked;
             if (autoUpdateToggle) currentSettings.auto_update = autoUpdateToggle.checked;
+            if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             currentSettings.theme = AppState.currentTheme;
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
@@ -795,6 +802,12 @@ export async function initSettings() {
 
     closeTrayToggle?.addEventListener('change', save);
     autoUpdateToggle?.addEventListener('change', async () => {
+        await save();
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        showNotification(t.requireAppRestart || "更改已保存，需重启应用生效", "info");
+    });
+    autoUpdateClientToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
         const t = /** @type {any} */ (translations)[AppState.currentLang];
@@ -1113,6 +1126,18 @@ export async function initSettings() {
         }
     };
     loadCoreVersion();
+
+    // ---- App version ----
+    const appVersionText = document.getElementById('app-version-text');
+    if (appVersionText) {
+        try {
+            const appVersion = await invoke('get_app_version');
+            appVersionText.textContent = appVersion;
+        } catch (e) {
+            appVersionText.textContent = '-';
+        }
+    }
+
     loadSettingsFromCore();
 
     // ---- Auto-update check ----
@@ -1147,23 +1172,65 @@ export async function initSettings() {
 
     if (checkUpdateBtn) {
         checkUpdateBtn.onclick = async () => {
-            /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
-            showNotification(t.notifUpdateCheck);
-            try {
-                /** @type {any} */
-                const latest = await invoke('get_latest_version');
-                const latestVersion = latest.version;
+            if (checkUpdateBtn.disabled) return;
+            checkUpdateBtn.disabled = true;
 
-                if (latestVersion === currentCoreVersion) {
+            try {
+                const t = /** @type {any} */ (translations)[AppState.currentLang];
+
+                showNotification(t.notifUpdateCheck);
+
+                // Check both core and client updates in parallel
+                const [latest, clientInfo, currentAppVersion] = await Promise.all([
+                    invoke('get_latest_version').catch(() => null),
+                    invoke('get_latest_client_version').catch(() => null),
+                    invoke('get_app_version').catch(() => ''),
+                ]);
+
+                const coreHasUpdate = latest && latest.version && latest.version !== currentCoreVersion;
+                const clientHasUpdate = clientInfo && clientInfo.version && clientInfo.version !== currentAppVersion;
+
+                if (!coreHasUpdate && !clientHasUpdate) {
                     showNotification(t.notifNoUpdate, 'success');
                     return;
                 }
 
-                await performCoreUpdate(latestVersion, latest.download_url);
+                if (coreHasUpdate && clientHasUpdate) {
+                    // Both have updates — download Full version (includes core + client)
+                    const confirmed = await showConfirmModal(
+                        t.bothUpdateAvailable || 'Both core and client have updates',
+                        `${t.coreUpdate || 'Core'}: ${currentCoreVersion} → ${latest.version}\n${t.clientUpdate || 'Client'}: ${currentAppVersion} → ${clientInfo.version}\n\n${t.recommendFullVersion || 'Recommend installing Full version'}`
+                    );
+                    if (confirmed) {
+                        try {
+                            await invoke('update_client');
+                            showNotification(`${t.clientUpdateSuccess || 'Update downloaded'} (${clientInfo.version})`, 'success');
+                        } catch (e) {
+                            showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
+                        }
+                    }
+                } else if (coreHasUpdate) {
+                    await performCoreUpdate(latest.version, latest.download_url);
+                } else {
+                    // Only client update
+                    const confirmed = await showUpdateNotesModal(
+                        `${t.clientUpdateAvailable || 'Client Update Available'}: v${clientInfo.version}`,
+                        clientInfo.release_notes || ''
+                    );
+                    if (confirmed) {
+                        try {
+                            await invoke('update_client');
+                            showNotification(`${t.clientUpdateSuccess || 'Client update downloaded'} (${clientInfo.version})`, 'success');
+                        } catch (e) {
+                            showNotification(`${t.clientUpdateFailed || 'Client update failed'}: ${e}`, 'error');
+                        }
+                    }
+                }
             } catch (err) {
                 const error = toError(err);
                 showNotification(error.toString(), 'error');
+            } finally {
+                checkUpdateBtn.disabled = false;
             }
         };
     }
@@ -1466,22 +1533,6 @@ export async function initSettings() {
     };
 
     renderConfigs();
-
-    // ---- Auto update check if enabled ----
-    if (settings.auto_update) {
-        setTimeout(async () => {
-            try {
-                /** @type {any} */
-                const latest = await invoke('get_latest_version');
-                const latestVersion = latest.version;
-                if (latestVersion && currentCoreVersion && latestVersion !== currentCoreVersion) {
-                    await performCoreUpdate(latestVersion, latest.download_url);
-                }
-            } catch (e) {
-                settingsLogger.warn('Auto update check failed', e);
-            }
-        }, 5000);
-    }
 
     initFakeClient();
 }

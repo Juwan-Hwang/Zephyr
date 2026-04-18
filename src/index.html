@@ -666,27 +666,48 @@
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-sm font-semibold text-zinc-200" data-i18n="curVersion">Current Version</p>
-                                    <p class="text-2xs text-zinc-500" id="core-version-text">Checking...</p>
+                                    <p class="text-2xs text-zinc-500"><span data-i18n="appVersion">App</span>: <span id="app-version-text">-</span> | <span data-i18n="coreVersion">Core</span>: <span id="core-version-text">Checking...</span></p>
                                 </div>
-                                <button id="check-update-btn" class="btn-ghost" data-i18n="checkUpdate">
-                                    Check for Updates
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <button id="check-update-btn" class="btn-ghost" data-i18n="checkUpdate">
+                                        Check for Updates
+                                    </button>
+                                </div>
                             </div>
                             <div class="h-px bg-white/5"></div>
                             
-                            <!-- Auto Update -->
+                            <!-- Auto Check Core Update -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-zinc-400">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="autoCheckUpdate">Auto Check Updates</p>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="autoCheckUpdate">Auto Check Core Updates</p>
                                         <p class="text-2xs text-zinc-500" data-i18n="autoCheckUpdateDesc">Automatically check for core updates on startup</p>
                                     </div>
                                 </div>
                                 <label class="ios-switch">
     <input type="checkbox" id="setting-auto-update">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Auto Check Client Update -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="autoUpdateClient">Auto-check client updates</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="autoUpdateClientDesc">Automatically check for Zephyr client updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update-client">
     <span class="switch-slider"></span>
 </label>
                             </div>
@@ -713,6 +734,23 @@
                     <section>
                         <h3 class="text-2xs font-bold text-zinc-500 uppercase tracking-wider mb-4 ml-1" data-i18n="utilities">System Utilities</h3>
                         <div class="glass-card p-5 space-y-4">
+                            <!-- Global Shortcuts -->
+                            <div>
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="globalShortcut">Global Shortcuts</p>
+                                            <p class="text-2xs text-zinc-500" data-i18n="globalShortcutDesc">Configure keyboard shortcuts</p>
+                                        </div>
+                                    </div>
+                                    <button id="open-shortcut-settings-btn" class="btn-ghost text-xs px-3 py-1" data-i18n="configure">Configure</button>
+                                </div>
+                                <div class="h-px bg-white/5 my-4"></div>
+                            </div>
+
                             <div id="uwp-loopback-item">
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-4">

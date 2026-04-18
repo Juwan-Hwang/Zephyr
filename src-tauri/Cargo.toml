@@ -26,6 +26,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate"] }
@@ -43,6 +45,7 @@ tauri-plugin-dialog = "2"
 regex = "1"
 tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
+url = "2"
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
 hmac = "0.12"
@@ -53,14 +56,15 @@ glib = ">= 0.20, < 1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
-    "Win32_NetworkManagement_IpHelper", 
-    "Win32_System_Registry", 
-    "Win32_Networking_WinHttp", 
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_System_Registry",
+    "Win32_Networking_WinHttp",
     "Win32_Networking_WinInet",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
     "Win32_System_Threading",
-    "Win32_Foundation"
+    "Win32_Foundation",
+    "Win32_UI_Shell"
 ] }
 winreg = "0.52"
 

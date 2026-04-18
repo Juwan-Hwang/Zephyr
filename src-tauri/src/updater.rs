@@ -910,3 +910,154 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     emit_core_download_status(&window, "Geo database update complete", 100);
     Ok("Geo databases updated successfully".to_string())
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Client (Zephyr) self-update
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ZEPHYR_RELEASE_API: &str =
+    "https://api.github.com/repos/Juwan-Hwang/Zephyr/releases/latest";
+
+/// Release info returned to the frontend for Zephyr client updates.
+#[derive(Debug, Serialize)]
+pub struct ClientUpdateInfo {
+    pub version: String,
+    pub download_url: String,
+    pub release_notes: String,
+}
+
+/// Determine the expected asset extension for the current platform.
+fn platform_asset_extensions() -> &'static [&'static str] {
+    if cfg!(target_os = "windows") {
+        &[".exe", ".msi"]
+    } else if cfg!(target_os = "macos") {
+        &[".dmg"]
+    } else {
+        &[".AppImage", ".deb"]
+    }
+}
+
+/// Select the best installer asset from a GitHub release for the current platform.
+fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
+    let extensions = platform_asset_extensions();
+    let target_triple = format!(
+        "{}-{}",
+        std::env::consts::OS,
+        if std::env::consts::ARCH == "x86_64" {
+            "x86_64"
+        } else if std::env::consts::ARCH == "aarch64" {
+            "aarch64"
+        } else {
+            std::env::consts::ARCH
+        }
+    );
+
+    // First pass: try to find an asset matching the target triple
+    for asset in assets {
+        let lower = asset.name.to_lowercase();
+        if extensions.iter().any(|ext| lower.ends_with(ext))
+            && lower.contains(&target_triple)
+        {
+            return Ok(asset);
+        }
+    }
+
+    // Second pass: any asset with a matching extension
+    for asset in assets {
+        let lower = asset.name.to_lowercase();
+        if extensions.iter().any(|ext| lower.ends_with(ext)) {
+            return Ok(asset);
+        }
+    }
+
+    Err("No suitable installer asset found for this platform".to_string())
+}
+
+/// Check for the latest Zephyr client version.
+#[command]
+pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
+    let client = build_github_client()?;
+
+    let response = client
+        .get(ZEPHYR_RELEASE_API)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Zephyr release info: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub API returned status: {}",
+            response.status()
+        ));
+    }
+
+    let release: GithubRelease = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Zephyr release info: {}", e))?;
+
+    let asset = select_client_asset(&release.assets)?;
+    let download_url = format!(
+        "https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
+        release.tag_name, asset.name
+    );
+
+    let mut version = release.tag_name;
+    if version.starts_with('v') || version.starts_with('V') {
+        version.remove(0);
+    }
+
+    Ok(ClientUpdateInfo {
+        version,
+        download_url,
+        release_notes: release.body.unwrap_or_default(),
+    })
+}
+
+/// Download and open the Zephyr client installer.
+#[command]
+pub async fn update_client(window: Window) -> Result<String, String> {
+    emit_core_download_status(&window, "Checking for Zephyr updates...", 5);
+
+    let info = get_latest_client_version().await?;
+
+    // Compare with current version
+    let current = env!("CARGO_PKG_VERSION");
+    if info.version == current {
+        return Ok("Already up to date".to_string());
+    }
+
+    emit_core_download_status(&window, "Downloading Zephyr update...", 10);
+
+    // Create temp directory for the installer
+    let temp_dir = std::env::temp_dir().join(format!("zephyr_update_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    // Determine file extension from download URL
+    let asset_name = info
+        .download_url
+        .rsplit('/')
+        .next()
+        .unwrap_or("Zephyr-installer");
+    let dest_path = temp_dir.join(asset_name);
+
+    // Download the installer
+    download_release_asset(&window, &info.download_url, &dest_path).await?;
+
+    emit_core_download_status(&window, "Opening installer...", 95);
+
+    // Open the installer with the system default application
+    tauri_plugin_opener::open_path(
+        &dest_path,
+        None::<&str>,
+    )
+    .map_err(|e| format!("Failed to open installer: {}", e))?;
+
+    emit_core_download_status(&window, "Installer launched", 100);
+
+    Ok(format!(
+        "Zephyr {} installer downloaded and opened",
+        info.version
+    ))
+}

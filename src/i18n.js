@@ -50,7 +50,7 @@ export const translations = {
         languageDesc: "Select interface language",
         minToTray: "Hide on Close",
         minToTrayDesc: "Hide to tray instead of quitting when closing window",
-        autoCheckUpdate: "Auto Check Updates",
+        autoCheckUpdate: "Auto Check Core Updates",
         autoCheckUpdateDesc: "Automatically check for core updates on startup",
         confirm: "Confirm",
         cancel: "Cancel",
@@ -94,6 +94,7 @@ export const translations = {
         invalidProtocol: "Invalid protocol. Use tcp, udp, or both.",
         invalidAddressFormat: "Invalid listen address format. Use host:port",
         invalidTargetFormat: "Invalid target address format. Use host:port",
+        tunStartFailed: "TUN failed to start, restoring core...",
 
         core: "Mihomo Core",
         curVersion: "Current Version",
@@ -115,7 +116,7 @@ export const translations = {
         notifSavingAndRestarting: "Saving and restarting core...",
         notifRestartSuccess: "Core restarted successfully!",
         proxyActive: "Proxy Active",
-        proxyInactive: "Virtual Adapter",
+        proxyInactive: "System proxy disabled",
         disconnected: "Disconnected",
         loadingNodes: "Loading nodes...",
         failedToConnect: "Failed to connect to core. Ensure Mihomo is running.",
@@ -260,6 +261,7 @@ export const translations = {
         // Storage
         usedSpace: "used",
         totalSpace: "total",
+        save: "Save",
 
         // Tunnel
         listen: "Listen",
@@ -328,6 +330,69 @@ export const translations = {
         logLevelError: "Error",
         logPaused: "Paused",
         logLines: "lines",
+
+        // Deep Link
+        deepLinkTitle: "Import from Deep Link",
+        deepLinkConfirm: "Import configuration from",
+
+        // Global Shortcut
+        globalShortcut: "Global Shortcuts",
+        globalShortcutDesc: "Configure keyboard shortcuts for quick actions",
+        shortcutToggleWindow: "Toggle Window",
+        shortcutToggleProxy: "Toggle System Proxy",
+        shortcutToggleTun: "Toggle TUN Mode",
+        shortcutModeRule: "Rule Mode",
+        shortcutModeGlobal: "Global Mode",
+        shortcutModeDirect: "Direct Mode",
+        enableGlobalShortcuts: "Enable Global Shortcuts",
+        tunEnabled: "TUN enabled",
+        tunDisabled: "TUN disabled",
+        tunToggleFailed: "TUN toggle failed",
+        switchedTo: "Switched to",
+        modeSwitchFailed: "Mode switch failed",
+        modeRule: "Rule",
+        modeGlobal: "Global",
+        modeDirect: "Direct",
+
+        // Client Update
+        clientUpdate: "Client Update",
+        clientUpdateDesc: "Check for Zephyr application updates",
+        clientChecking: "Checking for updates...",
+        clientUpdateAvailable: "Update Available",
+        clientNewVersion: "A new version is available.",
+        clientUpdateSuccess: "Update downloaded successfully",
+        clientUpdateFailed: "Update check failed",
+        clientUpToDate: "Client is up to date",
+        clientNewVersionTag: "Latest version: {version}",
+
+        // Auto update & core/client distinction
+        autoUpdateClient: "Auto-check client updates",
+        autoUpdateClientDesc: "Automatically check for Zephyr client updates on startup",
+        coreUpdate: "Core Update",
+
+        // Dual update notification
+        bothUpdateAvailable: "Both core and client have updates",
+        recommendFullVersion: "Recommend installing Full version",
+
+        // Version display
+        appVersion: "App",
+        coreVersion: "Core",
+
+        // Shortcut modal
+        configure: "Configure",
+        addShortcut: "Add Shortcut",
+        selectAction: "Select action",
+        shortcutSelectAction: "Please select an action",
+        actionName: "Action name",
+        clickToRecord: "Click to record",
+        pressKeys: "Press keys...",
+        shortcutEmpty: "Action and key are required",
+        shortcutSaved: "Shortcut saved",
+        shortcutCleared: "Shortcut cleared",
+        shortcutFailed: "Failed to save shortcut",
+        done: "Done",
+        shortcutTooLong: "Shortcut too long",
+        shortcutInvalidFormat: "Invalid shortcut format",
     },
 
     zh: {
@@ -352,7 +417,7 @@ export const translations = {
         languageDesc: "选择界面显示语言",
         minToTray: "最小化到托盘",
         minToTrayDesc: "关闭窗口时隐藏到后台，而不是退出",
-        autoCheckUpdate: "自动检查更新",
+        autoCheckUpdate: "自动检查内核更新",
         autoCheckUpdateDesc: "启动时自动检查核心更新",
         confirm: "确定",
         cancel: "取消",
@@ -393,6 +458,9 @@ export const translations = {
         tunnelProtocol: "协议",
         tunnelNetwork: "监听网络",
         tunnelTarget: "目标地址",
+        invalidProtocol: "无效的协议。请使用 tcp、udp 或 both。",
+        invalidAddressFormat: "无效的监听地址格式。请使用 主机:端口",
+        invalidTargetFormat: "无效的目标地址格式。请使用 主机:端口",
 
         core: "内核管理",
         curVersion: "当前版本",
@@ -414,7 +482,7 @@ export const translations = {
         notifSavingAndRestarting: "正在保存并重启核心...",
         notifRestartSuccess: "核心重启成功！",
         proxyActive: "代理已激活",
-        proxyInactive: "虚拟网卡",
+        proxyInactive: "系统代理已关闭",
         disconnected: "未连接",
         loadingNodes: "正在加载节点...",
         failedToConnect: "连接核心失败，请确保 Mihomo 已启动。",
@@ -560,6 +628,7 @@ export const translations = {
         // Storage
         usedSpace: "已用",
         totalSpace: "总计",
+        save: "保存",
 
         // Tunnel
         listen: "监听",
@@ -628,6 +697,69 @@ export const translations = {
         logLevelError: "错误",
         logPaused: "已暂停",
         logLines: "行",
+
+        // Deep Link
+        deepLinkTitle: "从 Deep Link 导入",
+        deepLinkConfirm: "导入配置来自",
+
+        // Global Shortcut
+        globalShortcut: "全局快捷键",
+        globalShortcutDesc: "配置快捷键以快速操作",
+        shortcutToggleWindow: "切换窗口显示",
+        shortcutToggleProxy: "切换系统代理",
+        shortcutToggleTun: "切换 TUN 模式",
+        shortcutModeRule: "规则模式",
+        shortcutModeGlobal: "全局模式",
+        shortcutModeDirect: "直连模式",
+        enableGlobalShortcuts: "启用全局快捷键",
+        tunEnabled: "TUN 已启用",
+        tunDisabled: "TUN 已关闭",
+        tunToggleFailed: "TUN 切换失败",
+        switchedTo: "已切换到",
+        modeSwitchFailed: "模式切换失败",
+        modeRule: "规则",
+        modeGlobal: "全局",
+        modeDirect: "直连",
+
+        // Client Update
+        clientUpdate: "客户端更新",
+        clientUpdateDesc: "检查 Zephyr 应用程序更新",
+        clientChecking: "正在检查更新...",
+        clientUpdateAvailable: "发现新版本",
+        clientNewVersion: "有新版本可用。",
+        clientUpdateSuccess: "更新下载成功",
+        clientUpdateFailed: "更新检查失败",
+        clientUpToDate: "客户端已是最新版本",
+        clientNewVersionTag: "最新版本: {version}",
+
+        // Auto update & core/client distinction
+        autoUpdateClient: "自动检查软件更新",
+        autoUpdateClientDesc: "启动时自动检查 Zephyr 客户端更新",
+        coreUpdate: "内核更新",
+
+        // Dual update notification
+        bothUpdateAvailable: "内核和软件都有更新",
+        recommendFullVersion: "推荐安装 Full 版本",
+
+        // Version display
+        appVersion: "软件",
+        coreVersion: "内核",
+
+        // Shortcut modal
+        configure: "配置",
+        addShortcut: "添加快捷键",
+        selectAction: "选择操作",
+        shortcutSelectAction: "请选择一个操作",
+        actionName: "动作名称",
+        clickToRecord: "点击录制",
+        pressKeys: "按下按键...",
+        shortcutEmpty: "动作名称和按键不能为空",
+        shortcutSaved: "快捷键已保存",
+        shortcutCleared: "快捷键已清除",
+        shortcutFailed: "保存快捷键失败",
+        done: "完成",
+        shortcutTooLong: "快捷键过长",
+        shortcutInvalidFormat: "快捷键格式无效",
     },
 
     ja: {
@@ -636,11 +768,69 @@ export const translations = {
         settings: "設定",
         confirm: "確認",
         cancel: "キャンセル",
+        delete: "",
         language: "言語",
         languageDesc: "表示言語を選択",
         loading: "読み込み中...",
         errorPrefix: "エラー",
         unknown: "不明",
+
+        // New keys (empty — fallback to English)
+        save: "",
+        globalShortcut: "",
+        globalShortcutDesc: "",
+        shortcutToggleWindow: "",
+        shortcutToggleProxy: "",
+        shortcutToggleTun: "",
+        shortcutModeRule: "",
+        shortcutModeGlobal: "",
+        shortcutModeDirect: "",
+        enableGlobalShortcuts: "",
+        tunEnabled: "",
+        tunDisabled: "",
+        tunToggleFailed: "",
+        switchedTo: "",
+        modeSwitchFailed: "",
+        modeRule: "",
+        modeGlobal: "",
+        modeDirect: "",
+        clientUpdate: "",
+        clientUpdateDesc: "",
+        autoUpdateClient: "",
+        autoUpdateClientDesc: "",
+        clientChecking: "",
+        clientUpdateAvailable: "",
+        clientNewVersion: "",
+        clientUpdateSuccess: "",
+        clientUpdateFailed: "",
+        clientUpToDate: "",
+        clientNewVersionTag: "",
+        bothUpdateAvailable: "",
+        recommendFullVersion: "",
+        coreUpdate: "",
+
+        proxyActive: "",
+        proxyInactive: "",
+
+        // Version display
+        appVersion: "",
+        coreVersion: "",
+
+        // Shortcut modal
+        configure: "",
+        addShortcut: "",
+        selectAction: "",
+        shortcutSelectAction: "",
+        actionName: "",
+        clickToRecord: "",
+        pressKeys: "",
+        shortcutEmpty: "",
+        shortcutSaved: "",
+        shortcutCleared: "",
+        shortcutFailed: "",
+        done: "",
+        shortcutTooLong: "",
+        shortcutInvalidFormat: "",
 
         // Logs Page
         logs: "ログ",
@@ -664,11 +854,69 @@ export const translations = {
         settings: "설정",
         confirm: "확인",
         cancel: "취소",
+        delete: "",
         language: "언어",
         languageDesc: "표시 언어 선택",
         loading: "로딩 중...",
         errorPrefix: "오류",
         unknown: "알 수 없음",
+
+        // New keys (empty — fallback to English)
+        save: "",
+        globalShortcut: "",
+        globalShortcutDesc: "",
+        shortcutToggleWindow: "",
+        shortcutToggleProxy: "",
+        shortcutToggleTun: "",
+        shortcutModeRule: "",
+        shortcutModeGlobal: "",
+        shortcutModeDirect: "",
+        enableGlobalShortcuts: "",
+        tunEnabled: "",
+        tunDisabled: "",
+        tunToggleFailed: "",
+        switchedTo: "",
+        modeSwitchFailed: "",
+        modeRule: "",
+        modeGlobal: "",
+        modeDirect: "",
+        clientUpdate: "",
+        clientUpdateDesc: "",
+        autoUpdateClient: "",
+        autoUpdateClientDesc: "",
+        clientChecking: "",
+        clientUpdateAvailable: "",
+        clientNewVersion: "",
+        clientUpdateSuccess: "",
+        clientUpdateFailed: "",
+        clientUpToDate: "",
+        clientNewVersionTag: "",
+        bothUpdateAvailable: "",
+        recommendFullVersion: "",
+        coreUpdate: "",
+
+        proxyActive: "",
+        proxyInactive: "",
+
+        // Version display
+        appVersion: "",
+        coreVersion: "",
+
+        // Shortcut modal
+        configure: "",
+        addShortcut: "",
+        selectAction: "",
+        shortcutSelectAction: "",
+        actionName: "",
+        clickToRecord: "",
+        pressKeys: "",
+        shortcutEmpty: "",
+        shortcutSaved: "",
+        shortcutCleared: "",
+        shortcutFailed: "",
+        done: "",
+        shortcutTooLong: "",
+        shortcutInvalidFormat: "",
 
         // Logs Page
         logs: "로그",

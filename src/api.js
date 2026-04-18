@@ -156,6 +156,9 @@ function getCurrentWindow() {
     minimize:    () => invoke('plugin:window|minimize',         { label }),
     maximize:    () => invoke('plugin:window|maximize',         { label }),
     setTitle: (/** @type {string} */ t) => invoke('plugin:window|set_title',         { label, value: t }),
+    /** @returns {Promise<boolean>} */
+    isVisible:    () => invoke('plugin:window|is_visible',      { label }),
+    setFocus:     () => invoke('plugin:window|set_focus',        { label }),
   };
 }
 

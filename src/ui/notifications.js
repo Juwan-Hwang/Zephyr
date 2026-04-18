@@ -6,6 +6,7 @@
 
 import { sanitizeHtml } from '../utils/sanitize.js';
 import { createFocusTrap } from '../utils/focus-trap.js';
+import { markdownToHtml } from '../utils/markdown.js';
 
 /**
  * Show a toast notification.
@@ -24,6 +25,11 @@ const NOTIFICATION_PRIORITY = {
 /** @type {number} Max simultaneous notifications */
 const MAX_NOTIFICATIONS = 5;
 
+/**
+ * @param {string} message
+ * @param {'info'|'success'|'warning'|'error'} [type]
+ * @param {string|null} [title]
+ */
 export function showNotification(message, type = 'info', title = null) {
     const container = document.getElementById('notif-container');
     if (!container) return;
@@ -62,7 +68,7 @@ export function showNotification(message, type = 'info', title = null) {
     const priority = NOTIFICATION_PRIORITY[type] ?? 2;
     const existing = Array.from(container.children);
     const insertBefore = existing.find(
-        (el) => Number(el.dataset.priority) > priority
+        (el) => Number(/** @type {HTMLElement} */ (el).dataset.priority) > priority
     );
 
     if (insertBefore) {
@@ -104,7 +110,11 @@ function unlockScroll() {
  * @param {string} customHtml
  * @returns {Promise<string|HTMLElement|null>}
  */
-export function showModal(title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '') {
+let _modalOpen = false;
+
+export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '') {
+    if (_modalOpen) return Promise.resolve(null);
+    _modalOpen = true;
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -122,7 +132,8 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
 
         if (isCustomContent) {
             contentArea.innerHTML = '';
-            contentArea.insertAdjacentHTML('beforeend', sanitizeHtml(customHtml));
+            // customHtml is already sanitized by the caller (e.g. markdownToHtml), skip sanitizeHtml
+            contentArea.insertAdjacentHTML('beforeend', customHtml);
         } else {
             contentArea.innerHTML = '';
             const input = document.createElement('input');
@@ -140,7 +151,14 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
+                // Restore classes AFTER animation completes to avoid visual glitch
+                if (isCustomContent) {
+                    container.classList.remove('w-[560px]', 'max-w-[90vw]');
+                    container.classList.add('w-[400px]');
+                    contentArea.classList.remove('overflow-y-auto', 'max-h-[65vh]', 'pr-1', 'custom-scrollbar');
+                }
                 bg.classList.add('hidden');
+                _modalOpen = false;
                 resolve(val);
             }, 300);
         };
@@ -150,6 +168,17 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
 
         bg.classList.remove('hidden');
         lockScroll();
+
+        // For custom content (e.g. update notes), constrain modal height
+        if (isCustomContent) {
+            container.classList.remove('w-[400px]');
+            container.classList.add('w-[560px]', 'max-w-[90vw]');
+            // contentArea is inside a space-y-6 wrapper, so flex-1 won't work.
+            // Use explicit max-height + overflow instead.
+            contentArea.classList.add('overflow-y-auto', 'max-h-[65vh]', 'pr-1');
+            contentArea.classList.add('custom-scrollbar');
+        }
+
         requestAnimationFrame(() => {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
@@ -158,7 +187,6 @@ export function showModal(title, placeholder = '', defaultValue = '', isCustomCo
 
         confirmBtn.onclick = () => {
             if (isCustomContent) {
-                resolve(contentArea);
                 close(contentArea);
             } else {
                 const modalInput = document.getElementById('modal-input');
@@ -242,5 +270,31 @@ export function showConfirmModal(title, message = '') {
         cancelBtn.onkeydown = (e) => {
             // Escape handled by focus trap
         };
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Update notes modal (renders Markdown release notes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Show a modal with rendered Markdown release notes.
+ * Automatically removes the "下载说明" / "Download" section.
+ * Content is scrollable.
+ * @param {string} title - Modal title
+ * @param {string} releaseNotesMd - Raw Markdown release notes
+ * @returns {Promise<boolean>} true if user confirmed
+ */
+export function showUpdateNotesModal(title, releaseNotesMd) {
+    const html = markdownToHtml(releaseNotesMd || '');
+    const customHtml = `
+        <div class="space-y-1">${html}</div>
+    `;
+
+    // We modify the DOM after showModal renders it
+
+    return showModal(title, '', '', true, customHtml).then(result => {
+        // Restore original classes (no-op if showModal already cleaned up)
+        return !!result;
     });
 }

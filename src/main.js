@@ -47,6 +47,9 @@ import {
 } from './ui/tray.js';
 import { initProxyToggle, updateSysProxyUI } from './ui/sysproxy.js';
 import { initWindowControls } from './ui/window-controls.js';
+import { initDeepLink } from './ui/deep-link.js';
+import { sendOSNotification } from './ui/os-notification.js';
+import { initGlobalShortcut, registerDefaultShortcuts, initShortcutSettings } from './ui/global-shortcut.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
@@ -115,6 +118,7 @@ async function initApp() {
   } catch (err) {
     const message = err?.toString?.() || 'Core start failed';
     apiLogger.error('Failed to start core', err);
+    sendOSNotification('Zephyr', message).catch(() => {});
     alert(message);
     return;
   }
@@ -141,6 +145,24 @@ async function initApp() {
   initSettings();
   initUwpExemption();
   initNodeWheel();
+  initShortcutSettings();
+
+  // 7b. Initialize deep link and global shortcut listeners
+  initDeepLink().then((unlisten) => {
+    registerCleanup(() => { unlisten(); });
+  }).catch((err) => {
+    apiLogger.warn('Failed to init deep link listener', err);
+  });
+
+  initGlobalShortcut().then((unlisten) => {
+    registerCleanup(() => { unlisten(); });
+  }).catch((err) => {
+    apiLogger.warn('Failed to init global shortcut listener', err);
+  });
+
+  registerDefaultShortcuts().catch((err) => {
+    apiLogger.warn('Failed to register default shortcuts', err);
+  });
 
   console.log(`[Zephyr] UI modules: +${(performance.now() - tUI).toFixed(0)}ms`);
 
@@ -171,6 +193,56 @@ async function initApp() {
   } catch (err) {
     apiLogger.warn('Initial syncCoreConfig failed', err);
   }
+
+  // 8b. Auto-check for updates on startup if enabled
+  setTimeout(async () => {
+    try {
+      const settings = await invoke('get_settings');
+      const lang = localStorage.getItem('lang') || 'en';
+      /** @type {Record<string, string>} */
+      const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang]);
+
+      let coreHasUpdate = false;
+      let clientHasUpdate = false;
+
+      // Check core update if auto_update is enabled
+      if (settings.auto_update) {
+        try {
+          const latest = await invoke('get_latest_version');
+          const currentVersion = await invoke('get_core_version');
+          if (latest.version !== currentVersion) {
+            coreHasUpdate = true;
+          }
+        } catch (e) {
+          apiLogger.warn('Auto core update check failed', e);
+        }
+      }
+
+      // Check client update if auto_update_client is enabled
+      if (settings.auto_update_client) {
+        try {
+          const info = await invoke('get_latest_client_version');
+          const currentVersion = await invoke('get_app_version');
+          if (info.version !== currentVersion) {
+            clientHasUpdate = true;
+          }
+        } catch (e) {
+          apiLogger.warn('Auto client update check failed', e);
+        }
+      }
+
+      // If both have updates, show special notification recommending Full version
+      if (coreHasUpdate && clientHasUpdate) {
+        showNotification(
+          t.bothUpdateAvailable || 'Both core and client have updates',
+          'warning',
+          t.recommendFullVersion || 'Recommend installing Full version'
+        );
+      }
+    } catch (e) {
+      apiLogger.warn('Auto update check failed', e);
+    }
+  }, 5000);
 
   // 9. Config parse error listener
   if (!_win._configParseErrorListener) {

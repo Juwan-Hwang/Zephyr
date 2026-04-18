@@ -615,6 +615,39 @@ html:not(.dark) [id$="-menu"] button.active {
   background: rgba(0, 0, 0, 0.05);
 }
 
+/* Shortcut dropdown menu — dark mode base */
+.shortcut-dropdown-menu {
+  background-color: rgba(24, 24, 27, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+.shortcut-dropdown-menu button {
+  color: #e4e4e7;
+}
+.shortcut-dropdown-menu button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.shortcut-dropdown-menu button.active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Shortcut dropdown menu — light mode */
+html:not(.dark) .shortcut-dropdown-menu {
+  background-color: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 10px 10px 10px 0 rgba(0, 0, 0, 0.08);
+}
+html:not(.dark) .shortcut-dropdown-menu button {
+  color: #18181b;
+}
+html:not(.dark) .shortcut-dropdown-menu button:hover {
+  background: rgba(0, 0, 0, 0.035);
+}
+html:not(.dark) .shortcut-dropdown-menu button.active {
+  background: rgba(0, 0, 0, 0.05);
+}
+
 /* Common textarea styles - rounded corners */
 .textarea-common {
   @apply w-full bg-black/40 border border-white/5 rounded-2xl p-3 text-xs text-zinc-300 font-mono;

@@ -1,5 +1,8 @@
 pub mod config_manager;
 pub mod core_manager;
+pub mod deep_link;
+pub mod global_shortcut;
+pub mod os_notification;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -22,7 +25,8 @@ use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
-use updater::{get_latest_client_versions, get_latest_version, update_core, update_geo_data};
+use updater::{get_latest_client_version, get_latest_client_versions, get_latest_version, update_client, update_core, update_geo_data};
+use global_shortcut::ShortcutRegistry;
 use uwp_loopback::exempt_uwp_apps;
 
 /// Rate limiter for Tauri commands
@@ -78,6 +82,8 @@ macro_rules! rate_limit {
 struct Settings {
     close_to_tray: bool,
     auto_update: bool,
+    #[serde(default)]
+    auto_update_client: bool,
     autostart: bool,
     theme: Option<String>,
     last_config: Option<String>,
@@ -171,6 +177,49 @@ fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
 #[cfg(test)]
 mod lib_test;
 
+// ---------------------------------------------------------------------------
+// S5: Rate-limited wrappers for security-sensitive commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn rate_limited_send_notification(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, RateLimiter>,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    rate_limit!(state, "send_notification", 1000);
+    os_notification::send_notification(app, title, body).await
+}
+
+#[tauri::command]
+async fn rate_limited_register_shortcut(
+    app: tauri::AppHandle,
+    rate_limiter: tauri::State<'_, RateLimiter>,
+    shortcut_state: tauri::State<'_, global_shortcut::ShortcutRegistry>,
+    action: String,
+    accelerator: String,
+) -> Result<(), String> {
+    rate_limit!(rate_limiter, "register_shortcut", 500);
+    global_shortcut::register_shortcut(app, shortcut_state, action, accelerator).await
+}
+
+#[tauri::command]
+async fn rate_limited_unregister_shortcut(
+    app: tauri::AppHandle,
+    rate_limiter: tauri::State<'_, RateLimiter>,
+    shortcut_state: tauri::State<'_, global_shortcut::ShortcutRegistry>,
+    action: String,
+) -> Result<(), String> {
+    rate_limit!(rate_limiter, "unregister_shortcut", 500);
+    global_shortcut::unregister_shortcut(app, shortcut_state, action).await
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 // rust-analyzer cannot resolve proc-macro `tauri::generate_context!()` without OUT_DIR at IDE analysis time.
 // This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
@@ -195,6 +244,8 @@ pub fn run() {
     builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(MihomoState(Mutex::new(CoreData {
             process: None,
             last_secret: String::new(),
@@ -205,7 +256,22 @@ pub fn run() {
         })))
         .manage(TrayState::default())
         .manage(RateLimiter::new())
+        .manage(ShortcutRegistry::default())
         .setup(|app| {
+            // Set AppUserModelId on Windows so notifications show "Zephyr" instead of "Windows PowerShell"
+            #[cfg(target_os = "windows")]
+            {
+                use std::ffi::OsStr;
+                use std::os::windows::ffi::OsStrExt;
+                let app_id: Vec<u16> = OsStr::new("com.zephyr.desktop")
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                unsafe {
+                    windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+                }
+            }
+
             ensure_app_storage(app.handle()).map_err(|e| e.clone())?;
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let settings_file = config_dir.join("settings.json");
@@ -216,6 +282,7 @@ pub fn run() {
                 Settings {
                     close_to_tray: true, // 默认开启
                     auto_update: false,
+                    auto_update_client: false,
                     autostart: false,
                     theme: None,
                     last_config: None,
@@ -228,6 +295,10 @@ pub fn run() {
 
             // Init Tray using the new tray module
             init_tray(app.handle()).map_err(|e| e.clone())?;
+
+            // Handle deep link URLs from command-line arguments
+            // (protocol associations on Windows/macOS pass URLs via argv)
+            deep_link::handle_cli_deep_links(app.handle());
 
             Ok(())
         })
@@ -312,6 +383,8 @@ pub fn run() {
             update_config,
             update_geo_data,
             get_latest_client_versions,
+            get_latest_client_version,
+            update_client,
             fetch_text,
             restart_core_as_root_cmd,
             set_tun_enabled,
@@ -326,6 +399,12 @@ pub fn run() {
             core_manager::core::crypto::is_machine_key_persisted,
             core_manager::core::tun_manager::release_tun_toggle,
             core_manager::core::core_log::read_core_log,
+            // Global shortcut commands (rate-limited wrappers)
+            rate_limited_register_shortcut,
+            rate_limited_unregister_shortcut,
+            // OS notification command (rate-limited wrapper)
+            rate_limited_send_notification,
+            get_app_version,
         ]);
 
     let app = builder

@@ -14,6 +14,7 @@
     "core:window:allow-hide",
     "core:window:allow-show",
     "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:image:default",
@@ -21,6 +22,9 @@
     "core:tray:default",
     "core:resources:default",
     "core:app:default",
-    "dialog:allow-message"
+    "dialog:allow-message",
+    "notification:allow-notify",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
   ]
 }
