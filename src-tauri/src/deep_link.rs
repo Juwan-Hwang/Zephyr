@@ -64,14 +64,14 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
 
     // Truncate URL to prevent memory abuse
     const MAX_URL_LEN: usize = 2048;
-    let url = if url.len() > MAX_URL_LEN {
+    let safe_url = if url.len() > MAX_URL_LEN {
         &url[..MAX_URL_LEN]
     } else {
         &url
     };
 
     // Security: only allow http:// or https:// via proper URL parsing
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !safe_url.starts_with("http://") && !safe_url.starts_with("https://") {
         return None;
     }
 
@@ -80,7 +80,7 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
 
     Some(DeepLinkPayload {
         action,
-        url: url.to_string(),
+        url: safe_url.to_string(),
         name,
     })
 }

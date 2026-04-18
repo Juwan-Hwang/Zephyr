@@ -915,8 +915,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
 //  Client (Zephyr) self-update
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const ZEPHYR_RELEASE_API: &str =
-    "https://api.github.com/repos/Juwan-Hwang/Zephyr/releases/latest";
+const ZEPHYR_RELEASE_API: &str = "https://api.github.com/repos/Juwan-Hwang/Zephyr/releases/latest";
 
 /// Release info returned to the frontend for Zephyr client updates.
 #[derive(Debug, Serialize)]
@@ -955,9 +954,7 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     // First pass: try to find an asset matching the target triple
     for asset in assets {
         let lower = asset.name.to_lowercase();
-        if extensions.iter().any(|ext| lower.ends_with(ext))
-            && lower.contains(&target_triple)
-        {
+        if extensions.iter().any(|ext| lower.ends_with(ext)) && lower.contains(&target_triple) {
             return Ok(asset);
         }
     }
@@ -985,10 +982,7 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
         .map_err(|e| format!("Failed to fetch Zephyr release info: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "GitHub API returned status: {}",
-            response.status()
-        ));
+        return Err(format!("GitHub API returned status: {}", response.status()));
     }
 
     let release: GithubRelease = response
@@ -1031,8 +1025,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Create temp directory for the installer
     let temp_dir = std::env::temp_dir().join(format!("zephyr_update_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     // Determine file extension from download URL
     let asset_name = info
@@ -1048,11 +1041,8 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     emit_core_download_status(&window, "Opening installer...", 95);
 
     // Open the installer with the system default application
-    tauri_plugin_opener::open_path(
-        &dest_path,
-        None::<&str>,
-    )
-    .map_err(|e| format!("Failed to open installer: {}", e))?;
+    tauri_plugin_opener::open_path(&dest_path, None::<&str>)
+        .map_err(|e| format!("Failed to open installer: {}", e))?;
 
     emit_core_download_status(&window, "Installer launched", 100);
 

@@ -6,19 +6,15 @@ use tauri_plugin_notification::NotificationExt;
 /// Uses the Tauri notification plugin to display a native desktop notification.
 /// Title is truncated to 128 characters and body to 1024 characters for safety.
 #[command]
-pub async fn send_notification(
-    app: AppHandle,
-    title: String,
-    body: String,
-) -> Result<(), String> {
+pub fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     // S1: Truncate title and body to prevent abuse
-    let title = truncate_str(&title, 128);
-    let body = truncate_str(&body, 1024);
+    let truncated_title = truncate_str(&title, 128);
+    let truncated_body = truncate_str(&body, 1024);
 
     app.notification()
         .builder()
-        .title(&title)
-        .body(&body)
+        .title(&truncated_title)
+        .body(&truncated_body)
         .id(1)
         .show()
         .map_err(|e| format!("Failed to show notification: {}", e))?;

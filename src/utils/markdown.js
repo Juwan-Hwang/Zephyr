@@ -5,6 +5,7 @@
  * Supports: headings, bold, italic, strikethrough, code blocks, inline code,
  * blockquotes, unordered/ordered lists, links, horizontal rules, images.
  *
+ * Inspired by a CLI markdown renderer but adapted for browser HTML output.
  * Zero external dependencies.
  */
 

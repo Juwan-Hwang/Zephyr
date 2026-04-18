@@ -15,6 +15,7 @@ use core_manager::{
     read_config_file, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
     start_core, stop_core, write_config_file, CoreData, MihomoState,
 };
+use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -25,8 +26,10 @@ use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
-use updater::{get_latest_client_version, get_latest_client_versions, get_latest_version, update_client, update_core, update_geo_data};
-use global_shortcut::ShortcutRegistry;
+use updater::{
+    get_latest_client_version, get_latest_client_versions, get_latest_version, update_client,
+    update_core, update_geo_data,
+};
 use uwp_loopback::exempt_uwp_apps;
 
 /// Rate limiter for Tauri commands
@@ -189,7 +192,7 @@ async fn rate_limited_send_notification(
     body: String,
 ) -> Result<(), String> {
     rate_limit!(state, "send_notification", 1000);
-    os_notification::send_notification(app, title, body).await
+    os_notification::send_notification(app, title, body)
 }
 
 #[tauri::command]
@@ -201,7 +204,7 @@ async fn rate_limited_register_shortcut(
     accelerator: String,
 ) -> Result<(), String> {
     rate_limit!(rate_limiter, "register_shortcut", 500);
-    global_shortcut::register_shortcut(app, shortcut_state, action, accelerator).await
+    global_shortcut::register_shortcut(app, shortcut_state, action, accelerator)
 }
 
 #[tauri::command]
@@ -212,7 +215,7 @@ async fn rate_limited_unregister_shortcut(
     action: String,
 ) -> Result<(), String> {
     rate_limit!(rate_limiter, "unregister_shortcut", 500);
-    global_shortcut::unregister_shortcut(app, shortcut_state, action).await
+    global_shortcut::unregister_shortcut(app, shortcut_state, action)
 }
 
 #[tauri::command]
@@ -268,7 +271,9 @@ pub fn run() {
                     .chain(std::iter::once(0))
                     .collect();
                 unsafe {
-                    windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+                    windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+                        app_id.as_ptr(),
+                    );
                 }
             }
 

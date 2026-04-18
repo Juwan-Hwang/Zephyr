@@ -2,9 +2,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{command, AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::{
-    GlobalShortcutExt, Shortcut, ShortcutState,
-};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 /// Maximum number of global shortcuts allowed.
 const MAX_SHORTCUTS: usize = 20;
@@ -32,7 +30,7 @@ const MAX_ACTION_LEN: usize = 64;
 const MAX_ACCELERATOR_LEN: usize = 128;
 
 #[command]
-pub async fn register_shortcut(
+pub fn register_shortcut(
     app: AppHandle,
     state: State<'_, ShortcutRegistry>,
     action: String,
@@ -43,12 +41,18 @@ pub async fn register_shortcut(
         return Err(format!("Action too long (max {} chars)", MAX_ACTION_LEN));
     }
     if accelerator.len() > MAX_ACCELERATOR_LEN {
-        return Err(format!("Accelerator too long (max {} chars)", MAX_ACCELERATOR_LEN));
+        return Err(format!(
+            "Accelerator too long (max {} chars)",
+            MAX_ACCELERATOR_LEN
+        ));
     }
 
     // S2: Enforce maximum shortcut count
     {
-        let map = state.0.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
+        let map = state
+            .0
+            .lock()
+            .map_err(|e| format!("Failed to lock state: {}", e))?;
         if map.len() >= MAX_SHORTCUTS && !map.contains_key(&action) {
             return Err(format!(
                 "Maximum number of shortcuts ({}) reached. Unregister a shortcut first.",
@@ -96,7 +100,7 @@ pub async fn register_shortcut(
 
 /// Unregister a previously registered global shortcut by action name.
 #[command]
-pub async fn unregister_shortcut(
+pub fn unregister_shortcut(
     app: AppHandle,
     state: State<'_, ShortcutRegistry>,
     action: String,
