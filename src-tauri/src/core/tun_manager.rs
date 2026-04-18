@@ -401,8 +401,8 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
         return Err("Config file not found".to_owned());
     }
 
-    let content = std::fs::read_to_string(&config_file)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
+    let content =
+        std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
     let updated = update_tun_in_yaml(&content, enable);
 
@@ -428,8 +428,8 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let content = std::fs::read_to_string(&config_file)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
+    let content =
+        std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
     // Check if TUN is enabled in config
     let tun_enabled = extract_tun_enabled_from_yaml(&content);

@@ -307,16 +307,17 @@ pub(super) fn obfuscate_string(s: &str) -> String {
     // Key should already be 32 bytes from PBKDF2 or random generation
     // If not exactly 32 bytes, something is wrong - fail closed
     if key_bytes.len() != 32 {
-        eprintln!("[Security] CRITICAL: Invalid key length {}, expected 32", key_bytes.len());
+        eprintln!(
+            "[Security] CRITICAL: Invalid key length {}, expected 32",
+            key_bytes.len()
+        );
         return String::new();
     }
 
     let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "[Security] CRITICAL: Failed to initialize AES cipher: {e:?}"
-            );
+            eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {e:?}");
             return String::new();
         }
     };
@@ -380,9 +381,7 @@ pub(super) fn deobfuscate_string(s: &str) -> String {
         let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!(
-                    "[Security] CRITICAL: Failed to initialize AES cipher: {e:?}"
-                );
+                eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {e:?}");
                 return String::new();
             }
         };
@@ -440,9 +439,7 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
         Err(e) => {
             // Only log warning if file exists but cannot be read
             if meta_path.exists() {
-                eprintln!(
-                    "[Metadata] Warning: Failed to read metadata.json: {e}. Using default."
-                );
+                eprintln!("[Metadata] Warning: Failed to read metadata.json: {e}. Using default.");
             }
             ProfilesMetadata::default()
         }
@@ -486,7 +483,12 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
                 .map(|ext| ext == "yaml" || ext == "yml")
                 .unwrap_or(false)
         })
-        .filter_map(|entry| entry.file_name().to_str().map(std::borrow::ToOwned::to_owned))
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(std::borrow::ToOwned::to_owned)
+        })
         .filter(|name| name != "run_config.yaml")
         .collect();
 

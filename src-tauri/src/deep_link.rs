@@ -36,7 +36,7 @@ fn sanitize_name(raw: &str) -> String {
 ///
 /// S6: Uses `url::Url::parse()` for protocol validation instead of `starts_with`.
 /// S3: Sanitizes the `name` parameter to prevent path traversal attacks.
-#[must_use] 
+#[must_use]
 pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     let parsed = url::Url::parse(raw).ok()?;
 

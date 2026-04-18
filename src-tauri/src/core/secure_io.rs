@@ -18,16 +18,16 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
         use std::os::windows::ffi::OsStrExt as _;
         use std::ptr;
         use windows_sys::Win32::Foundation::{
-            CloseHandle, GENERIC_ALL, HANDLE, ERROR_SUCCESS, INVALID_HANDLE_VALUE, LocalFree,
+            CloseHandle, LocalFree, ERROR_SUCCESS, GENERIC_ALL, HANDLE, INVALID_HANDLE_VALUE,
         };
         use windows_sys::Win32::Security::Authorization::{
-            EXPLICIT_ACCESS_W, GRANT_ACCESS, SetEntriesInAclW, SetSecurityInfo, SE_FILE_OBJECT,
+            SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT,
             TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_IS_WELL_KNOWN_GROUP,
         };
         use windows_sys::Win32::Security::{
-            ACL, DACL_SECURITY_INFORMATION, CreateWellKnownSid, GetTokenInformation,
-            NO_INHERITANCE, PSID, PROTECTED_DACL_SECURITY_INFORMATION,
-            TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
+            CreateWellKnownSid, GetTokenInformation, TokenUser, WinLocalSystemSid, ACL,
+            DACL_SECURITY_INFORMATION, NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, PSID,
+            TOKEN_QUERY, TOKEN_USER,
         };
         use windows_sys::Win32::Storage::FileSystem::{
             CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,

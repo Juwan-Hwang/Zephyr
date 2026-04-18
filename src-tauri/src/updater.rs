@@ -93,9 +93,7 @@ fn emit_core_download_status(window: &Window, status_text: impl Into<String>, pr
 }
 
 fn build_asset_download_url(version: &str, asset_name: &str) -> String {
-    format!(
-        "https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}"
-    )
+    format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}")
 }
 
 async fn fetch_latest_release() -> Result<GithubRelease, String> {
@@ -159,9 +157,7 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
         .build()
         .map_err(|e| format!("Failed to build client: {e}"))?;
 
-    let api_url = format!(
-        "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}"
-    );
+    let api_url = format!("https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}");
 
     let response = client
         .get(&api_url)
@@ -223,7 +219,10 @@ async fn download_release_asset(
         .map_err(|e| format!("Failed to download: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Download failed with status: {}", response.status()));
+        return Err(format!(
+            "Download failed with status: {}",
+            response.status()
+        ));
     }
 
     let total_size = response.content_length().unwrap_or(0);
@@ -233,8 +232,8 @@ async fn download_release_asset(
 
     let mut downloaded = 0_u64;
     let mut stream = response.bytes_stream();
-    let mut file = std::fs::File::create(dest_path)
-        .map_err(|e| format!("Failed to create temp file: {e}"))?;
+    let mut file =
+        std::fs::File::create(dest_path).map_err(|e| format!("Failed to create temp file: {e}"))?;
 
     while let Some(item) = stream.next().await {
         let chunk = match item {
@@ -264,11 +263,7 @@ async fn download_release_asset(
         } else {
             52
         };
-        emit_core_download_status(
-            window,
-            format!("Downloading core... {progress}%"),
-            progress,
-        );
+        emit_core_download_status(window, format!("Downloading core... {progress}%"), progress);
     }
 
     if let Err(e) = file.sync_all() {
@@ -300,8 +295,7 @@ fn extract_from_zip(
     exe_path: &std::path::Path,
 ) -> Result<(), String> {
     let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {e}"))?;
     let expected = core_manager::core_binary_name();
 
     for i in 0..archive.len() {
@@ -630,7 +624,7 @@ pub async fn update_core(
     let paths = core_manager::ensure_app_storage(app)?;
 
     // Use unpredictable temp file names to prevent TOCTOU attacks
-    let temp_suffix = uuid::Uuid::new_v4().to_owned();
+    let temp_suffix = uuid::Uuid::new_v4();
     let archive_path = paths
         .core_dir
         .join(format!("core_update_{temp_suffix}.tmp"));
@@ -648,8 +642,11 @@ pub async fn update_core(
     })?;
 
     emit_core_download_status(&window, "Download complete, extracting core...", 84);
-    let temp_exe_path = paths.core_dir.join(format!("{}_{}.tmp",
-        core_manager::core_binary_name(), temp_suffix));
+    let temp_exe_path = paths.core_dir.join(format!(
+        "{}_{}.tmp",
+        core_manager::core_binary_name(),
+        temp_suffix
+    ));
     if let Err(e) = extract_core_binary(&archive_path, &temp_exe_path, &url) {
         let _ = std::fs::remove_file(&archive_path);
         let _ = std::fs::remove_file(&temp_exe_path);
@@ -691,7 +688,10 @@ pub async fn update_core(
     install_core_binary(app)?;
 
     let (last_config, last_args, last_secret) = {
-        let lock = state.0.lock().map_err(|e| format!("Failed to lock state: {e}"))?;
+        let lock = state
+            .0
+            .lock()
+            .map_err(|e| format!("Failed to lock state: {e}"))?;
         let config = lock
             .last_config_path
             .clone()
@@ -748,7 +748,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to fetch GeoIP hash: {e}"))?;
     if !geoip_sha_res.status().is_success() {
-        return Err(format!("Failed to fetch GeoIP hash: HTTP {}", geoip_sha_res.status()));
+        return Err(format!(
+            "Failed to fetch GeoIP hash: HTTP {}",
+            geoip_sha_res.status()
+        ));
     }
     let geoip_sha_text = geoip_sha_res
         .text()
@@ -766,7 +769,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to fetch GeoSite hash: {e}"))?;
     if !geosite_sha_res.status().is_success() {
-        return Err(format!("Failed to fetch GeoSite hash: HTTP {}", geosite_sha_res.status()));
+        return Err(format!(
+            "Failed to fetch GeoSite hash: HTTP {}",
+            geosite_sha_res.status()
+        ));
     }
     let geosite_sha_text = geosite_sha_res
         .text()
@@ -779,13 +785,11 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .to_owned();
 
     // Use unpredictable temp file names to prevent TOCTOU attacks
-    let temp_suffix = uuid::Uuid::new_v4().to_owned();
+    let temp_suffix = uuid::Uuid::new_v4();
 
     // Download GeoIP
     emit_core_download_status(&window, "Downloading GeoIP...", 10);
-    let geoip_path = paths
-        .core_dir
-        .join(format!("geoip_{temp_suffix}.dat.tmp"));
+    let geoip_path = paths.core_dir.join(format!("geoip_{temp_suffix}.dat.tmp"));
     let response = client
         .get(geoip_url)
         .send()
@@ -793,7 +797,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .map_err(|e| format!("Failed to download GeoIP: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Failed to download GeoIP: HTTP {}", response.status()));
+        return Err(format!(
+            "Failed to download GeoIP: HTTP {}",
+            response.status()
+        ));
     }
 
     let mut stream = response.bytes_stream();
@@ -838,7 +845,10 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         .map_err(|e| format!("Failed to download GeoSite: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Failed to download GeoSite: HTTP {}", response.status()));
+        return Err(format!(
+            "Failed to download GeoSite: HTTP {}",
+            response.status()
+        ));
     }
 
     let mut stream = response.bytes_stream();
@@ -920,7 +930,8 @@ const fn platform_asset_extensions() -> &'static [&'static str] {
 /// Select the best installer asset from a GitHub release for the current platform.
 fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     let extensions = platform_asset_extensions();
-    let target_triple = format!("{}-{}",
+    let target_triple = format!(
+        "{}-{}",
         std::env::consts::OS,
         if std::env::consts::ARCH == "x86_64" {
             "x86_64"
@@ -971,8 +982,10 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
         .map_err(|e| format!("Failed to parse Zephyr release info: {e}"))?;
 
     let asset = select_client_asset(&release.assets)?;
-    let download_url = format!("https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
-        release.tag_name, asset.name);
+    let download_url = format!(
+        "https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
+        release.tag_name, asset.name
+    );
 
     let mut version = release.tag_name;
     if version.starts_with('v') || version.starts_with('V') {
@@ -1024,5 +1037,8 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     emit_core_download_status(&window, "Installer launched", 100);
 
-    Ok(format!("Zephyr {} installer downloaded and opened", info.version))
+    Ok(format!(
+        "Zephyr {} installer downloaded and opened",
+        info.version
+    ))
 }

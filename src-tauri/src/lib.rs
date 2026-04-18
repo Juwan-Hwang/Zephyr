@@ -44,7 +44,7 @@ impl Default for RateLimiter {
 }
 
 impl RateLimiter {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             calls: Mutex::new(HashMap::new()),
@@ -105,7 +105,11 @@ struct SettingsState(Arc<Mutex<Settings>>);
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn get_settings(state: tauri::State<SettingsState>) -> Settings {
-    state.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 #[tauri::command]
@@ -319,59 +323,60 @@ pub fn run() {
         .on_window_event(|window, event| {
             #[allow(clippy::wildcard_enum_match_arm)]
             match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                let settings_state = window.state::<SettingsState>();
-                let close_to_tray = settings_state
-                    .0
-                    .lock()
-                    .map(|guard| guard.close_to_tray)
-                    .unwrap_or(true);
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let settings_state = window.state::<SettingsState>();
+                    let close_to_tray = settings_state
+                        .0
+                        .lock()
+                        .map(|guard| guard.close_to_tray)
+                        .unwrap_or(true);
 
-                if close_to_tray {
-                    api.prevent_close();
-                    let _ = window.hide();
-                } else {
-                    kill_mihomo();
-                    let _ = clear_sys_proxy();
-                    let app = window.app_handle();
-                    app.cleanup_before_exit();
-                    app.exit(0);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    } else {
+                        kill_mihomo();
+                        let _ = clear_sys_proxy();
+                        let app = window.app_handle();
+                        app.cleanup_before_exit();
+                        app.exit(0);
+                    }
                 }
-            }
-            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
-                let app = window.app_handle();
-                if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
-                    let mut imported_count = 0;
-                    for path in paths {
-                        let ext = std::path::Path::new(&path)
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        if ext == "yaml" || ext == "yml" {
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                if let Some(file_name) = std::path::Path::new(&path)
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                {
-                                    let target_path = storage_paths.profiles_dir.join(file_name);
-                                    if core_manager::write_file_secure(&target_path, &content)
-                                        .is_ok()
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                    let app = window.app_handle();
+                    if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
+                        let mut imported_count = 0;
+                        for path in paths {
+                            let ext = std::path::Path::new(&path)
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            if ext == "yaml" || ext == "yml" {
+                                if let Ok(content) = std::fs::read_to_string(path) {
+                                    if let Some(file_name) = std::path::Path::new(&path)
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
                                     {
-                                        imported_count += 1;
+                                        let target_path =
+                                            storage_paths.profiles_dir.join(file_name);
+                                        if core_manager::write_file_secure(&target_path, &content)
+                                            .is_ok()
+                                        {
+                                            imported_count += 1;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    if imported_count > 0 {
-                        use tauri::Emitter as _;
-                        let _ = window.emit("profiles-imported", imported_count);
+                        if imported_count > 0 {
+                            use tauri::Emitter as _;
+                            let _ = window.emit("profiles-imported", imported_count);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        }
         })
         .invoke_handler(tauri::generate_handler![
             start_core,

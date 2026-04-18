@@ -18,7 +18,7 @@ use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
 
-#[must_use] 
+#[must_use]
 pub const fn core_binary_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
@@ -55,8 +55,7 @@ pub fn kill_mihomo() {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn ensure_executable(path: &Path) -> Result<(), String> {
-    let metadata =
-        fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {e}"))?;
+    let metadata = fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {e}"))?;
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)
@@ -204,8 +203,7 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 continue;
             }
 
-            fs::copy(&source, &target)
-                .map_err(|e| format!("Failed to migrate {source:?}: {e}"))?;
+            fs::copy(&source, &target).map_err(|e| format!("Failed to migrate {source:?}: {e}"))?;
         }
     }
 
@@ -328,8 +326,7 @@ rules:
   - MATCH,DIRECT
 ";
 
-    fs::write(path, default_config)
-        .map_err(|e| format!("Failed to create default config: {e}"))?;
+    fs::write(path, default_config).map_err(|e| format!("Failed to create default config: {e}"))?;
 
     println!("Created default config at {path:?}");
     Ok(())
@@ -409,7 +406,7 @@ fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
     Ok(safe_custom_args)
 }
 
-#[must_use] 
+#[must_use]
 pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u16)> {
     let mut yaml_val = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
     if !yaml_val.is_mapping() {
@@ -691,19 +688,23 @@ pub async fn start_core(
             .output()
             .ok();
         if let Some(o) = ps {
-            eprintln!("[CORE] mihomo processes before spawn:\n{String::from_utf8_lossy(&o.stdout)}");
+            eprintln!(
+                "[CORE] mihomo processes before spawn:\n{String::from_utf8_lossy(&o.stdout)}"
+            );
         }
     }
 
     // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
     // Use temp directory with unique filename per process to avoid multi-instance conflicts
     // Prefix with app name to avoid conflicts with other applications
-    let log_path = std::env::temp_dir().join(format!("zephyr-mihomo-{}-{}.log",
+    let log_path = std::env::temp_dir().join(format!(
+        "zephyr-mihomo-{}-{}.log",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
-            .unwrap_or(0)));
+            .unwrap_or(0)
+    ));
 
     // Cleanup old zephyr-mihomo log files (older than 1 hour) to prevent accumulation
     // Only scan for files matching our specific prefix to avoid interfering with other apps
@@ -787,12 +788,14 @@ pub async fn start_core(
                 retry_cmd.current_dir(&paths.core_dir);
 
                 // Setup log file for retry
-                let retry_log_path = std::env::temp_dir().join(format!("zephyr-mihomo-{}-{}-retry.log",
-                        std::process::id(),
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis())
-                            .unwrap_or(0)));
+                let retry_log_path = std::env::temp_dir().join(format!(
+                    "zephyr-mihomo-{}-{}-retry.log",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0)
+                ));
                 if let Ok(log_file) = std::fs::File::create(&retry_log_path) {
                     let stderr_handle = log_file.try_clone();
                     retry_cmd.stdout(std::process::Stdio::from(log_file));
@@ -832,9 +835,7 @@ pub async fn start_core(
                     }
                 }
             } else {
-                return Err(format!(
-                    "mihomo exited immediately: {status:?}, log: {log}"
-                ));
+                return Err(format!("mihomo exited immediately: {status:?}, log: {log}"));
             }
         }
         Ok(None) => {}
@@ -850,9 +851,8 @@ pub async fn start_core(
     let mut is_healthy = false;
     for _ in 0..20 {
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
-            let request = format!(
-                "GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-            );
+            let request =
+                format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
             if stream.write_all(request.as_bytes()).is_ok() {
                 let mut response = [0u8; 256];
                 if let Ok(n) = stream.read(&mut response) {

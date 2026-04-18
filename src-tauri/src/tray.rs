@@ -65,7 +65,10 @@ pub struct ProxyInfo {
 #[allow(clippy::needless_pass_by_value)]
 pub fn get_tray_menu_state(app: AppHandle) -> Result<TrayMenuState, String> {
     let state = app.state::<TrayState>();
-    let guard = state.0.lock().map_err(|e| format!("Failed to lock tray state: {e}"))?;
+    let guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock tray state: {e}"))?;
     Ok(guard.clone())
 }
 
@@ -321,8 +324,11 @@ pub fn update_tray_full_menu(
     current_mode: String,
 ) -> Result<(), String> {
     println!("[Tray] update_tray_full_menu called");
-    println!("[Tray] configs count: {}, proxy_groups count: {}",
-        configs.len(), proxy_groups.len());
+    println!(
+        "[Tray] configs count: {}, proxy_groups count: {}",
+        configs.len(),
+        proxy_groups.len()
+    );
 
     let tray = app
         .tray_by_id("main")

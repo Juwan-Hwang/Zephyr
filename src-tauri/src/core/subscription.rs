@@ -57,9 +57,7 @@ fn build_http_client_with_proxy(
                     }
                 }
             }
-            Err(e) => {
-                return attempt.error(format!("Failed to resolve redirect host {host}: {e}"))
-            }
+            Err(e) => return attempt.error(format!("Failed to resolve redirect host {host}: {e}")),
         }
 
         attempt.follow()
@@ -323,7 +321,9 @@ pub async fn download_sub(
             let state = app.state::<MihomoState>();
             let guard = state.0.lock().ok();
             guard.and_then(|g| {
-                g.process.is_some().then(|| format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
+                g.process
+                    .is_some()
+                    .then(|| format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
             })
         };
 
@@ -460,7 +460,7 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
-#[must_use] 
+#[must_use]
 pub fn is_private_host_public(host: &str) -> bool {
     is_private_host(host)
 }

@@ -282,8 +282,13 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
 
     ok &= Command::new(kwrite_cmd)
         .args([
-            "--file", "kioslaverc", "--group", "Proxy Settings",
-            "--key", "httpProxy", &format!("http://{host}:{port}"),
+            "--file",
+            "kioslaverc",
+            "--group",
+            "Proxy Settings",
+            "--key",
+            "httpProxy",
+            &format!("http://{host}:{port}"),
         ])
         .status()
         .map(|s| s.success())
@@ -292,8 +297,13 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
     if ok {
         ok &= Command::new(kwrite_cmd)
             .args([
-                "--file", "kioslaverc", "--group", "Proxy Settings",
-                "--key", "httpsProxy", &format!("http://{host}:{port}"),
+                "--file",
+                "kioslaverc",
+                "--group",
+                "Proxy Settings",
+                "--key",
+                "httpsProxy",
+                &format!("http://{host}:{port}"),
             ])
             .status()
             .map(|s| s.success())
@@ -303,8 +313,13 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
     if ok {
         ok &= Command::new(kwrite_cmd)
             .args([
-                "--file", "kioslaverc", "--group", "Proxy Settings",
-                "--key", "socksProxy", &format!("socks://{host}:{port}"),
+                "--file",
+                "kioslaverc",
+                "--group",
+                "Proxy Settings",
+                "--key",
+                "socksProxy",
+                &format!("socks://{host}:{port}"),
             ])
             .status()
             .map(|s| s.success())
@@ -314,8 +329,13 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
     if ok {
         if let Ok(status) = Command::new(kwrite_cmd)
             .args([
-                "--file", "kioslaverc", "--group", "Proxy Settings",
-                "--key", "ProxyType", "1",
+                "--file",
+                "kioslaverc",
+                "--group",
+                "Proxy Settings",
+                "--key",
+                "ProxyType",
+                "1",
             ])
             .status()
         {
@@ -343,8 +363,13 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
         // Rollback: disable proxy
         let _ = Command::new(kwrite_cmd)
             .args([
-                "--file", "kioslaverc", "--group", "Proxy Settings",
-                "--key", "ProxyType", "0",
+                "--file",
+                "kioslaverc",
+                "--group",
+                "Proxy Settings",
+                "--key",
+                "ProxyType",
+                "0",
             ])
             .status();
         eprintln!("[Proxy] Warning: Failed to set all KDE proxy settings, rolling back");
@@ -361,10 +386,15 @@ fn enable_xfce_proxy(host: &str, port: &str) -> bool {
     for proxy_type in &["HTTP", "HTTPS", "SOCKS"] {
         if let Ok(status) = Command::new("xfconf-query")
             .args([
-                "-c", "xfce4-session",
-                "-p", &format!("/proxies/{proxy_type}"),
-                "-s", &proxy_addr,
-                "-n", "-t", "string",
+                "-c",
+                "xfce4-session",
+                "-p",
+                &format!("/proxies/{proxy_type}"),
+                "-s",
+                &proxy_addr,
+                "-n",
+                "-t",
+                "string",
             ])
             .status()
         {
@@ -622,7 +652,7 @@ pub fn clear_sys_proxy() -> Result<(), String> {
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn get_sys_proxy_address() -> Option<String> {
     #[cfg(target_os = "windows")]
     {

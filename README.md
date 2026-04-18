@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.95+-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
 [![Security](https://img.shields.io/badge/Security-CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny-green)]()
 
 [简体中文](#-简体中文) | [English](#-english) | [日本語](#-日本語) | [한국어](#-한국어)
@@ -174,7 +174,7 @@ Zephyr 在安全方面的投入在开源代理客户端中是**独一无二**的
 
 #### 前置要求
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.95 或更高版本
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 或更高版本
 - [Node.js](https://nodejs.org/) 18 或更高版本
 - 平台特定依赖（参见 [Tauri 前置要求](https://tauri.app/v2/guides/prerequisites/)）
 
@@ -316,7 +316,7 @@ Download the latest release from [GitHub Releases](https://github.com/Juwan-Hwan
 
 #### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.95 or later
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later
 - [Node.js](https://nodejs.org/) 18 or later
 - Platform-specific dependencies (see [Tauri Prerequisites](https://tauri.app/v2/guides/prerequisites/))
 
@@ -430,7 +430,7 @@ Zephyr のセキュリティへの投資は、オープンソースプロキシ�
 
 #### 前提条件
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.95 以降
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 以降
 - [Node.js](https://nodejs.org/) 18 以降
 - プラットフォーム固有の依存関係（[Tauri 前提条件](https://tauri.app/v2/guides/prerequisites/)を参照）
 
@@ -544,7 +544,7 @@ Zephyr의 보안 투자는 오픈소스 프록시 클라이언트 중 **유일�
 
 #### 필수 조건
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.95 이상
+- [Rust](https://www.rust-lang.org/tools/install) 1.70 이상
 - [Node.js](https://nodejs.org/) 18 이상
 - 플랫폼별 종속성 ([Tauri 필수 조건](https://tauri.app/v2/guides/prerequisites/) 참조)
 

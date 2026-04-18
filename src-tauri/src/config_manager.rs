@@ -257,9 +257,7 @@ pub async fn update_config(
     let message = if hot_reload_success {
         "Configuration saved and applied successfully".to_owned()
     } else if !hot_reload_message.is_empty() {
-        format!(
-            "Configuration saved. {hot_reload_message} - restart core to apply changes."
-        )
+        format!("Configuration saved. {hot_reload_message} - restart core to apply changes.")
     } else {
         "Configuration saved. Restart core to apply changes.".to_owned()
     };
