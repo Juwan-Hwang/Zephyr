@@ -13,7 +13,7 @@ pub struct DeepLinkPayload {
 const MAX_NAME_LEN: usize = 128;
 
 /// Characters that could enable path traversal or injection attacks.
-const DANGEROUS_CHARS: &[char] = &['/', '\\', '\0', '\n', '\r'];
+const DANGEROUS_CHARS: &[char] = &['.', '/', '\\', '\0', '\n', '\r'];
 
 /// Sanitize the `name` parameter: replace dangerous characters and truncate.
 fn sanitize_name(raw: &str) -> String {
