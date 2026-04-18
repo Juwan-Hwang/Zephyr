@@ -165,4 +165,61 @@ mod tests {
     fn test_sanitize_name_backslash() {
         assert_eq!(sanitize_name("foo\\bar"), "foo_bar");
     }
+
+    // ── parse_deep_link tests (migrated from lib_test.rs) ──────────────────
+
+    #[test]
+    fn test_parse_deep_link_basic() {
+        let result =
+            parse_deep_link("clash://install-config?url=https://example.com/config.yaml&name=test")
+                .unwrap();
+        assert_eq!(result.url, "https://example.com/config.yaml");
+        assert_eq!(result.name, "test");
+    }
+
+    #[test]
+    fn test_parse_deep_link_url_only() {
+        let result =
+            parse_deep_link("clash://install-config?url=https://example.com/config.yaml").unwrap();
+        assert_eq!(result.url, "https://example.com/config.yaml");
+        assert!(result.name.is_empty());
+    }
+
+    #[test]
+    fn test_parse_deep_link_with_encoded_chars() {
+        let result = parse_deep_link(
+            "clash://install-config?url=https%3A%2F%2Fexample.com%2Fconfig.yaml&name=my%20config",
+        )
+        .unwrap();
+        assert_eq!(result.url, "https://example.com/config.yaml");
+        assert_eq!(result.name, "my config");
+    }
+
+    #[test]
+    fn test_parse_deep_link_missing_url() {
+        let result = parse_deep_link("clash://install-config?name=test");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_deep_link_empty() {
+        let result = parse_deep_link("");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_deep_link_invalid_scheme() {
+        let result = parse_deep_link("https://example.com");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_deep_link_multiple_params() {
+        let result = parse_deep_link(
+            "clash://install-config?url=https://example.com/config.yaml&name=test&extra=value",
+        )
+        .unwrap();
+        assert_eq!(result.url, "https://example.com/config.yaml");
+        assert_eq!(result.name, "test");
+    }
 }

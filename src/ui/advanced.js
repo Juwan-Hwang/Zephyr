@@ -529,4 +529,4 @@ function renderConfigItem(key, value, fullKey) {
 }
 
 // Re-export helpers for use by other modules
-export { deepMerge, isPlainObject, getActiveConfigContent };
+export { deepMerge, isPlainObject, isSafeMergeKey, getActiveConfigContent };

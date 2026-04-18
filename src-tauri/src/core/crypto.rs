@@ -509,3 +509,221 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
         save_metadata(paths, &metadata);
     }
 }
+
+// ── Test-only wrappers ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(
+    clippy::needless_borrows_for_generic_args,
+    clippy::indexing_slicing,
+    clippy::missing_const_for_fn
+)]
+pub mod test_helpers {
+    use super::*;
+
+    /// Encrypt a string using AES-256-GCM with an explicit key (test-only).
+    /// This mirrors the production `obfuscate_string` but accepts a caller-supplied key
+    /// so that tests are deterministic and do not depend on machine state.
+    #[must_use]
+    pub fn obfuscate_with_key(plaintext: &str, key: &[u8]) -> String {
+        use aes_gcm::{
+            aead::{Aead as _, KeyInit as _},
+            Aes256Gcm, Nonce,
+        };
+
+        if key.len() != 32 {
+            return String::new();
+        }
+
+        let cipher = match Aes256Gcm::new_from_slice(key) {
+            Ok(c) => c,
+            Err(_) => return String::new(),
+        };
+
+        let nonce_bytes: [u8; 12] = rand::rng().random();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        match cipher.encrypt(nonce, plaintext.as_bytes()) {
+            Ok(ciphertext) => {
+                let mut result = b"v2:".to_vec();
+                result.extend(&nonce_bytes);
+                result.extend(ciphertext);
+                base64_standard.encode(&result)
+            }
+            Err(_) => String::new(),
+        }
+    }
+
+    /// Decrypt a string encrypted with AES-256-GCM using an explicit key (test-only).
+    #[must_use]
+    pub fn deobfuscate_with_key(ciphertext: &str, key: &[u8]) -> String {
+        use aes_gcm::{
+            aead::{Aead as _, KeyInit as _},
+            Aes256Gcm, Nonce,
+        };
+
+        let Ok(decoded) = base64_standard.decode(ciphertext) else {
+            return String::new();
+        };
+
+        if !decoded.starts_with(b"v2:") || decoded.len() < 31 {
+            return String::new();
+        }
+
+        if key.len() != 32 {
+            return String::new();
+        }
+
+        let nonce_bytes = &decoded[3..15];
+        let ct = &decoded[15..];
+
+        let Ok(cipher) = Aes256Gcm::new_from_slice(key) else {
+            return String::new();
+        };
+
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        match cipher.decrypt(nonce, ct) {
+            Ok(pt) => String::from_utf8_lossy(&pt).into_owned(),
+            Err(_) => String::new(),
+        }
+    }
+
+    /// Derive a deterministic 32-byte key from a machine-id string using PBKDF2 (test-only).
+    /// Mirrors the production key-derivation logic so tests can verify determinism
+    /// without touching real hardware fingerprints.
+    #[must_use]
+    pub fn derive_key(machine_id: &str) -> [u8; 32] {
+        use pbkdf2::pbkdf2_hmac;
+        use sha2::Sha256;
+
+        const SALT: &[u8] = b"Zephyr_AES256_Key_Derivation";
+        let mut derived_key = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(machine_id.as_bytes(), SALT, 100_000, &mut derived_key);
+        derived_key
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::test_helpers::*;
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip() {
+        let key = [0u8; 32];
+        let plaintext = "Hello, World!";
+        let encrypted = obfuscate_with_key(plaintext, &key);
+        assert_ne!(encrypted, plaintext);
+        let decrypted = deobfuscate_with_key(&encrypted, &key);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_empty_string() {
+        let key = [0u8; 32];
+        let encrypted = obfuscate_with_key("", &key);
+        let decrypted = deobfuscate_with_key(&encrypted, &key);
+        assert_eq!(decrypted, "");
+    }
+
+    #[test]
+    fn test_encrypt_long_string() {
+        let key = [0u8; 32];
+        let plaintext = "a".repeat(10000);
+        let encrypted = obfuscate_with_key(&plaintext, &key);
+        let decrypted = deobfuscate_with_key(&encrypted, &key);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_unicode() {
+        let key = [0u8; 32];
+        let plaintext =
+            "\u{4f60}\u{597d}\u{4e16}\u{754c} \u{1f30d} \u{3053}\u{3093}\u{306b}\u{3061}\u{306f}";
+        let encrypted = obfuscate_with_key(plaintext, &key);
+        let decrypted = deobfuscate_with_key(&encrypted, &key);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_produces_different_ciphertexts() {
+        let key = [0u8; 32];
+        let plaintext = "same input";
+        let e1 = obfuscate_with_key(plaintext, &key);
+        let e2 = obfuscate_with_key(plaintext, &key);
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn test_decrypt_wrong_key_fails() {
+        let key1 = [1u8; 32];
+        let key2 = [2u8; 32];
+        let plaintext = "secret data";
+        let encrypted = obfuscate_with_key(plaintext, &key1);
+        let decrypted = deobfuscate_with_key(&encrypted, &key2);
+        assert_ne!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_decrypt_wrong_key_returns_empty() {
+        let key1 = [1u8; 32];
+        let key2 = [2u8; 32];
+        let plaintext = "secret data";
+        let encrypted = obfuscate_with_key(plaintext, &key1);
+        let decrypted = deobfuscate_with_key(&encrypted, &key2);
+        assert_eq!(decrypted, "");
+    }
+
+    #[test]
+    fn test_decrypt_invalid_base64() {
+        let key = [0u8; 32];
+        let decrypted = deobfuscate_with_key("not-valid-base64!!!", &key);
+        assert_eq!(decrypted, "");
+    }
+
+    #[test]
+    fn test_decrypt_garbage_input() {
+        let key = [0u8; 32];
+        let decrypted = deobfuscate_with_key("", &key);
+        assert_eq!(decrypted, "");
+    }
+
+    #[test]
+    fn test_derive_key_deterministic() {
+        let k1 = derive_key("test-machine-id");
+        let k2 = derive_key("test-machine-id");
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn test_derive_key_different_inputs() {
+        let k1 = derive_key("machine-a");
+        let k2 = derive_key("machine-b");
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn test_derive_key_empty_input() {
+        let k1 = derive_key("");
+        let k2 = derive_key("");
+        assert_eq!(k1, k2);
+        assert_eq!(k1.len(), 32);
+    }
+
+    #[test]
+    fn test_derive_key_roundtrip() {
+        let key = derive_key("roundtrip-test");
+        let plaintext = "derived key integration test";
+        let encrypted = obfuscate_with_key(plaintext, &key);
+        let decrypted = deobfuscate_with_key(&encrypted, &key);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_with_derived_key_different_from_zero_key() {
+        let zero_key = [0u8; 32];
+        let derived = derive_key("non-zero");
+        assert_ne!(zero_key, derived);
+    }
+}

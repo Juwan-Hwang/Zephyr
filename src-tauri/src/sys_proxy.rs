@@ -866,3 +866,96 @@ pub fn get_sys_proxy() -> Result<bool, String> {
         Ok(is_active)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_proxy_loopback_ipv4() {
+        assert!(validate_proxy_server("127.0.0.1:7890").is_ok());
+    }
+
+    #[test]
+    fn test_validate_proxy_loopback_ipv6() {
+        assert!(validate_proxy_server("[::1]:7890").is_ok());
+    }
+
+    #[test]
+    fn test_validate_proxy_localhost() {
+        assert!(validate_proxy_server("localhost:7890").is_ok());
+    }
+
+    #[test]
+    fn test_validate_proxy_rejects_public_ip() {
+        assert!(validate_proxy_server("8.8.8.8:7890").is_err());
+        assert!(validate_proxy_server("192.168.1.1:7890").is_err());
+        assert!(validate_proxy_server("10.0.0.1:7890").is_err());
+    }
+
+    #[test]
+    fn test_validate_proxy_rejects_empty() {
+        assert!(validate_proxy_server("").is_err());
+    }
+
+    #[test]
+    fn test_validate_proxy_rejects_too_long() {
+        let long_addr = "localhost:".to_owned() + &"a".repeat(600);
+        assert!(validate_proxy_server(&long_addr).is_err());
+    }
+
+    #[test]
+    fn test_validate_proxy_rejects_newlines() {
+        assert!(validate_proxy_server("127.0.0.1:7890\nInjected: true").is_err());
+        assert!(validate_proxy_server("127.0.0.1:7890\r\nEvil").is_err());
+        assert!(validate_proxy_server("127.0.0.1:7890\0null").is_err());
+    }
+
+    #[test]
+    fn test_validate_proxy_rejects_non_localhost_hostname() {
+        assert!(validate_proxy_server("proxy.example.com:7890").is_err());
+        assert!(validate_proxy_server("127.0.0.1.evil.com:7890").is_err());
+    }
+
+    #[test]
+    fn test_validate_proxy_invalid_format() {
+        assert!(validate_proxy_server("not-a-valid-address").is_err());
+        assert!(validate_proxy_server(":7890").is_err());
+        assert!(validate_proxy_server("127.0.0.1:").is_err());
+        assert!(validate_proxy_server("127.0.0.1:abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_host_port_ipv4() {
+        let (host, port) = parse_host_port("127.0.0.1:7890").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, "7890");
+    }
+
+    #[test]
+    fn test_parse_host_port_ipv6() {
+        let (host, port) = parse_host_port("[::1]:8080").unwrap();
+        assert_eq!(host, "::1");
+        assert_eq!(port, "8080");
+    }
+
+    #[test]
+    fn test_parse_host_port_with_spaces() {
+        let (host, port) = parse_host_port("  localhost : 7890  ").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, "7890");
+    }
+
+    #[test]
+    fn test_parse_host_port_empty() {
+        assert!(parse_host_port("").is_err());
+    }
+
+    #[test]
+    fn test_parse_host_port_invalid_ipv6() {
+        assert!(parse_host_port("[::1]").is_err());
+        assert!(parse_host_port("[::1]:").is_err());
+        assert!(parse_host_port("[::1]:abc").is_err());
+    }
+}

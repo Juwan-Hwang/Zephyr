@@ -88,9 +88,3 @@ pub use tun_manager::{
     restart_core_as_root_cmd, set_tun_enabled, set_tun_mode, smart_kill_all_mihomo_as_root,
     try_acquire_tun_toggle,
 };
-
-// Re-export test helpers
-#[cfg(test)]
-pub use config_sanitizer::sanitize_config_file_name_public;
-#[cfg(test)]
-pub use subscription::is_private_host_public;

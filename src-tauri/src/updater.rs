@@ -2,11 +2,20 @@ use crate::core_manager::{self, MihomoState};
 use flate2::read::GzDecoder;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use std::io::Read as _;
 use std::time::Duration;
 use tauri::{command, Emitter as _, Manager as _, State, Window};
 
-use sha2::{Digest as _, Sha256};
-use std::io::Read as _;
+// ── Pure helper functions ────────────────────────────────────────────────
+
+/// Strip a leading 'v' or 'V' prefix from a version tag.
+#[must_use]
+fn strip_version_prefix(tag: &str) -> &str {
+    tag.strip_prefix('v')
+        .or_else(|| tag.strip_prefix('V'))
+        .unwrap_or(tag)
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateInfo {
@@ -445,11 +454,7 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
     {
         Ok(res) if res.status().is_success() => {
             if let Ok(release) = res.json::<GithubRelease>().await {
-                let mut tag = release.tag_name;
-                if tag.starts_with('v') || tag.starts_with('V') {
-                    tag.remove(0);
-                }
-                tag
+                strip_version_prefix(&release.tag_name).to_owned()
             } else {
                 "1.7.5".to_owned()
             }
@@ -464,11 +469,7 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
     {
         Ok(res) if res.status().is_success() => {
             if let Ok(release) = res.json::<GithubRelease>().await {
-                let mut tag = release.tag_name;
-                if tag.starts_with('v') || tag.starts_with('V') {
-                    tag.remove(0);
-                }
-                tag
+                strip_version_prefix(&release.tag_name).to_owned()
             } else {
                 "1.0.0".to_owned()
             }
@@ -483,11 +484,7 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
     {
         Ok(res) if res.status().is_success() => {
             if let Ok(release) = res.json::<GithubRelease>().await {
-                let mut tag = release.tag_name;
-                if tag.starts_with('v') || tag.starts_with('V') {
-                    tag.remove(0);
-                }
-                tag
+                strip_version_prefix(&release.tag_name).to_owned()
             } else {
                 "0.8.92".to_owned()
             }
@@ -987,10 +984,7 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
         release.tag_name, asset.name
     );
 
-    let mut version = release.tag_name;
-    if version.starts_with('v') || version.starts_with('V') {
-        version.remove(0);
-    }
+    let version = strip_version_prefix(&release.tag_name).to_owned();
 
     Ok(ClientUpdateInfo {
         version,
@@ -1041,4 +1035,45 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         "Zephyr {} installer downloaded and opened",
         info.version
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_lowercase_v() {
+        assert_eq!(strip_version_prefix("v1.18.0"), "1.18.0");
+    }
+
+    #[test]
+    fn test_strip_uppercase_v() {
+        assert_eq!(strip_version_prefix("V1.18.0"), "1.18.0");
+    }
+
+    #[test]
+    fn test_no_prefix() {
+        assert_eq!(strip_version_prefix("1.18.0"), "1.18.0");
+    }
+
+    #[test]
+    fn test_empty() {
+        assert_eq!(strip_version_prefix(""), "");
+    }
+
+    #[test]
+    fn test_only_v() {
+        assert_eq!(strip_version_prefix("v"), "");
+    }
+
+    #[test]
+    fn test_only_uppercase_v() {
+        assert_eq!(strip_version_prefix("V"), "");
+    }
+
+    #[test]
+    fn test_lowercase_v_priority_over_uppercase() {
+        assert_eq!(strip_version_prefix("vV1.0"), "V1.0");
+    }
 }

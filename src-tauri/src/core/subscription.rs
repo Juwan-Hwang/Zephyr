@@ -9,6 +9,34 @@ use super::crypto::{load_metadata, save_metadata};
 use super::secure_io::write_file_secure;
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 
+// ── Pure functions for subscription content sanitization ─────────────────
+
+/// Attempt to base64-decode content that does not already contain Clash markers.
+/// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
+/// and contain a `proxies:` key.
+fn try_decode_base64_content(content: &str) -> Option<String> {
+    let trimmed = content.replace(&['\r', '\n', ' ', '\t'][..], "");
+    let decoded_bytes = base64_standard.decode(&trimmed).ok()?;
+    let decoded_str = String::from_utf8(decoded_bytes).ok()?;
+    (serde_yaml::from_str::<serde_yaml::Value>(&decoded_str).is_ok()
+        && decoded_str.contains("proxies:"))
+    .then_some(decoded_str)
+}
+
+/// Validate a subscription name to prevent path traversal and injection attacks.
+fn validate_subscription_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Subscription name cannot be empty".to_owned());
+    }
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err("Invalid subscription name: path traversal detected".to_owned());
+    }
+    if name.contains('\0') {
+        return Err("Invalid subscription name: null byte detected".to_owned());
+    }
+    Ok(())
+}
+
 fn build_http_client(
     user_agent: Option<&str>,
     resolve_pin: Option<(String, std::net::SocketAddr)>,
@@ -240,9 +268,7 @@ pub async fn download_sub(
     // Rate limit: max 1 call per 5 seconds
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
 
-    if name.contains("..") || name.contains('/') || name.contains('\\') {
-        return Err("Invalid subscription name".to_owned());
-    }
+    validate_subscription_name(&name)?;
 
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
     let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
@@ -374,17 +400,8 @@ pub async fn download_sub(
     let mut content = String::from_utf8_lossy(&bytes).into_owned();
 
     if !content.contains("proxies:") && !content.contains("port:") {
-        let trimmed_content = content.replace(&['\r', '\n', ' ', '\t'][..], "");
-        if let Ok(decoded_bytes) = base64_standard.decode(&trimmed_content) {
-            if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
-                // Validate: must be valid YAML AND contain proxies key
-                // This prevents injecting invalid/corrupted data or non-subscription content
-                if serde_yaml::from_str::<serde_yaml::Value>(&decoded_str).is_ok()
-                    && decoded_str.contains("proxies:")
-                {
-                    content = decoded_str;
-                }
-            }
+        if let Some(decoded) = try_decode_base64_content(&content) {
+            content = decoded;
         }
     }
 
@@ -460,7 +477,75 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
-#[must_use]
-pub fn is_private_host_public(host: &str) -> bool {
-    is_private_host(host)
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_private_ip_v4() {
+        assert!(is_private_ip("10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip("192.168.1.1".parse().unwrap()));
+        assert!(is_private_ip("127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("169.254.1.1".parse().unwrap()));
+        assert!(is_private_ip("0.0.0.0".parse().unwrap()));
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_v6() {
+        assert!(is_private_ip("::1".parse().unwrap()));
+        assert!(is_private_ip("::".parse().unwrap()));
+        assert!(is_private_ip("fc00::1".parse().unwrap()));
+        assert!(is_private_ip("fe80::1".parse().unwrap()));
+        assert!(!is_private_ip("2001:4860:4860::8888".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_host() {
+        assert!(is_private_host("localhost"));
+        assert!(is_private_host("my.localhost"));
+        assert!(is_private_host("my.local"));
+        assert!(is_private_host("my.test"));
+        assert!(is_private_host("my.example"));
+        assert!(is_private_host("my.invalid"));
+        assert!(is_private_host("127.0.0.1"));
+        assert!(is_private_host("10.0.0.1"));
+        assert!(!is_private_host("example.com"));
+        assert!(!is_private_host("8.8.8.8"));
+    }
+
+    #[test]
+    fn test_validate_subscription_name() {
+        assert!(validate_subscription_name("my-config").is_ok());
+        assert!(validate_subscription_name("config.yaml").is_ok());
+        assert!(validate_subscription_name("").is_err());
+        assert!(validate_subscription_name("../etc/passwd").is_err());
+        assert!(validate_subscription_name("foo/bar").is_err());
+        assert!(validate_subscription_name("foo\\bar").is_err());
+        assert!(validate_subscription_name("a\0b").is_err());
+    }
+
+    #[test]
+    fn test_try_decode_base64_content() {
+        // Valid base64-encoded Clash config
+        let yaml = "proxies:\n  - name: test\n    type: ss\n    port: 443";
+        let encoded = base64_standard.encode(yaml);
+        let result = try_decode_base64_content(&encoded);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("proxies:"));
+
+        // Non-base64 content should return None
+        assert!(try_decode_base64_content("not base64 at all!!!").is_none());
+
+        // Valid base64 but not YAML should return None
+        let not_yaml = base64_standard.encode("just some random text");
+        assert!(try_decode_base64_content(&not_yaml).is_none());
+
+        // Valid base64 YAML but no proxies key should return None
+        let no_proxies = "some_key: value\nother: thing";
+        let encoded_no_proxies = base64_standard.encode(no_proxies);
+        assert!(try_decode_base64_content(&encoded_no_proxies).is_none());
+    }
 }

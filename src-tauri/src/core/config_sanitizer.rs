@@ -89,6 +89,18 @@ pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
     // Step 1: Complete URL decoding to catch all encoded patterns
     let decoded_path = url_decode_complete(config_path);
 
+    // Step 1.5: Check the decoded path for traversal BEFORE extracting the filename.
+    // Path::file_name() strips directory components, which would silently discard
+    // "../" segments and allow encoded path traversal to bypass security checks.
+    if decoded_path.contains("..") {
+        return Err("Path traversal detected: '..' is not allowed".to_owned());
+    }
+    // Also reject directory separators in the decoded path to prevent
+    // "foo/bar.yaml" from being silently reduced to "bar.yaml".
+    if decoded_path.contains('/') || decoded_path.contains('\\') {
+        return Err("Path traversal detected: directory separators are not allowed".to_owned());
+    }
+
     // Step 2: Extract just the filename
     let config_file_name = Path::new(&decoded_path)
         .file_name()
@@ -186,6 +198,123 @@ pub(super) fn validate_path_within_dir(
 }
 
 #[cfg(test)]
-pub fn sanitize_config_file_name_public(config_path: &str) -> Result<String, String> {
-    sanitize_config_file_name(config_path)
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_config_file_name_valid() {
+        assert_eq!(sanitize_config_file_name("test.yaml").unwrap(), "test.yaml");
+        assert_eq!(sanitize_config_file_name("test.yml").unwrap(), "test.yml");
+        assert!(sanitize_config_file_name("../test.yaml").is_err());
+        assert!(sanitize_config_file_name("foo/test.yaml").is_err());
+        // Path traversal fix: directory separators are always rejected
+        // regardless of platform (both '/' and '\' are blocked)
+        assert!(sanitize_config_file_name("foo\\test.yaml").is_err());
+        assert!(sanitize_config_file_name("test.txt").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_config_file_name_rejects_path_traversal() {
+        assert!(sanitize_config_file_name("..").is_err());
+        assert!(sanitize_config_file_name("foo/bar").is_err());
+        assert!(sanitize_config_file_name("test\x00.yaml").is_err());
+        assert!(sanitize_config_file_name(".test.yaml").is_ok());
+        assert!(sanitize_config_file_name("config.backup.yml").is_ok());
+    }
+
+    #[test]
+    fn test_url_decode_standard() {
+        assert_eq!(url_decode_complete("%41"), "A");
+        assert_eq!(url_decode_complete("%3a"), ":");
+        assert_eq!(url_decode_complete("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn test_url_decode_double_encoding() {
+        assert_eq!(url_decode_complete("%2541"), "A");
+        assert_eq!(url_decode_complete("%252541"), "A");
+    }
+
+    #[test]
+    fn test_url_decode_triple_encoding() {
+        assert_eq!(url_decode_complete("%252541"), "A");
+    }
+
+    #[test]
+    fn test_url_decode_no_encoding() {
+        assert_eq!(url_decode_complete("hello"), "hello");
+        assert_eq!(url_decode_complete(""), "");
+    }
+
+    #[test]
+    fn test_url_decode_incomplete_percent() {
+        let result = url_decode_complete("test%");
+        assert!(!result.contains('\0'));
+    }
+
+    #[test]
+    fn test_url_decode_invalid_hex() {
+        assert_eq!(url_decode_complete("%GG"), "%GG");
+    }
+
+    #[test]
+    fn test_url_decode_mixed_case() {
+        assert_eq!(url_decode_complete("%3A"), ":");
+        assert_eq!(url_decode_complete("%2e"), ".");
+    }
+
+    #[test]
+    fn test_url_decode_max_iterations() {
+        let deep = "%252525252541";
+        let result = url_decode_complete(deep);
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_sanitize_url_encoded_path_traversal() {
+        assert!(sanitize_config_file_name("%2e%2e%2fetc%2fpasswd.yaml").is_err());
+        assert!(sanitize_config_file_name("..%2f..%2f..%2ftest.yaml").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_control_characters() {
+        assert!(sanitize_config_file_name("test\x01.yaml").is_err());
+        assert!(sanitize_config_file_name("test\x1f.yaml").is_err());
+        assert!(sanitize_config_file_name("test\x7f.yaml").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_filename_too_long() {
+        let long_name = "a".repeat(256) + ".yaml";
+        assert!(sanitize_config_file_name(&long_name).is_err());
+        let ok_name = "a".repeat(250) + ".yaml";
+        assert!(sanitize_config_file_name(&ok_name).is_ok());
+    }
+
+    #[test]
+    fn test_sanitize_windows_reserved_names() {
+        assert!(sanitize_config_file_name("CON.yaml").is_err());
+        assert!(sanitize_config_file_name("AUX.yaml").is_err());
+        assert!(sanitize_config_file_name("NUL.yaml").is_err());
+        assert!(sanitize_config_file_name("PRN.yaml").is_err());
+        assert!(sanitize_config_file_name("COM1.yaml").is_err());
+        assert!(sanitize_config_file_name("LPT1.yaml").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_empty_string() {
+        assert!(sanitize_config_file_name("").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_hidden_files() {
+        assert!(sanitize_config_file_name(".hidden.yaml").is_ok());
+    }
+
+    #[test]
+    fn test_sanitize_mixed_case_extension() {
+        assert!(sanitize_config_file_name("CONFIG.YAML").is_ok());
+        assert!(sanitize_config_file_name("test.YML").is_ok());
+    }
 }

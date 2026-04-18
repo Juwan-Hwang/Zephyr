@@ -18,6 +18,63 @@ use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
 
+// ── ProcessIo trait for testable process operations ────────────────────────
+
+/// Trait for process operations used by `core_process`.
+#[cfg_attr(test, mockall::automock)]
+pub(crate) trait ProcessIo {
+    fn run_command_output(&self, exe: &Path, args: &str) -> Result<std::process::Output, String>;
+}
+
+pub(crate) struct RealProcessIo;
+
+impl ProcessIo for RealProcessIo {
+    fn run_command_output(&self, exe: &Path, args: &str) -> Result<std::process::Output, String> {
+        let mut cmd = Command::new(exe);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt as _;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        cmd.arg(args);
+        cmd.output()
+            .map_err(|e| format!("Failed to run command: {e}"))
+    }
+}
+
+// ── Pure helper functions ────────────────────────────────────────────────
+
+/// Detect whether a core log indicates a cache/lock issue that warrants retry.
+fn detect_cache_lock_issue(log: &str) -> bool {
+    log.contains("database is locked")
+        || log.contains("cache.db")
+        || log.contains("unable to open database")
+        || log.contains("database disk image is malformed")
+}
+
+/// Redact sensitive directory paths from an error message.
+fn redact_error_message(msg: &str, core_dir: &str, profiles_dir: &str) -> String {
+    msg.replace(core_dir, "[CORE_DIR]")
+        .replace(profiles_dir, "[PROFILES_DIR]")
+}
+
+/// Parse the version string from `mihomo -v` stdout.
+fn parse_version_output(stdout: &str) -> String {
+    let trimmed = stdout.trim();
+    if let Some(v_idx) = trimmed.find('v') {
+        let after_v = &trimmed[v_idx..];
+        if let Some(space_idx) = after_v.find(' ') {
+            after_v[..space_idx].to_owned()
+        } else {
+            after_v.to_owned()
+        }
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+// ── Test-only public wrappers ───────────────────────────────────────────
+
 #[must_use]
 pub const fn core_binary_name() -> &'static str {
     #[cfg(target_os = "windows")]
@@ -643,8 +700,11 @@ pub async fn start_core(
         }
         let mut err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
         // Basic path redaction
-        err_msg = err_msg.replace(paths.core_dir.to_str().unwrap_or(""), "[CORE_DIR]");
-        err_msg = err_msg.replace(paths.profiles_dir.to_str().unwrap_or(""), "[PROFILES_DIR]");
+        err_msg = redact_error_message(
+            &err_msg,
+            paths.core_dir.to_str().unwrap_or(""),
+            paths.profiles_dir.to_str().unwrap_or(""),
+        );
         println!("Config test failed: {err_msg}");
         return Err(
             "Config test failed. Please check the config file for syntax errors.".to_owned(),
@@ -762,10 +822,7 @@ pub async fn start_core(
             let log = std::fs::read_to_string(&log_path).unwrap_or_default();
 
             // Check if this looks like a cache/lock issue
-            let is_lock_issue = log.contains("database is locked")
-                || log.contains("cache.db")
-                || log.contains("unable to open database")
-                || log.contains("database disk image is malformed");
+            let is_lock_issue = detect_cache_lock_issue(&log);
 
             if is_lock_issue {
                 eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
@@ -942,34 +999,31 @@ pub async fn get_core_version(app: AppHandle) -> Result<String, String> {
     let exe_path = get_core_exe_path(&app)?;
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     ensure_executable(&exe_path)?;
+    get_core_version_with_io(&RealProcessIo, &exe_path)
+}
 
-    let mut cmd = Command::new(&exe_path);
-    #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt as _;
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.arg("-v");
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run version check: {e}"))?;
+pub(crate) fn get_core_version_with_io<I: ProcessIo>(
+    io: &I,
+    exe_path: &Path,
+) -> Result<String, String> {
+    let output = io.run_command_output(exe_path, "-v")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    if let Some(v_idx) = stdout.find('v') {
-        let after_v = &stdout[v_idx..];
-        if let Some(space_idx) = after_v.find(' ') {
-            return Ok(after_v[..space_idx].to_owned());
-        }
-        return Ok(after_v.to_owned());
-    }
-
-    Ok(stdout.trim().to_owned())
+    Ok(parse_version_output(&stdout))
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{prepare_runtime_config, validate_custom_args};
+    use super::*;
+
+    #[test]
+    fn test_core_binary_name() {
+        let name = core_binary_name();
+        #[cfg(target_os = "windows")]
+        assert_eq!(name, "mihomo.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(name, "mihomo");
+    }
 
     #[test]
     fn prepare_runtime_config_injects_secret_and_controller() {
@@ -995,5 +1049,357 @@ mod tests {
     fn validate_custom_args_keeps_allowed_flags() {
         let args = validate_custom_args(&["  -t  ".to_owned(), "--version".to_owned()]).unwrap();
         assert_eq!(args, vec!["-t".to_owned(), "--version".to_owned()]);
+    }
+
+    // ── prepare_runtime_config extended tests ─────────────────────────────
+
+    #[test]
+    fn test_prepare_runtime_config_basic() {
+        let content = "port: 7890\nmode: rule";
+        let result = prepare_runtime_config(content, "mysecret");
+        assert!(result.is_some());
+        let (config, port) = result.unwrap();
+        assert_eq!(port, 9090);
+        assert!(config.contains("external-controller: 127.0.0.1:9090"));
+        assert!(config.contains("secret: mysecret"));
+        assert!(config.contains("unified-delay: true"));
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_custom_port() {
+        let content = "external-controller: 0.0.0.0:8080\nport: 7890";
+        let result = prepare_runtime_config(content, "secret");
+        assert!(result.is_some());
+        let (config, port) = result.unwrap();
+        assert_eq!(port, 8080);
+        assert!(config.contains("external-controller: 127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_unified_delay() {
+        let content = "unified-delay: false\nport: 7890";
+        let result = prepare_runtime_config(content, "s");
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("unified-delay: false"));
+        assert_eq!(config.matches("unified-delay").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_invalid_yaml() {
+        assert!(prepare_runtime_config("not: valid: yaml: :", "s").is_none());
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_non_mapping() {
+        assert!(prepare_runtime_config("just a string", "s").is_none());
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_empty_secret() {
+        let content = "port: 7890";
+        let result = prepare_runtime_config(content, "");
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("secret: "));
+    }
+
+    // ── validate_custom_args extended tests ───────────────────────────────
+
+    #[test]
+    fn test_validate_custom_args_empty() {
+        assert_eq!(validate_custom_args(&[]).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_validate_custom_args_blocked_config() {
+        assert!(validate_custom_args(&["-f".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--config".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--config=xxx".to_owned()]).is_err());
+        assert!(validate_custom_args(&["-secret".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--secret".to_owned()]).is_err());
+        assert!(validate_custom_args(&["-ext-ctl".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--external-controller".to_owned()]).is_err());
+        assert!(validate_custom_args(&["-d".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--directory".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn test_validate_custom_args_allowed() {
+        let args = vec!["-v".to_owned(), "--log-level=debug".to_owned()];
+        assert_eq!(validate_custom_args(&args).unwrap(), args);
+    }
+
+    #[test]
+    fn test_validate_custom_args_trims_and_filters_empty() {
+        let args = vec!["  -v  ".to_owned(), "".to_owned(), "   ".to_owned()];
+        let result = validate_custom_args(&args).unwrap();
+        assert_eq!(result, vec!["-v"]);
+    }
+
+    #[test]
+    fn test_validate_custom_args_case_insensitive() {
+        assert!(validate_custom_args(&["--Config".to_owned()]).is_err());
+        assert!(validate_custom_args(&["--SECRET=value".to_owned()]).is_err());
+    }
+
+    // ── parse_external_controller_port tests ──────────────────────────────
+
+    #[test]
+    fn test_parse_port_with_ip() {
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("external-controller: 127.0.0.1:9090").unwrap()
+            ),
+            9090
+        );
+    }
+
+    #[test]
+    fn test_parse_port_ip_only() {
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("external-controller: 0.0.0.0:8080").unwrap()
+            ),
+            8080
+        );
+    }
+
+    #[test]
+    fn test_parse_port_missing() {
+        assert_eq!(
+            parse_external_controller_port(&serde_yaml::from_str("port: 7890").unwrap()),
+            9090
+        );
+    }
+
+    #[test]
+    fn test_parse_port_not_number() {
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("external-controller: invalid").unwrap()
+            ),
+            9090
+        );
+    }
+
+    #[test]
+    fn test_parse_port_zero() {
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("external-controller: 127.0.0.1:0").unwrap()
+            ),
+            0
+        );
+    }
+
+    // ── detect_cache_lock_issue tests ─────────────────────────────────────
+
+    #[test]
+    fn test_detect_cache_lock_keywords() {
+        assert!(detect_cache_lock_issue("database is locked"));
+        assert!(detect_cache_lock_issue("error: cache.db corrupted"));
+        assert!(detect_cache_lock_issue("unable to open database file"));
+        assert!(detect_cache_lock_issue("database disk image is malformed"));
+    }
+
+    #[test]
+    fn test_detect_cache_lock_negative() {
+        assert!(!detect_cache_lock_issue("core started successfully"));
+        assert!(!detect_cache_lock_issue("listening on :9090"));
+        assert!(!detect_cache_lock_issue(""));
+    }
+
+    #[test]
+    fn test_detect_cache_lock_case_sensitive() {
+        assert!(detect_cache_lock_issue("database is locked"));
+        assert!(!detect_cache_lock_issue("Database is locked"));
+        assert!(!detect_cache_lock_issue("DATABASE IS LOCKED"));
+    }
+
+    #[test]
+    fn test_detect_cache_lock_substring() {
+        assert!(detect_cache_lock_issue(
+            "error: unable to open database file at path"
+        ));
+    }
+
+    // ── redact_error_message tests ────────────────────────────────────────
+
+    #[test]
+    fn test_redact_replaces_core_dir() {
+        let msg = format!("Failed to read {}/config.yaml", "/home/user/.config/zephyr");
+        let redacted = redact_error_message(
+            &msg,
+            "/home/user/.config/zephyr",
+            "/home/user/.config/zephyr/profiles",
+        );
+        assert!(!redacted.contains("/home/user/.config/zephyr"));
+        assert!(redacted.contains("[CORE_DIR]"));
+    }
+
+    #[test]
+    fn test_redact_replaces_profiles_dir() {
+        let msg = format!("Error in {}/test.yaml", "/home/user/profiles");
+        let redacted = redact_error_message(&msg, "/core", "/home/user/profiles");
+        assert!(!redacted.contains("/home/user/profiles"));
+        assert!(redacted.contains("[PROFILES_DIR]"));
+    }
+
+    #[test]
+    fn test_redact_no_match() {
+        let redacted = redact_error_message("Generic error message", "/core", "/profiles");
+        assert_eq!(redacted, "Generic error message");
+    }
+
+    #[test]
+    fn test_redact_empty_message() {
+        let redacted = redact_error_message("", "/core", "/profiles");
+        assert_eq!(redacted, "");
+    }
+
+    #[test]
+    fn test_redact_empty_dirs() {
+        let msg = "Error at /some/path";
+        let redacted = redact_error_message(msg, "", "");
+        assert!(!redacted.is_empty());
+    }
+
+    #[test]
+    fn test_redact_both_dirs_in_message() {
+        let msg = format!(
+            "Core dir {}/file and profiles dir {}/other",
+            "/core", "/profiles"
+        );
+        let redacted = redact_error_message(&msg, "/core", "/profiles");
+        assert!(!redacted.contains("/core"));
+        assert!(!redacted.contains("/profiles"));
+        assert!(redacted.contains("[CORE_DIR]"));
+        assert!(redacted.contains("[PROFILES_DIR]"));
+    }
+
+    // ── parse_version_output tests ────────────────────────────────────────
+
+    #[test]
+    fn test_parse_version_standard() {
+        assert_eq!(parse_version_output("mihomo v1.18.0\n"), "v1.18.0");
+    }
+
+    #[test]
+    fn test_parse_version_no_prefix() {
+        assert_eq!(parse_version_output("1.18.0"), "1.18.0");
+    }
+
+    #[test]
+    fn test_parse_version_with_metadata() {
+        assert_eq!(
+            parse_version_output("mihomo v1.18.0-alpha.1 2024-01-01"),
+            "v1.18.0-alpha.1"
+        );
+    }
+
+    #[test]
+    fn test_parse_version_empty() {
+        assert_eq!(parse_version_output(""), "");
+    }
+
+    #[test]
+    fn test_parse_version_whitespace() {
+        assert_eq!(parse_version_output("   v1.0.0   "), "v1.0.0");
+    }
+
+    #[test]
+    fn test_parse_version_only_v_prefix() {
+        assert_eq!(parse_version_output("v"), "v");
+    }
+
+    #[test]
+    fn test_parse_version_no_space_after() {
+        assert_eq!(parse_version_output("v1.2.3"), "v1.2.3");
+    }
+
+    #[test]
+    fn test_parse_version_multiple_v() {
+        assert_eq!(parse_version_output("av1.2.3 b4.5.6"), "v1.2.3");
+    }
+
+    // ── ProcessIo unit tests (mocked) ─────────────────────────────────────
+
+    /// Helper to create a fake successful `Output` for testing.
+    fn fake_success_output(stdout: &[u8]) -> std::process::Output {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt as _;
+            std::process::Output {
+                stdout: stdout.to_vec(),
+                stderr: Vec::new(),
+                status: std::process::ExitStatus::from_raw(0),
+            }
+        }
+        #[cfg(windows)]
+        {
+            std::process::Output {
+                stdout: stdout.to_vec(),
+                stderr: Vec::new(),
+                status: std::process::ExitStatus::default(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_core_version_with_io_success() {
+        let mut mock = MockProcessIo::new();
+        mock.expect_run_command_output()
+            .returning(|_, _| Ok(fake_success_output(b"mihomo v1.18.0\n")));
+
+        let result =
+            get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo")).unwrap();
+        assert_eq!(result, "v1.18.0");
+    }
+
+    #[test]
+    fn test_get_core_version_with_io_no_prefix() {
+        let mut mock = MockProcessIo::new();
+        mock.expect_run_command_output()
+            .returning(|_, _| Ok(fake_success_output(b"1.18.0\n")));
+
+        let result =
+            get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo")).unwrap();
+        assert_eq!(result, "1.18.0");
+    }
+
+    #[test]
+    fn test_get_core_version_with_io_command_failure() {
+        let mut mock = MockProcessIo::new();
+        mock.expect_run_command_output()
+            .returning(|_, _| Err("File not found".to_owned()));
+
+        let result = get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_core_version_with_io_empty_output() {
+        let mut mock = MockProcessIo::new();
+        mock.expect_run_command_output()
+            .returning(|_, _| Ok(fake_success_output(b"")));
+
+        let result =
+            get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo")).unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_get_core_version_with_io_with_metadata() {
+        let mut mock = MockProcessIo::new();
+        mock.expect_run_command_output().returning(|_, _| {
+            Ok(fake_success_output(
+                b"mihomo v1.18.0-alpha.1 (linux amd64) 2024-01-01\n",
+            ))
+        });
+
+        let result =
+            get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo")).unwrap();
+        assert_eq!(result, "v1.18.0-alpha.1");
     }
 }

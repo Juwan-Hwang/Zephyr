@@ -43,7 +43,7 @@ export function formatFileSize(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
 }
 
 // ── Network-traffic helpers (decimal, base-1000) ──────────────────────
@@ -72,7 +72,7 @@ export function formatBytes(bytes) {
         _NET_UNITS.length - 1,
     );
 
-    return parseFloat((bytes / Math.pow(1000, i)).toFixed(2)) + ' ' + _NET_UNITS[i];
+    return (bytes / Math.pow(1000, i)).toFixed(2) + ' ' + _NET_UNITS[i];
 }
 
 /**
@@ -114,10 +114,12 @@ export function formatDuration(ms) {
     const days    = Math.floor(ms / _MS_PER_DAY);
     const hours   = Math.floor((ms % _MS_PER_DAY) / _MS_PER_HOUR);
     const minutes = Math.floor((ms % _MS_PER_HOUR) / _MS_PER_MINUTE);
+    const seconds = Math.floor((ms % _MS_PER_MINUTE) / 1000);
 
-    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}s`;
+    if (days > 0) return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────

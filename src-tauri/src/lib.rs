@@ -187,9 +187,6 @@ fn get_tray_status(app: tauri::AppHandle) -> String {
     "default".to_owned()
 }
 
-#[cfg(test)]
-mod lib_test;
-
 // ---------------------------------------------------------------------------
 // S5: Rate-limited wrappers for security-sensitive commands
 // ---------------------------------------------------------------------------
@@ -441,4 +438,43 @@ pub fn run() {
             let _ = smart_kill_all_mihomo_as_root();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_rate_limiter_allows_first_call() {
+        let limiter = RateLimiter::new();
+        assert!(limiter.check_rate_limit("test_cmd", 1000));
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_rapid_calls() {
+        let limiter = RateLimiter::new();
+        assert!(limiter.check_rate_limit("rapid_cmd", 500));
+        assert!(!limiter.check_rate_limit("rapid_cmd", 500));
+    }
+
+    #[test]
+    fn test_rate_limiter_allows_after_interval() {
+        let limiter = RateLimiter::new();
+        assert!(limiter.check_rate_limit("delayed_cmd", 50));
+        assert!(!limiter.check_rate_limit("delayed_cmd", 50));
+        thread::sleep(Duration::from_millis(60));
+        assert!(limiter.check_rate_limit("delayed_cmd", 50));
+    }
+
+    #[test]
+    fn test_rate_limiter_different_keys_independent() {
+        let limiter = RateLimiter::new();
+        assert!(limiter.check_rate_limit("cmd_a", 500));
+        assert!(limiter.check_rate_limit("cmd_b", 500));
+        assert!(!limiter.check_rate_limit("cmd_a", 500));
+        assert!(!limiter.check_rate_limit("cmd_b", 500));
+        assert!(limiter.check_rate_limit("cmd_c", 500));
+    }
 }

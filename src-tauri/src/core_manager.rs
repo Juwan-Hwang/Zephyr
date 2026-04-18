@@ -52,16 +52,6 @@ pub use core::{
     TUN_TOGGLING,
 };
 
-// Re-export crate-visible items
-#[cfg(test)]
-pub(crate) use core::config_sanitizer::remove_dangerous_keys;
-
 // Re-export platform-specific items
 #[cfg(target_os = "windows")]
 pub use core::CREATE_NO_WINDOW;
-
-// Re-export test helpers
-#[cfg(test)]
-pub use core::is_private_host_public;
-#[cfg(test)]
-pub use core::sanitize_config_file_name_public;

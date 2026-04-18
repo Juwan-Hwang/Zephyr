@@ -77,6 +77,9 @@ winreg = "0.52"
 # Linux specific dependencies will be added as needed
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
+[dev-dependencies]
+mockall = "0.13"
+
 [lints]
 # rustc native lints
 [lints.rust]

@@ -259,3 +259,189 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
 
     Ok(target.to_string_lossy().into_owned())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ── mask_url tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_mask_long_domain() {
+        let result =
+            mask_url("https://very-long-domain-name.example.com/path/to/config?token=secret");
+        assert!(result.contains("***"));
+        assert!(!result.contains("very-long-domain-name"));
+        assert!(!result.contains("secret"));
+    }
+
+    #[test]
+    fn test_mask_short_domain() {
+        let result = mask_url("https://ab.cd/path");
+        assert!(result.contains("***"));
+    }
+
+    #[test]
+    fn test_mask_invalid_url() {
+        let result = mask_url("not-a-url");
+        assert_eq!(result, "***");
+    }
+
+    #[test]
+    fn test_mask_ip_url() {
+        let result = mask_url("http://192.168.1.1:7890/api");
+        assert!(result.contains("***"));
+    }
+
+    #[test]
+    fn test_mask_preserves_scheme() {
+        let result = mask_url("https://example.com/path");
+        assert!(result.starts_with("https://"));
+    }
+
+    #[test]
+    fn test_mask_http_scheme() {
+        let result = mask_url("http://example.com/path");
+        assert!(result.starts_with("http://"));
+    }
+
+    #[test]
+    fn test_mask_hides_path_and_query() {
+        let result = mask_url("https://example.com/secret/path?token=abc123");
+        assert!(!result.contains("/secret/path"));
+        assert!(!result.contains("token=abc123"));
+        assert!(result.ends_with("/***"));
+    }
+
+    // ── dangerous_keys tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_top_level_script_removed() {
+        let yaml = "script: test.js\nport: 7890";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        assert!(!value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("script".to_owned())));
+        assert!(value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("port".to_owned())));
+    }
+
+    #[test]
+    fn test_nested_script_in_proxy_group_removed() {
+        let yaml = r"
+proxy-groups:
+  - name: test
+    type: select
+    script: malicious.js
+    proxies:
+      - proxy1
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        let groups = value.get("proxy-groups").unwrap().as_sequence().unwrap();
+        let group = groups.first().unwrap().as_mapping().unwrap();
+        assert!(!group.contains_key(serde_yaml::Value::String("script".to_owned())));
+        assert!(group.contains_key(serde_yaml::Value::String("name".to_owned())));
+    }
+
+    #[test]
+    fn test_provider_path_removed() {
+        let yaml = r"
+proxy-providers:
+  my-provider:
+    type: http
+    url: https://example.com/proxies.yaml
+    path: /etc/passwd
+    interval: 3600
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
+        let provider = providers
+            .get(serde_yaml::Value::String("my-provider".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert!(!provider.contains_key(serde_yaml::Value::String("path".to_owned())));
+        assert!(provider.contains_key(serde_yaml::Value::String("type".to_owned())));
+    }
+
+    #[test]
+    fn test_non_provider_path_preserved() {
+        let yaml = r#"
+tun:
+  enable: false
+  stack: system
+  dns-hijack:
+    - any:53
+proxies:
+  - name: "test"
+    type: ss
+    server: 127.0.0.1
+    port: 8388
+"#;
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
+        let proxy = proxies.first().unwrap().as_mapping().unwrap();
+        assert!(proxy.contains_key(serde_yaml::Value::String("port".to_owned())));
+    }
+
+    #[test]
+    fn test_deeply_nested_script_removed() {
+        let yaml = r#"
+rules:
+  - SCRIPT,test.js,DIRECT
+  - MATCH,PROXY
+script:
+  code: |
+    function main() { return "malicious" }
+"#;
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        assert!(!value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("script".to_owned())));
+    }
+
+    #[test]
+    fn test_script_path_removed() {
+        let yaml = r"
+script-path: /malicious/script.js
+mode: rule
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        assert!(!value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("script-path".to_owned())));
+    }
+
+    #[test]
+    fn test_provider_without_path_preserved() {
+        let yaml = r"
+rule-providers:
+  my-rules:
+    type: http
+    url: https://example.com/rules.yaml
+    interval: 86400
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+
+        let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
+        assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));
+    }
+}
