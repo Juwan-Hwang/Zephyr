@@ -334,6 +334,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Check i18n completeness
+        run: pnpm check:i18n
+
       - name: Build CSS
         run: pnpm --filter @zephyr/desktop build:css
 

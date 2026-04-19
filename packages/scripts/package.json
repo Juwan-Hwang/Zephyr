@@ -1,0 +1,5 @@
+{
+  "name": "@zephyr/scripts",
+  "private": true,
+  "type": "module"
+}

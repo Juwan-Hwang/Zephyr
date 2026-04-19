@@ -11,7 +11,8 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "tauri": "pnpm --filter @zephyr/desktop tauri"
+    "tauri": "pnpm --filter @zephyr/desktop tauri",
+    "check:i18n": "node packages/scripts/check-i18n.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.2.2",
