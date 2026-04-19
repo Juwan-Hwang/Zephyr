@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src-tauri/icons/icon.png" alt="Zephyr Logo" width="128" height="128">
+<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr Logo" width="128" height="128">
 
 # Zephyr
 
@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.92+-orange)](https://www.rust-lang.org/)
 [![Security](https://img.shields.io/badge/Security-CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny-green)]()
 
 [简体中文](#-简体中文) | [English](#-english) | [日本語](#-日本語) | [한국어](#-한국어)
@@ -44,14 +44,14 @@
 
 ## 📸 应用截图
 
-![主页 - 浅色模式](assets/screenshot-home.png)
+![主页 - 浅色模式](apps/desktop/assets/screenshot-home.png)
 
 <details>
 <summary>📷 更多截图</summary>
 
 | 设置页面 | 深色模式 |
 |:---:|:---:|
-| ![设置](assets/screenshot-settings.png) | ![深色模式](assets/screenshot-dark.png) |
+| ![设置](apps/desktop/assets/screenshot-settings.png) | ![深色模式](apps/desktop/assets/screenshot-dark.png) |
 
 </details>
 
@@ -174,8 +174,9 @@ Zephyr 在安全方面的投入在开源代理客户端中是**独一无二**的
 
 #### 前置要求
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 或更高版本
+- [Rust](https://www.rust-lang.org/tools/install) 1.92 或更高版本
 - [Node.js](https://nodejs.org/) 18 或更高版本
+- [pnpm](https://pnpm.io/) 10 或更高版本
 - 平台特定依赖（参见 [Tauri 前置要求](https://tauri.app/v2/guides/prerequisites/)）
 
 #### 构建步骤
@@ -186,13 +187,13 @@ git clone https://github.com/Juwan-Hwang/Zephyr.git
 cd Zephyr
 
 # 安装依赖
-npm install
+pnpm install
 
 # 开发模式运行
-npm run tauri dev
+pnpm run dev
 
 # 生产构建
-npm run tauri build
+pnpm run build
 ```
 
 </details>
@@ -316,8 +317,9 @@ Download the latest release from [GitHub Releases](https://github.com/Juwan-Hwan
 
 #### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later
+- [Rust](https://www.rust-lang.org/tools/install) 1.92 or later
 - [Node.js](https://nodejs.org/) 18 or later
+- [pnpm](https://pnpm.io/) 10 or later
 - Platform-specific dependencies (see [Tauri Prerequisites](https://tauri.app/v2/guides/prerequisites/))
 
 #### Build Steps
@@ -328,13 +330,13 @@ git clone https://github.com/Juwan-Hwang/Zephyr.git
 cd Zephyr
 
 # Install dependencies
-npm install
+pnpm install
 
 # Run in development mode
-npm run tauri dev
+pnpm run dev
 
 # Build for production
-npm run tauri build
+pnpm run build
 ```
 
 </details>
@@ -430,8 +432,9 @@ Zephyr のセキュリティへの投資は、オープンソースプロキシ�
 
 #### 前提条件
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 以降
+- [Rust](https://www.rust-lang.org/tools/install) 1.92 以降
 - [Node.js](https://nodejs.org/) 18 以降
+- [pnpm](https://pnpm.io/) 10 以降
 - プラットフォーム固有の依存関係（[Tauri 前提条件](https://tauri.app/v2/guides/prerequisites/)を参照）
 
 #### ビルド手順
@@ -442,13 +445,13 @@ git clone https://github.com/Juwan-Hwang/Zephyr.git
 cd Zephyr
 
 # 依存関係をインストール
-npm install
+pnpm install
 
 # 開発モードで実行
-npm run tauri dev
+pnpm run dev
 
 # 本番用ビルド
-npm run tauri build
+pnpm run build
 ```
 
 </details>
@@ -544,8 +547,9 @@ Zephyr의 보안 투자는 오픈소스 프록시 클라이언트 중 **유일�
 
 #### 필수 조건
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 이상
+- [Rust](https://www.rust-lang.org/tools/install) 1.92 이상
 - [Node.js](https://nodejs.org/) 18 이상
+- [pnpm](https://pnpm.io/) 10 이상
 - 플랫폼별 종속성 ([Tauri 필수 조건](https://tauri.app/v2/guides/prerequisites/) 참조)
 
 #### 빌드 단계
@@ -556,13 +560,13 @@ git clone https://github.com/Juwan-Hwang/Zephyr.git
 cd Zephyr
 
 # 종속성 설치
-npm install
+pnpm install
 
 # 개발 모드로 실행
-npm run tauri dev
+pnpm run dev
 
 # 프로덕션 빌드
-npm run tauri build
+pnpm run build
 ```
 
 </details>
