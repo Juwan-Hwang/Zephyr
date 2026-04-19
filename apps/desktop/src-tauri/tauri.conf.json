@@ -4,7 +4,7 @@
   "version": "1.2.0",
   "identifier": "com.zephyr.desktop",
   "build": {
-    "beforeDevCommand": "pnpm run build:css",
+    "beforeDevCommand": "pnpm run dev:css",
     "beforeBuildCommand": "pnpm run build:css",
     "frontendDist": "../src"
   },

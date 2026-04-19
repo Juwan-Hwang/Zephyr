@@ -348,7 +348,7 @@ export async function initSettings() {
     const tunnelsList = document.getElementById('tunnels-list');
     const tunnelsEmpty = document.getElementById('tunnels-empty');
     const themeCircles = document.querySelectorAll('[data-theme]');
-    const checkUpdateBtn = document.getElementById('check-update-btn');
+    const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const versionText = document.getElementById('core-version-text');
     const configsList = document.getElementById('configs-list');
@@ -1139,9 +1139,9 @@ export async function initSettings() {
 
                 // Check both core and client updates in parallel
                 const [latest, clientInfo, currentAppVersion] = await Promise.all([
-                    invoke(COMMANDS.GET_LATEST_VERSION).catch(() => null),
-                    invoke(COMMANDS.GET_LATEST_CLIENT_VERSION).catch(() => null),
-                    invoke(COMMANDS.GET_APP_VERSION).catch(() => ''),
+                    invoke(COMMANDS.GET_LATEST_VERSION),
+                    invoke(COMMANDS.GET_LATEST_CLIENT_VERSION),
+                    invoke(COMMANDS.GET_APP_VERSION),
                 ]);
 
                 const coreHasUpdate = latest && latest.version && latest.version !== currentCoreVersion;
@@ -1261,7 +1261,7 @@ export async function initSettings() {
             for (const config of subConfigs) {
                 try {
                     const userAgent = getSubscriptionUserAgent();
-                    const fullUrl = await invoke(COMMANDS.GET_URL, { name: config.name });
+                    const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
                     await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent });
                     successCount++;
                 } catch (err) {
@@ -1377,7 +1377,7 @@ export async function initSettings() {
                     updateBtn.classList.add('animate-spin');
                     try {
                         const userAgent = getSubscriptionUserAgent();
-                        const fullUrl = await invoke(COMMANDS.GET_URL, { name: configInfo.name });
+                        const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: configInfo.name });
                         await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent });
                         invalidateConfigsCache();
                         if (isCurrent) {

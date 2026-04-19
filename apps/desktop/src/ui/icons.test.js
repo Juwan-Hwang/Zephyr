@@ -29,8 +29,8 @@ describe('SVG_ICONS', () => {
             'warning', 'error', 'success',
         ];
         for (const key of expectedKeys) {
-            if (SVG_ICONS[key] !== undefined) {
-                expect(typeof SVG_ICONS[key]).toBe('string');
+            if ((/** @type {Record<string, string>} */ (SVG_ICONS))[key] !== undefined) {
+                expect(typeof (/** @type {Record<string, string>} */ (SVG_ICONS))[key]).toBe('string');
             }
         }
     });

@@ -14,7 +14,7 @@ describe('createSequential', () => {
         const p2 = seq.run('key', () => Promise.resolve('new'));
         const [r1, r2] = await Promise.allSettled([p1, p2]);
         expect(r2.status).toBe('fulfilled');
-        expect(r2.value).toBe('new');
+        expect(r2.status === 'fulfilled' ? r2.value : undefined).toBe('new');
     });
 
     it('different keys do not interfere', async () => {

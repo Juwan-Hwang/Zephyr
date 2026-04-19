@@ -49,7 +49,7 @@ export function registerPageTimer(pageId, timerId) {
 export function registerPageRAF(pageId, rafId) {
     _ensureListening();
     const entry = _getOrCreate(pageId);
-    entry.rafts.add(rafId);
+    entry.rafs.add(rafId);
     return rafId;
 }
 
@@ -83,7 +83,7 @@ export function unregisterPageTimer(pageId, timerId) {
  */
 export function unregisterPageRAF(pageId, rafId) {
     const entry = _registry.get(pageId);
-    if (entry) entry.rafts.delete(rafId);
+    if (entry) entry.rafs.delete(rafId);
 }
 
 /**
@@ -94,9 +94,9 @@ export function destroyPageVisibility(pageId) {
     const entry = _registry.get(pageId);
     if (entry) {
         for (const id of entry.timers) clearInterval(id);
-        for (const id of entry.rafts) cancelAnimationFrame(id);
+        for (const id of entry.rafs) cancelAnimationFrame(id);
         entry.timers.clear();
-        entry.rafts.clear();
+        entry.rafs.clear();
         entry.callbacks.clear();
         _registry.delete(pageId);
     }

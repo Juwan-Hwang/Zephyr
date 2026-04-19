@@ -139,7 +139,7 @@ describe('EventBus', () => {
     });
 
     it('on throws for non-function listener', () => {
-        expect(() => Bus.on('test', 'not-a-function')).toThrow(TypeError);
+        expect(() => Bus.on('test', /** @type {any} */ ('not-a-function'))).toThrow(TypeError);
     });
 
     it('setMaxListeners changes the limit', () => {

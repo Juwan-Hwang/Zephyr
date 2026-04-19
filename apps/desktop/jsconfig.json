@@ -13,5 +13,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "src/js-yaml.min.js"]
+  "exclude": ["node_modules", "src/js-yaml.min.js", "src/**/*.test.js"]
 }

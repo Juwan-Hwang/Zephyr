@@ -485,7 +485,7 @@ export async function openConfigFolder() {
  * @throws {Error}
  */
 export async function restartCore(configPath, customArgs = []) {
-  const coreResult = await invoke(COMMANDS.START, {
+  const coreResult = await invoke(COMMANDS.START_CORE, {
     configPath,
     test: false,
     customArgs,
@@ -501,7 +501,7 @@ export async function restartCore(configPath, customArgs = []) {
  * Read mihomo core log (incremental)
  * @param {number} [offset=0] - Byte offset to start reading from
  * @param {number} [limit=500] - Max lines to read
- * @returns {Promise<{lines: string[], next_offset: number, file_size: number, has_more: boolean}>}
+ * @returns {Promise<{lines: string[], next_offset: number, file_size: number, has_more: boolean, rotated?: boolean}>}
  */
 export async function readCoreLog(offset = 0, limit = 500) {
   return invoke(COMMANDS.READ_LOG, { offset, limit });

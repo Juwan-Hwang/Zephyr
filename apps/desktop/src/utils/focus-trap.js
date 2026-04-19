@@ -76,7 +76,7 @@ export function createFocusTrap(container, options = {}) {
      * @returns {HTMLElement[]}
      */
     function getFocusableElements() {
-        const elements = Array.from(container.querySelectorAll(FOCUSABLE));
+        const elements = /** @type {HTMLElement[]} */ (Array.from(container.querySelectorAll(FOCUSABLE)));
         return elements.filter((el) => {
             if (el.offsetParent === null && el.style.position !== 'fixed') return false;
             if (el.getAttribute('tabindex') === '-1') return false;

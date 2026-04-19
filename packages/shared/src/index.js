@@ -14,9 +14,9 @@
 // ---------------------------------------------------------------------------
 
 export const CORE = Object.freeze({
-    START: "start_core",
-    STOP: "stop_core",
-    GET_VERSION: "get_core_version",
+    START_CORE: "start_core",
+    STOP_CORE: "stop_core",
+    GET_CORE_VERSION: "get_core_version",
     READ_CONFIG: "read_config",
     UPDATE_CONFIG: "update_config",
     READ_LOG: "read_core_log",
@@ -27,11 +27,11 @@ export const CORE = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const CONFIG_FILES = Object.freeze({
-    LIST: "list_configs",
-    GET_URL: "get_config_url",
-    DELETE: "delete_config",
-    READ: "read_config_file",
-    WRITE: "write_config_file",
+    LIST_CONFIGS: "list_configs",
+    GET_CONFIG_URL: "get_config_url",
+    DELETE_CONFIG: "delete_config",
+    READ_CONFIG_FILE: "read_config_file",
+    WRITE_CONFIG_FILE: "write_config_file",
     OPEN_FOLDER: "open_config_folder",
 });
 
@@ -40,9 +40,9 @@ export const CONFIG_FILES = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const SYS_PROXY = Object.freeze({
-    ENABLE: "enable_sysproxy",
-    DISABLE: "disable_sysproxy",
-    GET: "get_sys_proxy",
+    ENABLE_SYSPROXY: "enable_sysproxy",
+    DISABLE_SYSPROXY: "disable_sysproxy",
+    GET_SYS_PROXY: "get_sys_proxy",
 });
 
 // ---------------------------------------------------------------------------
@@ -58,8 +58,8 @@ export const CRYPTO = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const TUN = Object.freeze({
-    SET_ENABLED: "set_tun_enabled",
-    RELEASE_TOGGLE: "release_tun_toggle",
+    SET_TUN_ENABLED: "set_tun_enabled",
+    RELEASE_TUN_TOGGLE: "release_tun_toggle",
     RESTART_AS_ROOT: "restart_core_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
 });
@@ -69,12 +69,12 @@ export const TUN = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const TRAY = Object.freeze({
-    CHANGE_ICON: "change_tray_icon",
-    GET_MENU_STATE: "get_tray_menu_state",
-    SET_MENU_STATE: "set_tray_menu_state",
-    UPDATE_FULL_MENU: "update_tray_full_menu",
-    UPDATE_TOGGLE_STATES: "update_tray_toggle_states",
-    GET_STATUS: "get_tray_status",
+    CHANGE_TRAY_ICON: "change_tray_icon",
+    GET_TRAY_MENU_STATE: "get_tray_menu_state",
+    SET_TRAY_MENU_STATE: "set_tray_menu_state",
+    UPDATE_TRAY_FULL_MENU: "update_tray_full_menu",
+    UPDATE_TRAY_TOGGLE_STATES: "update_tray_toggle_states",
+    GET_TRAY_STATUS: "get_tray_status",
 });
 
 // ---------------------------------------------------------------------------
@@ -95,8 +95,8 @@ export const UPDATER = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const SHORTCUTS = Object.freeze({
-    REGISTER: "rate_limited_register_shortcut",
-    UNREGISTER: "rate_limited_unregister_shortcut",
+    REGISTER_SHORTCUT: "rate_limited_register_shortcut",
+    UNREGISTER_SHORTCUT: "rate_limited_unregister_shortcut",
 });
 
 // ---------------------------------------------------------------------------
@@ -104,8 +104,8 @@ export const SHORTCUTS = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const SETTINGS = Object.freeze({
-    GET: "get_settings",
-    SAVE: "save_settings",
+    GET_SETTINGS: "get_settings",
+    SAVE_SETTINGS: "save_settings",
 });
 
 // ---------------------------------------------------------------------------

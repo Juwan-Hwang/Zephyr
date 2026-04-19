@@ -26,7 +26,7 @@ describe('debounce (trailing)', () => {
 
     it('cancel prevents invocation', () => {
         const fn = vi.fn();
-        const debounced = debounce(fn, 100);
+        const debounced = /** @type {Function & { cancel(): void }} */ (debounce(fn, 100));
         debounced();
         debounced.cancel();
         vi.advanceTimersByTime(200);

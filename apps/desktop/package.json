@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "build:css": "tailwindcss -i src/styles.css -o src/tailwind.css --minify",
-    "dev:css": "tailwindcss -i src/styles.css -o src/tailwind.css --watch",
+    "copy-shared": "node -e \"const fs=require('fs');const p=require('path');const src=p.resolve(__dirname,'../../packages/shared/src/index.js');const dst=p.resolve(__dirname,'src/_shared/index.js');fs.mkdirSync(p.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);console.log('copied',src,'->',dst)\"",
+    "build:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --minify",
+    "dev:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --watch",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -p jsconfig.json --noEmit"
@@ -14,5 +15,8 @@
   "dependencies": {
     "@tauri-apps/plugin-autostart": "2.5.1",
     "@zephyr/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "globals": "^17.5.0"
   }
 }

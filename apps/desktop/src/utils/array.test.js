@@ -48,9 +48,9 @@ describe('buildLatencyPriorityQueue', () => {
         expect(result[1]).toBe('b');
     });
     it('null data → no crash', () => {
-        expect(buildLatencyPriorityQueue(null, ['a'])).toEqual(['a']);
+        expect(buildLatencyPriorityQueue(/** @type {any} */ (null), ['a'])).toEqual(['a']);
     });
     it('undefined data → no crash', () => {
-        expect(buildLatencyPriorityQueue(undefined, ['a'])).toEqual(['a']);
+        expect(buildLatencyPriorityQueue(/** @type {any} */ (undefined), ['a'])).toEqual(['a']);
     });
 });

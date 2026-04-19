@@ -78,6 +78,7 @@ describe('ApiError', () => {
     });
 
     it('ignores extra properties in options', () => {
+        // @ts-expect-error -- intentionally passing unknown property to test it is ignored
         const err = new ApiError('test', { status: 200, extra: 'ignored' });
         expect(err.status).toBe(200);
         expect(err).not.toHaveProperty('extra');
@@ -125,8 +126,8 @@ describe('setSecret', () => {
     });
 
     it('handles falsy values', () => {
-        expect(() => setSecret(null)).not.toThrow();
-        expect(() => setSecret(undefined)).not.toThrow();
+        expect(() => setSecret(/** @type {any} */ (null))).not.toThrow();
+        expect(() => setSecret(/** @type {any} */ (undefined))).not.toThrow();
     });
 
     it('is a function', () => {

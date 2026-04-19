@@ -89,7 +89,7 @@ const _escapeRe = /[&<>"']/g;
  */
 function escapeHtml(str) {
     if (typeof str !== 'string') return '';
-    return str.replace(_escapeRe, ch => _escapeMap[ch]);
+    return str.replace(_escapeRe, ch => /** @type {any} */ (_escapeMap)[ch]);
 }
 
 // ── Log Level Parser (regex compiled once, reused) ────────────────────────
@@ -257,6 +257,7 @@ function startPolling() {
 
 // ── HTML Builder ───────────────────────────────────────────────────────────
 
+/** @param {string} key */
 function t(key) {
     const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */ (currentLang);
     const dict = /** @type {Record<string, string>} */ (translations[langKey]) || /** @type {Record<string, string>} */ (translations.en);
@@ -330,7 +331,7 @@ function bindEvents() {
             if (!_container) return;
             _container.querySelectorAll('.log-level-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (btn.dataset.level) || 'all';
+            _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
             invalidateFilter();
             scheduleRender();
         });
@@ -356,7 +357,7 @@ function bindEvents() {
         const ro = new ResizeObserver(() => scheduleRender());
         ro.observe(_logContent);
         // Store for cleanup
-        _logContent._resizeObserver = ro;
+        /** @type {any} */ (_logContent)._resizeObserver = ro;
     }
 }
 

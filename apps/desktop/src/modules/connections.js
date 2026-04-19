@@ -60,6 +60,11 @@ let totalUploaded = 0;
 /** Debounce flag to prevent overlapping fetches */
 let isFetching = false;
 
+/** @type {Function|null} */
+let _unsubI18n = null;
+/** @type {Function|null} */
+let _unsubTheme = null;
+
 // HTML template for the connections page (injected into DOM on init)
 const PAGE_HTML = `
 <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-cyan-500/5 blur-[100px] pointer-events-none rounded-full"></div>
@@ -183,8 +188,8 @@ export function initConnectionsPage() {
 // Re-apply sort arrows when i18n/theme changes wipe header text
 const _onI18nApplied = () => updateSortIndicators();
 const _onThemeChanged = () => updateSortIndicators();
-const _unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
-const _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
+_unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
+_unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
 
     // Auto-refresh every 2 seconds (only when page is visible)
     connectionsPollTimer = setInterval(() => {
@@ -203,8 +208,8 @@ export function destroyConnectionsPage() {
         clearInterval(connectionsPollTimer);
         connectionsPollTimer = null;
     }
-    _unsubI18n();
-    _unsubTheme();
+    if (_unsubI18n) { _unsubI18n(); _unsubI18n = null; }
+    if (_unsubTheme) { _unsubTheme(); _unsubTheme = null; }
 }
 
 // ============================================

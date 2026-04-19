@@ -48,6 +48,9 @@ Thumbs.db
 # Tauri build output
 apps/desktop/src-tauri/target/
 
+# Generated: @zephyr/shared copied for import maps
+apps/desktop/src/_shared/
+
 # Installer files (should not be in repo)
 rustup-init.exe
 

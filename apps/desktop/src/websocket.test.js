@@ -50,8 +50,8 @@ describe('setWsSecret', () => {
     });
 
     it('handles falsy values', () => {
-        expect(() => setWsSecret(null)).not.toThrow();
-        expect(() => setWsSecret(undefined)).not.toThrow();
+        expect(() => setWsSecret(/** @type {any} */ (null))).not.toThrow();
+        expect(() => setWsSecret(/** @type {any} */ (undefined))).not.toThrow();
     });
 
     it('is a function', () => {
@@ -87,7 +87,7 @@ describe('onConnectionLost', () => {
     });
 
     it('accepts null without error', () => {
-        expect(() => onConnectionLost(null)).not.toThrow();
+        expect(() => onConnectionLost(/** @type {any} */ (null))).not.toThrow();
     });
 
     it('is a function', () => {
@@ -151,6 +151,7 @@ describe('forceReconnect', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('connectTraffic', () => {
+    /** @type {any} */
     let handle;
 
     afterEach(() => {
