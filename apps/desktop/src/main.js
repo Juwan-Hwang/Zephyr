@@ -51,9 +51,52 @@ import { initWindowControls } from './ui/window-controls.js';
 import { initDeepLink } from './ui/deep-link.js';
 import { sendOSNotification } from './ui/os-notification.js';
 import { initGlobalShortcut, registerDefaultShortcuts, initShortcutSettings } from './ui/global-shortcut.js';
+import { bind } from './ui/bind.js';
+import { appStore } from './ui/state.js';
+import { Bus, Events } from './ui/events.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
+
+// ═══════════════════════════════════════════════════════════════════
+//  initReactiveBindings — Centralized Bus -> store -> DOM wiring
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Wire Bus events to appStore and bind DOM elements reactively.
+ * Called once during initApp after all UI modules are initialized.
+ */
+function initReactiveBindings() {
+  // --- SysProxy toggle checkbox ---
+  const sysProxyToggle = document.getElementById('sys-proxy-toggle');
+  if (sysProxyToggle) {
+    bind(appStore, sysProxyToggle, 'isSysProxyEnabled', 'checked');
+  }
+
+  // --- TUN toggle checkbox ---
+  const tunToggle = document.getElementById('tun-proxy-toggle');
+  if (tunToggle) {
+    bind(appStore, tunToggle, 'isTunEnabled', 'checked');
+  }
+
+  // --- Tray auto-update on state changes ---
+  appStore.subscribe('isSysProxyEnabled', () => updateTrayStatus().catch(() => {}));
+  appStore.subscribe('isTunEnabled', () => updateTrayStatus().catch(() => {}));
+  appStore.subscribe('currentOutboundMode', () => updateTrayMenu(true).catch(() => {}));
+
+  // --- Bus event -> store wiring (for events from settings.js, i18n.js) ---
+  Bus.on(Events.MODE_CHANGED, /** @param {string} mode */ (mode) => {
+    appStore.set('currentOutboundMode', mode);
+  });
+
+  Bus.on(Events.LANGUAGE_CHANGED, /** @param {string} lang */ (lang) => {
+    appStore.set('currentLang', lang);
+  });
+
+  Bus.on(Events.THEME_CHANGED, /** @param {string} theme */ (theme) => {
+    appStore.set('currentTheme', theme);
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  initApp — Main initialization sequence
@@ -147,6 +190,9 @@ async function initApp() {
   initUwpExemption();
   initNodeWheel();
   initShortcutSettings();
+
+  // 6b. Initialize reactive bindings (Bus -> store -> DOM)
+  initReactiveBindings();
 
   // 7b. Initialize deep link and global shortcut listeners
   initDeepLink().then((unlisten) => {

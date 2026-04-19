@@ -61,7 +61,7 @@ export function initModeSelector() {
 
                 appStore.set('isNetworkUpdating', false);
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
-                import('./tray.js').then(m => m.updateTrayMenu(true).catch(() => {}));
+                // Reactive: subscribe() in initReactiveBindings() handles tray menu update
                 Bus.emit(Events.MODE_CHANGED, mode);
             } catch (err) {
                 showNotification(toError(err).toString(), 'error');

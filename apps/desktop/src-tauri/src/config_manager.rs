@@ -241,11 +241,10 @@ pub async fn update_config(
         port
     };
 
-    #[allow(clippy::expect_used)]
     let client = reqwest::Client::builder()
         .no_proxy() // Force direct connection to local core, bypass system proxy
         .build()
-        .expect("failed to build HTTP client");
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
     // For Mihomo, /configs requires PATCH for partial updates.
     let url = format!("http://127.0.0.1:{actual_port}/configs?force=true");
     let patch_yaml: YamlValue = serde_yaml::to_value(&patch)

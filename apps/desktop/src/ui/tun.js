@@ -9,7 +9,6 @@ import { tunLogger } from '../utils/logger.js';
 import { setWsSecret, setWsBaseUrl } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { persistConfigChanges } from './advanced.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
@@ -108,7 +107,6 @@ export function initTunToggle() {
             await closeAllConnections();
 
             appStore.set('isTunEnabled', enable);
-            Bus.emit(Events.TUN_CHANGED, enable);
 
             showNotification(t.configSuccess, 'success');
 
@@ -119,8 +117,7 @@ export function initTunToggle() {
             if (spinner) spinner.classList.add('hidden');
             appStore.set('isNetworkUpdating', false);
             try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
-            await updateTrayStatus();
-            updateTrayMenu(true).catch(() => {});
+            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         } catch (err) {
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
@@ -132,8 +129,7 @@ export function initTunToggle() {
             showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             appStore.set('isNetworkUpdating', false);
             try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
-            await updateTrayStatus();
-            updateTrayMenu(true).catch(() => {});
+            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         }
     };
 }

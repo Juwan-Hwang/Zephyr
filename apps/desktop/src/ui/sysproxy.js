@@ -8,7 +8,7 @@ import { getConfig, invoke } from '../api.js';
 import { sysproxyLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { updateTrayStatus, updateTrayMenu } from './tray.js';
+import { updateTrayStatus } from './tray.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -77,18 +77,14 @@ export async function initProxyToggle() {
             }
 
             appStore.set('isSysProxyEnabled', enabled);
-            Bus.emit(Events.SYS_PROXY_CHANGED, enabled);
-
-            updateSysProxyUI();
-            await updateTrayStatus();
-            updateTrayMenu().catch(() => {});
+            // Reactive: bind() and subscribe() in initReactiveBindings() handle UI updates
         } catch (err) {
             sysproxyLogger.error('Failed to set sys proxy', err);
             const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
             showNotification(`${t.errorPrefix || 'Error'}: ${err}`, 'error');
             toggle.checked = !enabled;
-            await updateTrayStatus();
-            updateTrayMenu().catch(() => {});
+            appStore.set('isSysProxyEnabled', !enabled);
+            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         }
     });
 }

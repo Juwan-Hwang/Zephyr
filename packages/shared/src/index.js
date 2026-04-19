@@ -61,6 +61,7 @@ export const TUN = Object.freeze({
     SET_TUN_ENABLED: "set_tun_enabled",
     RELEASE_TUN_TOGGLE: "release_tun_toggle",
     RESTART_AS_ROOT: "restart_core_as_root_cmd",
+    KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
 });
 
@@ -75,6 +76,7 @@ export const TRAY = Object.freeze({
     UPDATE_TRAY_FULL_MENU: "update_tray_full_menu",
     UPDATE_TRAY_TOGGLE_STATES: "update_tray_toggle_states",
     GET_TRAY_STATUS: "get_tray_status",
+    GET_TRAY_PROXY_STATUS: "get_tray_proxy_status",
 });
 
 // ---------------------------------------------------------------------------

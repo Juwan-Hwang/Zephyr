@@ -24,6 +24,7 @@ const PERSIST_DEBOUNCE_MS = 100;
  * @property {() => void} freeze - Freeze the store
  * @property {() => void} unfreeze - Unfreeze the store
  * @property {boolean} isFrozen - Whether the store is frozen
+ * @property {(name: string, deps: string[], compute: Function) => Function} selector - Register derived state, returns reader
  */
 
 /**
@@ -44,6 +45,12 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
 
     /** @type {Set<Function>} wildcard subscribers */
     const globalSubs = new Set();
+
+    /** @type {Map<string, Set<string>>} key -> Set<selectorName> */
+    const depGraph = new Map();
+
+    /** @type {Map<string, { dirty: boolean, value: any, compute: Function }>} */
+    const selectorCache = new Map();
 
     /** Batch tracking */
     let pendingKeys = new Set();
@@ -70,6 +77,17 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
         microtaskScheduled = false;
         const keys = pendingKeys;
         pendingKeys = new Set();
+
+        // Mark dependent selectors as dirty (O(1) per key)
+        for (const key of keys) {
+            const dependents = depGraph.get(key);
+            if (dependents) {
+                for (const name of dependents) {
+                    const entry = selectorCache.get(name);
+                    if (entry) entry.dirty = true;
+                }
+            }
+        }
 
         for (const key of keys) {
             const subs = keySubs.get(key);
@@ -228,6 +246,36 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
         /** @returns {boolean} Whether the store is currently frozen */
         get isFrozen() {
             return frozen;
+        },
+
+        /**
+         * Register a derived state selector.
+         * Returns a reader function that lazily recomputes when dirty.
+         *
+         * @param {string} name - Selector name (unique identifier)
+         * @param {string[]} deps - Store keys this selector depends on
+         * @param {Function} compute - Pure function: () => derivedValue
+         * @returns {Function} Reader: () => derivedValue
+         */
+        selector(name, deps, compute) {
+            selectorCache.set(name, { dirty: true, value: undefined, compute });
+            for (const dep of deps) {
+                let depSet = depGraph.get(dep);
+                if (!depSet) {
+                    depSet = new Set();
+                    depGraph.set(dep, depSet);
+                }
+                depSet.add(name);
+            }
+            return () => {
+                const entry = selectorCache.get(name);
+                if (!entry) return undefined;
+                if (entry.dirty) {
+                    entry.value = entry.compute();
+                    entry.dirty = false;
+                }
+                return entry.value;
+            };
         },
     };
 

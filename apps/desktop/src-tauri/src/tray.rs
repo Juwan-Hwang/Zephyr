@@ -302,27 +302,30 @@ fn toggle_tun(app: &AppHandle) {
     let _ = app.emit("tray-tun-changed", !current);
 }
 
+/// Parameters for [`update_tray_full_menu`].
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayMenuParams {
+    pub show_text: String,
+    pub quit_text: String,
+    pub sys_proxy_text: String,
+    pub tun_text: String,
+    pub rule_text: String,
+    pub global_text: String,
+    pub direct_text: String,
+    pub subscriptions_text: String,
+    pub proxies_text: String,
+    pub sys_proxy_enabled: bool,
+    pub tun_enabled: bool,
+    pub configs: Vec<ConfigInfo>,
+    pub proxy_groups: Vec<ProxyGroupInfo>,
+    pub current_mode: String,
+}
+
 /// Update tray menu with new configuration
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_pass_by_value)]
-pub fn update_tray_full_menu(
-    app: AppHandle,
-    show_text: String,
-    quit_text: String,
-    sys_proxy_text: String,
-    tun_text: String,
-    rule_text: String,
-    global_text: String,
-    direct_text: String,
-    subscriptions_text: String,
-    proxies_text: String,
-    sys_proxy_enabled: bool,
-    tun_enabled: bool,
-    configs: Vec<ConfigInfo>,
-    proxy_groups: Vec<ProxyGroupInfo>,
-    current_mode: String,
-) -> Result<(), String> {
+pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;
@@ -330,23 +333,23 @@ pub fn update_tray_full_menu(
     // Update internal state
     let state = app.state::<TrayState>();
     if let Ok(mut guard) = state.0.lock() {
-        guard.sys_proxy_enabled = sys_proxy_enabled;
-        guard.tun_enabled = tun_enabled;
-        guard.current_mode.clone_from(&current_mode);
+        guard.sys_proxy_enabled = params.sys_proxy_enabled;
+        guard.tun_enabled = params.tun_enabled;
+        guard.current_mode.clone_from(&params.current_mode);
     }
 
     // Build menu items
-    let show_i = MenuItem::with_id(&app, "show", &show_text, true, None::<&str>)
+    let show_i = MenuItem::with_id(&app, "show", &params.show_text, true, None::<&str>)
         .map_err(|e| format!("Failed to create show item: {e}"))?;
 
     let sep1 = PredefinedMenuItem::separator(&app)
         .map_err(|e| format!("Failed to create separator: {e}"))?;
 
     // System Proxy toggle - use MenuItem with circle indicator instead of CheckMenuItem
-    let sys_proxy_label = if sys_proxy_enabled {
-        format!("● {sys_proxy_text}")
+    let sys_proxy_label = if params.sys_proxy_enabled {
+        format!("● {}", params.sys_proxy_text)
     } else {
-        format!("○ {sys_proxy_text}")
+        format!("○ {}", params.sys_proxy_text)
     };
     let sys_proxy_i = MenuItem::with_id(
         &app,
@@ -358,10 +361,10 @@ pub fn update_tray_full_menu(
     .map_err(|e| format!("Failed to create sys proxy item: {e}"))?;
 
     // TUN Mode toggle - use MenuItem with circle indicator instead of CheckMenuItem
-    let tun_label = if tun_enabled {
-        format!("● {tun_text}")
+    let tun_label = if params.tun_enabled {
+        format!("● {}", params.tun_text)
     } else {
-        format!("○ {tun_text}")
+        format!("○ {}", params.tun_text)
     };
     let tun_i = MenuItem::with_id(&app, "toggle_tun", &tun_label, true, None::<&str>)
         .map_err(|e| format!("Failed to create tun item: {e}"))?;
@@ -369,20 +372,20 @@ pub fn update_tray_full_menu(
     // Mode items - use MenuItem with circle indicator
     let mode_sep = PredefinedMenuItem::separator(&app)
         .map_err(|e| format!("Failed to create separator: {e}"))?;
-    let rule_label = if current_mode.to_lowercase() == "rule" {
-        format!("● {rule_text}")
+    let rule_label = if params.current_mode.to_lowercase() == "rule" {
+        format!("● {}", params.rule_text)
     } else {
-        format!("○ {rule_text}")
+        format!("○ {}", params.rule_text)
     };
-    let global_label = if current_mode.to_lowercase() == "global" {
-        format!("● {global_text}")
+    let global_label = if params.current_mode.to_lowercase() == "global" {
+        format!("● {}", params.global_text)
     } else {
-        format!("○ {global_text}")
+        format!("○ {}", params.global_text)
     };
-    let direct_label = if current_mode.to_lowercase() == "direct" {
-        format!("● {direct_text}")
+    let direct_label = if params.current_mode.to_lowercase() == "direct" {
+        format!("● {}", params.direct_text)
     } else {
-        format!("○ {direct_text}")
+        format!("○ {}", params.direct_text)
     };
     let rule_i = MenuItem::with_id(&app, "mode_rule", &rule_label, true, None::<&str>)
         .map_err(|e| format!("Failed to create rule item: {e}"))?;
@@ -403,8 +406,8 @@ pub fn update_tray_full_menu(
         .item(&direct_i);
 
     // Build separate Subscriptions and Proxies submenus
-    let has_configs = !configs.is_empty();
-    let has_proxies = !proxy_groups.is_empty();
+    let has_configs = !params.configs.is_empty();
+    let has_proxies = !params.proxy_groups.is_empty();
 
     if has_configs || has_proxies {
         let sub_sep = PredefinedMenuItem::separator(&app)
@@ -413,9 +416,9 @@ pub fn update_tray_full_menu(
 
         // Build Subscriptions submenu
         if has_configs {
-            let mut sub_menu_builder = SubmenuBuilder::new(&app, &subscriptions_text);
+            let mut sub_menu_builder = SubmenuBuilder::new(&app, &params.subscriptions_text);
 
-            for config in &configs {
+            for config in &params.configs {
                 let sub_label = if config.is_active {
                     format!("● {}", config.name)
                 } else {
@@ -435,9 +438,9 @@ pub fn update_tray_full_menu(
 
         // Build Proxies submenu (only show nodes from active subscription)
         if has_proxies {
-            let mut proxy_menu_builder = SubmenuBuilder::new(&app, &proxies_text);
+            let mut proxy_menu_builder = SubmenuBuilder::new(&app, &params.proxies_text);
 
-            for group in &proxy_groups {
+            for group in &params.proxy_groups {
                 for proxy in group.proxies.iter().take(15) {
                     let id = format!("proxy_{}:{}", group.name, proxy.name);
                     let is_current = proxy.name == group.now;
@@ -462,7 +465,7 @@ pub fn update_tray_full_menu(
     // Separator and Quit
     let sep2 = PredefinedMenuItem::separator(&app)
         .map_err(|e| format!("Failed to create separator: {e}"))?;
-    let quit_i = MenuItem::with_id(&app, "quit", &quit_text, true, None::<&str>)
+    let quit_i = MenuItem::with_id(&app, "quit", &params.quit_text, true, None::<&str>)
         .map_err(|e| format!("Failed to create quit item: {e}"))?;
 
     builder = builder.item(&sep2).item(&quit_i);
