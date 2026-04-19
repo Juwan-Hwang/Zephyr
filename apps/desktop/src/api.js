@@ -1,5 +1,6 @@
 // @ts-check
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ApiError — 统一错误类型
@@ -472,7 +473,7 @@ export async function isAutoStartEnabled() {
  * @throws {Error}
  */
 export async function openConfigFolder() {
-  return invoke('open_config_folder');
+  return invoke(COMMANDS.OPEN_FOLDER);
 }
 
 /**
@@ -484,7 +485,7 @@ export async function openConfigFolder() {
  * @throws {Error}
  */
 export async function restartCore(configPath, customArgs = []) {
-  const coreResult = await invoke('start_core', {
+  const coreResult = await invoke(COMMANDS.START, {
     configPath,
     test: false,
     customArgs,
@@ -503,5 +504,5 @@ export async function restartCore(configPath, customArgs = []) {
  * @returns {Promise<{lines: string[], next_offset: number, file_size: number, has_more: boolean}>}
  */
 export async function readCoreLog(offset = 0, limit = 500) {
-  return invoke('read_core_log', { offset, limit });
+  return invoke(COMMANDS.READ_LOG, { offset, limit });
 }

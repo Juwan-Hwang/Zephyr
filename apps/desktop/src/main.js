@@ -27,6 +27,7 @@ import { initChart, updateTrafficData, cleanupChart } from './modules/traffic-ch
 import { initConnectionsPage, destroyConnectionsPage } from './modules/connections.js';
 import { apiLogger } from './utils/logger.js';
 import { registerCleanup, runCleanup } from './utils/cleanup-registry.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // --- UI module imports ---
 import { showNotification } from './ui/notifications.js';
@@ -83,7 +84,7 @@ async function initApp() {
   // 4. Show window
   setTimeout(async () => {
     try {
-      await invoke('show_main_window');
+      await invoke(COMMANDS.SHOW_MAIN_WINDOW);
     } catch (e) {
       apiLogger.warn('Failed to show window', e);
     }
@@ -94,13 +95,13 @@ async function initApp() {
   let secret = null;
   try {
     const tGetSettings = performance.now();
-    const settings = await invoke('get_settings');
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
     console.log(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
 
     const tStartCore = performance.now();
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
-    const coreResult = await invoke('start_core', {
+    const coreResult = await invoke(COMMANDS.START_CORE, {
       configPath,
       test: false,
       customArgs,
@@ -168,7 +169,7 @@ async function initApp() {
 
   // 7. Check encryption key persistence
   try {
-    const keyPersisted = await invoke('is_machine_key_persisted');
+    const keyPersisted = await invoke(COMMANDS.IS_MACHINE_KEY_PERSISTED);
     if (!keyPersisted) {
       apiLogger.error('Machine key not persisted — encrypted data will be lost on restart');
       const lang = localStorage.getItem('lang') || 'en';
@@ -197,7 +198,7 @@ async function initApp() {
   // 8b. Auto-check for updates on startup if enabled
   setTimeout(async () => {
     try {
-      const settings = await invoke('get_settings');
+      const settings = await invoke(COMMANDS.GET_SETTINGS);
       const lang = localStorage.getItem('lang') || 'en';
       /** @type {Record<string, string>} */
       const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang]);
@@ -208,8 +209,8 @@ async function initApp() {
       // Check core update if auto_update is enabled
       if (settings.auto_update) {
         try {
-          const latest = await invoke('get_latest_version');
-          const currentVersion = await invoke('get_core_version');
+          const latest = await invoke(COMMANDS.GET_LATEST_VERSION);
+          const currentVersion = await invoke(COMMANDS.GET_CORE_VERSION);
           if (latest.version !== currentVersion) {
             coreHasUpdate = true;
           }
@@ -221,8 +222,8 @@ async function initApp() {
       // Check client update if auto_update_client is enabled
       if (settings.auto_update_client) {
         try {
-          const info = await invoke('get_latest_client_version');
-          const currentVersion = await invoke('get_app_version');
+          const info = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSION);
+          const currentVersion = await invoke(COMMANDS.GET_APP_VERSION);
           if (info.version !== currentVersion) {
             clientHasUpdate = true;
           }

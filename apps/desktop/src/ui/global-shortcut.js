@@ -13,6 +13,7 @@ import { updateSysProxyUI } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { updateModeUI } from './modes.js';
 import { appStore } from './state.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -509,15 +510,15 @@ async function toggleProxy() {
     const lang = localStorage.getItem('lang') || 'en';
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
-        const enabled = await invoke('get_sys_proxy');
+        const enabled = await invoke(COMMANDS.GET_SYS_PROXY);
         if (enabled) {
-            await invoke('disable_sysproxy');
+            await invoke(COMMANDS.DISABLE_SYSPROXY);
             showNotification(t.proxyInactive || 'System proxy disabled', 'info');
         } else {
             /** @type {Record<string, any>} */
             const currentConfig = await getConfig();
             const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-            await invoke('enable_sysproxy', {
+            await invoke(COMMANDS.ENABLE_SYSPROXY, {
                 server: `127.0.0.1:${currentPort}`,
                 bypass: null,
             });

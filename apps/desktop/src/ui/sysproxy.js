@@ -9,13 +9,14 @@ import { sysproxyLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
+import { COMMANDS } from '@zephyr/shared';
 
 export async function updateSysProxyUI() {
     const statusText = document.getElementById('proxy-status-text');
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('sys-proxy-toggle'));
 
     try {
-        const isActive = await invoke('get_sys_proxy');
+        const isActive = await invoke(COMMANDS.GET_SYS_PROXY);
 
         if (toggle && toggle.checked !== isActive) {
             toggle.checked = isActive;
@@ -45,7 +46,7 @@ export async function initProxyToggle() {
 
     // Fetch initial status
     try {
-        const isEnabled = await invoke('get_sys_proxy');
+        const isEnabled = await invoke(COMMANDS.GET_SYS_PROXY);
         toggle.checked = isEnabled;
         updateSysProxyUI();
         await updateTrayStatus();
@@ -63,12 +64,12 @@ export async function initProxyToggle() {
             const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
 
             if (enabled) {
-                await invoke('enable_sysproxy', {
+                await invoke(COMMANDS.ENABLE_SYSPROXY, {
                     server: `127.0.0.1:${currentPort}`,
                     bypass: null,
                 });
             } else {
-                await invoke('disable_sysproxy');
+                await invoke(COMMANDS.DISABLE_SYSPROXY);
             }
 
             updateSysProxyUI();

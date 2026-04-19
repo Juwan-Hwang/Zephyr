@@ -323,13 +323,6 @@ pub fn update_tray_full_menu(
     proxy_groups: Vec<ProxyGroupInfo>,
     current_mode: String,
 ) -> Result<(), String> {
-    println!("[Tray] update_tray_full_menu called");
-    println!(
-        "[Tray] configs count: {}, proxy_groups count: {}",
-        configs.len(),
-        proxy_groups.len()
-    );
-
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;

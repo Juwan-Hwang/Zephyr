@@ -46,7 +46,7 @@ Thumbs.db
 *.deb
 
 # Tauri build output
-src-tauri/target/
+apps/desktop/src-tauri/target/
 
 # Installer files (should not be in repo)
 rustup-init.exe

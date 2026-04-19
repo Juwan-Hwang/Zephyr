@@ -10,6 +10,7 @@ import { listen } from '../api.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { translations } from '../i18n.js';
 import { invoke } from '../api.js';
+import { COMMANDS } from '@zephyr/shared';
 
 /**
  * Initialize deep link event listener.
@@ -51,7 +52,7 @@ async function handleInstallConfig(url, name) {
     showNotification(t.notifDownloadingSub || 'Downloading subscription...');
 
     try {
-        await invoke('download_sub', { url, name: displayName });
+        await invoke(COMMANDS.DOWNLOAD_SUB, { url, name: displayName });
         showNotification(t.notifSubSuccess || 'Subscription added successfully', 'success');
     } catch (err) {
         const message = err?.toString?.() || 'Unknown error';

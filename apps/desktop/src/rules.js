@@ -4,6 +4,7 @@
  */
 import { invoke } from './api.js';
 import { rulesLogger } from './utils/logger.js';
+import { COMMANDS } from '@zephyr/shared';
 
 /**
  * @param {string} url
@@ -24,7 +25,7 @@ export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
         }
 
         // Use Tauri command to bypass CSP and reuse SSRF protection
-        const text = await invoke('fetch_text', { url });
+        const text = await invoke(COMMANDS.FETCH_TEXT, { url });
 
         return convertSRToClash(text, targetProxy);
     } catch (error) {

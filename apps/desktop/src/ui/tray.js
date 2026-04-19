@@ -12,6 +12,7 @@ import { Bus, Events } from './events.js';
 import { trayMenuCache, TRAY_CACHE_TTL, invalidateSettingsCache, invalidateProxiesCache } from './cache.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // --- Tray event listener cleanup ---
 
@@ -36,7 +37,7 @@ export async function updateTrayStatus() {
     const mode = tunToggle?.checked ? 'tun' : (sysProxyToggle?.checked ? 'sysproxy' : 'default');
 
     try {
-        await invoke('change_tray_icon', { mode });
+        await invoke(COMMANDS.CHANGE_TRAY_ICON, { mode });
     } catch (err) {
         trayLogger.error('Failed to update tray icon', err);
     }
@@ -72,9 +73,9 @@ export async function updateTrayMenu(forceRefresh = false) {
     } else {
         const [config, configsList, proxyData, settings] = await Promise.all([
             getConfig(),
-            invoke('list_configs'),
+            invoke(COMMANDS.LIST_CONFIGS),
             getProxies(),
-            invoke('get_settings'),
+            invoke(COMMANDS.GET_SETTINGS),
         ]);
 
         /** @type {any} */
@@ -128,7 +129,7 @@ export async function updateTrayMenu(forceRefresh = false) {
     }
 
     try {
-        await invoke('update_tray_full_menu', {
+        await invoke(COMMANDS.UPDATE_TRAY_FULL_MENU, {
             showText: t.trayShow || "Show Zephyr",
             quitText: t.trayQuit || "Quit",
             sysProxyText: t.traySysProxy || "System Proxy",
@@ -174,12 +175,12 @@ export async function initTrayEventListeners() {
             const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
 
             if (enabled) {
-                await invoke('enable_sysproxy', {
+                await invoke(COMMANDS.ENABLE_SYSPROXY, {
                     server: `127.0.0.1:${currentPort}`,
                     bypass: null,
                 });
             } else {
-                await invoke('disable_sysproxy');
+                await invoke(COMMANDS.DISABLE_SYSPROXY);
             }
 
             import('./sysproxy.js').then(m => m.updateSysProxyUI());
@@ -203,10 +204,10 @@ export async function initTrayEventListeners() {
         if (toggle) {
             toggle.checked = enabled;
             setTimeout(async () => {
-                try { await invoke('release_tun_toggle'); } catch (_) {}
+                try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
             }, 60000);
         } else {
-            try { await invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
         }
     });
     _trayEventUnlisteners.push(unlisten2);
@@ -238,7 +239,7 @@ export async function initTrayEventListeners() {
             showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
 
             /** @type {any} */
-            const settings = await invoke('get_settings');
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
             const customArgs = settings.custom_args || [];
 
             const coreResult = await restartCore(subName, customArgs);
@@ -246,7 +247,7 @@ export async function initTrayEventListeners() {
             const result = coreResult;
             if (result && result.secret) {
                 settings.last_config = subName;
-                await invoke('save_settings', { settings });
+                await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 invalidateSettingsCache();
 
                 await new Promise((r) => setTimeout(r, 500));
@@ -313,8 +314,8 @@ export function startUnifiedSync() {
             const sysProxyToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
 
             const [realSysProxyState, actualMode] = await Promise.all([
-                invoke('get_sys_proxy'),
-                invoke('get_tray_status'),
+                invoke(COMMANDS.GET_SYS_PROXY),
+                invoke(COMMANDS.GET_TRAY_STATUS),
             ]);
 
             if (sysProxyToggle && sysProxyToggle.checked !== realSysProxyState) {

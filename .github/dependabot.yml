@@ -2,7 +2,7 @@ version: 2
 updates:
   # Rust 依赖自动更新
   - package-ecosystem: "cargo"
-    directory: "/src-tauri"
+    directory: "/apps/desktop/src-tauri"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -30,7 +30,6 @@ updates:
       - "javascript"
     versioning-strategy: "auto"
     groups:
-      # 将补丁更新和次要更新分组，避免 PR 风暴
       patch-and-minor:
         update-types:
           - "patch"
@@ -48,7 +47,6 @@ updates:
       - "dependencies"
       - "github-actions"
     groups:
-      # minor/patch 合并，major 单独 PR 便于审查破坏性变更
       minor-and-patch:
         update-types:
           - "minor"

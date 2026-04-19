@@ -12,6 +12,7 @@ import { translations, currentLang } from '../i18n.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { persistConfigChanges } from './advanced.js';
 import { appStore } from './state.js';
+import { COMMANDS } from '@zephyr/shared';
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -43,7 +44,7 @@ export function initTunToggle() {
             if (isMac) {
                 if (enable) {
                     try {
-                        const result = await invoke('restart_core_as_root_cmd', { enableTun: true });
+                        const result = await invoke(COMMANDS.RESTART_AS_ROOT, { enableTun: true });
                         if (result) {
                             setSecret(result);
                             setWsSecret(result);
@@ -55,7 +56,7 @@ export function initTunToggle() {
                         } else if (authErr === 'root_start_failed') {
                             showNotification(t.tunStartFailed || 'TUN failed to start, recovering...', 'error');
                             try {
-                                const settings = await invoke('get_settings');
+                                const settings = await invoke(COMMANDS.GET_SETTINGS);
                                 const currentConfig = settings.last_config || 'config.yaml';
                                 const customArgs = settings.custom_args || [];
                                 await restartCore(currentConfig, customArgs);
@@ -76,11 +77,11 @@ export function initTunToggle() {
                     }
                 } else {
                     try {
-                        await invoke('set_tun_enabled', { enable: false });
-                        await invoke('disable_tun_cmd');
+                        await invoke(COMMANDS.SET_TUN_ENABLED, { enable: false });
+                        await invoke(COMMANDS.DISABLE_CMD);
                         await new Promise(r => setTimeout(r, 1500));
 
-                        const settings = await invoke('get_settings');
+                        const settings = await invoke(COMMANDS.GET_SETTINGS);
                         const currentConfig = settings.last_config || 'config.yaml';
                         const customArgs = settings.custom_args || [];
                         await new Promise(r => setTimeout(r, 1000));
@@ -94,7 +95,7 @@ export function initTunToggle() {
                 await patchConfig({ tun: { enable } });
                 await persistConfigChanges({ tun: { enable } });
 
-                const coreConfig = await invoke('get_configs').catch(() => null);
+                const coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
                 /** @type {{tun?: {enable?: boolean}}} */
                 const typedConfig = /** @type {{tun?: {enable?: boolean}}} */ (config);
@@ -113,7 +114,7 @@ export function initTunToggle() {
             }
             if (spinner) spinner.classList.add('hidden');
             appStore.set('isNetworkUpdating', false);
-            try { await invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
             await updateTrayStatus();
             updateTrayMenu(true).catch(() => {});
         } catch (err) {
@@ -125,7 +126,7 @@ export function initTunToggle() {
             if (spinner) spinner.classList.add('hidden');
             showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             appStore.set('isNetworkUpdating', false);
-            try { await invoke('release_tun_toggle'); } catch (_) {}
+            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
             await updateTrayStatus();
             updateTrayMenu(true).catch(() => {});
         }

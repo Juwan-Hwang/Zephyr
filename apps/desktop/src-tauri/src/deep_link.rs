@@ -66,7 +66,12 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     // Truncate URL to prevent memory abuse
     const MAX_URL_LEN: usize = 2048;
     let safe_url = if url.len() > MAX_URL_LEN {
-        &url[..MAX_URL_LEN]
+        // Find the nearest UTF-8 char boundary to avoid panic on multi-byte chars
+        let mut end = MAX_URL_LEN;
+        while end > 0 && !url.is_char_boundary(end) {
+            end -= 1;
+        }
+        &url[..end]
     } else {
         &url
     };

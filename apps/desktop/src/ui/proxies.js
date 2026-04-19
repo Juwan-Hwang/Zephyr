@@ -17,6 +17,7 @@ import { showNotification } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
 import { createRovingTabindex } from '../utils/roving-tabindex.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -356,7 +357,7 @@ export async function updateSysProxyUI() {
     const toggle = document.getElementById('sys-proxy-toggle');
 
     try {
-        const isActive = await invoke('get_sys_proxy');
+        const isActive = await invoke(COMMANDS.GET_SYS_PROXY);
 
         if (toggle && (/** @type {HTMLInputElement} */ (toggle)).checked !== isActive) {
             (/** @type {HTMLInputElement} */ (toggle)).checked = isActive;

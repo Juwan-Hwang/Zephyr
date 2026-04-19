@@ -1,15 +1,16 @@
 {
-  "name": "Zephyr",
+  "name": "zephyr",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri",
-    "build:css": "tailwindcss -i src/styles.css -o src/tailwind.css --minify",
-    "dev:css": "tailwindcss -i src/styles.css -o src/tailwind.css --watch",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "typecheck": "tsc -p jsconfig.json --noEmit"
+    "dev": "pnpm --filter @zephyr/desktop tauri dev",
+    "build": "pnpm --filter @zephyr/desktop build:css && pnpm --filter @zephyr/desktop tauri build",
+    "build:css": "pnpm --filter @zephyr/desktop build:css",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "tauri": "pnpm --filter @zephyr/desktop tauri"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.2.2",
@@ -19,8 +20,5 @@
     "tailwindcss": "4.2.2",
     "typescript": "^6.0.2",
     "vitest": "4.1.3"
-  },
-  "dependencies": {
-    "@tauri-apps/plugin-autostart": "2.5.1"
   }
 }

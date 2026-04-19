@@ -14,6 +14,7 @@ import { showNotification } from './notifications.js';
 import { persistConfigChanges } from './advanced.js';
 import { invalidateSettingsCache } from './cache.js';
 import { translations, currentLang } from '../i18n.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // ---------------------------------------------------------------------------
 //  Default DNS configuration
@@ -42,7 +43,7 @@ export const DEFAULT_DNS_CONFIG = {
  */
 export async function getDnsConfig() {
     try {
-        const settings = await invoke('get_settings');
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
         return {
             nameserver: settings.dns_nameservers || DEFAULT_DNS_CONFIG.nameserver,
             fallback: settings.dns_fallbacks || DEFAULT_DNS_CONFIG.fallback,
@@ -270,10 +271,10 @@ export async function initDnsRewriteToggle() {
             }
 
             try {
-                const settings = await invoke('get_settings');
+                const settings = await invoke(COMMANDS.GET_SETTINGS);
                 settings.dns_nameservers = nameservers;
                 settings.dns_fallbacks = fallbacks.length > 0 ? fallbacks : null;
-                await invoke('save_settings', { settings });
+                await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 invalidateSettingsCache();
 
                 closeModal();

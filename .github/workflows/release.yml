@@ -47,33 +47,37 @@ jobs:
           VERSION=${{ steps.get_version.outputs.VERSION }}
 
           echo "Before update:"
-          nl -ba src-tauri/tauri.conf.json | sed -n '1,80p'
+          nl -ba apps/desktop/src-tauri/tauri.conf.json | sed -n '1,80p'
 
           tmp=$(mktemp)
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > "$tmp"
-          mv "$tmp" src-tauri/tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' apps/desktop/src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" apps/desktop/src-tauri/tauri.conf.json
 
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          rm -f src-tauri/Cargo.toml.bak
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" apps/desktop/src-tauri/Cargo.toml
+          rm -f apps/desktop/src-tauri/Cargo.toml.bak
 
           tmp=$(mktemp)
-          jq --arg v "$VERSION" '.version = $v' package.json > "$tmp"
-          mv "$tmp" package.json
+          jq --arg v "$VERSION" '.version = $v' apps/desktop/package.json > "$tmp"
+          mv "$tmp" apps/desktop/package.json
 
           echo "After update:"
-          nl -ba src-tauri/tauri.conf.json | sed -n '1,80p'
+          nl -ba apps/desktop/src-tauri/tauri.conf.json | sed -n '1,80p'
 
           echo "Validate JSON:"
-          jq empty src-tauri/tauri.conf.json
-          jq empty package.json
+          jq empty apps/desktop/src-tauri/tauri.conf.json
+          jq empty apps/desktop/package.json
 
           echo "Updated version to $VERSION"
         shell: bash
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: pnpm
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -90,19 +94,16 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           brew install pkg-config glib
-          # For cross-compilation, set pkg-config to allow cross-compilation
-          # and point to the correct sysroot
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-          # Use the SDK root as sysroot for cross-targets
           if [ "${{ matrix.target }}" == "aarch64-apple-darwin" ]; then
             SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
             echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
           fi
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install
 
-      # Get latest mihomo release version (Added GITHUB_TOKEN to prevent API Rate Limit)
+      # Get latest mihomo release version
       - name: Get latest mihomo version
         id: mihomo_version
         env:
@@ -113,17 +114,14 @@ jobs:
           echo "Latest mihomo version: $MIHOMO_VERSION"
         shell: bash
 
-      # Download mihomo core for full version (Fixed extracted filename)
       - name: Download mihomo core (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
-          mkdir -p src-tauri/bundled
+          mkdir -p apps/desktop/src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
           
-          # Download mihomo binary
           curl -L -o mihomo.zip "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
           
-          # Get SHA256 from GitHub API digest
           ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r '.assets[] | select(.name == "mihomo-windows-amd64-compatible-'${MIHOMO_VERSION}'.zip") | .digest // empty')
@@ -141,29 +139,22 @@ jobs:
             echo "✓ SHA256 verified for mihomo-windows-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
-            echo "This could mean:"
-            echo "  1. GitHub API rate limit reached - wait and retry"
-            echo "  2. Network timeout - check workflow logs"
-            echo "  3. Release asset missing digest - verify upstream release"
-            echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
           
           unzip mihomo.zip
-          mv mihomo-windows-amd64-compatible.exe src-tauri/bundled/mihomo.exe
+          mv mihomo-windows-amd64-compatible.exe apps/desktop/src-tauri/bundled/mihomo.exe
           rm mihomo.zip
         shell: bash
 
       - name: Download mihomo core (macOS arm64)
         if: matrix.platform == 'macos-latest' && matrix.arch == 'arm64'
         run: |
-          mkdir -p src-tauri/bundled
+          mkdir -p apps/desktop/src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
           
-          # Download mihomo binary
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
           
-          # Get SHA256 from GitHub API digest
           ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r '.assets[] | select(.name == "mihomo-darwin-arm64-'${MIHOMO_VERSION}'.gz") | .digest // empty')
@@ -181,29 +172,22 @@ jobs:
             echo "✓ SHA256 verified for mihomo-darwin-arm64"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
-            echo "This could mean:"
-            echo "  1. GitHub API rate limit reached - wait and retry"
-            echo "  2. Network timeout - check workflow logs"
-            echo "  3. Release asset missing digest - verify upstream release"
-            echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
           
           gunzip mihomo.gz
           chmod +x mihomo
-          mv mihomo src-tauri/bundled/mihomo
+          mv mihomo apps/desktop/src-tauri/bundled/mihomo
         shell: bash
 
       - name: Download mihomo core (macOS x64)
         if: matrix.platform == 'macos-latest' && matrix.arch == 'x64'
         run: |
-          mkdir -p src-tauri/bundled
+          mkdir -p apps/desktop/src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
           
-          # Download mihomo binary (compatible version)
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
           
-          # Get SHA256 from GitHub API digest
           ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r '.assets[] | select(.name == "mihomo-darwin-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
@@ -221,29 +205,22 @@ jobs:
             echo "✓ SHA256 verified for mihomo-darwin-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
-            echo "This could mean:"
-            echo "  1. GitHub API rate limit reached - wait and retry"
-            echo "  2. Network timeout - check workflow logs"
-            echo "  3. Release asset missing digest - verify upstream release"
-            echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
           
           gunzip mihomo.gz
           chmod +x mihomo
-          mv mihomo src-tauri/bundled/mihomo
+          mv mihomo apps/desktop/src-tauri/bundled/mihomo
         shell: bash
 
       - name: Download mihomo core (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          mkdir -p src-tauri/bundled
+          mkdir -p apps/desktop/src-tauri/bundled
           MIHOMO_VERSION=${{ steps.mihomo_version.outputs.VERSION }}
           
-          # Download mihomo binary (compatible version)
           curl -L -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
           
-          # Get SHA256 from GitHub API digest
           ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r '.assets[] | select(.name == "mihomo-linux-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
@@ -261,36 +238,28 @@ jobs:
             echo "✓ SHA256 verified for mihomo-linux-amd64-compatible"
           else
             echo "ERROR: SHA256 digest not available from GitHub API"
-            echo "This could mean:"
-            echo "  1. GitHub API rate limit reached - wait and retry"
-            echo "  2. Network timeout - check workflow logs"
-            echo "  3. Release asset missing digest - verify upstream release"
-            echo "Cannot verify download integrity - aborting for security"
             exit 1
           fi
           
           gunzip mihomo.gz
           chmod +x mihomo
-          mv mihomo src-tauri/bundled/mihomo
+          mv mihomo apps/desktop/src-tauri/bundled/mihomo
         shell: bash
 
-      # Download geo data files for full version
       - name: Download geo data files
         run: |
-          mkdir -p src-tauri/bundled
+          mkdir -p apps/desktop/src-tauri/bundled
           
-          # Download geo data files and their SHA256 checksums
-          curl -L -o src-tauri/bundled/geoip.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
-          curl -L -o src-tauri/bundled/geoip.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat.sha256sum"
-          curl -L -o src-tauri/bundled/geosite.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
-          curl -L -o src-tauri/bundled/geosite.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat.sha256sum"
-          curl -L -o src-tauri/bundled/Country.mmdb "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb"
-          curl -L -o src-tauri/bundled/Country.mmdb.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb.sha256sum"
+          curl -L -o apps/desktop/src-tauri/bundled/geoip.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
+          curl -L -o apps/desktop/src-tauri/bundled/geoip.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat.sha256sum"
+          curl -L -o apps/desktop/src-tauri/bundled/geosite.dat "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat"
+          curl -L -o apps/desktop/src-tauri/bundled/geosite.dat.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat.sha256sum"
+          curl -L -o apps/desktop/src-tauri/bundled/Country.mmdb "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb"
+          curl -L -o apps/desktop/src-tauri/bundled/Country.mmdb.sha256sum "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb.sha256sum"
           
-          # Verify SHA256 checksums
           for file in geoip.dat geosite.dat Country.mmdb; do
-            EXPECTED=$(cat "src-tauri/bundled/$file.sha256sum" | cut -d' ' -f1)
-            ACTUAL=$(sha256sum "src-tauri/bundled/$file" | cut -d' ' -f1)
+            EXPECTED=$(cat "apps/desktop/src-tauri/bundled/$file.sha256sum" | cut -d' ' -f1)
+            ACTUAL=$(sha256sum "apps/desktop/src-tauri/bundled/$file" | cut -d' ' -f1)
             
             if [ -z "$EXPECTED" ]; then
               echo "ERROR: Could not read SHA256 checksum for $file"
@@ -305,30 +274,25 @@ jobs:
             fi
             echo "✓ SHA256 verified for $file"
             
-            # Clean up checksum files
-            rm "src-tauri/bundled/$file.sha256sum"
+            rm "apps/desktop/src-tauri/bundled/$file.sha256sum"
           done
         shell: bash
 
-      # Build full version (with bundled core and geo)
-# 0. 准备存放所有产物的保险柜文件夹
       - name: Create artifacts directory
         run: mkdir -p dist-artifacts
         shell: bash
 
-      # 1. 编译 Full 版本
       - name: Build Tauri app (Full)
-        run: npx tauri build ${{ matrix.args }}
+        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
 
-      # 2. 收集 Full 版本的安装包到保险柜
       - name: Collect Windows Full artifacts
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/release/bundle/nsis/*-setup.exe; do
+          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
           done
-          for f in src-tauri/target/release/bundle/msi/*.msi; do
+          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
           done
         shell: bash
@@ -337,10 +301,10 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "dist-artifacts/$(basename "${f/.dmg/-full.dmg}")"
           done
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
             cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-full.tar.gz}")"
           done
         shell: bash
@@ -349,36 +313,33 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/release/bundle/deb/*.deb; do
+          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
             cp "$f" "dist-artifacts/$(basename "${f/.deb/-full.deb}")"
           done
-          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-full.AppImage}")"
           done
-          for f in src-tauri/target/release/bundle/rpm/*.rpm; do
+          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
             cp "$f" "dist-artifacts/$(basename "${f/.rpm/-full.rpm}")"
           done
         shell: bash
 
-      # 3. 删除内置内核与Geo文件，准备编译 Lite 版
       - name: Remove bundled files for lite version
         run: |
-          rm -rf src-tauri/bundled/*
+          rm -rf apps/desktop/src-tauri/bundled/*
         shell: bash
 
-      # 4. 编译 Lite 版本 (此时Tauri清理旧文件夹也不会影响我们已经拷走的文件了)
       - name: Build Tauri app (Lite)
-        run: npx tauri build ${{ matrix.args }}
+        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
 
-      # 5. 收集 Lite 版本的安装包到保险柜
       - name: Collect Windows Lite artifacts
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/release/bundle/nsis/*-setup.exe; do
+          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
           done
-          for f in src-tauri/target/release/bundle/msi/*.msi; do
+          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
           done
         shell: bash
@@ -387,10 +348,10 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "dist-artifacts/$(basename "${f/.dmg/-lite.dmg}")"
           done
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
             cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-lite.tar.gz}")"
           done
         shell: bash
@@ -399,18 +360,17 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           shopt -s nullglob
-          for f in src-tauri/target/release/bundle/deb/*.deb; do
+          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
             cp "$f" "dist-artifacts/$(basename "${f/.deb/-lite.deb}")"
           done
-          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-lite.AppImage}")"
           done
-          for f in src-tauri/target/release/bundle/rpm/*.rpm; do
+          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
             cp "$f" "dist-artifacts/$(basename "${f/.rpm/-lite.rpm}")"
           done
         shell: bash
 
-      # 6. 一键清空购物车！上传保险柜里的所有文件到 GitHub Release
       - name: Upload All Release Assets
         uses: softprops/action-gh-release@v2
         env:

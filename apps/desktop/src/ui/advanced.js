@@ -14,6 +14,7 @@ import { createCollapsible } from './collapsible.js';
 import { invalidateConfigCache } from './cache.js';
 import { advancedLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // --- Helpers ---
 
@@ -90,17 +91,17 @@ function deepMerge(target, source) {
  * @returns {Promise<{ configName: string, content: string } | null>}
  */
 async function getActiveConfigContent() {
-    const settings = await invoke('get_settings');
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
     let configName = settings.last_config || 'config.yaml';
     let content = '';
     try {
-        content = await invoke('read_config_file', { configPath: configName });
+        content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
         return { configName, content };
     } catch (e) {
-        const configs = await invoke('list_configs');
+        const configs = await invoke(COMMANDS.LIST_CONFIGS);
         if (configs && configs.length > 0) {
             configName = configs[0].name;
-            content = await invoke('read_config_file', { configPath: configName });
+            content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
             return { configName, content };
         } else {
             return null;

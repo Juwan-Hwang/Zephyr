@@ -8,6 +8,7 @@
 
 import { getConfig, getProxies } from '../api.js';
 import { invoke } from '../api.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // --- API Cache (LRU + Stale-While-Revalidate) ---
 
@@ -171,11 +172,11 @@ export async function getProxiesCached() {
 }
 
 export async function getSettingsCached() {
-    return getCached('settings', () => invoke('get_settings'));
+    return getCached('settings', () => invoke(COMMANDS.GET_SETTINGS));
 }
 
 export async function getConfigsCached() {
-    return getCached('configs', () => invoke('list_configs'));
+    return getCached('configs', () => invoke(COMMANDS.LIST_CONFIGS));
 }
 
 // --- Tray Menu Cache ---

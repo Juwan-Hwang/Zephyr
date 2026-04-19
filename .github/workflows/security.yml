@@ -37,7 +37,7 @@ jobs:
         with:
           toolchain: stable
       - name: Run cargo audit
-        working-directory: src-tauri
+        working-directory: apps/desktop/src-tauri
         run: |
           cargo install cargo-audit --locked
           cargo audit
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          manifest-path: src-tauri/Cargo.toml
+          manifest-path: apps/desktop/src-tauri/Cargo.toml
           command: check
           command-arguments: --config deny.toml
           log-level: warn
@@ -74,7 +74,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
-          workspaces: src-tauri -> target
+          workspaces: apps/desktop/src-tauri -> target
 
       - name: Install system dependencies
         run: |
@@ -82,7 +82,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Run clippy with security lints
-        working-directory: src-tauri
+        working-directory: apps/desktop/src-tauri
         run: |
           cargo clippy --all-targets -- -D warnings \
             -W clippy::indexing_slicing \
@@ -112,7 +112,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Check formatting
-        working-directory: src-tauri
+        working-directory: apps/desktop/src-tauri
         run: cargo fmt --all -- --check
 
   # ============================================================
@@ -124,13 +124,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
-      - name: npm ci
-        run: npm ci
-      - name: npm audit (production only, fail on moderate+)
-        run: npm audit --omit=dev --audit-level=moderate
+          cache: pnpm
+      - name: pnpm install
+        run: pnpm install
+      - name: pnpm audit (production only, fail on moderate+)
+        run: pnpm audit --audit-level=moderate
 
   # ============================================================
   # Job 6: PR 依赖审查（仅 PR 触发）
@@ -196,26 +198,26 @@ jobs:
           FAILED=0
 
           # Rust: 硬编码密码/凭证
-          if grep -rnE '(password|passwd|pwd|secret)\s*[:=]\s*["\x27][^"\x27]{8,}' src-tauri/src/ --include="*.rs" --exclude-dir=target \
+          if grep -rnE '(password|passwd|pwd|secret)\s*[:=]\s*["\x27][^"\x27]{8,}' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target \
              | grep -v 'test\|example\|placeholder\|TODO\|FIXME'; then
             echo "::error::Found hardcoded password or secret in Rust code"
             FAILED=1
           fi
 
           # Rust: 硬编码 API key / token
-          if grep -rnE '(api_key|apikey|secret_key|private_key|access_token)\s*=\s*"[^"]{20,}"' src-tauri/src/ --include="*.rs" --exclude-dir=target \
+          if grep -rnE '(api_key|apikey|secret_key|private_key|access_token)\s*=\s*"[^"]{20,}"' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target \
              | grep -v 'test\|example'; then
             echo "::error::Found hardcoded API key in Rust code"
             FAILED=1
           fi
 
           # Rust: 从环境变量读取密码（警告级别）
-          if grep -rn 'env::var("PASSWORD")' src-tauri/src/ --include="*.rs" --exclude-dir=target; then
+          if grep -rn 'env::var("PASSWORD")' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target; then
             echo "::warning::Password read from environment variable (ensure not logged)"
           fi
 
           # JS: 硬编码 token / auth
-          if grep -rnE '(token|auth|bearer|api_key)\s*[:=]\s*["\x27][^"\x27 ]{20,}' src/ --include="*.js" \
+          if grep -rnE '(token|auth|bearer|api_key)\s*[:=]\s*["\x27][^"\x27 ]{20,}' apps/desktop/src/ --include="*.js" \
              | grep -v 'test\|example\|placeholder\|localhost\|127\.0\.0\.1'; then
             echo "::error::Found hardcoded token in JS code"
             FAILED=1
@@ -248,34 +250,32 @@ jobs:
           echo "=== Tauri Security Configuration Audit ==="
           WARNINGS=0
 
-          if grep -q '"devtools": true' src-tauri/tauri.conf.json; then
+          if grep -q '"devtools": true' apps/desktop/src-tauri/tauri.conf.json; then
             echo "::warning::devtools is enabled in production build. Set to false or use cfg!"
             WARNINGS=$((WARNINGS + 1))
           else
             echo "\u2705 devtools is disabled in production"
           fi
 
-          if grep -q 'ws://127.0.0.1:\*' src-tauri/tauri.conf.json; then
+          if grep -q 'ws://127.0.0.1:\*' apps/desktop/src-tauri/tauri.conf.json; then
             echo "::warning::CSP allows wildcard WebSocket ports. Restrict to specific ports."
             WARNINGS=$((WARNINGS + 1))
           fi
 
-          if grep -q '"withGlobalTauri": true' src-tauri/tauri.conf.json; then
+          if grep -q '"withGlobalTauri": true' apps/desktop/src-tauri/tauri.conf.json; then
             echo "::warning::withGlobalTauri is enabled. Consider disabling."
             WARNINGS=$((WARNINGS + 1))
           fi
 
           # 检查 capabilities 权限（Tauri v2 风格）
-          if [ -d "src-tauri/capabilities" ]; then
+          if [ -d "apps/desktop/src-tauri/capabilities" ]; then
             echo "=== Checking capabilities ==="
-            for cap_file in src-tauri/capabilities/*.json; do
+            for cap_file in apps/desktop/src-tauri/capabilities/*.json; do
               if [ -f "$cap_file" ]; then
-                # 检查是否有通配符 window 权限
                 if grep -q '"windows"' "$cap_file" 2>/dev/null && ! grep -q '"label"' "$cap_file" 2>/dev/null; then
                   echo "::warning::$cap_file: window permission without label filter"
                   WARNINGS=$((WARNINGS + 1))
                 fi
-                # 检查 allow-emit
                 if grep -q 'allow-emit' "$cap_file" 2>/dev/null; then
                   echo "::warning::$cap_file: core:event:allow-emit is granted. Evaluate if needed."
                   WARNINGS=$((WARNINGS + 1))
@@ -285,18 +285,18 @@ jobs:
             echo "\u2705 Capabilities checked"
           fi
 
-          if [ ! -f "src-tauri/Cargo.lock" ]; then
+          if [ ! -f "apps/desktop/src-tauri/Cargo.lock" ]; then
             echo "::warning::Cargo.lock not found. Commit it for reproducible builds."
             WARNINGS=$((WARNINGS + 1))
           else
             echo "\u2705 Cargo.lock exists"
           fi
 
-          if [ ! -f "package-lock.json" ]; then
-            echo "::error::package-lock.json not found. Run npm install and commit it."
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "::error::pnpm-lock.yaml not found. Run pnpm install and commit it."
             exit 1
           else
-            echo "\u2705 package-lock.json exists"
+            echo "\u2705 pnpm-lock.yaml exists"
           fi
 
           if [ $WARNINGS -gt 0 ]; then
@@ -319,10 +319,12 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
-          workspaces: src-tauri -> target
+          workspaces: apps/desktop/src-tauri -> target
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
+          cache: pnpm
 
       - name: Install system dependencies
         run: |
@@ -330,18 +332,18 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install
 
       - name: Build CSS
-        run: npm run build:css
+        run: pnpm --filter @zephyr/desktop build:css
 
       - name: Build Rust (release)
-        working-directory: src-tauri
+        working-directory: apps/desktop/src-tauri
         run: cargo build --release
 
       - name: Run Rust tests
-        working-directory: src-tauri
+        working-directory: apps/desktop/src-tauri
         run: cargo test --release
 
       - name: Run frontend tests
-        run: npm test
+        run: pnpm --filter @zephyr/desktop test

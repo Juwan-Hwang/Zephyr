@@ -9,6 +9,7 @@
 import { invoke, listen } from '../api.js';
 import { showNotification, showModal, showConfirmModal, showUpdateNotesModal } from './notifications.js';
 import { translations } from '../i18n.js';
+import { COMMANDS } from '@zephyr/shared';
 
 /** P3: Guard flag to prevent concurrent update checks. */
 let _updateCheckInProgress = false;
@@ -29,10 +30,10 @@ export async function checkForClientUpdate() {
 
     try {
         /** @type {{ version: string, download_url: string, release_notes: string }} */
-        const info = await invoke('get_latest_client_version');
+        const info = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSION);
 
         // Compare with current version (from Cargo.toml, injected at build time)
-        const currentVersion = await invoke('get_app_version');
+        const currentVersion = await invoke(COMMANDS.GET_APP_VERSION);
 
         if (info.version === currentVersion) {
             showNotification(t.notifNoUpdate || 'Already up to date', 'success');
@@ -50,7 +51,7 @@ export async function checkForClientUpdate() {
         });
 
         try {
-            await invoke('update_client');
+            await invoke(COMMANDS.UPDATE_CLIENT);
             showNotification(
                 (t.clientUpdateSuccess || 'Update downloaded successfully') + ` (${info.version})`,
                 'success'

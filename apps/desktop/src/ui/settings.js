@@ -45,6 +45,7 @@ import {
     initDnsRewriteToggle,
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
+import { COMMANDS } from '@zephyr/shared';
 
 // The following modules have not yet been extracted from ui.js.
 // We import them from ui.js for now; when they are extracted, these
@@ -92,12 +93,12 @@ function getCached(key, fetcher) {
 
 /** @returns {Promise<any>} */
 function getSettingsCached() {
-    return getCached('settings', () => invoke('get_settings'));
+    return getCached('settings', () => invoke(COMMANDS.GET_SETTINGS));
 }
 
 /** @returns {Promise<any>} */
 function getConfigsCached() {
-    return getCached('configs', () => invoke('list_configs'));
+    return getCached('configs', () => invoke(COMMANDS.LIST_CONFIGS));
 }
 
 function invalidateSettingsCache() {
@@ -223,7 +224,7 @@ export function initUwpExemption() {
             spinner?.classList.remove('hidden');
 
             try {
-                await invoke('exempt_uwp_apps');
+                await invoke(COMMANDS.EXEMPT_UWP_APPS);
                 showNotification(
                     /** @type {any} */(/** @type {any} */ (translations)[AppState.currentLang]).notifUwpSuccess || 'UWP Loopback exemption process started. Please check the UAC prompt.',
                     'success'
@@ -317,7 +318,7 @@ function initFakeClient() {
 
         try {
             /** @type {any} */
-            const versions = await invoke('get_latest_client_versions');
+            const versions = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSIONS);
 
             const vergeOpt = select.querySelector('option[value^="clash-verge"]');
             const partyOpt = select.querySelector('option[value^="mihomo-party"]');
@@ -440,7 +441,7 @@ export async function initSettings() {
         applyArgsBtn.onclick = async () => {
             const argsStr = customArgsInput.value.trim();
             /** @type {any} */
-            const settings = await invoke('get_settings');
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
             const configPath = settings.last_config || 'config.yaml';
             const customArgs = argsStr.split('\n').filter(a => a.trim() !== '');
 
@@ -482,7 +483,7 @@ export async function initSettings() {
 
     // ---- Load current settings ----
     /** @type {any} */
-    const settings = await invoke('get_settings');
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
@@ -630,7 +631,7 @@ export async function initSettings() {
                 }
 
                 await trackResult('appSettings', async () => {
-                    await invoke('save_settings', { settings });
+                    await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 });
                 invalidateSettingsCache();
 
@@ -786,14 +787,14 @@ export async function initSettings() {
     const save = async () => {
         try {
             /** @type {any} */
-            const currentSettings = await invoke('get_settings');
+            const currentSettings = await invoke(COMMANDS.GET_SETTINGS);
             if (closeTrayToggle) currentSettings.close_to_tray = closeTrayToggle.checked;
             if (autoUpdateToggle) currentSettings.auto_update = autoUpdateToggle.checked;
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             currentSettings.theme = AppState.currentTheme;
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
-            await invoke('save_settings', { settings: currentSettings });
+            await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
             invalidateSettingsCache();
         } catch (err) {
             settingsLogger.error('Failed to save settings', err);
@@ -838,7 +839,7 @@ export async function initSettings() {
     const saveConfigToCore = async (patch) => {
         try {
             /** @type {any} */
-            const result = await invoke('update_config', { patch });
+            const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch });
             await syncCoreConfig();
 
             if (result && !result.hot_reload_success) {
@@ -896,13 +897,13 @@ export async function initSettings() {
         showNotification(t.notifGeoUpdating || "Updating Geo databases...");
 
         try {
-            await invoke('update_geo_data');
+            await invoke(COMMANDS.UPDATE_GEO_DATA);
             /** @type {any} */
             const t2 = /** @type {any} */ (translations)[AppState.currentLang];
             showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
 
             /** @type {any} */
-            const geoSettings = await invoke('get_settings');
+            const geoSettings = await invoke(COMMANDS.GET_SETTINGS);
             const configPath = geoSettings.last_config || 'config.yaml';
             const customArgs = geoSettings.custom_args || [];
             await restartCore(configPath, customArgs);
@@ -1043,7 +1044,7 @@ export async function initSettings() {
     const loadSettingsFromCore = async () => {
         try {
             /** @type {any} */
-            const config = await invoke('read_config');
+            const config = await invoke(COMMANDS.READ_CONFIG);
             if (unifiedDelayToggle) unifiedDelayToggle.checked = config['unified-delay'] !== false;
             if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
             if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
@@ -1114,7 +1115,7 @@ export async function initSettings() {
 
     const loadCoreVersion = async () => {
         try {
-            currentCoreVersion = await invoke('get_core_version');
+            currentCoreVersion = await invoke(COMMANDS.GET_CORE_VERSION);
             if (versionText) versionText.textContent = currentCoreVersion.startsWith('v') ? currentCoreVersion : `v${currentCoreVersion}`;
         } catch (err) {
             settingsLogger.error('Failed to get core version', err);
@@ -1131,7 +1132,7 @@ export async function initSettings() {
     const appVersionText = document.getElementById('app-version-text');
     if (appVersionText) {
         try {
-            const appVersion = await invoke('get_app_version');
+            const appVersion = await invoke(COMMANDS.GET_APP_VERSION);
             appVersionText.textContent = appVersion;
         } catch (e) {
             appVersionText.textContent = '-';
@@ -1152,7 +1153,7 @@ export async function initSettings() {
         if (confirmed) {
             showNotification(t.notifUpdating);
             /** @type {any} */
-            const coreResult = await invoke('update_core', {
+            const coreResult = await invoke(COMMANDS.UPDATE_CORE, {
                 url: downloadUrl,
             });
             setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
@@ -1182,9 +1183,9 @@ export async function initSettings() {
 
                 // Check both core and client updates in parallel
                 const [latest, clientInfo, currentAppVersion] = await Promise.all([
-                    invoke('get_latest_version').catch(() => null),
-                    invoke('get_latest_client_version').catch(() => null),
-                    invoke('get_app_version').catch(() => ''),
+                    invoke(COMMANDS.GET_LATEST_VERSION).catch(() => null),
+                    invoke(COMMANDS.GET_LATEST_CLIENT_VERSION).catch(() => null),
+                    invoke(COMMANDS.GET_APP_VERSION).catch(() => ''),
                 ]);
 
                 const coreHasUpdate = latest && latest.version && latest.version !== currentCoreVersion;
@@ -1203,7 +1204,7 @@ export async function initSettings() {
                     );
                     if (confirmed) {
                         try {
-                            await invoke('update_client');
+                            await invoke(COMMANDS.UPDATE_CLIENT);
                             showNotification(`${t.clientUpdateSuccess || 'Update downloaded'} (${clientInfo.version})`, 'success');
                         } catch (e) {
                             showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
@@ -1219,7 +1220,7 @@ export async function initSettings() {
                     );
                     if (confirmed) {
                         try {
-                            await invoke('update_client');
+                            await invoke(COMMANDS.UPDATE_CLIENT);
                             showNotification(`${t.clientUpdateSuccess || 'Client update downloaded'} (${clientInfo.version})`, 'success');
                         } catch (e) {
                             showNotification(`${t.clientUpdateFailed || 'Client update failed'}: ${e}`, 'error');
@@ -1254,12 +1255,12 @@ export async function initSettings() {
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
-                await invoke('download_sub', invokeArgs);
+                await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
 
                 invalidateConfigsCache();
 
                 /** @type {any} */
-                const subSettings = await invoke('get_settings');
+                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = subSettings.last_config || 'config.yaml';
                 if (name === currentConfig || name === currentConfig + '.yaml') {
                     await reloadConfig();
@@ -1285,7 +1286,7 @@ export async function initSettings() {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[AppState.currentLang];
             /** @type {any} */
-            const configs = await invoke('list_configs');
+            const configs = await invoke(COMMANDS.LIST_CONFIGS);
             const subConfigs = configs.filter(/** @param {any} c */ (c) => c.url_display);
 
             if (subConfigs.length === 0) {
@@ -1304,8 +1305,8 @@ export async function initSettings() {
             for (const config of subConfigs) {
                 try {
                     const userAgent = getSubscriptionUserAgent();
-                    const fullUrl = await invoke('get_config_url', { name: config.name });
-                    await invoke('download_sub', { url: fullUrl, name: config.name, userAgent });
+                    const fullUrl = await invoke(COMMANDS.GET_URL, { name: config.name });
+                    await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent });
                     successCount++;
                 } catch (err) {
                     failCount++;
@@ -1316,7 +1317,7 @@ export async function initSettings() {
             invalidateConfigsCache();
 
             /** @type {any} */
-            const subSettings = await invoke('get_settings');
+            const subSettings = await invoke(COMMANDS.GET_SETTINGS);
             const currentConfig = subSettings.last_config || 'config.yaml';
             const customArgs = subSettings.custom_args || [];
             const wasCurrentUpdated = subConfigs.some(/** @param {any} c */ (c) => c.name === currentConfig);
@@ -1399,7 +1400,7 @@ export async function initSettings() {
                 if (!confirmed) return;
 
                 try {
-                    await invoke('delete_config', { name });
+                    await invoke(COMMANDS.DELETE_CONFIG, { name });
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
                     renderConfigs();
@@ -1420,8 +1421,8 @@ export async function initSettings() {
                     updateBtn.classList.add('animate-spin');
                     try {
                         const userAgent = getSubscriptionUserAgent();
-                        const fullUrl = await invoke('get_config_url', { name: configInfo.name });
-                        await invoke('download_sub', { url: fullUrl, name: configInfo.name, userAgent });
+                        const fullUrl = await invoke(COMMANDS.GET_URL, { name: configInfo.name });
+                        await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent });
                         invalidateConfigsCache();
                         if (isCurrent) {
                             const cfgCustomArgs = cfgSettings.custom_args || [];
@@ -1454,9 +1455,9 @@ export async function initSettings() {
                         showNotification(t.configSuccess, 'success');
 
                         /** @type {any} */
-                        const s = await invoke('get_settings');
+                        const s = await invoke(COMMANDS.GET_SETTINGS);
                         s.last_config = name;
-                        await invoke('save_settings', { settings: s });
+                        await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
                         invalidateSettingsCache();
 
                         await new Promise(r => setTimeout(r, 1000));

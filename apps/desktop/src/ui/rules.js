@@ -10,6 +10,7 @@ import { showNotification, showModal, showConfirmModal } from './notifications.j
 import { initCustomDropdown } from './dropdown.js';
 import { translations, currentLang } from '../i18n.js';
 import { invoke, closeAllConnections } from '../api.js';
+import { COMMANDS } from '@zephyr/shared';
 import { fetchAndConvertSRRules } from '../rules.js';
 import { SVG_ICONS } from './icons.js';
 
@@ -29,9 +30,9 @@ export async function initRulesPage() {
     // Fetch initial original rules state silently
     if (!originalConfigRules || originalConfigRules.length === 0) {
         try {
-            const settings = await invoke('get_settings');
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
             const configName = settings.last_config || 'config.yaml';
-            const content = await invoke('read_config_file', { configPath: configName });
+            const content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
             if (typeof jsyaml !== 'undefined') {
                 const config = jsyaml.load(content);
                 originalConfigRules = (/** @type {any} */ (config)).rules || [];
@@ -120,17 +121,17 @@ export async function initRulesPage() {
 // --- Internal ---
 
 async function getActiveConfigContent() {
-    const settings = await invoke('get_settings');
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
     let configName = settings.last_config || 'config.yaml';
     let content = '';
     try {
-        content = await invoke('read_config_file', { configPath: configName });
+        content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
         return { configName, content };
     } catch (e) {
-        const configs = await invoke('list_configs');
+        const configs = await invoke(COMMANDS.LIST_CONFIGS);
         if (configs && configs.length > 0) {
             configName = configs[0].name;
-            content = await invoke('read_config_file', { configPath: configName });
+            content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
             return { configName, content };
         } else {
             return null;
