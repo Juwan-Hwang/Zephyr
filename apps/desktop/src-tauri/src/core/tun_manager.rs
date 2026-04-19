@@ -90,7 +90,6 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
 }
 
 /// Extract TUN enable status from YAML config content
-#[allow(dead_code)]
 fn extract_tun_enabled_from_yaml(content: &str) -> bool {
     let mut in_tun_block = false;
 
@@ -419,7 +418,6 @@ pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String
 }
 
 /// Initialize TUN mode flag from config file (call at app startup)
-#[allow(dead_code)]
 pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
     let config_file = paths.core_dir.join("run_config.yaml");

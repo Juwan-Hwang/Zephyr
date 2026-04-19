@@ -16,6 +16,7 @@ pub use core::{
     fetch_text,
     get_config_url,
     get_core_version,
+    init_tun_mode_from_config,
     // crypto
     is_machine_key_persisted,
     is_tun_mode,

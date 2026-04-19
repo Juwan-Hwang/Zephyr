@@ -84,7 +84,7 @@ pub use crypto::is_machine_key_persisted;
 pub use secure_io::write_file_secure;
 pub use subscription::{download_sub, fetch_text};
 pub use tun_manager::{
-    disable_tun_cmd, is_tun_mode, is_tun_toggling, kill_all_mihomo_as_root_cmd, release_tun_toggle,
-    restart_core_as_root_cmd, set_tun_enabled, set_tun_mode, smart_kill_all_mihomo_as_root,
-    try_acquire_tun_toggle,
+    disable_tun_cmd, init_tun_mode_from_config, is_tun_mode, is_tun_toggling,
+    kill_all_mihomo_as_root_cmd, release_tun_toggle, restart_core_as_root_cmd, set_tun_enabled,
+    set_tun_mode, smart_kill_all_mihomo_as_root, try_acquire_tun_toggle,
 };

@@ -33,8 +33,9 @@ import { formatFileSize } from '../utils/format.js';
 import { settingsLogger } from '../utils/logger.js';
 import { showNotification, showModal, showConfirmModal, showUpdateNotesModal } from './notifications.js';
 import { applyTheme } from './theme.js';
-import { AppState } from './state.js';
+import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
+import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from './cache.js';
 import {
     DEFAULT_DNS_CONFIG,
     isValidIPv6,
@@ -62,52 +63,6 @@ const SVG_ICONS = {
     trash: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
     refresh: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
 };
-
-// ---------------------------------------------------------------------------
-//  Cache helpers (mirrors the apiCache in ui.js)
-// ---------------------------------------------------------------------------
-/** @type {Record<string, { data: any, time: number }>} */
-const apiCache = {
-    settings: { data: null, time: 0 },
-    configs: { data: null, time: 0 },
-};
-const CACHE_TTL = 2000;
-
-/**
- * @param {string} key
- * @param {() => Promise<any>} fetcher
- * @returns {Promise<any>}
- */
-function getCached(key, fetcher) {
-    const now = Date.now();
-    const entry = apiCache[key];
-    if (entry.data && (now - entry.time) < CACHE_TTL) {
-        return Promise.resolve(entry.data);
-    }
-    return fetcher().then(data => {
-        entry.data = data;
-        entry.time = now;
-        return data;
-    });
-}
-
-/** @returns {Promise<any>} */
-function getSettingsCached() {
-    return getCached('settings', () => invoke(COMMANDS.GET_SETTINGS));
-}
-
-/** @returns {Promise<any>} */
-function getConfigsCached() {
-    return getCached('configs', () => invoke(COMMANDS.LIST_CONFIGS));
-}
-
-function invalidateSettingsCache() {
-    apiCache.settings = { data: null, time: 0 };
-}
-
-function invalidateConfigsCache() {
-    apiCache.configs = { data: null, time: 0 };
-}
 
 // ---------------------------------------------------------------------------
 //  Utility: extract a human-readable name from a subscription URL
@@ -209,34 +164,34 @@ export function initUwpExemption() {
         }
 
         exemptBtn.onclick = async () => {
-            if (AppState.isNetworkUpdating) return;
+            if (appStore.get('isNetworkUpdating')) return;
 
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const confirmed = await showConfirmModal(
                 t.uwpExemptTitle || "UWP Loopback Exemption",
                 t.uwpExemptDesc || "This will apply loopback exemption to all UWP apps, which requires Administrator privileges. Do you want to continue?"
             );
             if (!confirmed) return;
 
-            AppState.isNetworkUpdating = true;
+            appStore.set('isNetworkUpdating', true);
             exemptBtn.classList.add('opacity-50', 'cursor-not-allowed');
             spinner?.classList.remove('hidden');
 
             try {
                 await invoke(COMMANDS.EXEMPT_UWP_APPS);
                 showNotification(
-                    /** @type {any} */(/** @type {any} */ (translations)[AppState.currentLang]).notifUwpSuccess || 'UWP Loopback exemption process started. Please check the UAC prompt.',
+                    /** @type {any} */(/** @type {any} */ (translations)[appStore.get('currentLang')]).notifUwpSuccess || 'UWP Loopback exemption process started. Please check the UAC prompt.',
                     'success'
                 );
             } catch (err) {
                 const error = toError(err);
                 showNotification(
-                    (/** @type {any} */(/** @type {any} */ (translations)[AppState.currentLang]).notifUwpFailed || 'Failed') + ': ' + error,
+                    (/** @type {any} */(/** @type {any} */ (translations)[appStore.get('currentLang')]).notifUwpFailed || 'Failed') + ': ' + error,
                     'error'
                 );
             } finally {
-                AppState.isNetworkUpdating = false;
+                appStore.set('isNetworkUpdating', false);
                 exemptBtn.classList.remove('opacity-50', 'cursor-not-allowed');
                 spinner?.classList.add('hidden');
             }
@@ -360,7 +315,7 @@ function initFakeClient() {
         updateVisibility();
         if (!toggle.checked) {
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             showNotification(t.fakeClientWarning || "Warning: Disabling this may cause incorrect config format from subscriptions.", "warning");
         }
     });
@@ -446,7 +401,7 @@ export async function initSettings() {
             const customArgs = argsStr.split('\n').filter(a => a.trim() !== '');
 
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             showNotification(t.notifSavingAndRestarting || "Saving and restarting core...");
             try {
                 await save();
@@ -462,7 +417,7 @@ export async function initSettings() {
 
     // ---- Language dropdown ----
     if (langSelect) {
-        langSelect.value = AppState.currentLang;
+        langSelect.value = appStore.get('currentLang');
 
         const langDropdown = initCustomDropdown({
             wrapId: 'setting-lang-wrap',
@@ -474,6 +429,8 @@ export async function initSettings() {
             /** @param {string} value */
             onChange: (value) => {
                 setLanguage(value);
+                appStore.set('currentLang', value);
+                Bus.emit(Events.LANGUAGE_CHANGED, value);
                 renderConfigs();
             },
         });
@@ -515,8 +472,7 @@ export async function initSettings() {
     if (restoreDefaultsBtn) {
         restoreDefaultsBtn.onclick = async () => {
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
-
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const confirmed = await showConfirmModal(
                 t.restoreDefaultsTitle || "Restore Defaults",
                 t.restoreDefaultsConfirm || "Are you sure you want to restore all settings to default values?"
@@ -640,7 +596,7 @@ export async function initSettings() {
                 successItems.push('themeMode');
 
                 localStorage.removeItem('appTheme');
-                AppState.currentTheme = 'zinc';
+                appStore.set('currentTheme', 'zinc');
                 applyTheme('zinc');
                 document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-zinc-900'));
                 const defaultThemeBtn = document.querySelector('.theme-btn[data-theme="zinc"]');
@@ -740,7 +696,6 @@ export async function initSettings() {
         }
         updateThemeModeUI(mode);
         applyDarkMode(resolveThemeModeToDark(mode));
-        window.dispatchEvent(new CustomEvent('theme-mode-changed'));
         Bus.emit(Events.THEME_MODE_CHANGED, mode);
     };
 
@@ -763,7 +718,6 @@ export async function initSettings() {
     const systemThemeListener = (event) => {
         if (currentThemeMode === 'auto') {
             applyDarkMode(event.matches);
-            window.dispatchEvent(new CustomEvent('theme-mode-changed'));
             Bus.emit(Events.THEME_MODE_CHANGED, 'auto');
         }
     };
@@ -792,7 +746,7 @@ export async function initSettings() {
             if (autoUpdateToggle) currentSettings.auto_update = autoUpdateToggle.checked;
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
-            currentSettings.theme = AppState.currentTheme;
+            currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
             invalidateSettingsCache();
@@ -805,13 +759,13 @@ export async function initSettings() {
     autoUpdateToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "更改已保存，需重启应用生效", "info");
     });
     autoUpdateClientToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "更改已保存，需重启应用生效", "info");
     });
     autostartToggle?.addEventListener('change', async () => {
@@ -843,15 +797,15 @@ export async function initSettings() {
             await syncCoreConfig();
 
             if (result && !result.hot_reload_success) {
+                    /** @type {any} */
+                    const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+                    showNotification(result.message || t2.requireRestart || "更改已保存，需重启核心生效", "info");
+                }
+                return true;
+            } catch (err) {
+                settingsLogger.error('Failed to save config to core', err);
                 /** @type {any} */
-                const t2 = /** @type {any} */ (translations)[AppState.currentLang];
-                showNotification(result.message || t2.requireRestart || "更改已保存，需重启核心生效", "info");
-            }
-            return true;
-        } catch (err) {
-            settingsLogger.error('Failed to save config to core', err);
-            /** @type {any} */
-            const t2 = /** @type {any} */ (translations)[AppState.currentLang];
+                const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const error = toError(err);
             showNotification(error.toString() || t2.failedSaveSettings || 'Failed to save settings to core', 'error');
             return false;
@@ -863,7 +817,7 @@ export async function initSettings() {
         if (!unifiedDelayToggle) return;
         saveConfigToCore({ 'unified-delay': unifiedDelayToggle.checked });
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
     });
 
@@ -871,7 +825,7 @@ export async function initSettings() {
         if (!ipv6Toggle) return;
         saveConfigToCore({ ipv6: ipv6Toggle.checked });
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
     });
 
@@ -879,27 +833,27 @@ export async function initSettings() {
         if (!allowLanToggle) return;
         saveConfigToCore({ 'allow-lan': allowLanToggle.checked });
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
     });
 
     // ---- Geo data update ----
     updateGeoBtn?.addEventListener('click', async () => {
-        if (AppState.isNetworkUpdating) return;
-        AppState.isNetworkUpdating = true;
+        if (appStore.get('isNetworkUpdating')) return;
+        appStore.set('isNetworkUpdating', true);
 
         const spinner = document.getElementById('geo-spinner');
         spinner?.classList.remove('hidden');
         updateGeoBtn.classList.add('opacity-50', 'pointer-events-none');
 
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.notifGeoUpdating || "Updating Geo databases...");
 
         try {
             await invoke(COMMANDS.UPDATE_GEO_DATA);
             /** @type {any} */
-            const t2 = /** @type {any} */ (translations)[AppState.currentLang];
+            const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
             showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
 
             /** @type {any} */
@@ -911,7 +865,7 @@ export async function initSettings() {
             const error = toError(err);
             showNotification(error.toString(), 'error');
         } finally {
-            AppState.isNetworkUpdating = false;
+            appStore.set('isNetworkUpdating', false);
             spinner?.classList.add('hidden');
             updateGeoBtn.classList.remove('opacity-50', 'pointer-events-none');
         }
@@ -958,7 +912,7 @@ export async function initSettings() {
             const listen = document.createElement('span');
             listen.className = 'text-2xs text-zinc-500 font-mono';
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             listen.textContent = `${t.listen || 'Listen'}: ${tunnel.address}`;
 
             info.appendChild(topRow);
@@ -981,7 +935,7 @@ export async function initSettings() {
 
     addTunnelBtn?.addEventListener('click', async () => {
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         const customHtml = `
             <div class="space-y-4">
                 <div>
@@ -1079,7 +1033,7 @@ export async function initSettings() {
             const importedCount = event.payload;
             if (importedCount > 0) {
                 /** @type {any} */
-                const t = /** @type {any} */ (translations)[AppState.currentLang];
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(`${t.profilesImported?.replace('{count}', importedCount) || `Successfully imported ${importedCount} profile(s)`}`, 'success');
                 if (typeof /** @type {any} */ (window).refreshConfigs === 'function') {
                     /** @type {any} */ (window).refreshConfigs();
@@ -1096,6 +1050,8 @@ export async function initSettings() {
         /** @type {HTMLElement} */ (circle).onclick = () => {
             const theme = circle.getAttribute('data-theme') || '';
             applyTheme(theme);
+            appStore.set('currentTheme', theme);
+            Bus.emit(Events.THEME_CHANGED, theme);
             save();
         };
     });
@@ -1121,7 +1077,7 @@ export async function initSettings() {
             settingsLogger.error('Failed to get core version', err);
             if (versionText) {
                 /** @type {any} */
-                const t = /** @type {any} */ (translations)[AppState.currentLang];
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 versionText.textContent = t.unknown || 'Unknown';
             }
         }
@@ -1148,7 +1104,7 @@ export async function initSettings() {
      */
     const performCoreUpdate = async (latestVersion, downloadUrl) => {
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         const confirmed = await showConfirmModal(t.notifUpdateFound, latestVersion);
         if (confirmed) {
             showNotification(t.notifUpdating);
@@ -1177,7 +1133,7 @@ export async function initSettings() {
             checkUpdateBtn.disabled = true;
 
             try {
-                const t = /** @type {any} */ (translations)[AppState.currentLang];
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
 
                 showNotification(t.notifUpdateCheck);
 
@@ -1241,11 +1197,11 @@ export async function initSettings() {
     if (subAddBtn) {
         subAddBtn.onclick = async () => {
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const url = /** @type {string} */ (await showModal(t.addSubscription, t.urlPlaceholder || "Subscription URL"));
             if (!url) return;
             /** @type {any} */
-            const t2 = /** @type {any} */ (translations)[AppState.currentLang];
+            const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
             showNotification(t2.notifDownloadingSub || "Downloading subscription...");
             try {
                 const userAgent = getSubscriptionUserAgent();
@@ -1267,13 +1223,13 @@ export async function initSettings() {
                 }
 
                 /** @type {any} */
-                const t3 = /** @type {any} */ (translations)[AppState.currentLang];
+                const t3 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(t3.notifSubSuccess, 'success');
                 renderConfigs();
             } catch (err) {
                 const error = toError(err);
                 /** @type {any} */
-                const t4 = /** @type {any} */ (translations)[AppState.currentLang];
+                const t4 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(`${t4.notifSubFailed}: ${error}`, 'error');
             }
         };
@@ -1284,7 +1240,7 @@ export async function initSettings() {
     if (updateAllSubBtn) {
         updateAllSubBtn.onclick = async () => {
             /** @type {any} */
-            const t = /** @type {any} */ (translations)[AppState.currentLang];
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             /** @type {any} */
             const configs = await invoke(COMMANDS.LIST_CONFIGS);
             const subConfigs = configs.filter(/** @param {any} c */ (c) => c.url_display);
@@ -1350,7 +1306,7 @@ export async function initSettings() {
         const currentConfig = cfgSettings.last_config || 'config.yaml';
         const customArgs = cfgSettings.custom_args || [];
         /** @type {any} */
-        const t = /** @type {any} */ (translations)[AppState.currentLang];
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
 
         configsList.innerHTML = '';
         configs.forEach((/** @type {any} */ configInfo) => {
@@ -1443,9 +1399,9 @@ export async function initSettings() {
             actions.appendChild(delBtn);
 
             const switchConfig = async () => {
-                if (isCurrent || AppState.isNetworkUpdating) return;
+                if (isCurrent || appStore.get('isNetworkUpdating')) return;
 
-                AppState.isNetworkUpdating = true;
+                appStore.set('isNetworkUpdating', true);
                 item.classList.add('opacity-50', 'pointer-events-none');
 
                 try {
@@ -1470,7 +1426,7 @@ export async function initSettings() {
                     const error = toError(err);
                     showNotification(error.toString(), 'error');
                 } finally {
-                    AppState.isNetworkUpdating = false;
+                    appStore.set('isNetworkUpdating', false);
                     item.classList.remove('opacity-50', 'pointer-events-none');
                 }
             };

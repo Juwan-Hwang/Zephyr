@@ -18,6 +18,8 @@ import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
 import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
+import { getConfigCached, getProxiesCached, invalidateProxiesCache } from './cache.js';
+import { appStore } from './state.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -31,10 +33,8 @@ const latencyLoadingIcon = SVG_ICONS.loading;
 
 // --- State ---
 
-let currentSortMode = localStorage.getItem('sortMode') || 'default'; // 'default' | 'name' | 'latency'
 /** @type {number|null} */
 let latencySortTimer = null;
-let isTestingLatency = false;
 
 /** @type {ReturnType<typeof createRovingTabindex>|null} */
 let _rovingInstance = null;
@@ -66,7 +66,7 @@ export function sortProxiesByLatency(proxies, data) {
  * @param {boolean} [finalPass=false] - If true, ignore pending/estimate and sort by actual latency
  */
 function applyLatencySortToDom(finalPass = false) {
-    if (currentSortMode !== 'latency') return;
+    if (appStore.get('currentSortMode') !== 'latency') return;
     const container = document.getElementById('proxies-list');
     if (!container) return;
     const cards = Array.from(container.children);
@@ -239,44 +239,6 @@ async function fetchProxyGroups(options = {}) {
     return { data, config, groups, mainGroup, proxies, current };
 }
 
-// --- Cached API wrappers ---
-
-/** @type {Record<string, { data: any, time: number }>} */
-const apiCache = {
-    config: { data: null, time: 0 },
-    proxies: { data: null, time: 0 },
-};
-const CACHE_TTL = 2000;
-
-/**
- * @param {string} key
- * @param {() => Promise<any>} fetcher
- */
-function getCached(key, fetcher) {
-    const now = Date.now();
-    const entry = apiCache[key];
-    if (entry.data && (now - entry.time) < CACHE_TTL) {
-        return Promise.resolve(entry.data);
-    }
-    return fetcher().then((/** @type {any} */ data) => {
-        entry.data = data;
-        entry.time = now;
-        return data;
-    });
-}
-
-function getConfigCached() {
-    return getCached('config', getConfig);
-}
-
-function getProxiesCached() {
-    return getCached('proxies', getProxies);
-}
-
-function invalidateProxiesCache() {
-    apiCache.proxies = { data: null, time: 0 };
-}
-
 // --- Sync ---
 
 /**
@@ -393,13 +355,13 @@ export function initProxyControls() {
     if (sortLabel) {
         const t = /** @type {any} */ (translations)[currentLang];
         const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
-        sortLabel.textContent = (/** @type {any} */ (labels))[currentSortMode] || labels['default'];
+        sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')] || labels['default'];
     }
 
     if (testBtn) {
         testBtn.onclick = async () => {
-            if (isTestingLatency) return;
-            isTestingLatency = true;
+            if (appStore.get('isTestingLatency')) return;
+            appStore.set('isTestingLatency', true);
 
             const icon = document.getElementById('test-icon');
             const t = /** @type {any} */ (translations)[currentLang];
@@ -485,7 +447,7 @@ export function initProxyControls() {
                     'error'
                 );
             } finally {
-                isTestingLatency = false;
+                appStore.set('isTestingLatency', false);
                 if (latencySortTimer) clearTimeout(latencySortTimer);
                 applyLatencySortToDom(true);
                 icon?.classList.remove('animate-spin', 'text-purple-400');
@@ -497,13 +459,12 @@ export function initProxyControls() {
     if (sortBtn) {
         sortBtn.onclick = () => {
             const modes = ['default', 'name', 'latency'];
-            const idx = (modes.indexOf(currentSortMode) + 1) % modes.length;
-            currentSortMode = modes[idx];
-            localStorage.setItem('sortMode', currentSortMode);
+            const idx = (modes.indexOf(appStore.get('currentSortMode')) + 1) % modes.length;
+            appStore.set('currentSortMode', modes[idx]);
 
             const t = /** @type {any} */ (translations)[currentLang];
             const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
-            if (sortLabel) sortLabel.textContent = (/** @type {any} */ (labels))[currentSortMode];
+            if (sortLabel) sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')];
             renderProxies();
         };
     }
@@ -588,9 +549,9 @@ export async function renderProxies() {
     let { mainGroup, proxies, current } = /** @type {any} */ (proxyGroupsResult);
     proxies = [...proxies]; // Mutable copy
 
-    if (currentSortMode === 'name') {
+    if (appStore.get('currentSortMode') === 'name') {
         proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));
-    } else if (currentSortMode === 'latency') {
+    } else if (appStore.get('currentSortMode') === 'latency') {
         sortProxiesByLatency(proxies, data);
     }
 
@@ -598,11 +559,11 @@ export async function renderProxies() {
     const sortLabelEl = document.getElementById('sort-label');
     if (sortLabelEl) {
         const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
-        sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[currentSortMode] || sortLabels['default'];
+        sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[appStore.get('currentSortMode')] || sortLabels['default'];
     }
 
     // Store virtual data for lazy card creation
-    /** @type {any} */ (container)._virtData = { proxies, data, current, isTestingLatency, mainGroup };
+    /** @type {any} */ (container)._virtData = { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup };
 
     // --- In-place update path (same proxies, just refresh data) ---
     const existingWrappers = Array.from(container.children);
@@ -822,7 +783,7 @@ export async function renderProxies() {
         wrapper.className = 'w-full';
 
         const card = createCard(wrapper);
-        setProxyPendingState(card, isTestingLatency);
+        setProxyPendingState(card, appStore.get('isTestingLatency'));
         wrapper.appendChild(card);
         setup3DEffect(card);
 

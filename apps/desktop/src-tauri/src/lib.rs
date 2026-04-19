@@ -11,9 +11,9 @@ pub mod uwp_loopback;
 use config_manager::{read_config, update_config};
 use core_manager::{
     delete_config, disable_tun_cmd, download_sub, ensure_app_storage, fetch_text, get_config_url,
-    get_core_version, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder,
-    read_config_file, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
-    start_core, stop_core, write_config_file, CoreData, MihomoState,
+    get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd, kill_mihomo,
+    list_configs, open_config_folder, read_config_file, restart_core_as_root_cmd, set_tun_enabled,
+    smart_kill_all_mihomo_as_root, start_core, stop_core, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -53,9 +53,11 @@ impl RateLimiter {
 
     /// Check if a command can be executed (returns true if allowed, false if rate limited)
     /// Also cleans up expired entries to prevent unbounded memory growth
-    #[allow(clippy::expect_used)]
     pub fn check_rate_limit(&self, command: &str, min_interval_ms: u64) -> bool {
-        let mut calls = self.calls.lock().expect("rate limiter mutex not poisoned");
+        let mut calls = self
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = Instant::now();
 
         // Clean up entries older than 1 minute to prevent unbounded growth
@@ -288,6 +290,8 @@ pub fn run() {
             }
 
             ensure_app_storage(app.handle())?;
+            // Initialize TUN mode flag from config (before tray init so icon is correct)
+            let _ = init_tun_mode_from_config(app.handle());
             let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let settings_file = config_dir.join("settings.json");
             let settings = if settings_file.exists() {

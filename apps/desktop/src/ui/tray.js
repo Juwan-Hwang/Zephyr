@@ -31,10 +31,9 @@ export function cleanupTrayEventListeners() {
 // --- Tray status ---
 
 export async function updateTrayStatus() {
-    const tunToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('tun-proxy-toggle'));
-    const sysProxyToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
-
-    const mode = tunToggle?.checked ? 'tun' : (sysProxyToggle?.checked ? 'sysproxy' : 'default');
+    const isTunEnabled = appStore.get('isTunEnabled');
+    const isSysProxyEnabled = appStore.get('isSysProxyEnabled');
+    const mode = isTunEnabled ? 'tun' : (isSysProxyEnabled ? 'sysproxy' : 'default');
 
     try {
         await invoke(COMMANDS.CHANGE_TRAY_ICON, { mode });
@@ -51,11 +50,9 @@ export async function updateTrayMenu(forceRefresh = false) {
 
     const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
     const t = /** @type {Record<string, string>} */(translations[langKey]);
-    const tunToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('tun-proxy-toggle'));
-    const sysProxyToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
 
-    const sysProxyEnabled = sysProxyToggle?.checked || false;
-    const tunEnabled = tunToggle?.checked || false;
+    const sysProxyEnabled = appStore.get('isSysProxyEnabled');
+    const tunEnabled = appStore.get('isTunEnabled');
 
     /** @type {string} */
     let currentMode;
@@ -146,8 +143,6 @@ export async function updateTrayMenu(forceRefresh = false) {
             currentMode,
         });
 
-        /** @type {any} */ (window)._currentSysProxyEnabled = sysProxyEnabled;
-        /** @type {any} */ (window)._currentTunEnabled = tunEnabled;
     } catch (err) {
         trayLogger.error('Failed to update tray menu', err);
     }
@@ -310,20 +305,17 @@ export function startUnifiedSync() {
 
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const tunToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('tun-proxy-toggle'));
-            const sysProxyToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
-
             const [realSysProxyState, actualMode] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.GET_TRAY_STATUS),
             ]);
 
-            if (sysProxyToggle && sysProxyToggle.checked !== realSysProxyState) {
-                sysProxyToggle.checked = realSysProxyState;
+            if (realSysProxyState !== appStore.get('isSysProxyEnabled')) {
+                appStore.set('isSysProxyEnabled', realSysProxyState);
                 import('./sysproxy.js').then(m => m.updateSysProxyUI());
             }
 
-            const expectedMode = tunToggle?.checked ? 'tun' : (realSysProxyState ? 'sysproxy' : 'default');
+            const expectedMode = appStore.get('isTunEnabled') ? 'tun' : (realSysProxyState ? 'sysproxy' : 'default');
 
             if (actualMode !== expectedMode) {
                 await updateTrayStatus();

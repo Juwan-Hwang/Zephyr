@@ -9,6 +9,8 @@ import { sysproxyLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
+import { appStore } from './state.js';
+import { Bus, Events } from './events.js';
 import { COMMANDS } from '@zephyr/shared';
 
 export async function updateSysProxyUI() {
@@ -17,6 +19,8 @@ export async function updateSysProxyUI() {
 
     try {
         const isActive = await invoke(COMMANDS.GET_SYS_PROXY);
+
+        appStore.set('isSysProxyEnabled', isActive);
 
         if (toggle && toggle.checked !== isActive) {
             toggle.checked = isActive;
@@ -71,6 +75,9 @@ export async function initProxyToggle() {
             } else {
                 await invoke(COMMANDS.DISABLE_SYSPROXY);
             }
+
+            appStore.set('isSysProxyEnabled', enabled);
+            Bus.emit(Events.SYS_PROXY_CHANGED, enabled);
 
             updateSysProxyUI();
             await updateTrayStatus();

@@ -1,16 +1,19 @@
+#[cfg(target_os = "windows")]
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Manager as _};
+use tauri::AppHandle;
 
+#[cfg(target_os = "windows")]
+use tauri::Manager as _;
 #[cfg(target_os = "windows")]
 use tauri_plugin_dialog::DialogExt as _;
 
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 // Rate limiting: Maximum 1 UWP exemption operation per 5 minutes
 static LAST_UWP_OPERATION: AtomicU64 = AtomicU64::new(0);
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 const UWP_OPERATION_COOLDOWN_SECS: u64 = 300; // 5 minutes
 
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 /// Check if enough time has passed since last UWP operation (rate limiting)
 fn check_rate_limit() -> Result<(), String> {
     let now = std::time::SystemTime::now()
@@ -30,7 +33,7 @@ fn check_rate_limit() -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 /// Validate that this is a legitimate call by checking various security markers
 fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
     // Check if the app is in a valid state
@@ -57,7 +60,7 @@ fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-#[allow(unused_variables)]
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {

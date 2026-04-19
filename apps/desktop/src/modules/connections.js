@@ -24,6 +24,7 @@ import { translations, currentLang, applyTranslations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { formatBytes, formatSpeed } from '../utils/format.js';
 import { connectionsLogger } from '../utils/logger.js';
+import { Bus, Events } from '../ui/events.js';
 
 // ============================================
 // State
@@ -182,9 +183,8 @@ export function initConnectionsPage() {
 // Re-apply sort arrows when i18n/theme changes wipe header text
 const _onI18nApplied = () => updateSortIndicators();
 const _onThemeChanged = () => updateSortIndicators();
-window.addEventListener('i18n-applied', _onI18nApplied);
-// Also re-apply on theme mode change (dark/light toggle doesn't fire i18n-applied)
-window.addEventListener('theme-mode-changed', _onThemeChanged);
+const _unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
+const _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
 
     // Auto-refresh every 2 seconds (only when page is visible)
     connectionsPollTimer = setInterval(() => {
@@ -203,8 +203,8 @@ export function destroyConnectionsPage() {
         clearInterval(connectionsPollTimer);
         connectionsPollTimer = null;
     }
-    window.removeEventListener('i18n-applied', _onI18nApplied);
-    window.removeEventListener('theme-mode-changed', _onThemeChanged);
+    _unsubI18n();
+    _unsubTheme();
 }
 
 // ============================================

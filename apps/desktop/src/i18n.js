@@ -9,6 +9,7 @@
 
 import { invoke } from './api.js';
 import { i18nLogger } from './utils/logger.js';
+import { Bus, Events } from './ui/events.js';
 
 // ---------------------------------------------------------------------------
 // RTL language detection
@@ -1224,7 +1225,7 @@ export function applyTranslations() {
         }).catch(e => i18nLogger.warn("Failed to update tray menu", e));
     }
 
-    window.dispatchEvent(new CustomEvent('i18n-applied'));
+    Bus.emit(Events.I18N_APPLIED);
 }
 
 // ---------------------------------------------------------------------------

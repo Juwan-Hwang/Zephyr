@@ -12,6 +12,7 @@ import { translations, currentLang } from '../i18n.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { persistConfigChanges } from './advanced.js';
 import { appStore } from './state.js';
+import { Bus, Events } from './events.js';
 import { COMMANDS } from '@zephyr/shared';
 
 export function initTunToggle() {
@@ -106,6 +107,9 @@ export function initTunToggle() {
 
             await closeAllConnections();
 
+            appStore.set('isTunEnabled', enable);
+            Bus.emit(Events.TUN_CHANGED, enable);
+
             showNotification(t.configSuccess, 'success');
 
             if (statusText) {
@@ -119,6 +123,7 @@ export function initTunToggle() {
             updateTrayMenu(true).catch(() => {});
         } catch (err) {
             toggle.checked = !enable;
+            appStore.set('isTunEnabled', !enable);
             if (statusText) {
                 statusText.textContent = t.virtualAdapter;
                 statusText.classList.remove('text-purple-400');
