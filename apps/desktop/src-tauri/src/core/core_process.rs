@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
 #[cfg(target_os = "macos")]
-use super::tun_manager::{is_tun_mode, restart_core_as_root, set_tun_mode};
+use super::tun_manager::{is_tun_mode, restart_core_as_root};
 use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 
 #[cfg(target_os = "windows")]
@@ -655,13 +655,13 @@ pub async fn start_core(
     {
         for i in 0..50 {
             if std::net::TcpListener::bind("127.0.0.1:9090").is_ok() {
-                eprintln!("[CORE] port 9090 confirmed free after {i * 100}ms");
+                eprintln!("[CORE] port 9090 confirmed free after {}ms", i * 100);
                 break;
             }
             if i == 49 {
                 eprintln!("[CORE] WARNING: port 9090 still occupied after 5s, proceeding anyway");
             } else {
-                eprintln!("[CORE] waiting for port 9090... {(i + 1) * 100}ms");
+                eprintln!("[CORE] waiting for port 9090... {}ms", (i + 1) * 100);
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
@@ -749,7 +749,8 @@ pub async fn start_core(
             .ok();
         if let Some(o) = ps {
             eprintln!(
-                "[CORE] mihomo processes before spawn:\n{String::from_utf8_lossy(&o.stdout)}"
+                "[CORE] mihomo processes before spawn:\n{}",
+                String::from_utf8_lossy(&o.stdout)
             );
         }
     }
