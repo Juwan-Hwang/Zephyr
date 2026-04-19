@@ -165,10 +165,11 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install semgrep
 
-      - name: Semgrep scan (open source rules)
+      - name: Semgrep scan (open source + custom rules)
         run: |
           semgrep scan \
             --config auto \
+            --config .semgrep.yml \
             --sarif \
             --output semgrep.sarif \
             --severity WARNING \
