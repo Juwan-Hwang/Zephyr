@@ -10,7 +10,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "futures-util",
- "glib 0.22.4",
+ "glib 0.22.5",
  "hex",
  "hmac",
  "mockall",
@@ -1696,9 +1696,9 @@ dependencies = [
 
 [[package]]
 name = "glib"
-version = "0.22.4"
+version = "0.22.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02856b71413e175be50eff37fe0aefa53e227054ee3d96196faee8a0823cac80"
+checksum = "a1b7df55594e0e787d1560e23f7e12d7360d0b22e7b7c228ec2488b9e59b1b6b"
 dependencies = [
  "bitflags 2.11.0",
  "futures-channel",
