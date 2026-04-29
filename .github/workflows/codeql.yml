@@ -35,7 +35,7 @@ jobs:
       # JS 分析需要 node_modules 存在以获得完整数据流追踪
       - name: Install pnpm
         if: matrix.language == 'javascript'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
       - name: Install Node.js dependencies (JS only)
         if: matrix.language == 'javascript'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
