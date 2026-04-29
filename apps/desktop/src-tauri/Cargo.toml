@@ -74,7 +74,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_Shell"
 ] }
-winreg = "0.52"
+winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS specific dependencies will be added as needed
