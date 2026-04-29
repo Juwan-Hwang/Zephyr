@@ -43,6 +43,8 @@ allow = [
   # Tauri / gtk-rs ecosystem
   "LGPL-3.0",
   "0BSD",
+  # notify (via clash-prism-core) — FSF-approved public-domain dedication
+  "CC0-1.0",
 ]
 
 [bans]
