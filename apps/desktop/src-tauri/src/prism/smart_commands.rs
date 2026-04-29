@@ -21,6 +21,14 @@ fn build_scorer(state: &PrismState) -> Result<SmartScorer, String> {
     ))
 }
 
+/// Record a latency test result and compute the node's smart score.
+///
+/// Uses an EMA (Exponential Moving Average) model with configurable weights:
+/// - P90 latency (default 0.4)
+/// - Success rate (default 0.4)
+/// - Stability / inverse stddev (default 0.2)
+///
+/// The result is persisted to `prism/smart_history.json`.
 #[tauri::command]
 pub fn smart_score(
     state: State<PrismState>,
@@ -108,6 +116,10 @@ pub fn smart_config_save(
         .map_err(|e| format!("Failed to write smart.toml: {e}"))
 }
 
+/// Calculate the next adaptive test interval based on current network quality.
+///
+/// Returns seconds until the next latency test. Higher `network_quality` (0–1)
+/// yields longer intervals; poor quality triggers more frequent testing.
 #[tauri::command]
 pub fn smart_next_interval(
     state: State<PrismState>,

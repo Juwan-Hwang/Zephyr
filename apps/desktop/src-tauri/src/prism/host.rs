@@ -274,24 +274,14 @@ impl PrismHost for ZephyrPrismHost {
         let tmp_path = paths.core_dir.join("_prism_validate.yaml");
         write_file_secure(&tmp_path, config)?;
 
-        let exe = crate::core_manager::get_core_exe_path(&self.app);
-        match exe {
-            Ok(exe_path) => {
-                println!("[prism] validate_config: using mihomo at {exe_path:?}");
-                let output = std::process::Command::new(&exe_path)
-                    .args(["-t", "-f"])
-                    .arg(&tmp_path)
-                    .output()
-                    .map_err(|e| format!("Failed to run validation: {e}"))?;
+        let exe = crate::core_manager::get_core_exe_path(&self.app)?;
+        let output = std::process::Command::new(&exe)
+            .args(["-t", "-f"])
+            .arg(&tmp_path)
+            .output()
+            .map_err(|e| format!("Failed to run validation: {e}"))?;
 
-                let _ = std::fs::remove_file(&tmp_path);
-                Ok(output.status.success())
-            }
-            Err(e) => {
-                println!("[prism] validate_config: mihomo not found: {e}");
-                let _ = std::fs::remove_file(&tmp_path);
-                Err(format!("mihomo not found: {e}"))
-            }
-        }
+        let _ = std::fs::remove_file(&tmp_path);
+        Ok(output.status.success())
     }
 }

@@ -9,12 +9,21 @@ use clash_prism_script::{SandboxConfig, ScriptContext, ScriptRuntime};
 use crate::prism::types::check_input_size;
 use crate::prism::PrismState;
 
+/// Execute a JavaScript script inside the Prism sandbox.
+///
+/// The script receives the running Mihomo configuration as context and can
+/// read (but not modify) proxy/state data. Resource limits (execution time,
+/// memory, string length, loop iterations, recursion depth) are enforced by
+/// the `ScriptLimits` configuration.
+///
+/// Rate-limited: 10 calls per 10 seconds.
 #[tauri::command]
 pub fn script_execute(
     state: State<PrismState>,
     script: String,
     script_name: String,
 ) -> Result<serde_json::Value, String> {
+    state.check_rate_limit("script_execute")?;
     check_input_size(&script, "Script")?;
     let config_str = state.with_ext(|_ext| {
         // Read running config directly from disk

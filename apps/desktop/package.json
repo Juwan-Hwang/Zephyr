@@ -25,7 +25,6 @@
     "@zephyr/shared": "workspace:*"
   },
   "devDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "1.0.0-rc.17",
     "esbuild": "^0.25.0",
     "globals": "^17.5.0"
   }

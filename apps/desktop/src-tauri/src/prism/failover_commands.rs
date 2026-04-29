@@ -9,6 +9,10 @@ use clash_prism_core::failover::{FailoverTracker, NodeFailPolicy};
 use crate::prism::PrismState;
 
 /// Report a proxy test result to the failover engine.
+///
+/// If the node fails and exceeds the configured threshold, returns a
+/// suggested failover action (`{ failedNode, failureCount, target }`).
+/// The caller is responsible for actually switching the proxy.
 #[tauri::command]
 pub fn failover_report(
     state: State<PrismState>,

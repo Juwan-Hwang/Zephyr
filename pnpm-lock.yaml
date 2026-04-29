@@ -60,9 +60,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
-      '@rolldown/binding-win32-x64-msvc':
-        specifier: 1.0.0-rc.17
-        version: 1.0.0-rc.17
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
@@ -525,12 +522,6 @@ packages:
 
   '@rolldown/binding-win32-x64-msvc@1.0.0-rc.15':
     resolution: {integrity: sha512-3P2A8L+x75qavWLe/Dll3EYBJLQmtkJN8rfh+U/eR3MqMgL/h98PhYI+JFfXuDPgPeCB7iZAKiqii5vqOvnA0g==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    cpu: [x64]
-    os: [win32]
-
-  '@rolldown/binding-win32-x64-msvc@1.0.0-rc.17':
-    resolution: {integrity: sha512-3hkiolcUAvPB9FLb3UZdfjVVNWherN1f/skkGWJP/fgSQhYUZpSIRr0/I8ZK9TkF3F7kxvJAk0+IcKvPHk9qQg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [win32]
@@ -1675,8 +1666,6 @@ snapshots:
 
   '@rolldown/binding-win32-x64-msvc@1.0.0-rc.15':
     optional: true
-
-  '@rolldown/binding-win32-x64-msvc@1.0.0-rc.17': {}
 
   '@rolldown/pluginutils@1.0.0-rc.15': {}
 

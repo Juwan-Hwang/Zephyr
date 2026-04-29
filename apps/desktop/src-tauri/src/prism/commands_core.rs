@@ -28,6 +28,14 @@ pub(crate) fn parse_position(
     }
 }
 
+/// Apply Prism rule engine changes to the running Mihomo configuration.
+///
+/// Compiles all `.prism.yaml` rule files, merges patches into the active
+/// config, and hot-reloads via the Mihomo REST API. Runs in a blocking
+/// thread pool to avoid starving other IPC commands during compilation
+/// of large rule sets (65k+ rules).
+///
+/// Returns `{ patches, annotations, trace }` describing what was changed.
 #[tauri::command]
 pub async fn prism_apply(
     state: State<'_, PrismState>,

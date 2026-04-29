@@ -45,6 +45,7 @@ mod failover_commands;
 mod host;
 mod kv_commands;
 mod plugin_commands;
+mod rate_limiter;
 mod rule_groups;
 mod rule_library;
 mod script_commands;
@@ -107,6 +108,8 @@ pub(crate) struct PrismInner {
     /// Cached trace from the last `apply()` call.
     /// Used by `prism_get_last_trace` to avoid re-compilation.
     last_trace: Vec<serde_json::Value>,
+    /// Per-command rate limiter.
+    rate_limiter: rate_limiter::RateLimiter,
 }
 
 impl PrismInner {
@@ -222,6 +225,14 @@ impl PrismState {
                 sandbox_config: SandboxConfig::strict(),
                 script_limits: ScriptLimits::default(),
                 last_trace: Vec::new(),
+                rate_limiter: {
+                    let mut rl = rate_limiter::RateLimiter::new();
+                    // script_execute: max 10 calls per 10 seconds
+                    rl.register("script_execute", 10, std::time::Duration::from_secs(10));
+                    // rule_import_url: max 5 calls per 10 seconds
+                    rl.register("rule_import_url", 5, std::time::Duration::from_secs(10));
+                    rl
+                },
             })),
             app: app.clone(),
         }
@@ -262,6 +273,15 @@ impl PrismState {
     /// Acquire the inner mutex guard.
     pub(crate) fn lock_inner(&self) -> Result<std::sync::MutexGuard<'_, PrismInner>, String> {
         self.inner.lock().map_err(|e| format!("Lock failed: {e}"))
+    }
+
+    /// Check rate limit for a command. Returns `Ok(())` if allowed,
+    /// `Err(retry_after)` if rate-limited.
+    pub(crate) fn check_rate_limit(&self, key: &str) -> Result<(), String> {
+        let mut lock = self.lock_inner()?;
+        lock.rate_limiter
+            .check(key)
+            .map_err(|d| format!("Rate limited: retry after {:.1}s", d.as_secs_f64()))
     }
 }
 

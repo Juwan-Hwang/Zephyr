@@ -350,11 +350,19 @@ pub fn rule_import_file(
 }
 
 #[tauri::command]
+/// Import rules from a remote URL.
+///
+/// Validates the URL scheme and resolves DNS to prevent SSRF attacks.
+/// The resolved IP is pinned to prevent DNS rebinding between validation
+/// and the actual HTTP request. Response body is limited to 10 MB.
+///
+/// Rate-limited: 5 calls per 10 seconds.
 pub async fn rule_import_url(
     state: State<'_, PrismState>,
     url: String,
     name: String,
 ) -> Result<String, String> {
+    state.check_rate_limit("rule_import_url")?;
     // C-3: Validate URL scheme and resolve DNS to prevent SSRF (rebinding/TOCTOU)
     let (validated_host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
 
