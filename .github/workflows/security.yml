@@ -374,6 +374,11 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
       - name: Install macOS dependencies
         run: brew install pkg-config glib
+      - name: Configure pkg-config for cross-compilation
+        run: |
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+          echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
       - name: Check x86_64-apple-darwin
         working-directory: apps/desktop/src-tauri
         run: cargo check --target x86_64-apple-darwin
