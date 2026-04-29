@@ -40,7 +40,7 @@ tempfile = "3"
 rand = { version = "0.10.1", features = ["thread_rng", "alloc"] }
 base64 = "0.22"
 serde_yaml = "0.9"  # TODO: Consider migrating to serde_yml when stable
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 tauri-plugin-dialog = "2"
 regex = "1"
