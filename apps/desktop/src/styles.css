@@ -48,7 +48,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
 }
@@ -64,7 +64,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
@@ -74,6 +74,11 @@ html:not(.dark) * {
 .btn-ghost:hover {
   background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--text-primary);
+}
+.btn-ghost.active {
+  background-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
 }
 
 @utility btn-accent {
@@ -87,7 +92,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
@@ -109,7 +114,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: rgba(244, 63, 94, 0.1);
@@ -131,7 +136,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: rgba(245, 158, 11, 0.1);
@@ -153,7 +158,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
@@ -175,7 +180,7 @@ html:not(.dark) * {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition-property: all;
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 0.21s;
   transition-timing-function: ease-out;
   background-color: var(--color-accent);
@@ -308,10 +313,8 @@ body.theme-purple { --color-accent: #AF52DE; --color-accent-glow: rgba(175, 82, 
 .glass-card:hover {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.3);
-  transform: translateY(-2px);
-  /* Hover: reduce brightness to 90% of current */
-  --glass-card-hover: blur(16px) saturate(1.2) brightness(calc(var(--brightness) * 0.9));
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.35);
+  --glass-card-hover: blur(16px) saturate(1.2) brightness(calc(var(--brightness, 1) * 0.9));
   backdrop-filter: var(--glass-card-hover);
   -webkit-backdrop-filter: var(--glass-card-hover);
 }
@@ -319,7 +322,6 @@ body.theme-purple { --color-accent: #AF52DE; --color-accent-glow: rgba(175, 82, 
 .movie-card-base {
   transform-style: preserve-3d;
   perspective: 1000px;
-  will-change: transform;
 }
 
 /* iOS Switch Component */
@@ -525,8 +527,7 @@ html:not(.dark) #setting-lang-menu {
   padding: 0.375rem;
   border-radius: 0.5rem;
   color: var(--text-secondary);
-  transition-property: all;
-  transition-duration: 0.21s;
+  transition-property: color, background-color, border-color, opacity;
   transition-timing-function: ease-out;
 }
 .btn-delete-icon:hover {
@@ -565,6 +566,88 @@ html:not(.dark) .type-badge {
   background-color: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.1);
   color: #475569;
+}
+
+/* --- Score Badge (Smart Proxy) --- */
+.score-badge {
+  font-size: 0.625rem;
+  line-height: 1.4;
+  font-weight: 700;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  flex-shrink: 0;
+  /* Hidden by default; shown when --smart-enabled is set to 1 */
+  display: none;
+}
+html:root[style*="--smart-enabled: 1"] .score-badge,
+html:root[style*="--smart-enabled:1"] .score-badge {
+  display: block;
+}
+.score-badge.score-medium {
+  background-color: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border-color: rgba(234, 179, 8, 0.2);
+}
+.score-badge.score-low {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+html:not(.dark) .score-badge {
+  background-color: rgba(34, 197, 94, 0.08);
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.15);
+}
+html:not(.dark) .score-badge.score-medium {
+  background-color: rgba(234, 179, 8, 0.08);
+  color: #ca8a04;
+  border-color: rgba(234, 179, 8, 0.15);
+}
+html:not(.dark) .score-badge.score-low {
+  background-color: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+/* --- Plugin Panel --- */
+.plugin-panel {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5);
+}
+html:not(.dark) .plugin-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.15);
+}
+
+/* --- Script Editor --- */
+.script-editor {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  tab-size: 2;
+  resize: vertical;
+  min-height: 120px;
+}
+.script-output {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+}
+html:not(.dark) .script-editor,
+html:not(.dark) .script-output {
+  color: #1e293b;
 }
 
 /* Common dropdown trigger styles - pill shape like language selector */
@@ -687,7 +770,8 @@ html:not(.dark) .textarea-common::placeholder {
 
 /* Connection row hover animation */
 #connections-list > div {
-  transition: all var(--transition-standard);
+  transition-property: background-color, border-color, opacity;
+  transition-duration: var(--transition-standard);
 }
 
 #connections-list > div:hover {
@@ -696,7 +780,8 @@ html:not(.dark) .textarea-common::placeholder {
 
 /* Rule badge pill animation */
 #connections-list .group span[class*="bg-"] {
-  transition: all var(--transition-standard);
+  transition-property: background-color, color, opacity;
+  transition-duration: var(--transition-standard);
 }
 
 /* Close button reveal on hover */
@@ -856,6 +941,17 @@ html:not(.dark) .textarea-common::placeholder {
   contain-intrinsic-size: 0 44px;
 }
 
+/* Proxy card wrapper: content-visibility for virtual scroll perf */
+.proxy-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 96px;
+}
+.proxy-wrapper:hover {
+  content-visibility: visible;
+  z-index: 10;
+  position: relative;
+}
+
 .conn-row:hover {
   background: rgba(255, 255, 255, 0.06) !important;
   border-color: rgba(255, 255, 255, 0.1) !important;
@@ -875,7 +971,8 @@ html:not(.dark) .textarea-common::placeholder {
 
 /* Detail close button animation */
 #detail-close-btn {
-  transition: all var(--transition-standard);
+  transition-property: color, background-color, opacity;
+  transition-duration: var(--transition-standard);
 }
 
 #detail-close-btn:hover:not(:disabled) {
@@ -963,6 +1060,33 @@ button:focus-visible,
    Logs Page Styles
    ============================================ */
 
+/* ── Log Tab Buttons ── */
+.log-tab-btn {
+    color: var(--text-muted, rgba(161, 161, 170, 1));
+    cursor: pointer;
+}
+.log-tab-btn:hover {
+    color: var(--text-primary, rgba(244, 244, 245, 1));
+    background: rgba(255, 255, 255, 0.05);
+}
+.log-tab-btn.active {
+    color: var(--text-primary, rgba(244, 244, 245, 1));
+    background: rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+}
+html:not(.dark) .log-tab-btn {
+    color: rgba(113, 113, 122, 1);
+}
+html:not(.dark) .log-tab-btn:hover {
+    color: rgba(24, 24, 27, 1);
+    background: rgba(0, 0, 0, 0.05);
+}
+html:not(.dark) .log-tab-btn.active {
+    color: rgba(24, 24, 27, 1);
+    background: rgba(0, 0, 0, 0.08);
+    font-weight: 600;
+}
+
 /* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
 .log-level-btn {
     display: inline-flex;
@@ -978,8 +1102,7 @@ button:focus-visible,
     color: var(--text-primary);
     background: color-mix(in srgb, var(--color-accent) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
-    transition-property: all;
-    transition-duration: 0.21s;
+    transition-property: color, background-color, border-color, opacity;
     transition-timing-function: ease-out;
     cursor: pointer;
 }

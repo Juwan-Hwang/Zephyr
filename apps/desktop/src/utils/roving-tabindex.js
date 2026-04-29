@@ -78,8 +78,8 @@ export function createRovingTabindex(container, options = {}) {
         const items = getItems();
         if (items.length === 0) return;
 
-        index = Math.max(0, Math.min(index, items.length - 1));
-        currentIndex = index;
+        const clampedIndex = Math.max(0, Math.min(index, items.length - 1));
+        currentIndex = clampedIndex;
 
         for (let i = 0; i < items.length; i++) {
             items[i].setAttribute('tabindex', i === currentIndex ? '0' : '-1');

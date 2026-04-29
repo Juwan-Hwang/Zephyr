@@ -28,12 +28,83 @@ pub struct ConfigInfo {
 }
 
 pub struct CoreData {
-    pub process: Option<Child>,
-    pub last_secret: String,
-    pub last_config_path: Option<String>,
-    pub last_custom_args: Option<Vec<String>>,
-    pub last_port: Option<u16>,
-    pub last_log_path: Option<String>,
+    process: Option<Child>,
+    last_secret: String,
+    last_config_path: Option<String>,
+    last_custom_args: Option<Vec<String>>,
+    last_port: Option<u16>,
+    last_log_path: Option<String>,
+}
+
+impl Default for CoreData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CoreData {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            process: None,
+            last_secret: String::new(),
+            last_config_path: None,
+            last_custom_args: None,
+            last_port: None,
+            last_log_path: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn process(&self) -> Option<&std::process::Child> {
+        self.process.as_ref()
+    }
+    pub const fn process_mut(&mut self) -> Option<&mut std::process::Child> {
+        self.process.as_mut()
+    }
+    #[must_use]
+    pub const fn take_process(&mut self) -> Option<Child> {
+        self.process.take()
+    }
+    #[must_use]
+    pub fn last_secret(&self) -> &str {
+        &self.last_secret
+    }
+    #[must_use]
+    pub fn last_config_path(&self) -> Option<&str> {
+        self.last_config_path.as_deref()
+    }
+    #[must_use]
+    pub fn last_custom_args(&self) -> Option<&[String]> {
+        self.last_custom_args.as_deref()
+    }
+    #[must_use]
+    pub const fn last_port(&self) -> Option<u16> {
+        self.last_port
+    }
+    #[must_use]
+    pub fn last_log_path(&self) -> Option<&str> {
+        self.last_log_path.as_deref()
+    }
+
+    pub fn set_process(&mut self, p: Option<Child>) {
+        self.process = p;
+    }
+    pub fn set_last_secret(&mut self, s: String) {
+        self.last_secret = s;
+    }
+    pub fn set_last_config_path(&mut self, p: Option<String>) {
+        self.last_config_path = p;
+    }
+    pub fn set_last_custom_args(&mut self, a: Option<Vec<String>>) {
+        self.last_custom_args = a;
+    }
+    pub const fn set_last_port(&mut self, p: Option<u16>) {
+        self.last_port = p;
+    }
+    pub fn set_last_log_path(&mut self, p: Option<String>) {
+        self.last_log_path = p;
+    }
 }
 pub struct MihomoState(pub Mutex<CoreData>);
 
@@ -77,8 +148,8 @@ pub use config_manager::{
 };
 pub use core_log::read_core_log;
 pub use core_process::{
-    core_binary_name, ensure_app_storage, ensure_executable, get_core_version, kill_mihomo,
-    start_core, stop_core,
+    core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_version,
+    kill_mihomo, start_core, stop_core, stop_core_inner,
 };
 pub use crypto::is_machine_key_persisted;
 pub use secure_io::write_file_secure;

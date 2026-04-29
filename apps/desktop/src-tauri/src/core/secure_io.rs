@@ -174,9 +174,10 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             {
                 LocalFree(new_acl as *mut _);
                 CloseHandle(handle);
-                // Security issue - file written with insecure permissions
-                eprintln!("[SECURITY] WARNING: Failed to set file security info - file may have insecure permissions");
-                return Ok(());
+                return Err(
+                    "Failed to set file security info - file may have insecure permissions"
+                        .to_owned(),
+                );
             }
 
             LocalFree(new_acl as *mut _);

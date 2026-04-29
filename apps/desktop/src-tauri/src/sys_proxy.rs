@@ -29,7 +29,12 @@ fn validate_proxy_server(server: &str) -> Result<(), String> {
     }
 
     // Parse host and port from server string
-    let (host, _port) = parse_host_port(server)?;
+    let (host, port_str) = parse_host_port(server)?;
+
+    // Reject port 0 — OS would assign a random port, causing confusion
+    if port_str == "0" {
+        return Err("Port 0 is not allowed (OS would assign a random port)".to_owned());
+    }
 
     // Validate that host is a loopback address
     // First try to parse as IP address directly
@@ -647,8 +652,7 @@ pub fn disable_sysproxy() -> Result<String, String> {
 pub fn clear_sys_proxy() -> Result<(), String> {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
-        let _ = disable_sysproxy();
-        Ok(())
+        disable_sysproxy().map(|_| ())
     }
 }
 

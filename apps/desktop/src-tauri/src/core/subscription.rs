@@ -23,21 +23,15 @@ fn try_decode_base64_content(content: &str) -> Option<String> {
     .then_some(decoded_str)
 }
 
-/// Validate a subscription name to prevent path traversal and injection attacks.
-fn validate_subscription_name(name: &str) -> Result<(), String> {
+/// Validate and sanitize a subscription name to prevent path traversal and injection attacks.
+fn validate_subscription_name(name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("Subscription name cannot be empty".to_owned());
     }
-    if name.contains("..") || name.contains('/') || name.contains('\\') {
-        return Err("Invalid subscription name: path traversal detected".to_owned());
-    }
-    if name.contains('\0') {
-        return Err("Invalid subscription name: null byte detected".to_owned());
-    }
-    Ok(())
+    super::config_sanitizer::sanitize_base_filename(name)
 }
 
-fn build_http_client(
+pub(crate) fn build_http_client(
     user_agent: Option<&str>,
     resolve_pin: Option<(String, std::net::SocketAddr)>,
 ) -> Result<reqwest::Client, String> {
@@ -147,7 +141,7 @@ fn build_http_client_with_proxy(
 }
 
 /// Check if an IP address is private or local
-const fn is_private_ip(ip: IpAddr) -> bool {
+pub(crate) const fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
             ipv4.is_private()
@@ -167,7 +161,7 @@ const fn is_private_ip(ip: IpAddr) -> bool {
 }
 
 /// Check if a host is a private or local address (SSRF protection)
-fn is_private_host(host: &str) -> bool {
+pub(crate) fn is_private_host(host: &str) -> bool {
     let host_lower = host.to_lowercase();
 
     // Quick checks for common localnames
@@ -190,7 +184,7 @@ fn is_private_host(host: &str) -> bool {
 }
 
 /// Validate URL and its resolved IPs for SSRF protection
-fn validate_subscription_url_with_ip(
+pub(crate) fn validate_subscription_url_with_ip(
     url: &str,
 ) -> Result<(String, Option<std::net::SocketAddr>), String> {
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
@@ -268,7 +262,7 @@ pub async fn download_sub(
     // Rate limit: max 1 call per 5 seconds
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
 
-    validate_subscription_name(&name)?;
+    let safe_name = validate_subscription_name(&name)?;
 
     let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
     let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
@@ -347,9 +341,9 @@ pub async fn download_sub(
             let state = app.state::<MihomoState>();
             let guard = state.0.lock().ok();
             guard.and_then(|g| {
-                g.process
+                g.process()
                     .is_some()
-                    .then(|| format!("http://127.0.0.1:{}", g.last_port.unwrap_or(7890)))
+                    .then(|| format!("http://127.0.0.1:{}", g.last_port().unwrap_or(7890)))
             })
         };
 
@@ -427,12 +421,14 @@ pub async fn download_sub(
 
     let paths = ensure_app_storage(&app)?;
 
-    let clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
-        name.clone()
+    let mut clean_name = if safe_name.ends_with(".yaml") || safe_name.ends_with(".yml") {
+        safe_name.clone()
     } else {
-        format!("{name}.yaml")
+        format!("{safe_name}.yaml")
     };
+    clean_name = super::config_sanitizer::sanitize_config_file_name(&clean_name)?;
     let target_path = paths.profiles_dir.join(&clean_name);
+    super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 
     let mut metadata = load_metadata(&paths);
     metadata.configs.insert(

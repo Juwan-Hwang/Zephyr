@@ -3,6 +3,7 @@ pub mod core_manager;
 pub mod deep_link;
 pub mod global_shortcut;
 pub mod os_notification;
+pub mod prism;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -51,6 +52,15 @@ impl RateLimiter {
         }
     }
 
+    /// Reset rate limit for a specific command (e.g. after core stops)
+    pub fn reset(&self, command: &str) {
+        let mut calls = self
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        calls.remove(command);
+    }
+
     /// Check if a command can be executed (returns true if allowed, false if rate limited)
     /// Also cleans up expired entries to prevent unbounded memory growth
     pub fn check_rate_limit(&self, command: &str, min_interval_ms: u64) -> bool {
@@ -80,7 +90,12 @@ impl RateLimiter {
 macro_rules! rate_limit {
     ($limiter:expr, $cmd:expr, $ms:expr) => {
         if !$limiter.check_rate_limit($cmd, $ms) {
-            return Err(format!("{} rate limited, please wait", $cmd));
+            let msg = format!(
+                "{} rate limited (min {}ms interval), please wait",
+                $cmd, $ms
+            );
+            eprintln!("[RateLimit] {msg}");
+            return Err(msg);
         }
     };
 }
@@ -100,6 +115,8 @@ struct Settings {
     dns_nameservers: Option<Vec<String>>,
     #[serde(default)]
     dns_fallbacks: Option<Vec<String>>,
+    #[serde(default)]
+    auto_apply: bool,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -121,7 +138,11 @@ fn save_settings(
     state: tauri::State<SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
-    if let Ok(mut guard) = state.0.lock() {
+    {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
         *guard = settings.clone();
     }
     let path = app
@@ -134,12 +155,8 @@ fn save_settings(
     let file_path = path.join("settings.json");
     let json_str = serde_json::to_string(&settings)
         .map_err(|e| format!("Failed to serialize settings: {e}"))?;
-    fs::write(&file_path, json_str).map_err(|e| format!("Failed to write settings.json: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let _ = fs::set_permissions(&file_path, fs::Permissions::from_mode(0o600));
-    }
+    core_manager::write_file_secure(&file_path, &json_str)
+        .map_err(|e| format!("Failed to write settings.json: {e}"))?;
     Ok(())
 }
 
@@ -159,7 +176,7 @@ fn get_tray_status(app: tauri::AppHandle) -> String {
     let core_running = state
         .0
         .lock()
-        .map(|guard| guard.process.is_some())
+        .map(|guard| guard.process().is_some())
         .unwrap_or(false);
 
     if !core_running {
@@ -258,14 +275,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .manage(MihomoState(Mutex::new(CoreData {
-            process: None,
-            last_secret: String::new(),
-            last_config_path: None,
-            last_custom_args: None,
-            last_port: None,
-            last_log_path: None,
-        })))
+        .manage(MihomoState(Mutex::new(CoreData::new())))
         .manage(TrayState::default())
         .manage(RateLimiter::new())
         .manage(ShortcutRegistry::default())
@@ -308,9 +318,13 @@ pub fn run() {
                     custom_args: Vec::new(),
                     dns_nameservers: None,
                     dns_fallbacks: None,
+                    auto_apply: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
+
+            // Initialize Prism Engine extension
+            app.manage(prism::PrismState::new(app.handle()));
 
             // Init Tray using the new tray module
             init_tray(app.handle())?;
@@ -359,9 +373,24 @@ pub fn run() {
                                         .file_name()
                                         .and_then(|n| n.to_str())
                                     {
+                                        // Sanitize file name to prevent path traversal
+                                        let safe_name = match core_manager::core::config_sanitizer::sanitize_config_file_name(file_name) {
+                                            Ok(name) => name,
+                                            Err(_) => continue,
+                                        };
                                         let target_path =
-                                            storage_paths.profiles_dir.join(file_name);
-                                        if core_manager::write_file_secure(&target_path, &content)
+                                            storage_paths.profiles_dir.join(&safe_name);
+                                        // Validate path stays within profiles dir
+                                        if core_manager::core::config_sanitizer::validate_path_within_dir(&target_path, &storage_paths.profiles_dir).is_err() {
+                                            continue;
+                                        }
+                                        // Sanitize dangerous keys (same as subscription import)
+                                        let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
+                                            .unwrap_or(serde_yaml::Value::Null);
+                                        core_manager::core::config_sanitizer::remove_dangerous_keys(&mut yaml_value, false);
+                                        let sanitized_content = serde_yaml::to_string(&yaml_value)
+                                            .unwrap_or(content);
+                                        if core_manager::write_file_secure(&target_path, &sanitized_content)
                                             .is_ok()
                                         {
                                             imported_count += 1;
@@ -428,6 +457,98 @@ pub fn run() {
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            // Prism Engine commands
+            prism::prism_apply,
+            prism::prism_status,
+            prism::prism_list_rules,
+            prism::prism_preview_rules,
+            prism::prism_get_last_trace,
+            prism::prism_is_prism_rule,
+            prism::prism_insert_rule,
+            prism::prism_insert_rule_str,
+            prism::prism_toggle_group,
+            prism::prism_trace_report,
+            prism::prism_trace_report_text,
+            prism::prism_validate_config,
+            prism::prism_list_profiles,
+            prism::prism_get_core_info,
+            prism::prism_start_watching,
+            prism::prism_stop_watching,
+            prism::prism_is_watching,
+            prism::prism_get_stats,
+            prism::prism_read_raw_profile,
+            prism::prism_rebuild,
+            // Rule Library (R2) commands
+            prism::open_prism_folder,
+            prism::rule_list,
+            prism::rule_read,
+            prism::rule_create,
+            prism::rule_update,
+            prism::rule_delete,
+            prism::rule_rename,
+            prism::rule_extract_from_profile,
+            prism::rule_import_text,
+            prism::rule_import_file,
+            prism::rule_import_url,
+            prism::rule_group_list,
+            prism::rule_group_create,
+            prism::rule_group_rename,
+            prism::rule_group_delete,
+            prism::rule_group_move,
+            prism::rule_get_auto_apply,
+            prism::rule_set_auto_apply,
+            // Plugin System commands
+            prism::plugin_discover,
+            prism::plugin_load,
+            prism::plugin_unload,
+            prism::plugin_enable,
+            prism::plugin_delete,
+            prism::plugin_list_loaded,
+            // Script Engine commands
+            prism::script_execute,
+            prism::script_validate,
+            // Smart Proxy Selector commands
+            prism::smart_score,
+            prism::smart_config,
+            prism::smart_config_save,
+            prism::smart_next_interval,
+            prism::smart_rank,
+            prism::smart_select_best,
+            prism::smart_clear_history,
+            // Smart additional
+            prism::smart_score_at,
+            prism::smart_validate_config,
+            prism::smart_scheduler_config,
+            prism::smart_trim_history,
+            // Failover
+            prism::failover_report,
+            prism::failover_get_policy,
+            prism::failover_set_policy,
+            prism::failover_failure_count,
+            prism::failover_reset,
+            // KvStore
+            prism::kv_get,
+            prism::kv_set,
+            prism::kv_delete,
+            prism::kv_keys,
+            // Trace advanced
+            prism::trace_statistics,
+            prism::trace_filter_by_source,
+            // Plugin additional
+            prism::plugin_execute_hook,
+            prism::plugin_list_hooks,
+            prism::plugin_check_permission,
+            prism::plugin_execute,
+            prism::plugin_list_permissions,
+            // Script additional
+            prism::script_get_sandbox,
+            prism::script_set_sandbox,
+            prism::script_get_limits,
+            prism::script_set_limits,
+            prism::script_grant_plugin,
+            prism::script_revoke_plugin,
+            prism::script_check_plugin_permission,
+            prism::script_is_sandbox_safe,
         ]);
 
     #[allow(clippy::expect_used)]

@@ -6,11 +6,11 @@
  * and routes them to the appropriate UI actions.
  */
 
-import { listen } from '../api.js';
+import { listen, invoke } from '../api.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { translations } from '../i18n.js';
-import { invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
+import { apiLogger } from '../utils/logger.js';
 
 /**
  * Initialize deep link event listener.
@@ -24,7 +24,7 @@ export async function initDeepLink() {
         if (action === 'install-config') {
             await handleInstallConfig(url, name);
         } else {
-            console.warn(`[DeepLink] Unknown action: ${action}`);
+            apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
         }
     });
 }

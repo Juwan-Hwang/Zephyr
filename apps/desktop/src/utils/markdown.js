@@ -9,6 +9,8 @@
  * Zero external dependencies.
  */
 
+import { escapeHtml } from './sanitize.js';
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -23,12 +25,12 @@ export function markdownToHtml(md) {
     // --- Pre-processing: strip unwanted sections ---
 
     // Remove "📦 下载说明" / "Download" section and everything after it
-    md = md.replace(/(?:^|\n)##\s*📦?\s*下载说明[\s\S]*$/i, '');
-    md = md.replace(/(?:^|\n)##\s*📦?\s*Download[\s\S]*$/i, '');
+    let processed = md.replace(/(?:^|\n)##\s*📦?\s*下载说明[\s\S]*$/i, '');
+    processed = processed.replace(/(?:^|\n)##\s*📦?\s*Download[\s\S]*$/i, '');
 
     // --- Token-level processing (order matters) ---
 
-    let html = md;
+    let html = processed;
 
     // 1. Code blocks (```...```) — must be first to prevent inner content from being parsed
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
@@ -97,17 +99,3 @@ export function markdownToHtml(md) {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Minimal HTML entity escaping.
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}

@@ -1,3 +1,4 @@
+use crate::core_manager::core::config_sanitizer::remove_dangerous_keys;
 use crate::core_manager::ensure_app_storage;
 use crate::core_manager::MihomoState;
 use serde_json::Value as JsonValue;
@@ -199,9 +200,9 @@ pub async fn update_config(
             .lock()
             .map_err(|e| format!("Failed to lock state: {e}"))?;
         (
-            lock.last_config_path.clone(),
-            lock.last_port.unwrap_or(9090),
-            lock.last_secret.clone(),
+            lock.last_config_path().map(String::from),
+            lock.last_port().unwrap_or(9090),
+            lock.last_secret().to_owned(),
         )
     };
 
@@ -213,12 +214,16 @@ pub async fn update_config(
                 let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
                     .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
                 if let Ok(mut profile_yaml) = serde_yaml::from_str::<YamlValue>(&profile_content) {
+                    remove_dangerous_keys(&mut profile_yaml, false);
                     if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
+                        remove_dangerous_keys(&mut profile_yaml, false);
                         if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                            let _ = crate::core_manager::write_file_secure(
+                            if let Err(e) = crate::core_manager::write_file_secure(
                                 &profile_path,
                                 &new_profile_content,
-                            );
+                            ) {
+                                eprintln!("[warn] Failed to update profile {profile_name}: {e}");
+                            }
                         }
                     }
                 }
@@ -245,11 +250,13 @@ pub async fn update_config(
         .no_proxy() // Force direct connection to local core, bypass system proxy
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
-    // For Mihomo, /configs requires PATCH for partial updates.
+    // Reload the full config file (consistent with Prism's apply_config).
+    // Since update_config_core already merged the patch into run_config.yaml,
+    // we use PUT to reload the file rather than PATCH for partial runtime update.
     let url = format!("http://127.0.0.1:{actual_port}/configs?force=true");
-    let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
-        .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
-    let mut req = client.patch(&url).json(&patch_yaml);
+    let mut req = client.put(&url).json(&serde_json::json!({
+        "path": run_config_path.to_string_lossy()
+    }));
 
     if !secret.is_empty() {
         req = req.bearer_auth(secret);
@@ -312,9 +319,11 @@ pub(crate) fn update_config_core<I: ConfigIo>(
     let patch_yaml: YamlValue = serde_yaml::to_value(patch)
         .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
 
-    // 3. SECURITY: Save and restore critical settings
+    // 3. SECURITY: Remove dangerous keys before merging
+    remove_dangerous_keys(&mut current_yaml, false);
     let security_settings = extract_security_settings(&current_yaml);
     merge_yaml(&mut current_yaml, &patch_yaml, 0)?;
+    remove_dangerous_keys(&mut current_yaml, false);
     restore_security_settings(&mut current_yaml, &security_settings);
 
     // 4. Write back

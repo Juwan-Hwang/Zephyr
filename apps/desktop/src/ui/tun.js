@@ -6,12 +6,11 @@
 
 import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
-import { setWsSecret, setWsBaseUrl } from '../websocket.js';
+import { setWsSecret } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { persistConfigChanges } from './advanced.js';
 import { appStore } from './state.js';
-import { Bus, Events } from './events.js';
 import { COMMANDS } from '@zephyr/shared';
 
 export function initTunToggle() {
@@ -19,6 +18,20 @@ export function initTunToggle() {
     const statusText = document.getElementById('tun-status-text');
     const spinner = document.getElementById('tun-spinner');
     if (!toggle) return;
+
+    /**
+     * Attempt to recover from a TUN root-start failure by restarting the core.
+     */
+    async function recoverFromRootStartFailure() {
+        try {
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const currentConfig = settings.last_config || 'config.yaml';
+            const customArgs = settings.custom_args || [];
+            await restartCore(currentConfig, customArgs);
+        } catch (recoverErr) {
+            tunLogger.error('recovery failed', recoverErr);
+        }
+    }
 
     toggle.onchange = async () => {
         if (appStore.get('isNetworkUpdating')) {
@@ -55,14 +68,7 @@ export function initTunToggle() {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
                         } else if (authErr === 'root_start_failed') {
                             showNotification(t.tunStartFailed || 'TUN failed to start, recovering...', 'error');
-                            try {
-                                const settings = await invoke(COMMANDS.GET_SETTINGS);
-                                const currentConfig = settings.last_config || 'config.yaml';
-                                const customArgs = settings.custom_args || [];
-                                await restartCore(currentConfig, customArgs);
-                            } catch (recoverErr) {
-                                tunLogger.error('recovery failed', recoverErr);
-                            }
+                            await recoverFromRootStartFailure();
                         } else {
                             showNotification(t.tunAuthFailed || 'Authorization failed', 'error');
                         }
@@ -95,7 +101,7 @@ export function initTunToggle() {
                 await patchConfig({ tun: { enable } });
                 await persistConfigChanges({ tun: { enable } });
 
-                const coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
+                const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
                 /** @type {{tun?: {enable?: boolean}}} */
                 const typedConfig = /** @type {{tun?: {enable?: boolean}}} */ (config);
@@ -118,7 +124,7 @@ export function initTunToggle() {
             appStore.set('isNetworkUpdating', false);
             try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
             // Reactive: subscribe() in initReactiveBindings() handles tray updates
-        } catch (err) {
+        } catch {
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
             if (statusText) {

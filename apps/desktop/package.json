@@ -7,16 +7,26 @@
     "tauri": "tauri",
     "copy-shared": "node -e \"const fs=require('fs');const p=require('path');const src=p.resolve(__dirname,'../../packages/shared/src/index.js');const dst=p.resolve(__dirname,'src/_shared/index.js');fs.mkdirSync(p.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);console.log('copied',src,'->',dst)\"",
     "build:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --minify",
+    "build:cm6": "esbuild src/ui/editor/cm6-entry.js --bundle --format=esm --outfile=src/cm6.bundle.js --minify",
     "dev:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --watch",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -p jsconfig.json --noEmit"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.1",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-yaml": "^6.1.3",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.1",
     "@tauri-apps/plugin-autostart": "2.5.1",
     "@zephyr/shared": "workspace:*"
   },
   "devDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.0.0-rc.17",
+    "esbuild": "^0.25.0",
     "globals": "^17.5.0"
   }
 }

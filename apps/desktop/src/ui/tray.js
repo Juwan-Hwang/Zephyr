@@ -8,7 +8,6 @@ import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen
 import { translations, currentLang } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
-import { Bus, Events } from './events.js';
 import { trayMenuCache, TRAY_CACHE_TTL, invalidateSettingsCache, invalidateProxiesCache } from './cache.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
@@ -33,7 +32,10 @@ export function cleanupTrayEventListeners() {
 export async function updateTrayStatus() {
     const isTunEnabled = appStore.get('isTunEnabled');
     const isSysProxyEnabled = appStore.get('isSysProxyEnabled');
-    const mode = isTunEnabled ? 'tun' : (isSysProxyEnabled ? 'sysproxy' : 'default');
+    let mode;
+    if (isTunEnabled) mode = 'tun';
+    else if (isSysProxyEnabled) mode = 'sysproxy';
+    else mode = 'default';
 
     try {
         await invoke(COMMANDS.CHANGE_TRAY_ICON, { mode });
@@ -102,18 +104,20 @@ export async function updateTrayMenu(forceRefresh = false) {
                     return type === 'selector' || type === 'select';
                 });
 
-                proxyGroups = groupNames.slice(0, 5).map(/** @param {string} groupName */ (groupName) => {
-                    const group = pd.proxies[groupName];
-                    return {
-                        name: groupName,
+                // Only use the first selector group to avoid duplicate nodes in tray
+                const mainGroup = groupNames[0];
+                if (mainGroup) {
+                    const group = pd.proxies[mainGroup];
+                    proxyGroups = [{
+                        name: mainGroup,
                         type: group.type,
                         now: group.now || '',
                         proxies: (group.all || []).slice(0, 20).map(/** @param {string} proxyName */ (proxyName) => ({
                             name: proxyName,
                             alive: pd.proxies[proxyName]?.alive,
                         })),
-                    };
-                });
+                    }];
+                }
             }
         } catch (e) {
             trayLogger.warn('Failed to get proxy groups for tray menu', e);
@@ -127,20 +131,22 @@ export async function updateTrayMenu(forceRefresh = false) {
 
     try {
         await invoke(COMMANDS.UPDATE_TRAY_FULL_MENU, {
-            showText: t.trayShow || "Show Zephyr",
-            quitText: t.trayQuit || "Quit",
-            sysProxyText: t.traySysProxy || "System Proxy",
-            tunText: t.trayTunMode || "TUN Mode",
-            ruleText: t.rule || "Rule",
-            globalText: t.global || "Global",
-            directText: t.direct || "Direct",
-            subscriptionsText: t.traySubscriptions || "Subscriptions",
-            proxiesText: t.trayProxies || "Proxies",
-            sysProxyEnabled,
-            tunEnabled,
-            configs,
-            proxyGroups,
-            currentMode,
+            params: {
+                showText: t.trayShow || "Show Zephyr",
+                quitText: t.trayQuit || "Quit",
+                sysProxyText: t.traySysProxy || "System Proxy",
+                tunText: t.trayTunMode || "TUN Mode",
+                ruleText: t.rule || "Rule",
+                globalText: t.global || "Global",
+                directText: t.direct || "Direct",
+                subscriptionsText: t.traySubscriptions || "Subscriptions",
+                proxiesText: t.trayProxies || "Proxies",
+                sysProxyEnabled,
+                tunEnabled,
+                configs,
+                proxyGroups,
+                currentMode,
+            },
         });
 
     } catch (err) {
@@ -198,6 +204,7 @@ export async function initTrayEventListeners() {
 
         if (toggle) {
             toggle.checked = enabled;
+            toggle.dispatchEvent(new Event('change'));
             setTimeout(async () => {
                 try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
             }, 60000);
@@ -257,6 +264,8 @@ export async function initTrayEventListeners() {
     });
 
     // Listen for proxy change from tray
+    _trayEventUnlisteners.push(unlisten4);
+
     const unlisten5 = await listen('tray-proxy-changed', async (event) => {
         /** @type {any} */
         const ev = event;
@@ -279,6 +288,8 @@ export async function initTrayEventListeners() {
                 }
 
                 updateTrayMenu(true).catch(() => {});
+                // Refresh tray again after a short delay to ensure mihomo has updated `now`
+                setTimeout(() => updateTrayMenu(true).catch(() => {}), 500);
             }
         } catch (err) {
             trayLogger.error('Failed to switch proxy from tray', err);
@@ -315,7 +326,10 @@ export function startUnifiedSync() {
                 import('./sysproxy.js').then(m => m.updateSysProxyUI());
             }
 
-            const expectedMode = appStore.get('isTunEnabled') ? 'tun' : (realSysProxyState ? 'sysproxy' : 'default');
+            let expectedMode;
+            if (appStore.get('isTunEnabled')) expectedMode = 'tun';
+            else if (realSysProxyState) expectedMode = 'sysproxy';
+            else expectedMode = 'default';
 
             if (actualMode !== expectedMode) {
                 await updateTrayStatus();

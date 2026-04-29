@@ -42,6 +42,7 @@ export function setup3DEffect(input) {
         };
 
         const handleMouseEnter = () => {
+            el.style.willChange = 'transform';
             el.style.transition = 'transform 0.15s ease-out';
             el.style.transform = 'translateY(-2px) scale(1.01)';
             el.style.zIndex = '10';
@@ -51,10 +52,11 @@ export function setup3DEffect(input) {
             if (frameId) cancelAnimationFrame(frameId);
             el.style.transition = 'transform 0.3s ease-out';
             el.style.transform = 'translateY(0) scale(1)';
-            el.style.zIndex = '1';
             setTimeout(() => {
+                el.style.zIndex = '1';
                 el.style.transition = '';
                 el.style.transform = '';
+                el.style.willChange = '';
             }, 300);
         };
 

@@ -147,15 +147,11 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
             save_metadata(&paths, &metadata);
             return Ok(format!("Config {yml_name} deleted"));
         }
-        return Err(format!("File does not exist: {target_path:?}"));
+        return Err("File does not exist".to_owned());
     }
 
-    // Remove metadata
-    let mut metadata = load_metadata(&paths);
-    metadata.configs.remove(&name);
-    save_metadata(&paths, &metadata);
-
-    // Delete the file and verify
+    // Delete the file first, then update metadata
+    // This ensures metadata consistency: if file deletion fails, metadata stays intact
     fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
 
     // Verify deletion (Windows may report success but file remains if locked)
@@ -164,11 +160,19 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
         fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
 
         if target_path.exists() {
-            return Err(format!(
-                "File could not be deleted (locked by another process?): {target_path:?}"
-            ));
+            return Err("File could not be deleted (locked by another process?)".to_owned());
         }
     }
+
+    // File deleted successfully — now update metadata
+    // Use clean_name for metadata removal (matches the actual file key stored)
+    let mut metadata = load_metadata(&paths);
+    metadata.configs.remove(&clean_name);
+    // Also try the original name in case metadata was stored with a different key
+    if name != clean_name {
+        metadata.configs.remove(&name);
+    }
+    save_metadata(&paths, &metadata);
 
     Ok(format!("Config {name} deleted"))
 }
@@ -193,7 +197,7 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
     validate_path_within_dir(&resolved_path, &base_dir)?;
 
     if !resolved_path.exists() {
-        return Err(format!("Config file {resolved_path:?} not found"));
+        return Err("Config file not found".to_owned());
     }
 
     fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {e}"))
@@ -224,7 +228,7 @@ pub fn write_config_file(
 
     write_file_secure(&resolved_path, &content)?;
 
-    Ok(format!("Successfully wrote to {resolved_path:?}"))
+    Ok("Config saved".to_owned())
 }
 
 #[tauri::command]

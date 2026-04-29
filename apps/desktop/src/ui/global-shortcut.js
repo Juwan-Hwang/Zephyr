@@ -7,6 +7,7 @@
  */
 
 import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections, getConfig } from '../api.js';
+import { persistConfigChanges } from './advanced.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
 import { updateSysProxyUI } from './sysproxy.js';
@@ -14,6 +15,7 @@ import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { updateModeUI } from './modes.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
+import { apiLogger } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -127,12 +129,12 @@ function saveShortcuts(/** @type {string} */ action, /** @type {string} */ accel
     localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
 }
 
-function removeShortcut(/** @type {string} */ action) {
+function _removeShortcut(/** @type {string} */ action) {
     const shortcuts = loadShortcuts();
     shortcuts[action] = '';
     localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
     try {
-        invoke('rate_limited_unregister_shortcut', { action }).catch(() => {});
+        invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action }).catch(() => {});
     } catch { /* ignore */ }
 }
 
@@ -157,9 +159,9 @@ export async function registerDefaultShortcuts() {
     for (const [action, accelerator] of Object.entries(shortcuts)) {
         if (!accelerator) continue;
         try {
-            await invoke('rate_limited_register_shortcut', { action, accelerator });
+            await invoke(COMMANDS.SHORTCUTS.REGISTER_SHORTCUT, { action, accelerator });
         } catch (err) {
-            console.warn(`[GlobalShortcut] Failed to register ${action}:`, err);
+            apiLogger.warn(`[GlobalShortcut] Failed to register ${action}:`, err);
         }
     }
 }
@@ -169,7 +171,7 @@ export async function setShortcutsEnabled(/** @type {boolean} */ enabled) {
     if (!enabled) {
         const shortcuts = loadShortcuts();
         for (const action of Object.keys(shortcuts)) {
-            try { await invoke('rate_limited_unregister_shortcut', { action }).catch(() => {}); } catch { /* ignore */ }
+            try { await invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action }).catch(() => {}); } catch { /* ignore */ }
         }
     } else {
         await registerDefaultShortcuts();
@@ -197,25 +199,25 @@ function openShortcutModal() {
 
     const modal = document.createElement('div');
     modal.id = 'shortcut-modal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md';
     modal.innerHTML = `
         <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-zinc-200">${t.globalShortcut || 'Global Shortcuts'}</h3>
-                <button id="shortcut-modal-close" class="text-zinc-400 hover:text-zinc-200 transition-colors">
+                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${t.globalShortcut || 'Global Shortcuts'}</h3>
+                <button id="shortcut-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="flex items-center justify-between py-2">
-                <span class="text-xs text-zinc-300">${t.enableGlobalShortcuts || 'Enable Global Shortcuts'}</span>
+                <span class="text-xs text-zinc-600 dark:text-zinc-300">${t.enableGlobalShortcuts || 'Enable Global Shortcuts'}</span>
                 <label class="ios-switch">
                     <input type="checkbox" id="shortcut-enable-toggle" ${enabled ? 'checked' : ''} />
                     <span class="switch-slider"></span>
                 </label>
             </div>
-            <div class="h-px bg-white/5"></div>
+            <div class="h-px bg-black/5 dark:bg-white/5"></div>
             <div id="shortcut-list" class="space-y-3"></div>
-            <div class="flex items-center justify-between pt-2 border-t border-white/10">
+            <div class="flex items-center justify-between pt-2 border-t border-black/10 dark:border-white/10">
                 <button id="shortcut-add-btn" class="btn-ghost text-xs px-3 py-1.5 text-accent">+ ${t.addShortcut || 'Add Shortcut'}</button>
                 <button id="shortcut-modal-done" class="btn-ghost text-xs px-3 py-1.5">${t.done || 'Done'}</button>
             </div>
@@ -272,7 +274,7 @@ function openShortcutModal() {
  * Get actions that are NOT yet in the list.
  * @returns {string[]}
  */
-function getUnboundActions() {
+function _getUnboundActions() {
     const shortcuts = loadShortcuts();
     const boundActions = new Set(Object.keys(shortcuts).filter(a => shortcuts[a]));
     return SUPPORTED_ACTIONS.filter(a => !boundActions.has(a.id)).map(a => a.id);
@@ -311,6 +313,15 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     let originalAccelerator = existingAccelerator || '';
     let hasChanged = false;
 
+    /** Stores the raw Tauri accelerator (e.g. "CmdOrCtrl+Shift+Z") */
+    let rawAccelerator = existingAccelerator || '';
+
+    // --- Save button (hidden by default, shown only when changed) ---
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-ghost text-xs px-2 py-1.5';
+    saveBtn.textContent = t.save || 'Save';
+    saveBtn.style.display = 'none';
+
     /** Check if current state differs from original */
     function checkChanged() {
         const currentAction = row.dataset.action || '';
@@ -346,7 +357,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         const opt = document.createElement('button');
         opt.type = 'button';
         opt.dataset.value = actionDef.id;
-        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all';
+        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 transition-all';
         if (actionDef.id === actionId) opt.classList.add('active');
         opt.textContent = getActionLabel(actionDef.id, t);
         opt.addEventListener('click', () => {
@@ -379,9 +390,6 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     keyInput.placeholder = t.clickToRecord || 'Click to record';
     keyInput.value = existingAccelerator ? formatAccelerator(existingAccelerator) : '';
 
-    /** Stores the raw Tauri accelerator (e.g. "CmdOrCtrl+Shift+Z") */
-    let rawAccelerator = existingAccelerator || '';
-
     keyInput.addEventListener('focus', () => {
         rawAccelerator = existingAccelerator || rawAccelerator;
         keyInput.value = '';
@@ -408,11 +416,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         }
     });
 
-    // --- Save button (hidden by default, shown only when changed) ---
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn-ghost text-xs px-2 py-1.5';
-    saveBtn.textContent = t.save || 'Save';
-    saveBtn.style.display = 'none';
+    // --- Save button click handler ---
     saveBtn.addEventListener('click', async () => {
         const currentAction = /** @type {string} */ (row.dataset.action);
         if (!currentAction) {
@@ -420,7 +424,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
             return;
         }
         if (!rawAccelerator) {
-            try { await invoke('rate_limited_unregister_shortcut', { action: currentAction }); } catch { /* ignore */ }
+            try { await invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action: currentAction }); } catch { /* ignore */ }
             const sc = loadShortcuts();
             sc[currentAction] = '';
             localStorage.setItem('custom_shortcuts', JSON.stringify(sc));
@@ -429,7 +433,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
             return;
         }
         try {
-            await invoke('rate_limited_register_shortcut', { action: currentAction, accelerator: rawAccelerator });
+            await invoke(COMMANDS.SHORTCUTS.REGISTER_SHORTCUT, { action: currentAction, accelerator: rawAccelerator });
             saveShortcuts(currentAction, rawAccelerator);
             originalAction = currentAction;
             originalAccelerator = rawAccelerator;
@@ -453,7 +457,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         rawAccelerator = '';
         // Directly invoke unregister to ensure it completes before removing UI
         try {
-            await invoke('rate_limited_unregister_shortcut', { action: currentAction });
+            await invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action: currentAction });
         } catch { /* may fail if not registered */ }
         // Update localStorage
         const shortcuts = loadShortcuts();
@@ -482,7 +486,7 @@ export async function initGlobalShortcut() {
             case 'mode-rule': await switchMode('rule'); break;
             case 'mode-global': await switchMode('global'); break;
             case 'mode-direct': await switchMode('direct'); break;
-            default: console.warn(`[GlobalShortcut] Unknown action: ${action}`);
+            default: apiLogger.warn(`[GlobalShortcut] Unknown action: ${action}`);
         }
     });
 }
@@ -500,7 +504,7 @@ async function toggleWindow() {
         const visible = await win.isVisible();
         if (visible) { await win.hide(); } else { await win.show(); await win.setFocus(); }
     } catch (err) {
-        console.warn('[GlobalShortcut] Failed to toggle window:', err);
+        apiLogger.warn('[GlobalShortcut] Failed to toggle window:', err);
     }
 }
 
@@ -544,7 +548,7 @@ async function toggleTun() {
         // (including macOS root auth, persistConfigChanges, closeAllConnections, UI/tray updates)
         const tunToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
         if (!tunToggle) {
-            console.warn('[GlobalShortcut] TUN toggle element not found');
+            apiLogger.warn('[GlobalShortcut] TUN toggle element not found');
             return;
         }
         // Flip the checked state and dispatch change event to trigger tun.js handler
@@ -566,6 +570,7 @@ async function switchMode(/** @type {string} */ mode) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
         await patchConfig({ mode });
+        await persistConfigChanges({ mode });
         await closeAllConnections();
         const modeNames = /** @type {Record<string, string>} */ ({ rule: t.modeRule || 'Rule', global: t.modeGlobal || 'Global', direct: t.modeDirect || 'Direct' });
         showNotification(`${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`, 'success');

@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { getProxies, switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -20,6 +20,9 @@ import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
 import { getConfigCached, getProxiesCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
+import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig } from './prism.js';
+import { fetchProxyGroups as fetchProxyGroupsShared } from './proxy-groups.js';
+import { Bus, Events } from './events.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -28,6 +31,9 @@ export { switchPage } from './navigation.js';
 
 /** Represents "infinite" or "timeout" latency */
 export const DELAY_INFINITE = 1000000;
+
+/** Returns true if the given delay value means "not tested" or "timeout". */
+function isInvalidDelay(d) { return d == null || d === 0 || d >= 999999; }
 
 const latencyLoadingIcon = SVG_ICONS.loading;
 
@@ -38,6 +44,14 @@ let latencySortTimer = null;
 
 /** @type {ReturnType<typeof createRovingTabindex>|null} */
 let _rovingInstance = null;
+
+// --- Virtual state (decoupled from DOM) ---
+
+/** Maps container elements to their virtual proxy data (replaces container._virtData) */
+const _virtState = new Map();
+
+/** Maps container elements to their MutationObserver (replaces container._virtObserver) */
+const _virtObservers = new Map();
 
 // --- Sorting ---
 
@@ -53,7 +67,7 @@ export function sortProxiesByLatency(proxies, data) {
         const getLat = (/** @type {string} */ name) => {
             const p = (/** @type {any} */ (data)).proxies[name];
             const lat = (p && p.history && p.history.length > 0) ? p.history[p.history.length - 1].delay : 0;
-            return (lat === 0 || lat >= 999999) ? DELAY_INFINITE : lat;
+            return isInvalidDelay(lat) ? DELAY_INFINITE : lat;
         };
         return getLat(a) - getLat(b);
     });
@@ -110,6 +124,119 @@ const queueLatencySort = debounce(() => {
     applyLatencySortToDom(false);
 }, 220);
 
+/** Update a node's smart score badge in the DOM.
+ *  @param {string} nodeName
+ *  @param {number} latencyMs
+ *  @param {boolean} success
+ */
+async function updateSmartScore(nodeName, latencyMs, success) {
+    try {
+        const score = await smartScore(nodeName, latencyMs, success);
+        const rounded = Math.round(score);
+        if (rounded === 0) return; // No meaningful score yet
+
+        // Adaptive scheduling: calculate next test interval based on score
+        const quality = rounded / 100;
+        try {
+            await smartNextInterval(quality, 10, 3600);
+        } catch { /* ignore scheduling errors */ }
+
+        // Update the badge in the DOM
+        const card = document.querySelector(`[data-name="${CSS.escape(nodeName)}"]`);
+        if (!card) return;
+        const badge = card.querySelector('[data-score-badge]');
+        if (!badge) return;
+
+        badge.textContent = String(rounded);
+        badge.classList.remove('score-medium', 'score-low');
+        if (rounded >= 70) { /* default green */ }
+        else if (rounded >= 40) badge.classList.add('score-medium');
+        else badge.classList.add('score-low');
+    } catch {
+        // Silently ignore score calculation errors
+    }
+}
+
+/** Backfill smart score badges from backend after render. */
+async function backfillSmartScores(container) {
+    try {
+        // Check smart enabled state directly (CSS var may not be set yet due to async init)
+        let smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+        if (!smartEnabled) {
+            try {
+                const config = await smartConfig();
+                smartEnabled = config.enabled ?? false;
+                // Sync CSS variable so badge visibility stays consistent
+                if (smartEnabled) {
+                    document.documentElement.style.setProperty('--smart-enabled', '1');
+                }
+            } catch { /* not enabled */ }
+        }
+        if (!smartEnabled) return;
+
+        const rankings = await smartRank();
+        if (!Array.isArray(rankings) || rankings.length === 0) return;
+        const scoreMap = new Map(rankings.map((r) => [r.name, Math.round(r.score)]));
+        container.querySelectorAll('[data-name]').forEach((wrapper) => {
+            const name = wrapper.dataset.name;
+            const score = scoreMap.get(name);
+            if (score === undefined || score === 0) return;
+            const badge = wrapper.querySelector('[data-score-badge]');
+            if (!badge) return;
+            badge.textContent = String(score);
+            badge.classList.remove('score-medium', 'score-low');
+            if (score >= 70) { /* default green */ }
+            else if (score >= 40) badge.classList.add('score-medium');
+            else badge.classList.add('score-low');
+        });
+    } catch {
+        // Silently ignore — scores are non-critical
+    }
+}
+
+/** Sort DOM cards by smart score (descending), using backend rank data. */
+export async function applySmartSortToDom() {
+    if (appStore.get('currentSortMode') !== 'smart') return;
+    const container = document.getElementById('proxies-list');
+    if (!container) return;
+    const cards = Array.from(container.children);
+    if (cards.length === 0) return;
+
+    try {
+        const rankings = await smartRank();
+        if (!rankings || rankings.length === 0) return;
+
+        // Build name -> rank map from backend results
+        const rankMap = new Map();
+        for (const item of rankings) {
+            rankMap.set(item.name, item.rank);
+        }
+
+        cards.sort((a, b) => {
+            const baseA = parseInt((/** @type {HTMLElement} */ (a)).dataset.baseOrder || '0', 10);
+            const baseB = parseInt((/** @type {HTMLElement} */ (b)).dataset.baseOrder || '0', 10);
+
+            const selectedA = (/** @type {HTMLElement} */ (a)).dataset.selected === '1' ? 1 : 0;
+            const selectedB = (/** @type {HTMLElement} */ (b)).dataset.selected === '1' ? 1 : 0;
+            if (selectedA !== selectedB) return selectedB - selectedA;
+
+            const nameA = (/** @type {HTMLElement} */ (a)).dataset.name || '';
+            const nameB = (/** @type {HTMLElement} */ (b)).dataset.name || '';
+            const rankA = rankMap.get(nameA) ?? Number.MAX_SAFE_INTEGER;
+            const rankB = rankMap.get(nameB) ?? Number.MAX_SAFE_INTEGER;
+
+            if (rankA !== rankB) return rankA - rankB; // Lower rank number = higher score
+            return baseA - baseB;
+        });
+
+        cards.forEach((card, idx) => {
+            (/** @type {HTMLElement} */ (card)).style.order = String(idx);
+        });
+    } catch {
+        // Fallback: if smartRank fails, keep current order
+    }
+}
+
 // --- Pending State ---
 
 /**
@@ -164,25 +291,32 @@ const ACTIVE_CARD_CLASSES = [
 ];
 const INACTIVE_HOVER_CLASS = 'hover:bg-white/5';
 
+/** @type {HTMLElement|null} Cached reference to the currently active card */
+let _activeCard = null;
+
 /**
  * Apply active-node styling to a card and remove it from all others in the same container.
  *
  * @param {HTMLElement} card - The card to mark as active
  * @param {HTMLElement} container - The parent container holding all cards
  */
-function setActiveNode(card, container) {
-    // Remove active styling from all cards
-    container.querySelectorAll('.glass-card').forEach(c => {
-        ACTIVE_CARD_CLASSES.forEach(cls => c.classList.remove(cls));
-        c.classList.add(INACTIVE_HOVER_CLASS);
-        const dot = c.querySelector('.active-dot');
-        if (dot) dot.remove();
-    });
+function setActiveNode(card, _container) {
+    // Fast path: same card already active
+    if (_activeCard === card) return;
 
-    // Update wrapper selected state
-    container.querySelectorAll('div[data-name]').forEach(w => {
-        (/** @type {HTMLElement} */ (w)).dataset.selected = '0';
-    });
+    // Remove active styling from previous card only
+    if (_activeCard && _activeCard.isConnected) {
+        ACTIVE_CARD_CLASSES.forEach(cls => _activeCard.classList.remove(cls));
+        _activeCard.classList.add(INACTIVE_HOVER_CLASS);
+        const dot = _activeCard.querySelector('.active-dot');
+        if (dot) dot.remove();
+    }
+
+    // Update wrapper selected state for previous card
+    if (_activeCard) {
+        const oldWrapper = _activeCard.closest('div[data-name]');
+        if (oldWrapper) oldWrapper.dataset.selected = '0';
+    }
 
     // Apply active styling to target card
     ACTIVE_CARD_CLASSES.forEach(cls => card.classList.add(cls));
@@ -193,50 +327,12 @@ function setActiveNode(card, container) {
         activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
         card.appendChild(activeDot);
     }
-}
 
-// --- Proxy Groups Fetch ---
+    // Update new wrapper
+    const newWrapper = card.closest('div[data-name]');
+    if (newWrapper) newWrapper.dataset.selected = '1';
 
-/**
- * Fetch proxy groups data and determine the main group based on config mode.
- *
- * @param {Object} [options={}] - Optional configuration
- * @param {Object} [options.existingData] - Pre-fetched proxies data to avoid duplicate API calls
- * @param {Object} [options.existingConfig] - Pre-fetched config to avoid duplicate API calls
- * @returns {Promise<Object|null>} Proxy groups result or null on failure
- */
-async function fetchProxyGroups(options = {}) {
-    const data = options.existingData || await getProxies();
-    if (!data || !(/** @type {any} */ (data)).proxies) return null;
-
-    const config = options.existingConfig || await getConfig();
-
-    const groups = Object.keys((/** @type {any} */ (data)).proxies).filter((/** @type {string} */ name) => {
-        const type = (/** @type {any} */ (data)).proxies[name].type?.toLowerCase() || '';
-        return type === 'selector' || type === 'select';
-    });
-
-    let mainGroup = 'GLOBAL';
-    const mode = (/** @type {any} */ (config))?.mode?.toLowerCase();
-
-    if (mode === 'direct') {
-        mainGroup = 'DIRECT';
-    } else if (mode !== 'global') {
-        mainGroup = groups.find(g => g.toLowerCase().includes('proxy')) || groups[0];
-    }
-
-    if (!(/** @type {any} */ (data)).proxies[mainGroup]) {
-        mainGroup = groups.find((/** @type {string} */ g) => g.toLowerCase().includes('proxy')) || groups[0];
-    }
-    if (!(/** @type {any} */ (data)).proxies[mainGroup]) {
-        mainGroup = groups[0];
-    }
-    if (!mainGroup || !(/** @type {any} */ (data)).proxies[mainGroup]) return null;
-
-    const proxies = (/** @type {any} */ (data)).proxies[mainGroup]?.all || [];
-    const current = (/** @type {any} */ (data)).proxies[mainGroup]?.now || null;
-
-    return { data, config, groups, mainGroup, proxies, current };
+    _activeCard = card;
 }
 
 // --- Sync ---
@@ -272,7 +368,7 @@ export async function syncCoreConfig() {
 
     // Update current node display
     try {
-        const proxyGroupsResult = await fetchProxyGroups({ existingConfig: config });
+        const proxyGroupsResult = await fetchProxyGroupsShared({ existingConfig: config });
         let currentNode = 'Direct';
         if (proxyGroupsResult) {
             currentNode = (/** @type {any} */ (proxyGroupsResult)).current || 'Direct';
@@ -354,17 +450,32 @@ export function initProxyControls() {
     // Init sort label
     if (sortLabel) {
         const t = /** @type {any} */ (translations)[currentLang];
-        const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
+        const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
         sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')] || labels['default'];
     }
 
     if (testBtn) {
+        // Safety: reset stale lock from previous session / old version
+        if (appStore.get('isTestingLatency')) {
+            const startTime = appStore.get('latencyTestStartTime');
+            if (!startTime) {
+                appStore.set('isTestingLatency', false);
+            } else {
+                const elapsed = Date.now() - startTime;
+                if (elapsed > 120_000) {
+                    proxyLogger.warn(`[LATENCY-TEST] Lock stuck for ${Math.round(elapsed / 1000)}s, force-resetting`);
+                    appStore.set('isTestingLatency', false);
+                }
+            }
+        }
+
         testBtn.onclick = async () => {
             if (appStore.get('isTestingLatency')) return;
             appStore.set('isTestingLatency', true);
+            appStore.set('latencyTestStartTime', Date.now());
 
             const icon = document.getElementById('test-icon');
-            const t = /** @type {any} */ (translations)[currentLang];
+            const _t = /** @type {any} */ (translations)[currentLang];
 
             icon?.classList.add('animate-spin', 'text-purple-400');
             testBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -373,11 +484,11 @@ export function initProxyControls() {
                 showLatencyLoadingForAllCards();
                 await renderProxies();
 
-                const proxyGroupsResult = await fetchProxyGroups();
+                const proxyGroupsResult = await fetchProxyGroupsShared();
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
-                const { data, mainGroup, proxies } = /** @type {any} */ (proxyGroupsResult);
+                const { data, mainGroup: _mainGroup, proxies } = /** @type {any} */ (proxyGroupsResult);
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -410,7 +521,7 @@ export function initProxyControls() {
                     if (updatedLatVal) {
                         const card = updatedLatVal.closest('.glass-card');
                         if (delay > 0) {
-                            updatedLatVal.textContent = delay + 'ms';
+                            updatedLatVal.textContent = `${delay}ms`;
                             updatedLatVal.className = `text-xs tabular-nums font-semibold ${getDelayColorClass(delay)}`;
                             if (card) {
                                 (/** @type {HTMLElement} */ (card)).dataset.latency = String(delay);
@@ -426,6 +537,12 @@ export function initProxyControls() {
                         }
                     }
                     queueLatencySort();
+
+                    // Update smart score if enabled
+                    if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+                        const success = delay > 0 && delay < 999999;
+                        updateSmartScore(name, success ? delay : 999999, success);
+                    }
                 };
 
                 const priorityQueue = buildLatencyPriorityQueue(data, validProxiesToTest);
@@ -448,8 +565,13 @@ export function initProxyControls() {
                 );
             } finally {
                 appStore.set('isTestingLatency', false);
+                appStore.set('latencyTestStartTime', null);
                 if (latencySortTimer) clearTimeout(latencySortTimer);
-                applyLatencySortToDom(true);
+                if (appStore.get('currentSortMode') === 'smart') {
+                    await applySmartSortToDom();
+                } else {
+                    applyLatencySortToDom(true);
+                }
                 icon?.classList.remove('animate-spin', 'text-purple-400');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
@@ -457,15 +579,55 @@ export function initProxyControls() {
     }
 
     if (sortBtn) {
-        sortBtn.onclick = () => {
-            const modes = ['default', 'name', 'latency'];
+        sortBtn.onclick = async () => {
+            const modes = ['default', 'name', 'latency', 'smart'];
             const idx = (modes.indexOf(appStore.get('currentSortMode')) + 1) % modes.length;
             appStore.set('currentSortMode', modes[idx]);
 
             const t = /** @type {any} */ (translations)[currentLang];
-            const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
+            const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
             if (sortLabel) sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')];
             renderProxies();
+            if (appStore.get('currentSortMode') === 'smart') {
+                await applySmartSortToDom();
+            }
+        };
+    }
+
+    // Smart Select Best: one-click switch to the best-scoring node
+    const selectBestBtn = document.getElementById('select-best-btn');
+    if (selectBestBtn) {
+        selectBestBtn.onclick = async () => {
+            try {
+                const best = await smartSelectBest();
+                if (!best || !best.name) {
+                    showNotification(
+                        /** @type {any} */ (translations)[currentLang].noProxiesToTest || 'No proxy history available',
+                        'info'
+                    );
+                    return;
+                }
+
+                // Use smartRank to get the canonical score (same source as badge display)
+                let displayScore = Math.round(best.score);
+                try {
+                    const rankings = await smartRank();
+                    const match = rankings?.find((r) => r.name === best.name);
+                    if (match) displayScore = Math.round(match.score);
+                } catch { /* fallback to selectBest score */ }
+
+                const proxyGroupsResult = await fetchProxyGroupsShared();
+                if (!proxyGroupsResult) return;
+                const { mainGroup } = /** @type {any} */ (proxyGroupsResult);
+                const success = await switchProxy(mainGroup, best.name);
+                if (success) {
+                    showNotification(`Switched to best node: ${best.name} (score: ${displayScore})`, 'success');
+                    await syncCoreConfig();
+                    await renderProxies();
+                }
+            } catch (err) {
+                proxyLogger.error('Smart select best failed', err);
+            }
         };
     }
 
@@ -486,86 +648,32 @@ export function initProxyControls() {
 // --- Render Proxies ---
 
 /**
- * Render the proxy node list. Supports in-place updates when the list
- * hasn't changed (for smooth latency re-testing) and full re-renders.
+ * Show loading state in the proxy container.
+ * @param {HTMLElement} container
+ * @param {string} loadingText
  */
-export async function renderProxies() {
-    const container = document.getElementById('proxies-list');
-    if (!container) return;
+function renderProxiesLoading(container, loadingText) {
+    container.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.className = 'col-span-full text-center py-10 text-zinc-500 flex flex-col items-center gap-4';
+    const span = document.createElement('span');
+    span.textContent = loadingText;
+    const spinner = document.createElement('div');
+    spinner.className = 'w-6 h-6 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin';
+    loading.appendChild(span);
+    loading.appendChild(spinner);
+    container.appendChild(loading);
+}
 
-    const t = /** @type {any} */ (translations)[currentLang];
-
-    // Show loading state if empty
-    if (container.children.length === 0) {
-        container.innerHTML = '';
-        const loading = document.createElement('div');
-        loading.className = 'col-span-full text-center py-10 text-zinc-500 flex flex-col items-center gap-4';
-        const span = document.createElement('span');
-        span.textContent = t.loadingNodes;
-        const spinner = document.createElement('div');
-        spinner.className = 'w-6 h-6 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin';
-        loading.appendChild(span);
-        loading.appendChild(spinner);
-        container.appendChild(loading);
-    }
-
-    // Fetch proxies and config in parallel using cached versions
-    const [data, config] = await Promise.all([
-        getProxiesCached(),
-        getConfigCached(),
-    ]);
-
-    if (!data || !data.proxies) {
-        container.innerHTML = '';
-        const err = document.createElement('div');
-        err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-2xl border border-rose-400/20';
-        err.textContent = t.failedToConnect;
-        container.appendChild(err);
-        return;
-    }
-
-    if (config?.mode?.toLowerCase() === 'direct') {
-        container.innerHTML = '';
-        const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-3xl border border-white/5 flex flex-col items-center gap-4';
-        prompt.innerHTML = `
-            <svg class="w-12 h-12 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>
-        `;
-        container.appendChild(prompt);
-        return;
-    }
-
-    const proxyGroupsResult = await fetchProxyGroups({ existingData: data, existingConfig: config });
-    if (!proxyGroupsResult) {
-        container.innerHTML = '';
-        const empty = document.createElement('div');
-        empty.className = 'col-span-full text-center py-10 text-zinc-500';
-        empty.textContent = t.noGroupsFound;
-        container.appendChild(empty);
-        return;
-    }
-
-    let { mainGroup, proxies, current } = /** @type {any} */ (proxyGroupsResult);
-    proxies = [...proxies]; // Mutable copy
-
-    if (appStore.get('currentSortMode') === 'name') {
-        proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));
-    } else if (appStore.get('currentSortMode') === 'latency') {
-        sortProxiesByLatency(proxies, data);
-    }
-
-    // Sync sort label with current mode (may be reset by applyTranslations)
-    const sortLabelEl = document.getElementById('sort-label');
-    if (sortLabelEl) {
-        const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency };
-        sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[appStore.get('currentSortMode')] || sortLabels['default'];
-    }
-
-    // Store virtual data for lazy card creation
-    /** @type {any} */ (container)._virtData = { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup };
-
-    // --- In-place update path (same proxies, just refresh data) ---
+/**
+ * Update existing proxy wrappers in-place when the proxy list hasn't changed.
+ * @param {HTMLElement} container
+ * @param {string[]} proxies
+ * @param {any} data
+ * @param {string|null} current
+ * @returns {Promise<boolean>} true if in-place update was performed
+ */
+async function updateProxiesInPlace(container, proxies, data, current) {
     const existingWrappers = Array.from(container.children);
     const existingNames = new Set(existingWrappers.map(w => (/** @type {HTMLElement} */ (w)).dataset.name));
     const newNames = new Set(proxies);
@@ -573,69 +681,92 @@ export async function renderProxies() {
         existingWrappers.length === proxies.length &&
         [...existingNames].every(name => newNames.has(/** @type {string} */ (name)));
 
-    if (canUpdateInPlace) {
-        const wrapperMap = new Map();
-        existingWrappers.forEach(w => { wrapperMap.set((/** @type {HTMLElement} */ (w)).dataset.name, w); });
+    if (!canUpdateInPlace) return false;
 
-        proxies.forEach((/** @type {string} */ name, /** @type {number} */ index) => {
-            const wrapper = /** @type {HTMLElement} */ (wrapperMap.get(name));
-            if (!wrapper) return;
-            const proxy = (/** @type {any} */ (data)).proxies[name];
-            const isSelected = name === current;
+    const wrapperMap = new Map();
+    existingWrappers.forEach(w => { wrapperMap.set((/** @type {HTMLElement} */ (w)).dataset.name, w); });
 
-            (/** @type {HTMLElement} */ (wrapper)).dataset.index = String(index);
-            (/** @type {HTMLElement} */ (wrapper)).dataset.baseOrder = `${index}`;
-            (/** @type {HTMLElement} */ (wrapper)).style.order = String(index);
-            (/** @type {HTMLElement} */ (wrapper)).dataset.selected = isSelected ? '1' : '0';
-            (/** @type {HTMLElement} */ (wrapper)).setAttribute('aria-selected', isSelected ? 'true' : 'false');
-            const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
-            if ((/** @type {HTMLElement} */ (wrapper)).dataset.pending !== '1') {
-                (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String((lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay);
-                (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
+    proxies.forEach((/** @type {string} */ name, /** @type {number} */ index) => {
+        const wrapper = /** @type {HTMLElement} */ (wrapperMap.get(name));
+        if (!wrapper) return;
+        const proxy = (/** @type {any} */ (data)).proxies[name];
+        const isSelected = name === current;
+
+        (/** @type {HTMLElement} */ (wrapper)).dataset.index = String(index);
+        (/** @type {HTMLElement} */ (wrapper)).dataset.baseOrder = `${index}`;
+        (/** @type {HTMLElement} */ (wrapper)).style.order = String(index);
+        (/** @type {HTMLElement} */ (wrapper)).dataset.selected = isSelected ? '1' : '0';
+        (/** @type {HTMLElement} */ (wrapper)).setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
+        if ((/** @type {HTMLElement} */ (wrapper)).dataset.pending !== '1') {
+            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
+            (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
+        }
+
+        const card = wrapper.firstElementChild;
+        if (card) {
+            (/** @type {HTMLElement} */ (card)).dataset.baseOrder = `${index}`;
+            (/** @type {HTMLElement} */ (card)).dataset.selected = isSelected ? '1' : '0';
+
+            const delayColor = getDelayColorClass(lastDelay);
+            const latVal = card.querySelector('[id^="latency-"]');
+            if (latVal && wrapper.dataset.pending !== '1') {
+                latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
+                latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : 'Timeout';
             }
 
-            const card = wrapper.firstElementChild;
-            if (card) {
-                (/** @type {HTMLElement} */ (card)).dataset.baseOrder = `${index}`;
-                (/** @type {HTMLElement} */ (card)).dataset.selected = isSelected ? '1' : '0';
-
-                const delayColor = getDelayColorClass(lastDelay);
-                const latVal = card.querySelector('[id^="latency-"]');
-                if (latVal && wrapper.dataset.pending !== '1') {
-                    latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-                    latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? lastDelay + 'ms' : 'Timeout';
+            if (isSelected) {
+                ACTIVE_CARD_CLASSES.forEach(cls => card.classList.add(cls));
+                card.classList.remove(INACTIVE_HOVER_CLASS);
+                if (!card.querySelector('.active-dot')) {
+                    const activeDot = document.createElement('div');
+                    activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
+                    card.appendChild(activeDot);
                 }
-
-                if (isSelected) {
-                    ACTIVE_CARD_CLASSES.forEach(cls => card.classList.add(cls));
-                    card.classList.remove(INACTIVE_HOVER_CLASS);
-                    if (!card.querySelector('.active-dot')) {
-                        const activeDot = document.createElement('div');
-                        activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
-                        card.appendChild(activeDot);
-                    }
-                } else {
-                    ACTIVE_CARD_CLASSES.forEach(cls => card.classList.remove(cls));
-                    card.classList.add(INACTIVE_HOVER_CLASS);
-                    const activeDot = card.querySelector('.active-dot');
-                    if (activeDot) activeDot.remove();
-                }
+            } else {
+                ACTIVE_CARD_CLASSES.forEach(cls => card.classList.remove(cls));
+                card.classList.add(INACTIVE_HOVER_CLASS);
+                const activeDot = card.querySelector('.active-dot');
+                if (activeDot) activeDot.remove();
             }
-        });
+        }
+    });
 
+    if (appStore.get('currentSortMode') === 'smart') {
+        await applySmartSortToDom();
+    } else {
         applyLatencySortToDom(true);
-        return;
     }
 
-    // --- Full render path ---
+    // Sync _activeCard with the actual current node
+    const currentWrapper = container.querySelector('[data-selected="1"]');
+    if (currentWrapper) {
+        _activeCard = currentWrapper.firstElementChild || null;
+    } else {
+        _activeCard = null;
+    }
+
+    return true;
+}
+
+/**
+ * Build all proxy wrappers and cards for the full render path.
+ * @param {HTMLElement} container
+ * @param {string[]} proxies
+ * @param {any} data
+ * @param {string|null} current
+ * @param {string} mainGroup
+ * @returns {DocumentFragment}
+ */
+function buildProxyWrappers(container, proxies, data, current, mainGroup) {
     const fragment = document.createDocumentFragment();
 
     const createCard = (/** @type {HTMLElement} */ wrapper) => {
-        const { proxies, data, current, isTestingLatency, mainGroup } = /** @type {any} */ (container)._virtData;
+        const { proxies: virtProxies, data: virtData, current: virtCurrent, isTestingLatency: _isTestingLatency, mainGroup: _virtMainGroup } = /** @type {any} */ (_virtState.get(container));
         const index = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.index || '0', 10);
-        const name = proxies[index];
-        const proxy = (/** @type {any} */ (data)).proxies[name];
-        const isSelected = name === current;
+        const name = virtProxies[index];
+        const proxy = (/** @type {any} */ (virtData)).proxies[name];
+        const isSelected = name === virtCurrent;
 
         let latFromWrapper = null;
         if ((/** @type {HTMLElement} */ (wrapper)).dataset.latency) latFromWrapper = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.latency, 10);
@@ -655,7 +786,7 @@ export async function renderProxies() {
 
         const delayColor = getDelayColorClass(lastDelay);
 
-        (/** @type {HTMLElement} */ (card)).dataset.latency = String((lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay);
+        (/** @type {HTMLElement} */ (card)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (card)).dataset.estimate = (/** @type {HTMLElement} */ (card)).dataset.latency;
 
         // --- Top row: name + type badge ---
@@ -710,10 +841,11 @@ export async function renderProxies() {
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
         } else {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-            latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? lastDelay + 'ms' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout');
+            latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout');
         }
         right.appendChild(latLabel);
         right.appendChild(latVal);
+
         bottom.appendChild(left);
         bottom.appendChild(right);
 
@@ -724,6 +856,14 @@ export async function renderProxies() {
         }
 
         card.appendChild(top);
+
+        // Smart score badge (between title and UDP rows, only visible when smart mode is enabled)
+        const scoreBadge = document.createElement('div');
+        scoreBadge.className = 'score-badge absolute left-4 top-[55%] -translate-y-1/2 text-center text-2xs tabular-nums font-bold';
+        scoreBadge.setAttribute('data-score-badge', 'true');
+        scoreBadge.textContent = '--';
+        card.appendChild(scoreBadge);
+
         card.appendChild(bottom);
 
         // --- Click handler: switch proxy ---
@@ -736,24 +876,37 @@ export async function renderProxies() {
                 latVal.innerHTML = SVG_ICONS.loadingSmall;
             }
 
-            const success = await switchProxy(mainGroup, name);
-            invalidateProxiesCache();
+            try {
+                const success = await switchProxy(mainGroup, name);
+                invalidateProxiesCache();
 
-            card.classList.remove('opacity-50', 'pointer-events-none');
-            if (latVal) {
-                latVal.innerHTML = originalLatContent;
-            }
-
-            if (success) {
-                setActiveNode(card, container);
-
-                if (typeof applyLatencySortToDom === 'function') {
-                    applyLatencySortToDom();
+                card.classList.remove('opacity-50', 'pointer-events-none');
+                if (latVal) {
+                    latVal.innerHTML = originalLatContent;
                 }
 
-                closeAllConnections().then(() => {
-                    syncCoreConfig();
-                });
+                if (success) {
+                    setActiveNode(card, container);
+
+                    if (appStore.get('currentSortMode') === 'smart') {
+                        await applySmartSortToDom();
+                    } else if (typeof applyLatencySortToDom === 'function') {
+                        applyLatencySortToDom();
+                    }
+
+                    closeAllConnections().then(() => {
+                        syncCoreConfig();
+                    });
+                } else {
+                    const t = translations[appStore.get('currentLang')] || {};
+                    showNotification(t.proxySwitchFailed || 'Failed to switch proxy', 'error');
+                }
+            } catch (err) {
+                card.classList.remove('opacity-50', 'pointer-events-none');
+                if (latVal) {
+                    latVal.innerHTML = originalLatContent;
+                }
+                showNotification(String(err), 'error');
             }
         };
 
@@ -774,43 +927,233 @@ export async function renderProxies() {
         wrapper.setAttribute('role', 'option');
         wrapper.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
-        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String((lastDelay === null || lastDelay === 0 || lastDelay >= 999999) ? DELAY_INFINITE : lastDelay);
+        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
         wrapper.style.height = '96px';
-        wrapper.style.contentVisibility = 'auto';
-        wrapper.style.containIntrinsicSize = '96px';
-        wrapper.className = 'w-full';
+        wrapper.className = 'w-full proxy-wrapper';
 
         const card = createCard(wrapper);
         setProxyPendingState(card, appStore.get('isTestingLatency'));
         wrapper.appendChild(card);
         setup3DEffect(card);
 
-        // Prevent clipping by disabling content-visibility on hover
-        /** @type {number|undefined} */
-        let leaveTimeout;
-        wrapper.addEventListener('mouseenter', () => {
-            clearTimeout(leaveTimeout);
-            wrapper.style.contentVisibility = 'visible';
-            wrapper.style.zIndex = '10';
-            wrapper.style.position = 'relative';
-        });
-        wrapper.addEventListener('mouseleave', () => {
-            leaveTimeout = setTimeout(() => {
-                wrapper.style.contentVisibility = 'auto';
-                wrapper.style.zIndex = '';
-                wrapper.style.position = '';
-            }, 300);
-        });
-
         fragment.appendChild(wrapper);
     });
 
-    if ((/** @type {any} */ (container))._virtObserver) {
-        (/** @type {any} */ (container))._virtObserver.disconnect();
+    return fragment;
+}
+
+/**
+ * Render the proxy node list. Supports in-place updates when the list
+ * hasn't changed (for smooth latency re-testing) and full re-renders.
+ */
+export async function renderProxies() {
+    const container = document.getElementById('proxies-list');
+    if (!container) return;
+
+    const t = /** @type {any} */ (translations)[currentLang];
+
+    // Show loading state if empty
+    if (container.children.length === 0) {
+        renderProxiesLoading(container, t.loadingNodes);
     }
 
+    // Fetch proxies and config in parallel using cached versions
+    const [data, config] = await Promise.all([
+        getProxiesCached(),
+        getConfigCached(),
+    ]);
+
+    if (!data || !data.proxies) {
+        container.innerHTML = '';
+        const err = document.createElement('div');
+        err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-2xl border border-rose-400/20';
+        err.textContent = t.failedToConnect;
+        container.appendChild(err);
+        return;
+    }
+
+    if (config?.mode?.toLowerCase() === 'direct') {
+        container.innerHTML = '';
+        const prompt = document.createElement('div');
+        prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-3xl border border-white/5 flex flex-col items-center gap-4';
+        prompt.innerHTML = `
+            ${SVG_ICONS.externalLink}
+            <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>
+        `;
+        container.appendChild(prompt);
+        return;
+    }
+
+    const proxyGroupsResult = await fetchProxyGroupsShared({ existingData: data, existingConfig: config });
+    if (!proxyGroupsResult) {
+        container.innerHTML = '';
+        const empty = document.createElement('div');
+        empty.className = 'col-span-full text-center py-10 text-zinc-500';
+        empty.textContent = t.noGroupsFound;
+        container.appendChild(empty);
+        return;
+    }
+
+    const { mainGroup, current } = /** @type {any} */ (proxyGroupsResult);
+    const proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+
+    if (appStore.get('currentSortMode') === 'name') {
+        proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));
+    } else if (appStore.get('currentSortMode') === 'latency') {
+        sortProxiesByLatency(proxies, data);
+    }
+
+    // Sync sort label with current mode (may be reset by applyTranslations)
+    const sortLabelEl = document.getElementById('sort-label');
+    if (sortLabelEl) {
+        const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
+        sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[appStore.get('currentSortMode')] || sortLabels['default'];
+    }
+
+    // Store virtual data for lazy card creation
+    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup });
+
+    // --- In-place update path ---
+    if (await updateProxiesInPlace(container, proxies, data, current)) {
+        // Still backfill scores even on in-place updates (badges may not exist yet on first render)
+        backfillSmartScores(container);
+        return;
+    }
+
+    // --- Full render path ---
+    const existingObserver = _virtObservers.get(container);
+    if (existingObserver) {
+        existingObserver.disconnect();
+    }
+
+    const fragment = buildProxyWrappers(container, proxies, data, current, mainGroup);
     container.innerHTML = '';
     container.appendChild(fragment);
+
+    // Sync _activeCard with the actual current node
+    const currentWrapper = container.querySelector('[data-selected="1"]');
+    _activeCard = currentWrapper ? (currentWrapper.firstElementChild || null) : null;
+
+    // Backfill existing smart scores from backend (avoids showing '--' when scores exist)
+    await backfillSmartScores(container);
+
+    // Apply smart sort on initial render if mode is 'smart' (e.g. restored from localStorage)
+    if (appStore.get('currentSortMode') === 'smart') {
+        await applySmartSortToDom();
+    }
+}
+
+// --- Event Bus: react to config updates from other modules (e.g. settings.js) ---
+
+Bus.on(Events.CONFIG_UPDATED, () => {
+    renderProxies();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Smart Auto-Test Scheduler
+// ═══════════════════════════════════════════════════════════════════════
+
+const _autoTest = {
+    /** @type {number|null} */
+    _timer: null,
+    _running: false,
+
+    /** Check whether auto-test is enabled (setting + smart enabled). */
+    _isEnabled() {
+        return localStorage.getItem('smartAutoTest') === 'true'
+            && document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+    },
+
+    /** Run a single auto-test cycle for all nodes in the current proxy group. */
+    async _runOnce() {
+        if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
+        this._running = true;
+        try {
+            const proxyGroupsResult = await fetchProxyGroupsShared();
+            if (!proxyGroupsResult) return;
+            const { data, proxies } = /** @type {any} */ (proxyGroupsResult);
+
+            const validProxies = proxies.filter((/** @type {string} */ name) => {
+                const node = (/** @type {any} */ (data)).proxies[name];
+                const type = node?.type?.toLowerCase() || '';
+                return type !== 'reject' && type !== 'compatible' && type !== 'pass';
+            });
+            if (validProxies.length === 0) return;
+
+            // Test all nodes concurrently (respecting mihomo's internal concurrency)
+            const concurrency = Math.min(12, validProxies.length);
+            let idx = 0;
+            const workers = Array.from({ length: concurrency }, async () => {
+                while (idx < validProxies.length) {
+                    const name = validProxies[idx++];
+                    try {
+                        const delay = await testProxy(name);
+                        const success = delay > 0 && delay < 999999;
+                        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+                            await updateSmartScore(name, success ? delay : 999999, success);
+                        }
+                    } catch { /* skip individual failures */ }
+                }
+            });
+            await Promise.all(workers);
+
+            // Schedule next cycle using adaptive interval
+            const config = await smartConfig().catch(() => null);
+            const minInterval = config?.min_interval_secs ?? 60;
+            const maxInterval = config?.max_interval_secs ?? 600;
+            // Use average score of all tested nodes as network quality
+            const rankings = await smartRank().catch(() => []);
+            const avgScore = rankings.length > 0
+                ? rankings.reduce((sum, r) => sum + (r.score || 0), 0) / rankings.length
+                : 50;
+            const nextSecs = await smartNextInterval(avgScore / 100, minInterval, maxInterval).catch(() => maxInterval);
+            this._scheduleNext(nextSecs * 1000);
+        } catch {
+            // On error, retry after a longer delay
+            this._scheduleNext(300_000);
+        } finally {
+            this._running = false;
+        }
+    },
+
+    /** Schedule the next auto-test. */
+    _scheduleNext(ms) {
+        this._stop();
+        if (!this._isEnabled()) return;
+        this._timer = setTimeout(() => this._runOnce(), ms);
+    },
+
+    /** Stop any pending auto-test. */
+    _stop() {
+        if (this._timer !== null) {
+            clearTimeout(this._timer);
+            this._timer = null;
+        }
+    },
+
+    /** Start the auto-test scheduler (called on app init or setting change). */
+    start() {
+        this._stop();
+        if (!this._isEnabled()) return;
+        // Delay first auto-test by 30s to let the app settle
+        this._scheduleNext(30_000);
+    },
+
+    /** Stop and disable the auto-test scheduler. */
+    stop() {
+        this._stop();
+        this._running = false;
+    },
+};
+
+/** Start the smart auto-test scheduler. */
+export function startSmartAutoTest() {
+    _autoTest.start();
+}
+
+/** Stop the smart auto-test scheduler. */
+export function stopSmartAutoTest() {
+    _autoTest.stop();
 }

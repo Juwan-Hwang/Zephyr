@@ -18,20 +18,20 @@
 <body class="bg-transparent h-screen w-screen overflow-hidden select-none">
     <div id="app-main-container" class="w-full h-full bg-transparent flex overflow-hidden border border-white/10 ring-1 ring-black/20 transition-all duration-300">
         <!-- Sidebar -->
-        <div class="w-20 flex flex-col items-center py-8 bg-black/20 border-r border-white/5 gap-8">
-            <div data-nav="home" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 bg-white/10 text-white shadow-lg ring-1 ring-white/20" title="Home">
+        <nav class="w-20 flex flex-col items-center py-8 bg-black/20 border-r border-white/5 gap-8" aria-label="Main navigation">
+            <button data-nav="home" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 bg-white/10 text-white shadow-lg ring-1 ring-white/20" title="Home" aria-current="page">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 <span class="sr-only" data-i18n="home">Home</span>
-            </div>
-            <div data-nav="proxies" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Proxies">
+            </button>
+            <button data-nav="proxies" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Proxies">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                 <span class="sr-only" data-i18n="proxies">Proxies</span>
-            </div>
-            <div data-nav="subscriptions" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Subscriptions">
+            </button>
+            <button data-nav="subscriptions" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Subscriptions">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></svg>
                 <span class="sr-only" data-i18n="subscriptions">Subscriptions</span>
-            </div>
-            <div data-nav="connections" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Connections">
+            </button>
+            <button data-nav="connections" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Connections">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <!-- Left node (client) -->
                     <circle cx="5" cy="12" r="2.5"/>
@@ -44,24 +44,24 @@
                     <circle cx="13.5" cy="12" r="0.8" fill="currentColor" class="conn-pulse-dot conn-dot-2"/>
                 </svg>
                 <span class="sr-only" data-i18n="connections">Connections</span>
-            </div>
-            <div data-nav="rules" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Rules">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h10"/></svg>
-                <span class="sr-only" data-i18n="rules">Rules</span>
-            </div>
-            <div data-nav="logs" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Logs">
+            </button>
+            <button data-nav="rule-library" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Rule Library">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                <span class="sr-only" data-i18n="ruleLibrary">Rule Library</span>
+            </button>
+            <button data-nav="logs" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Logs">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="4 17 10 11 4 5"/>
                     <line x1="12" y1="19" x2="20" y2="19"/>
                 </svg>
                 <span class="sr-only" data-i18n="logs">Logs</span>
-            </div>
+            </button>
             <div class="flex-1"></div>
-            <div data-nav="settings" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Settings">
+            <button data-nav="settings" class="w-12 h-12 flex items-center justify-center rounded-2xl cursor-pointer transition-all duration-300 text-zinc-500 hover:text-white hover:bg-white/10" title="Settings">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 <span class="sr-only" data-i18n="settings">Settings</span>
-            </div>
-        </div>
+            </button>
+        </nav>
 
         <!-- Main Area -->
         <div class="flex-1 flex flex-col min-w-0">
@@ -72,7 +72,7 @@
                     <span class="text-xs font-semibold text-zinc-300 tracking-wide">Zephyr</span>
                 </div>
                 <div class="flex items-center gap-3">
-                    <button id="close-btn" class="group flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57]/80 transition-all shadow-sm">
+                    <button id="close-btn" class="group flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57]/80 transition-all shadow-sm" aria-label="Close window">
                         <svg class="opacity-0 group-hover:opacity-100 w-2 h-2 text-black/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -158,8 +158,8 @@
                             </div>
                             <h3 class="text-xs font-bold text-zinc-100 tracking-tight" data-i18n="mode">Proxy Mode</h3>
                         </div>
-                        <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/40 rounded-xl border border-white/5 h-9 transition-all duration-300">
-                            <div id="mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-white/10 backdrop-blur-md rounded-lg shadow-sm border border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
+                        <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5 h-9 transition-all duration-300">
+                            <div id="mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-black/5 dark:bg-white/10 rounded-lg shadow-sm border border-black/5 dark:border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
                             <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="rule">Rule</button>
                             <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="global">Global</button>
                             <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="direct">Direct</button>
@@ -221,6 +221,10 @@
                         <h2 class="text-2xl font-light text-zinc-100" data-i18n="subscriptions">Subscriptions</h2>
                     </div>
                     <div class="flex items-center gap-3">
+                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <span data-i18n="plugins">Plugins</span>
+                        </button>
                         <button id="update-all-sub-btn" class="btn-ghost" title="Update All">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="updateAll">Update All</span>
@@ -234,6 +238,39 @@
 
                 <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pr-2 pt-2 -mt-2 custom-scrollbar relative z-10">
                     <!-- Subscriptions will be rendered here -->
+                </div>
+
+                <!-- Plugin Panel (overlay) -->
+                <div id="plugin-panel" class="hidden absolute inset-0 z-50 flex items-center justify-center">
+                    <div class="absolute inset-0 bg-black/40" id="plugin-panel-backdrop"></div>
+                    <div class="plugin-panel relative w-full max-w-2xl max-h-[80vh] flex flex-col p-6 gap-4">
+                        <div class="flex items-center justify-between shrink-0">
+                            <h3 class="text-lg font-light text-zinc-100" data-i18n="plugins">Plugins</h3>
+                            <button id="close-plugins-btn" class="text-zinc-500 hover:text-zinc-200 transition-colors">
+                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                        <div id="plugin-list" class="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                            <!-- Plugin items rendered by plugins.js -->
+                        </div>
+                        <div id="plugin-script-area" class="hidden flex flex-col gap-3 shrink-0">
+                            <div class="flex items-center justify-between">
+                                <h4 id="plugin-script-title" class="text-sm font-semibold text-zinc-200"></h4>
+                                <button id="plugin-script-back-btn" class="btn-ghost text-xs">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+                                    <span data-i18n="plugins">Plugins</span>
+                                </button>
+                            </div>
+                            <textarea id="plugin-script-editor" class="hidden script-editor input-mono w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 focus:outline-none focus:border-accent/50 transition-all" spellcheck="false" placeholder="// Write your script here..."></textarea>
+                            <div id="plugin-script-cm6" class="w-full bg-black/40 border border-white/5 rounded-xl overflow-hidden"></div>
+                            <div class="flex items-center gap-2">
+                                <button id="plugin-script-validate-btn" class="btn-ghost text-xs" data-i18n="pluginScriptValidate">Validate</button>
+                                <button id="plugin-script-run-btn" class="btn-accent text-xs" data-i18n="pluginScriptRun">Run</button>
+                                <span id="plugin-script-status" class="text-2xs ml-auto"></span>
+                            </div>
+                            <div id="plugin-script-output" class="script-output bg-black/30 border border-white/5 rounded-xl px-4 py-3 text-zinc-400 whitespace-pre-wrap"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -253,6 +290,11 @@
                                 <span id="sort-label" data-i18n="sortDefault">Default</span>
                             </button>
                         </div>
+                        <!-- Smart Select Best Button -->
+                        <button id="select-best-btn" class="btn-ghost" title="Select best node by smart score">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            <span data-i18n="selectBest">Best</span>
+                        </button>
                         <!-- Latency Test Button -->
                         <button id="test-all-btn" class="btn-accent">
                             <svg id="test-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -266,117 +308,30 @@
                 </div>
             </div>
 
-            <!-- Custom Rules Page -->
-            <div data-page="rules" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
-                <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500"></div>
-                
-                <header class="flex items-center justify-between relative z-10 shrink-0">
-                    <div>
-                        <h2 class="text-2xl font-light text-zinc-100" data-i18n="rulesTitle">Custom Rules</h2>
-                    </div>
-                    
-                    <div class="flex items-center gap-4">
-                        <!-- Search Box (Journal Style) -->
-                        <div class="relative group flex items-center">
-                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                </svg>
-                            </div>
-                            <input type="text" id="rules-search-input" placeholder="Search rules..." data-i18n-placeholder="searchRules" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
-                        </div>
-
-                        <div class="flex items-center gap-3">
-                            <button id="add-rule-btn" class="btn-accent">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                <span data-i18n="addRule">Add Rule</span>
-                            </button>
-                            <button id="save-rules-btn" class="btn-success">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span data-i18n="saveRules">Save & Apply</span>
-                            </button>
-                        </div>
-                    </div>
-                </header>
-
-                <div class="glass-card p-4 relative z-10 flex items-center gap-3 shrink-0">
-                    <div class="flex-1 relative group">
-                        <div class="absolute inset-y-0 left-3 flex items-center text-zinc-500 group-focus-within:text-accent transition-colors">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </div>
-                        <input id="import-sr-input" type="text" class="w-full bg-black/40 border border-white/5 rounded-xl py-2 pl-9 pr-4 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all" placeholder="Paste Shadowrocket Rule URL here..." data-i18n-placeholder="srPlaceholder">
-                    </div>
-                    <button id="import-sr-btn" class="btn-ghost" data-i18n="importSR">Import SR</button>
-                </div>
-
-                <!-- Custom Add Rule Form -->
-                <div id="add-rule-form" class="hidden glass-card p-4 mb-4 border border-accent/20 relative">
-                    <div class="grid grid-cols-3 gap-3 mb-3">
-                        <div class="flex flex-col gap-2">
-                            <label class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="type">Type</label>
-                            <div id="new-rule-type-wrap" class="relative">
-                                <button id="new-rule-type-trigger" type="button" class="select-common w-full flex items-center justify-between">
-                                    <span id="new-rule-type-label">DOMAIN-SUFFIX</span>
-                                    <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
-                                </button>
-                                <div id="new-rule-type-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30">
-                                    <button type="button" data-value="DOMAIN-SUFFIX" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">DOMAIN-SUFFIX</button>
-                                    <button type="button" data-value="DOMAIN" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">DOMAIN</button>
-                                    <button type="button" data-value="DOMAIN-KEYWORD" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">DOMAIN-KEYWORD</button>
-                                    <button type="button" data-value="IP-CIDR" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">IP-CIDR</button>
-                                    <button type="button" data-value="GEOIP" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">GEOIP</button>
-                                    <button type="button" data-value="MATCH" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">MATCH</button>
-                                </div>
-                                <select id="new-rule-type" class="hidden">
-                                    <option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option>
-                                    <option value="DOMAIN">DOMAIN</option>
-                                    <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option>
-                                    <option value="IP-CIDR">IP-CIDR</option>
-                                    <option value="GEOIP">GEOIP</option>
-                                    <option value="MATCH">MATCH</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="flex flex-col gap-2">
-                            <label class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="value">Value</label>
-                            <input type="text" id="new-rule-value" placeholder="e.g. google.com" data-i18n-placeholder="ruleValuePlaceholder" class="input-common placeholder:text-zinc-700">
-                        </div>
-                        <div class="flex flex-col gap-2">
-                            <label class="text-2xs text-zinc-500 uppercase tracking-wider" data-i18n="policy">Policy</label>
-                            <div id="new-rule-policy-wrap" class="relative">
-                                <button id="new-rule-policy-trigger" type="button" class="select-common w-full flex items-center justify-between">
-                                    <span id="new-rule-policy-label">Proxy</span>
-                                    <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
-                                </button>
-                                <div id="new-rule-policy-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30">
-                                    <button type="button" data-value="Proxy" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">Proxy</button>
-                                    <button type="button" data-value="DIRECT" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">DIRECT</button>
-                                    <button type="button" data-value="REJECT" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">REJECT</button>
-                                </div>
-                                <select id="new-rule-policy" class="hidden">
-                                    <option value="Proxy">Proxy</option>
-                                    <option value="DIRECT">DIRECT</option>
-                                    <option value="REJECT">REJECT</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-<div class="flex justify-end gap-2">
-<button id="cancel-add-rule-btn" class="btn-ghost" data-i18n="cancel">Cancel</button>
-<button id="confirm-add-rule-btn" class="btn-primary" data-i18n="confirmAdd">Confirm Add</button>
-</div>
-                </div>
-
-                <div id="rules-list" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 space-y-2 relative z-10">
-                    <!-- Rules will be rendered here -->
-                </div>
-            </div>
-
             <!-- Connections Page (HTML injected by connections.js module) -->
             <div data-page="connections" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
 
             <!-- Logs Page (HTML injected by logs.js module) -->
             <div data-page="logs" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
+
+            <!-- Rule Library Page -->
+            <div data-page="rule-library" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500 z-0"></div>
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-2xl font-light text-zinc-900 dark:text-zinc-100" data-i18n="ruleLibraryTitle">Rule Library</h2>
+                        <span id="rl-status" class="text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"></span>
+                        <span id="rl-stats" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="rl-btn-new-group" class="px-3 py-1.5 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700/80 hover:text-zinc-900 dark:hover:text-white transition-all duration-200" data-i18n="ruleLibraryNewGroup">New Group</button>
+                        <button id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200" data-i18n="ruleLibraryImport">Import Rules</button>
+                    </div>
+                </header>
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 space-y-4 relative z-10">
+                    <!-- Rendered by rule-library.js -->
+                </div>
+            </div>
 
             <!-- Settings Page -->
             <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
@@ -431,8 +386,8 @@
                                         <p class="text-2xs text-zinc-500" data-i18n="themeDesc">Auto / Light / Dark appearance</p>
                                     </div>
                                 </div>
-                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/40 rounded-xl border border-white/5 h-9 transition-all duration-300 w-[180px]">
-                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-white/10 backdrop-blur-md rounded-lg shadow-sm border border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
+                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5 h-9 transition-all duration-300 w-[180px]">
+                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-black/5 dark:bg-white/10 rounded-lg shadow-sm border border-black/5 dark:border-white/10 transition-all duration-300 ease-out will-change-transform"></div>
                                     <button data-theme-mode="light" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="themeLight">Light</button>
                                     <button data-theme-mode="auto" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-100 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="themeAuto">Auto</button>
                                     <button data-theme-mode="dark" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider" data-i18n="themeDark">Dark</button>
@@ -841,6 +796,89 @@
                             <div id="tunnels-list" class="space-y-3">
                                 <!-- Dynamic Tunnels Rendered Here -->
                                 <div class="text-center text-xs text-zinc-600 py-4" id="tunnels-empty" data-i18n="noTunnels">No port forwarding rules configured</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Smart Proxy Selector -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-zinc-500 uppercase tracking-wider mb-4 ml-1" data-i18n="smartProxy">Smart Proxy Selector</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="smartProxy">Smart Proxy Selector</p>
+                                            <button id="smart-config-btn" class="text-zinc-500 hover:text-accent transition-colors" title="Configure">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <circle cx="12" cy="12" r="3"/>
+                                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="smartProxyDesc">Auto-select best proxy using EMA scoring</p>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="smart-toggle">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <!-- Smart Auto-Test -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                        </div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="smartAutoTest">Auto Speed Test</p>
+                                    </div>
+                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="smartAutoTestDesc">Periodically test all proxies to keep scores accurate</p>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="smart-auto-test-toggle">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Extension Rules -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-zinc-500 uppercase tracking-wider mb-4 ml-1" data-i18n="ruleLibrary">Extension Rules</h3>
+                        <div class="glass-card p-5 space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="ruleLibraryAutoApply">Auto Apply Changes</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="ruleLibraryAutoApplyDesc">Automatically apply when rule files change</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="setting-auto-apply">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="h-px bg-white/5"></div>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="ruleLibraryManageFiles">Manage Rule Files</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="ruleLibraryManageFilesDesc">Open the prism rules directory in file manager</p>
+                                    </div>
+                                </div>
+                                <button id="manage-rule-files-btn" class="btn-ghost" data-i18n="ruleLibraryManageFiles">
+                                    Manage Rule Files
+                                </button>
                             </div>
                         </div>
                     </section>

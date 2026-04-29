@@ -171,6 +171,12 @@ function setState(newState) {
  * @returns {{ close: Function, reconnect: Function, isMaxRetriesReached: Function }}
  */
 export function connectTraffic(callback) {
+  // Close any existing connection to prevent resource leaks
+  if (globalConnectionHandle) {
+    globalConnectionHandle.close();
+    globalConnectionHandle = null;
+  }
+
   /** @type {AbortController} */
   let abortController = new AbortController();
 
@@ -267,10 +273,34 @@ export function connectTraffic(callback) {
       if (!response.body) throw new Error('Response body is null');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+
       /** @type {string} */
       let buffer = '';
       let parseErrorCount = 0;
       let lastCallbackTime = 0;
+
+      /**
+       * Process a single JSON line from the traffic stream.
+       * @param {string} trimmed
+       */
+      function processLine(trimmed) {
+        const data = JSON.parse(trimmed);
+        parseErrorCount = 0;
+
+        const now = Date.now();
+        if (now - lastCallbackTime >= 500) {
+          const formatted = {
+            up: formatSpeed(data.up),
+            down: formatSpeed(data.down),
+            raw: data,
+          };
+
+          if (typeof callback === 'function') {
+            callback(formatted);
+            lastCallbackTime = now;
+          }
+        }
+      }
 
       while (true) {
         const { done, value } = await reader.read();
@@ -287,23 +317,8 @@ export function connectTraffic(callback) {
           if (!trimmed) continue;
 
           try {
-            const data = JSON.parse(trimmed);
-            parseErrorCount = 0;
-
-            const now = Date.now();
-            if (now - lastCallbackTime >= 500) {
-              const formatted = {
-                up: formatSpeed(data.up),
-                down: formatSpeed(data.down),
-                raw: data,
-              };
-
-              if (typeof callback === 'function') {
-                callback(formatted);
-                lastCallbackTime = now;
-              }
-            }
-          } catch (err) {
+            processLine(trimmed);
+          } catch {
             parseErrorCount++;
             if (parseErrorCount > 10) {
               log.error('too many parse errors — reconnecting');
@@ -317,6 +332,11 @@ export function connectTraffic(callback) {
       handleClose();
     } catch (err) {
       const error = /** @type {Error} */ (err);
+      if (error.name === 'AbortError' && !isClosed) {
+        // Heartbeat timeout or force-reconnect — treat as disconnection
+        handleClose();
+        return;
+      }
       if (error.name === 'AbortError') return;
       log.error('stream error:', error.message || error);
       handleClose();
@@ -327,7 +347,7 @@ export function connectTraffic(callback) {
    * Handle disconnection — schedule retry or notify permanent failure.
    * @private
    */
-  const handleClose = () => {
+  function handleClose() {
     stopHeartbeat();
 
     if (isForceReconnecting || isClosed) return;
@@ -356,7 +376,7 @@ export function connectTraffic(callback) {
         connectionLostCallback();
       }
     }
-  };
+  }
 
   /* ---- kick off ---- */
   connect();

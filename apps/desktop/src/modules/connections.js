@@ -53,12 +53,12 @@ let activeDetailConnId = null;
 /** @type {string|null} */
 let activeDetailMode = null;
 
-/** Grand totals across all connections (active + archived) */
-let totalDownloaded = 0;
-let totalUploaded = 0;
-
 /** Debounce flag to prevent overlapping fetches */
 let isFetching = false;
+
+/** Grand totals (kept for future use) */
+let _totalDownloaded = 0;
+let _totalUploaded = 0;
 
 /** @type {Function|null} */
 let _unsubI18n = null;
@@ -248,7 +248,8 @@ function switchConnTab(tab) {
 
         if (actionBtn) {
             actionBtn.className = 'btn-danger';
-            if (actionIcon) actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>';
+            actionBtn.disabled = false;
+            if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'; }
             if (actionText) { actionText.textContent = t.closeAll || 'Close All'; actionText.setAttribute('data-i18n', 'closeAll'); }
         }
     } else {
@@ -259,7 +260,8 @@ function switchConnTab(tab) {
 
         if (actionBtn) {
             actionBtn.className = 'btn-warning';
-            if (actionIcon) actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>';
+            actionBtn.disabled = false;
+            if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'; }
             if (actionText) { actionText.textContent = t.clearAll || 'Clear All'; actionText.setAttribute('data-i18n', 'clearAll'); }
         }
     }
@@ -410,7 +412,7 @@ function updateConnStats(conns) {
     const ulTotalEl = document.getElementById('stat-ul-total');
     const activeEl = document.getElementById('stat-active');
 
-    const total = conns.length;
+    const total = conns.length + closedConnections.length;
     const active = conns.filter(/** @param {any} c */ (c) => (c.download ?? 0) > 0 || (c.upload ?? 0) > 0).length;
 
     let grandDl = 0, grandUl = 0;
@@ -423,14 +425,21 @@ function updateConnStats(conns) {
         grandUl += c.ulTotal ?? 0;
     }
 
-    totalDownloaded = grandDl;
-    totalUploaded = grandUl;
+    _totalDownloaded = grandDl;
+    _totalUploaded = grandUl;
 
     if (totalEl) totalEl.textContent = String(total);
     if (dlTotalEl) dlTotalEl.textContent = formatBytes(grandDl);
     if (ulTotalEl) ulTotalEl.textContent = formatBytes(grandUl);
     if (activeEl) activeEl.textContent = String(active);
 }
+
+// ============================================
+// Sorting
+// ============================================
+
+/** Keys that sort as strings (lexicographic) rather than numerically */
+const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 
 // ============================================
 // Rendering
@@ -441,7 +450,7 @@ function updateConnStats(conns) {
  * @param {string} mode
  * @param {string} [searchQuery]
  */
-function renderConnectionList(connections, mode, searchQuery) {
+function renderConnectionList(connections, mode, _searchQuery) {
     const container = document.getElementById('connections-list');
     const emptyState = document.getElementById('connections-empty');
     const closedEmptyState = document.getElementById('connections-closed-empty');
@@ -485,7 +494,11 @@ function renderConnectionList(connections, mode, searchQuery) {
                 return va.localeCompare(vb) * mul;
             }
             // Numeric comparison for speed/total columns
-            return (va < vb ? -1 : va > vb ? 1 : 0) * mul;
+            let cmp;
+            if (va < vb) cmp = -1;
+            else if (va > vb) cmp = 1;
+            else cmp = 0;
+            return cmp * mul;
         });
     }
 
@@ -505,10 +518,6 @@ function renderConnectionList(connections, mode, searchQuery) {
     // Re-apply sort arrows (in case i18n or other code reset header text)
     updateSortIndicators();
 }
-
-// ============================================
-// Row Builder
-// ============================================
 
 // ============================================
 // Sorting
@@ -535,9 +544,6 @@ function getConnSortValue(conn, key, mode) {
         default: return 0;
     }
 }
-
-/** Keys that sort as strings (lexicographic) rather than numerically */
-const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 
 /**
  * Update sort arrow indicators in the table header.
@@ -571,7 +577,7 @@ function updateSortIndicators() {
                 // Fallback: strip any existing arrow from current text
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
-            (/** @type {HTMLElement} */ (cell)).textContent = base + ' ' + (isAsc ? '\u25B2' : '\u25BC');
+            (/** @type {HTMLElement} */ (cell)).textContent = `${base} ${isAsc ? '\u25B2' : '\u25BC'}`;
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
@@ -619,13 +625,11 @@ function bindHeaderSortEvents() {
             } else if (connSortState.key !== key) {
                 // Different column → switch to new column, default descending
                 connSortState = { key: /** @type {string} */ (key), dir: 'desc' };
-            } else {
+            } else if (connSortState.dir === 'desc') {
                 // Same column → cycle: desc → asc → null (off)
-                if (connSortState.dir === 'desc') {
-                    connSortState.dir = 'asc';
-                } else {
-                    connSortState = null; // turn off sorting
-                }
+                connSortState.dir = 'asc';
+            } else {
+                connSortState = null; // turn off sorting
             }
             updateSortIndicators();
             // Re-render current tab with new sort
@@ -780,10 +784,10 @@ function showConnDetail(conn, mode) {
         <!-- Header -->
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pr-4">
-                <h3 class="text-lg font-light text-zinc-100 truncate">${host}</h3>
-                <p class="text-xs text-zinc-500 mt-1 font-mono truncate">${id}</p>
+                <h3 class="text-lg font-light text-zinc-800 dark:text-zinc-100 truncate">${host}</h3>
+                <p class="text-xs text-zinc-400 dark:text-zinc-500 mt-1 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-lg bg-white/5 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-all">
+            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-lg bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/5 flex items-center justify-center text-zinc-400 hover:text-zinc-800 dark:hover:text-white hover:bg-black/10 dark:hover:bg-white/10 transition-all">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
@@ -796,26 +800,26 @@ function showConnDetail(conn, mode) {
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-white/[0.03] rounded-xl p-3 border border-white/5">
+            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-3 border border-black/5 dark:border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
-                    <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
+                    <span class="text-2xs text-purple-500/70 dark:text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
+                    <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-purple-400 tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
-                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-white/5">
-                    <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-zinc-400 tabular-nums" id="detail-dl-total">${dlTotal}</span>
+                <span class="text-sm font-semibold text-purple-500 dark:text-purple-400 tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
+                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-black/5 dark:border-white/5">
+                    <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>
+                    <span class="text-2xs text-zinc-500 dark:text-zinc-400 tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-white/[0.03] rounded-xl p-3 border border-white/5">
+            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-3 border border-black/5 dark:border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
-                    <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
+                    <span class="text-2xs text-blue-500/70 dark:text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
+                    <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-blue-400 tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
-                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-white/5">
-                    <span class="text-[8px] text-zinc-600">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-zinc-400 tabular-nums" id="detail-ul-total">${ulTotal}</span>
+                <span class="text-sm font-semibold text-blue-500 dark:text-blue-400 tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
+                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-black/5 dark:border-white/5">
+                    <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>
+                    <span class="text-2xs text-zinc-500 dark:text-zinc-400 tabular-nums" id="detail-ul-total">${ulTotal}</span>
                 </div>
             </div>
         </div>
@@ -839,12 +843,13 @@ function showConnDetail(conn, mode) {
     if (!bg) {
         bg = document.createElement('div');
         bg.id = 'conn-detail-bg';
-        bg.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-[105] hidden flex items-center justify-center transition-all duration-200 opacity-0';
+        bg.className = 'fixed inset-0 z-[105] hidden items-center justify-center bg-black/40 backdrop-blur-md transition-all duration-200 opacity-0';
         document.body.appendChild(bg);
     }
 
     bg.innerHTML = panelHtml;
     bg.classList.remove('hidden');
+    bg.classList.add('flex');
 
     // Register active detail view for live refresh
     activeDetailConnId = conn.id;
@@ -875,11 +880,11 @@ function showConnDetail(conn, mode) {
             panel.style.transform = 'scale(0.96)';
             panel.style.opacity = '0';
         }
-        setTimeout(() => bg.classList.add('hidden'), 200);
+        setTimeout(() => { bg.classList.add('hidden'); bg.classList.remove('flex'); }, 200);
     };
 
     document.getElementById('detail-dismiss-btn')?.addEventListener('click', dismiss);
-    bg.addEventListener('click', (e) => { if (e.target === bg) dismiss(); });
+    bg.addEventListener('click', (e) => { if (e.target === bg) dismiss(); }, { once: true });
 
     // Close connection button (only active)
     const closeBtn = document.getElementById('detail-close-btn');
@@ -888,14 +893,13 @@ function showConnDetail(conn, mode) {
             setButtonLoading(closeBtn, t, 'closing');
 
             try {
+                await closeConnection(id);
                 closedConnections.unshift(archiveConnection(conn, Date.now()));
                 delete connAccumulators[conn.id];
-
-                await closeConnection(id);
                 showNotification(t.connClosed || 'Connection closed', 'success');
                 dismiss();
                 await fetchAndRenderConnections();
-            } catch (err) {
+            } catch {
                 showNotification(t.closeConnFailed || 'Failed to close connection', 'error');
                 resetButton(closeBtn, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', t.closeConn || 'Close Connection');
             }
@@ -948,9 +952,9 @@ function refreshDetailPanel(connId, mode) {
 function renderDetailRow(label, value, rowId) {
     const idAttr = rowId ? ` id="${rowId}"` : '';
     return `
-  <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
-    <span class="text-zinc-500 shrink-0 mr-4">${_esc(label)}</span>
-    <span${idAttr} class="text-zinc-300 font-mono text-right truncate min-w-0 tabular-nums">${_esc(value)}</span>
+  <div class="flex items-center justify-between py-1.5 border-b border-white/[0.04] dark:border-white/[0.06] last:border-0">
+    <span class="text-zinc-500 dark:text-zinc-400 shrink-0 mr-4">${_esc(label)}</span>
+    <span${idAttr} class="text-zinc-700 dark:text-zinc-300 font-mono text-right truncate min-w-0 tabular-nums">${_esc(value)}</span>
   </div>`;
 }
 
@@ -977,20 +981,19 @@ async function handleCloseAllConnections() {
     setButtonLoading(btn, t, 'closing');
 
     try {
+        await closeAllConnections();
         const now = Date.now();
         for (const conn of cachedConnections) {
             closedConnections.unshift(archiveConnection(conn, now));
         }
         connAccumulators = {};
-
-        await closeAllConnections();
         showNotification(t.connsClosed || 'All connections closed', 'success');
         await fetchAndRenderConnections();
-    } catch (err) {
+    } catch {
         showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
+    } finally {
+        switchConnTab(currentConnTab);
     }
-
-    switchConnTab(currentConnTab);
 }
 
 async function handleClearClosedConnections() {
@@ -1007,11 +1010,11 @@ async function handleClearClosedConnections() {
 
         const badge = document.getElementById('closed-count-badge');
         if (badge) badge.classList.add('hidden');
-    } catch (err) {
+    } catch {
         showNotification(t.clearConnsFailed || 'Failed to clear history', 'error');
+    } finally {
+        switchConnTab(currentConnTab);
     }
-
-    switchConnTab(currentConnTab);
 }
 
 // ============================================
@@ -1065,7 +1068,13 @@ function bindOnce(el) {
 function setButtonLoading(btn, t, loadingText) {
     if (!btn) return;
     /** @type {HTMLButtonElement} */ (btn).disabled = true;
-    btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>${t[loadingText] || loadingText}</span>`;
+    const icon = btn.querySelector('#action-btn-icon');
+    const text = btn.querySelector('#action-btn-text');
+    if (icon) {
+        icon.classList.add('animate-spin');
+        icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>';
+    }
+    if (text) text.textContent = t[loadingText] || loadingText;
 }
 
 /**

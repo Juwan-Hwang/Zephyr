@@ -334,10 +334,10 @@ describe('closeAllConnections', () => {
         vi.unstubAllGlobals();
     });
 
-    it('does not throw on failure (silent)', async () => {
+    it('throws on failure', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fail')));
 
-        await expect(closeAllConnections()).resolves.toBeUndefined();
+        await expect(closeAllConnections()).rejects.toThrow('fail');
         vi.unstubAllGlobals();
     });
 });
@@ -364,10 +364,10 @@ describe('closeConnection', () => {
         vi.unstubAllGlobals();
     });
 
-    it('does not throw on failure (silent)', async () => {
+    it('throws on failure', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fail')));
 
-        await expect(closeConnection('conn-id')).resolves.toBeUndefined();
+        await expect(closeConnection('conn-id')).rejects.toThrow('fail');
         vi.unstubAllGlobals();
     });
 

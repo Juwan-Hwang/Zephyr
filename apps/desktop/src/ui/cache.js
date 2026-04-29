@@ -6,8 +6,7 @@
  * and in-flight request deduplication.
  */
 
-import { getConfig, getProxies } from '../api.js';
-import { invoke } from '../api.js';
+import { getConfig, getProxies, invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 
 // --- API Cache (LRU + Stale-While-Revalidate) ---

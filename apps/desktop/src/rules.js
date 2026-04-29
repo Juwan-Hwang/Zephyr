@@ -42,15 +42,12 @@ export async function fetchAndConvertSRRules(url, targetProxy = 'Proxy') {
 export function convertSRToClash(srText, targetProxy = 'Proxy') {
     const lines = srText.split('\n');
     const clashRules = [];
-    let inRuleSection = false;
-
     for (let line of lines) {
         line = line.trim();
         if (!line || line.startsWith('#') || line.startsWith(';')) continue;
 
         // Shadowrocket usually has [Rule] section
         if (line.startsWith('[') && line.endsWith(']')) {
-            inRuleSection = line.toLowerCase() === '[rule]';
             continue;
         }
 

@@ -4,9 +4,9 @@
  * Extracted from ui.js for modularity.
  */
 
-import { sanitizeHtml } from '../utils/sanitize.js';
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { markdownToHtml } from '../utils/markdown.js';
+import { sanitizeHtml } from '../utils/sanitize.js';
 
 /**
  * Show a toast notification.
@@ -108,11 +108,12 @@ function unlockScroll() {
  * @param {string} defaultValue
  * @param {boolean} isCustomContent
  * @param {string} customHtml
+ * @param {(contentArea: HTMLElement, close: (val?: string|HTMLElement|null) => void) => void} [onReady]
  * @returns {Promise<string|HTMLElement|null>}
  */
 let _modalOpen = false;
 
-export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '') {
+export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', onReady) {
     if (_modalOpen) return Promise.resolve(null);
     _modalOpen = true;
     return new Promise((resolve) => {
@@ -145,6 +146,9 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
             contentArea.appendChild(input);
         }
 
+        // Focus trap: Tab cycles inside modal, Escape closes
+        const trap = createFocusTrap(bg, { onEscape: () => close(null) });
+
         const close = (/** @type {string|HTMLElement|null} */ val) => {
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
@@ -156,15 +160,14 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
                     container.classList.remove('w-[560px]', 'max-w-[90vw]');
                     container.classList.add('w-[400px]');
                     contentArea.classList.remove('overflow-y-auto', 'max-h-[65vh]', 'pr-1', 'custom-scrollbar');
+                    cancelBtn.classList.remove('hidden');
+                    confirmBtn.classList.remove('hidden');
                 }
                 bg.classList.add('hidden');
                 _modalOpen = false;
                 resolve(val);
             }, 300);
         };
-
-        // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(null) });
 
         bg.classList.remove('hidden');
         lockScroll();
@@ -173,16 +176,22 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
         if (isCustomContent) {
             container.classList.remove('w-[400px]');
             container.classList.add('w-[560px]', 'max-w-[90vw]');
-            // contentArea is inside a space-y-6 wrapper, so flex-1 won't work.
-            // Use explicit max-height + overflow instead.
             contentArea.classList.add('overflow-y-auto', 'max-h-[65vh]', 'pr-1');
             contentArea.classList.add('custom-scrollbar');
+            // Hide default Cancel/Confirm buttons — custom content has its own action buttons
+            cancelBtn.classList.add('hidden');
+            confirmBtn.classList.add('hidden');
         }
 
         requestAnimationFrame(() => {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
             trap.activate();
+            // Call onReady after modal is visible, so callers can wire up events
+            // on the custom content while the modal is still open.
+            if (isCustomContent && onReady) {
+                onReady(contentArea, close);
+            }
         });
 
         confirmBtn.onclick = () => {
@@ -237,6 +246,9 @@ export function showConfirmModal(title, message = '') {
         msgDiv.textContent = message;
         contentArea.appendChild(msgDiv);
 
+        // Focus trap: Tab cycles inside modal, Escape closes
+        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
@@ -247,9 +259,6 @@ export function showConfirmModal(title, message = '') {
                 resolve(val);
             }, 300);
         };
-
-        // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
 
         bg.classList.remove('hidden');
         lockScroll();
@@ -267,7 +276,7 @@ export function showConfirmModal(title, message = '') {
             if (e.key === 'Enter') close(true);
             // Escape handled by focus trap
         };
-        cancelBtn.onkeydown = (e) => {
+        cancelBtn.onkeydown = (_e) => {
             // Escape handled by focus trap
         };
     });
@@ -286,7 +295,7 @@ export function showConfirmModal(title, message = '') {
  * @returns {Promise<boolean>} true if user confirmed
  */
 export function showUpdateNotesModal(title, releaseNotesMd) {
-    const html = markdownToHtml(releaseNotesMd || '');
+    const html = sanitizeHtml(markdownToHtml(releaseNotesMd || ''));
     const customHtml = `
         <div class="space-y-1">${html}</div>
     `;

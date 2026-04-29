@@ -47,71 +47,52 @@ fn extract_secret_from_yaml(content: &str) -> Option<String> {
     None
 }
 
-/// Update TUN enable setting in YAML config content
-/// Returns updated content with TUN block modified or appended
+use serde_yaml::Value as YamlValue;
+
+/// Update TUN enable setting in YAML config content using `serde_yaml`.
+/// Returns updated content with TUN block modified or appended.
 fn update_tun_in_yaml(content: &str, enable: bool) -> String {
-    if content.contains("tun:") {
-        // Find the tun block and update enable within it
-        let mut in_tun_block = false;
-        let lines: Vec<String> = content
-            .lines()
-            .map(|line| {
-                if line.trim().starts_with("tun:") {
-                    in_tun_block = true;
-                } else if in_tun_block
-                    && !line.starts_with(' ')
-                    && !line.starts_with('\t')
-                    && !line.is_empty()
-                {
-                    in_tun_block = false;
-                }
+    let mut yaml = serde_yaml::from_str::<YamlValue>(content)
+        .unwrap_or_else(|_| YamlValue::Mapping(serde_yaml::Mapping::new()));
 
-                if in_tun_block && line.trim().starts_with("enable:") {
-                    let indent = line
-                        .chars()
-                        .take_while(|c| c.is_whitespace())
-                        .collect::<String>();
-                    format!("{indent}enable: {enable}")
-                } else {
-                    line.to_owned()
-                }
-            })
-            .collect();
-        lines.join("\n")
-    } else {
-        // No tun block, append it
-        let tun_block = if enable {
-            "\ntun:\n  enable: true\n  stack: system\n  auto-route: true\n  auto-detect-interface: true\n"
-        } else {
-            "\ntun:\n  enable: false\n"
-        };
-        format!("{}{}", content.trim_end(), tun_block)
-    }
-}
-
-/// Extract TUN enable status from YAML config content
-fn extract_tun_enabled_from_yaml(content: &str) -> bool {
-    let mut in_tun_block = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("tun:") {
-            in_tun_block = true;
-        } else if in_tun_block {
-            if trimmed.starts_with("enable:") {
-                return trimmed
-                    .split(':')
-                    .nth(1)
-                    .map(|s| s.trim() == "true")
-                    .unwrap_or(false);
-            }
-            // Exit tun block when we hit a non-indented line
-            if !line.starts_with(' ') && !line.starts_with('\t') && !line.is_empty() {
-                in_tun_block = false;
+    if let Some(mapping) = yaml.as_mapping_mut() {
+        let tun = mapping
+            .entry(YamlValue::String("tun".to_owned()))
+            .or_insert_with(|| YamlValue::Mapping(serde_yaml::Mapping::new()));
+        if let Some(tun_map) = tun.as_mapping_mut() {
+            tun_map.insert(
+                YamlValue::String("enable".to_owned()),
+                YamlValue::Bool(enable),
+            );
+            // Preserve sensible defaults when enabling TUN
+            if enable {
+                tun_map
+                    .entry(YamlValue::String("stack".to_owned()))
+                    .or_insert_with(|| YamlValue::String("system".to_owned()));
+                tun_map
+                    .entry(YamlValue::String("auto-route".to_owned()))
+                    .or_insert_with(|| YamlValue::Bool(true));
+                tun_map
+                    .entry(YamlValue::String("auto-detect-interface".to_owned()))
+                    .or_insert_with(|| YamlValue::Bool(true));
             }
         }
     }
-    false
+
+    serde_yaml::to_string(&yaml).unwrap_or_else(|_| content.to_owned())
+}
+
+/// Extract TUN enable status from YAML config content using `serde_yaml`.
+fn extract_tun_enabled_from_yaml(content: &str) -> bool {
+    let yaml = match serde_yaml::from_str::<YamlValue>(content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    yaml.get("tun")
+        .and_then(|t| t.get("enable"))
+        .and_then(YamlValue::as_bool)
+        .unwrap_or(false)
 }
 
 /// Restart mihomo core with root privileges on macOS for TUN mode

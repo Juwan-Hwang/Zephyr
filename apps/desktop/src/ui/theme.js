@@ -36,6 +36,7 @@ export function applyTheme(theme) {
         const g = parseInt(theme.slice(3, 5), 16) || 92;
         const b = parseInt(theme.slice(5, 7), 16) || 246;
         document.body.style.setProperty('--color-accent-glow', `rgba(${r}, ${g}, ${b}, 0.2)`);
+        document.body.style.setProperty('--accent-rgb', `${r} ${g} ${b}`);
     } else {
         document.body.style.removeProperty('--color-accent');
         document.body.style.removeProperty('--color-accent-glow');

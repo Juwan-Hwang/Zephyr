@@ -33,6 +33,7 @@ struct GithubRelease {
 #[derive(Debug, Deserialize)]
 struct GithubAsset {
     name: String,
+    digest: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -262,12 +263,16 @@ async fn download_release_asset(
             return Err(format!("Failed to write chunk: {e}"));
         }
 
+        #[allow(clippy::manual_hash_one)]
         let progress = if total_size > 0 {
-            let ratio = downloaded as f64 / total_size as f64;
-            // clippy: value is already clamped to 24-80, safe for u8
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let p: u8 = (24.0 + ratio * 56.0).round().clamp(24.0, 80.0) as u8;
-            p
+            // Integer-only progress: ratio ∈ [0, 1000] maps to font size [24, 80]
+            let ratio_x1000 = downloaded
+                .checked_mul(1000)
+                .unwrap_or(0)
+                .checked_div(total_size)
+                .unwrap_or(0);
+            let font_size = 24 + ((ratio_x1000 * 56) / 1000);
+            u8::try_from(font_size).unwrap_or(52)
         } else {
             52
         };
@@ -653,7 +658,7 @@ pub async fn update_core(
     emit_core_download_status(&window, "Writing core files...", 92);
 
     // Stop core and wait for it to fully exit
-    let _ = core_manager::stop_core(app.clone(), state.clone());
+    let _ = core_manager::stop_core_inner(app, &state);
 
     // Wait for the process to fully exit (give it some time)
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -689,22 +694,19 @@ pub async fn update_core(
             .lock()
             .map_err(|e| format!("Failed to lock state: {e}"))?;
         let config = lock
-            .last_config_path
-            .clone()
+            .last_config_path()
+            .map(String::from)
             .unwrap_or_else(|| "config.yaml".to_owned());
-        let args = lock.last_custom_args.clone().unwrap_or_default();
-        let secret = if lock.last_secret.is_empty() {
+        let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
+        let secret = if lock.last_secret().is_empty() {
             None
         } else {
-            Some(lock.last_secret.clone())
+            Some(lock.last_secret().to_owned())
         };
         (config, args, secret)
     };
 
     emit_core_download_status(&window, "Update complete, restarting core...", 98);
-
-    // Get rate limiter from app state
-    let rate_limiter = app.state::<crate::RateLimiter>();
 
     let result = core_manager::start_core(
         app.clone(),
@@ -713,7 +715,6 @@ pub async fn update_core(
         false,
         last_args,
         last_secret,
-        rate_limiter,
     )
     .await?;
     emit_core_download_status(&window, "Core ready", 100);
@@ -910,6 +911,7 @@ pub struct ClientUpdateInfo {
     pub version: String,
     pub download_url: String,
     pub release_notes: String,
+    pub download_digest: Option<String>,
 }
 
 /// Determine the expected asset extension for the current platform.
@@ -989,6 +991,7 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
         version,
         download_url,
         release_notes: release.body.unwrap_or_default(),
+        download_digest: asset.digest.clone(),
     })
 }
 
@@ -1021,6 +1024,20 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Download the installer
     download_release_asset(&window, &info.download_url, &dest_path).await?;
+
+    // Verify SHA256 if digest is available from GitHub API
+    if let Some(digest) = &info.download_digest {
+        if let Some(hash) = digest
+            .strip_prefix("sha256:")
+            .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            emit_core_download_status(&window, "Verifying installer integrity...", 93);
+            verify_sha256(&dest_path, hash).map_err(|e| {
+                let _ = std::fs::remove_file(&dest_path);
+                format!("SHA256 verification failed: {e}. Installer deleted for security.")
+            })?;
+        }
+    }
 
     emit_core_download_status(&window, "Opening installer...", 95);
 

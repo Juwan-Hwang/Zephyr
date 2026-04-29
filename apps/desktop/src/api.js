@@ -1,6 +1,17 @@
 // @ts-check
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
+import { apiLogger } from './utils/logger.js';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Internal state (declared early — used by apiFetch below)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** @type {string} mihomo RESTful API 基地址 */
+let BASE_URL = 'http://127.0.0.1:9090';
+
+/** 运行时状态（sealed，防止意外扩展） */
+const _state = Object.seal({ secret: '' });
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ApiError — 统一错误类型
@@ -57,14 +68,15 @@ const DEFAULT_TIMEOUT = 10_000;
  */
 async function apiFetch(endpoint, init = {}) {
   const { timeout = DEFAULT_TIMEOUT, signal: externalSignal, headers, ...rest } = init;
+  const safeTimeout = Math.max(1000, Math.min(timeout, 300000));
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => controller.abort(), safeTimeout);
 
   // 外部信号（如 testProxy 的全局中止）与内部超时联动
   if (externalSignal?.aborted) {
     clearTimeout(timer);
-    throw new ApiError(`请求已被取消: ${endpoint}`, { endpoint, cause: new DOMException('Aborted', 'AbortError') });
+    throw new ApiError(`Request cancelled: ${endpoint}`, { endpoint, cause: new DOMException('Aborted', 'AbortError') });
   }
   const onExternalAbort = () => controller.abort();
   externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
@@ -90,7 +102,7 @@ async function apiFetch(endpoint, init = {}) {
     const error = /** @type {Error} */ (err);
     const isAbort = error.name === 'AbortError';
     throw new ApiError(
-      isAbort ? `请求超时 (${timeout}ms): ${endpoint}` : `网络请求失败: ${endpoint}`,
+      isAbort ? `Request timeout (${timeout}ms): ${endpoint}` : `Network request failed: ${endpoint}`,
       { endpoint, cause: error },
     );
   } finally {
@@ -127,11 +139,17 @@ function invoke(cmd, args) {
 async function listen(event, handler) {
   if (!_t?.transformCallback) throw new Error('[API] Tauri IPC not available');
   const callbackId = _t.transformCallback(/** @type {(...args: any[]) => void} */ (handler));
-  const eventId = await invoke('plugin:event|listen', {
-    event,
-    target: { kind: 'Any' },
-    handler: callbackId,
-  });
+  let eventId;
+  try {
+    eventId = await invoke('plugin:event|listen', {
+      event,
+      target: { kind: 'Any' },
+      handler: callbackId,
+    });
+  } catch (e) {
+    _t.transformCallback(undefined, false, callbackId);
+    throw e;
+  }
   return async () => {
     _t.transformCallback(undefined, false, callbackId);
     await invoke('plugin:event|unlisten', { event, eventId });
@@ -165,16 +183,6 @@ function getCurrentWindow() {
 
 // Re-export for all other modules
 export { invoke, listen, openUrl, getCurrentWindow };
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Internal state
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** @type {string} mihomo RESTful API 基地址 */
-let BASE_URL = 'http://127.0.0.1:9090';
-
-/** 运行时状态（sealed，防止意外扩展） */
-const _state = Object.seal({ secret: '' });
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Helpers
@@ -292,14 +300,15 @@ export async function patchConfig(payload) {
  * @param {string} [path='run_config.yaml'] - 配置文件名（仅用于语义，实际由 core 决定）
  * @returns {Promise<boolean>} 是否成功
  */
-export async function reloadConfig(path = 'run_config.yaml') {
+export async function reloadConfig(_path = 'run_config.yaml') {
   try {
     const res = await apiFetch('/configs?force=true', {
       method: 'PUT',
       body: JSON.stringify({ path: '', payload: '' }),
     });
     return res.ok;
-  } catch {
+  } catch (err) {
+    apiLogger.debug('reloadConfig failed:', err);
     return false;
   }
 }
@@ -313,11 +322,7 @@ export async function reloadConfig(path = 'run_config.yaml') {
  * @returns {Promise<void>}
  */
 export async function closeAllConnections() {
-  try {
-    await apiFetch('/connections', { method: 'DELETE' });
-  } catch {
-    /* 静默失败 — 断连操作不阻塞 UI */
-  }
+  await apiFetch('/connections', { method: 'DELETE' });
 }
 
 /**
@@ -336,15 +341,11 @@ export async function getConnections() {
  * @returns {Promise<void>}
  */
 export async function closeConnection(id) {
-  try {
-    const ids = typeof id === 'string' ? [id] : id;
-    await apiFetch('/connections', {
-      method: 'DELETE',
-      body: JSON.stringify({ ids }),
-    });
-  } catch {
-    /* 静默失败 */
-  }
+  const ids = typeof id === 'string' ? [id] : id;
+  await apiFetch('/connections', {
+    method: 'DELETE',
+    body: JSON.stringify({ ids }),
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -388,25 +389,13 @@ export async function testProxy(name, customTimeout = 5000) {
       timeout: customTimeout + 2000,
     });
 
-    clearTimeout(timeout);
-    latencyTestController.signal.removeEventListener('abort', onGlobalAbort);
-
     if (res.ok) {
       const data = await res.json();
       return data.delay;
     }
 
-    // 以下状态码在延迟测试中属正常现象，静默返回 -1
-    const silentStatusCodes = new Set([401, 404, 503, 504]);
-    if (!silentStatusCodes.has(res.status)) {
-      // apiFetch 在 !res.ok 时已抛出 ApiError，走到这里说明 res.ok 为 true
-      // 此分支理论上不会被命中，保留作为防御性编程
-    }
     return -1;
   } catch (err) {
-    clearTimeout(timeout);
-    latencyTestController.signal.removeEventListener('abort', onGlobalAbort);
-
     if (err instanceof ApiError && err.status != null) {
       // HTTP 错误（如 404/503/504）— 延迟测试中的正常情况
       return -1;
@@ -419,6 +408,9 @@ export async function testProxy(name, customTimeout = 5000) {
 
     // 其他网络异常（ERR_CONNECTION_RESET 等）同样静默
     return -1;
+  } finally {
+    clearTimeout(timeout);
+    latencyTestController.signal.removeEventListener('abort', onGlobalAbort);
   }
 }
 
@@ -462,7 +454,8 @@ export async function disableAutoStart() {
 export async function isAutoStartEnabled() {
   try {
     return await invoke('plugin:autostart|is_enabled');
-  } catch {
+  } catch (err) {
+    apiLogger.debug('isAutoStartEnabled failed:', err);
     return false;
   }
 }
@@ -477,6 +470,13 @@ export async function openConfigFolder() {
 }
 
 /**
+ * Open the Prism rule library folder in the system file manager.
+ */
+export async function openPrismFolder() {
+  return invoke(COMMANDS.RULE.OPEN_PRISM_FOLDER);
+}
+
+/**
  * 重启 mihomo 核心，并同步更新本模块及 websocket 模块的连接参数。
  *
  * @param {string}   configPath        - 配置文件路径
@@ -485,6 +485,8 @@ export async function openConfigFolder() {
  * @throws {Error}
  */
 export async function restartCore(configPath, customArgs = []) {
+  // eslint-disable-next-line no-console
+  console.log(`[API] restartCore called (config=${configPath})`);
   const coreResult = await invoke(COMMANDS.START_CORE, {
     configPath,
     test: false,

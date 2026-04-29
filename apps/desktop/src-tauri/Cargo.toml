@@ -50,6 +50,13 @@ url = "2"
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
 hmac = "0.12"
+clash-prism-core = "0.1.4"
+clash-prism-extension = { version = "0.1.7", features = ["watcher"] }
+clash-prism-plugin = "0.1.1"
+clash-prism-script = "0.1.1"
+clash-prism-smart = "0.1.1"
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
@@ -79,6 +86,13 @@ winreg = "0.52"
 
 [dev-dependencies]
 mockall = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [lints]
 # rustc native lints

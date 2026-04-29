@@ -10,7 +10,6 @@ import {
   invoke,
   setBaseUrl,
   setSecret,
-  listen,
 } from './api.js';
 import {
   setBaseUrl as setWsBaseUrl,
@@ -19,21 +18,21 @@ import {
 } from './websocket.js';
 import {
   translations,
-  currentLang,
   applyTranslations,
 } from './i18n.js';
-import { escapeHtml } from './utils/sanitize.js';
 import { initChart, updateTrafficData, cleanupChart } from './modules/traffic-chart.js';
-import { initConnectionsPage, destroyConnectionsPage } from './modules/connections.js';
+import { initConnectionsPage } from './modules/connections.js';
 import { apiLogger } from './utils/logger.js';
 import { registerCleanup, runCleanup } from './utils/cleanup-registry.js';
 import { COMMANDS } from '@zephyr/shared';
+import * as prism from './ui/prism.js';
 
 // --- UI module imports ---
 import { showNotification } from './ui/notifications.js';
 import { initSettings, initUwpExemption } from './ui/settings.js';
 import { initNavigation } from './ui/navigation.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
+import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
@@ -57,6 +56,9 @@ import { Bus, Events } from './ui/events.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
+
+let _trafficWsHandle = null;
+let _configParseErrorListener = null;
 
 // ═══════════════════════════════════════════════════════════════════
 //  initReactiveBindings — Centralized Bus -> store -> DOM wiring
@@ -104,7 +106,7 @@ function initReactiveBindings() {
 
 async function initApp() {
   const t0 = performance.now();
-  console.log(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
+  apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
   // 1. Disable context menu globally (except on draggable titlebar)
   document.addEventListener('contextmenu', (e) => {
@@ -139,18 +141,19 @@ async function initApp() {
   try {
     const tGetSettings = performance.now();
     const settings = await invoke(COMMANDS.GET_SETTINGS);
-    console.log(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
+    apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
 
     const tStartCore = performance.now();
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
+    apiLogger.info(`[Zephyr] calling start_core (config=${configPath})`);
     const coreResult = await invoke(COMMANDS.START_CORE, {
       configPath,
       test: false,
       customArgs,
       secret: null,
     });
-    console.log(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
+    apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
 
     secret = coreResult.secret;
     const port = coreResult.port;
@@ -159,6 +162,28 @@ async function initApp() {
     setWsBaseUrl(`ws://127.0.0.1:${port}`);
     setSecret(secret || '');
     setWsSecret(secret || '');
+
+    // 5b. Initialize Prism engine — compile patches and populate rule annotations.
+    // mihomo already started with run_config.yaml (previous compile output), so rules
+    // are already active. This apply() runs in the background to refresh annotations
+    // for the "Active Rules" tab. Non-blocking: UI renders immediately.
+    const tPrism = performance.now();
+    prism.apply().then((applyResult) => {
+        const elapsed = (performance.now() - tPrism).toFixed(0);
+        const stats = applyResult?.stats;
+        const annotationCount = applyResult?.rule_annotations?.length ?? 0;
+        apiLogger.info(
+            `[Zephyr] prism.apply: +${elapsed}ms | patches=${stats?.succeeded ?? '?'}/${stats?.total ?? '?'} | annotations=${annotationCount}`
+        );
+        if (annotationCount === 0 && (stats?.total ?? 0) > 0) {
+            apiLogger.warn(
+                '[Zephyr] prism.apply succeeded but produced 0 rule annotations.',
+                'Check that .prism.yaml files use $prepend/$append DSL syntax.',
+            );
+        }
+    }).catch((err) => {
+        apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
+    });
   } catch (err) {
     const message = err?.toString?.() || 'Core start failed';
     apiLogger.error('Failed to start core', err);
@@ -174,7 +199,7 @@ async function initApp() {
     onProxies: () => { renderProxies(); },
     onAdvanced: () => { import('./ui/advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {}); },
     onHome: () => { updateSysProxyUI(); },
-    onRules: () => { import('./ui/rules.js').then(m => m.initRulesPage()).catch(() => {}); },
+    onRuleLibrary: () => { import('./ui/rule-library.js').then(m => m.initRuleLibraryPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
     onLeaveLogs: () => { import('./ui/logs.js').then(m => m.destroyLogsPage()).catch(() => {}); },
@@ -186,6 +211,7 @@ async function initApp() {
   initModeSelector();
   initTunToggle();
   initProxyControls();
+  initPlugins();
   initSettings();
   initUwpExemption();
   initNodeWheel();
@@ -211,7 +237,7 @@ async function initApp() {
     apiLogger.warn('Failed to register default shortcuts', err);
   });
 
-  console.log(`[Zephyr] UI modules: +${(performance.now() - tUI).toFixed(0)}ms`);
+  apiLogger.info(`[Zephyr] UI modules: +${(performance.now() - tUI).toFixed(0)}ms`);
 
   // 7. Check encryption key persistence
   try {
@@ -222,8 +248,7 @@ async function initApp() {
       /** @type {Record<string, string>} */
       const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang]);
       showNotification(
-        (t.keyNotPersistedTitle || 'Encryption Key Warning') + ': ' +
-        (t.keyNotPersistedMessage || 'The encryption key could not be persisted. Subscription URLs and other sensitive data will be lost after restart.'),
+        `${t.keyNotPersistedTitle || 'Encryption Key Warning'}: ${t.keyNotPersistedMessage || 'The encryption key could not be persisted. Subscription URLs and other sensitive data will be lost after restart.'}`,
         'error'
       );
     }
@@ -231,14 +256,12 @@ async function initApp() {
     apiLogger.error('Failed to check machine key status', err);
   }
 
-  // 8. Initial config sync and tray
+  // 8. Initial config sync and tray (parallel — no dependencies)
   try {
-    await syncCoreConfig();
-    await updateTrayStatus();
-    await updateTrayMenu();
+    await Promise.all([syncCoreConfig(), updateTrayStatus(), updateTrayMenu()]);
     startUnifiedSync();
   } catch (err) {
-    apiLogger.warn('Initial syncCoreConfig failed', err);
+    apiLogger.warn('Initial sync failed', err);
   }
 
   // 8b. Auto-check for updates on startup if enabled
@@ -291,37 +314,21 @@ async function initApp() {
     }
   }, 5000);
 
-  // 9. Config parse error listener
-  if (!_win._configParseErrorListener) {
-    listen('config-parse-error', (event) => {
-      /** @type {Record<string, string>} */
-      const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang] || /** @type {any} */ (translations).en);
-      showNotification(
-        t.configParseErrorMsg || 'Configuration file could not be parsed. Using empty config.',
-        'warning',
-        t.configParseErrorTitle || 'Configuration Parse Error'
-      );
-      apiLogger.error('[Config]', event.payload);
-    }).then((unlisten) => {
-      _win._configParseErrorListener = unlisten;
-    });
-  }
-
-  // 10. Traffic WebSocket
-  _win._trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
+  // 9. Traffic WebSocket
+  _trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
     updateTrafficData(data);
   });
 
   // 11. Cleanup handlers
   registerCleanup(() => {
-    if (_win._configParseErrorListener) {
-      _win._configParseErrorListener();
-      _win._configParseErrorListener = null;
+    if (_configParseErrorListener) {
+      _configParseErrorListener();
+      _configParseErrorListener = null;
     }
   });
   registerCleanup(() => {
-    if (_win._trafficWsHandle) {
-      _win._trafficWsHandle.close();
+    if (_trafficWsHandle) {
+      _trafficWsHandle.close();
     }
   });
   registerCleanup(() => { cleanupChart(); });
@@ -330,7 +337,7 @@ async function initApp() {
 
   window.addEventListener('beforeunload', () => runCleanup());
 
-  console.log(`[Zephyr] ✅ App ready! Total: ${(performance.now() - t0).toFixed(0)}ms`);
+  apiLogger.info(`[Zephyr] ✅ App ready! Total: ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
 // ═══════════════════════════════════════════════════════════════════

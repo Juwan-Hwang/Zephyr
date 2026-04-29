@@ -43,7 +43,7 @@ export function formatFileSize(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-    return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }
 
 // ── Network-traffic helpers (decimal, base-1000) ──────────────────────
@@ -72,7 +72,7 @@ export function formatBytes(bytes) {
         _NET_UNITS.length - 1,
     );
 
-    return (bytes / Math.pow(1000, i)).toFixed(2) + ' ' + _NET_UNITS[i];
+    return `${(bytes / Math.pow(1000, i)).toFixed(2)} ${_NET_UNITS[i]}`;
 }
 
 /**
@@ -86,7 +86,7 @@ export function formatBytes(bytes) {
  * formatSpeed(1024); // "1.02 KB/s"
  */
 export function formatSpeed(bytesPerSecond) {
-    return formatBytes(bytesPerSecond) + '/s';
+    return `${formatBytes(bytesPerSecond)}/s`;
 }
 
 // ── Time helpers ───────────────────────────────────────────────────────

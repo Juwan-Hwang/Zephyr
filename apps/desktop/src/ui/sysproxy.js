@@ -10,7 +10,6 @@ import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { updateTrayStatus } from './tray.js';
 import { appStore } from './state.js';
-import { Bus, Events } from './events.js';
 import { COMMANDS } from '@zephyr/shared';
 
 export async function updateSysProxyUI() {

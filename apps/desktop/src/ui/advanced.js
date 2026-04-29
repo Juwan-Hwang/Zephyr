@@ -5,9 +5,7 @@
  * Uses createCollapsible for reusable panel rendering.
  */
 
-import { getConfig, patchConfig } from '../api.js';
-import { invoke } from '../api.js';
-import { escapeHtml } from '../utils/sanitize.js';
+import { getConfig, patchConfig, invoke } from '../api.js';
 import { SVG_ICONS } from './icons.js';
 import { showNotification } from './notifications.js';
 import { createCollapsible } from './collapsible.js';
@@ -15,6 +13,7 @@ import { invalidateConfigCache } from './cache.js';
 import { advancedLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
+import { validateConfig } from './prism.js';
 
 // --- Helpers ---
 
@@ -97,15 +96,14 @@ async function getActiveConfigContent() {
     try {
         content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
         return { configName, content };
-    } catch (e) {
+    } catch {
         const configs = await invoke(COMMANDS.LIST_CONFIGS);
         if (configs && configs.length > 0) {
             configName = configs[0].name;
             content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
             return { configName, content };
-        } else {
-            return null;
         }
+        return null;
     }
 }
 
@@ -126,7 +124,20 @@ export async function persistConfigChanges(payload) {
         deepMerge(config, payload);
 
         const newYaml = jsyaml.dump(config, { indent: 2, lineWidth: -1 });
-        await invoke('write_config_file', { configPath: configName, content: newYaml });
+
+        // Validate config before writing to prevent core crash.
+        // If validation is unavailable (e.g. mihomo not in PATH) or fails,
+        // still write — the runtime config was already patched successfully.
+        try {
+            const isValid = await validateConfig(newYaml);
+            if (!isValid) {
+                advancedLogger.warn('Config validation failed, writing anyway');
+            }
+        } catch (validationErr) {
+            advancedLogger.debug('Config validation skipped:', validationErr);
+        }
+
+        await invoke(COMMANDS.WRITE_CONFIG_FILE, { configPath: configName, content: newYaml });
         return true;
     } catch (err) {
         advancedLogger.error('Failed to persist config', err);
@@ -146,7 +157,15 @@ async function handleConfigUpdate(path, value) {
     try {
         await patchConfig(payload);
         invalidateConfigCache();
-        await persistConfigChanges(payload);
+        const persisted = await persistConfigChanges(payload);
+        if (!persisted) {
+            const { translations, currentLang } = await import('../i18n.js').then(m => m);
+            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+            const t = /** @type {Record<string, string>} */(translations[langKey]);
+            showNotification(`${t.errorPrefix || 'Error'}: Config validation failed, changes not persisted`, 'error');
+            renderAdvancedSettings();
+            return;
+        }
 
         const { translations, currentLang } = await import('../i18n.js').then(m => m);
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
@@ -310,7 +329,7 @@ function renderObjectContent(container, obj, parentKey, depth) {
  * @param {string} parentKey
  * @param {number} depth
  */
-function renderArrayContent(container, arr, parentKey, depth) {
+function renderArrayContent(container, arr, parentKey, _depth) {
     if (arr.length === 0) {
         const empty = document.createElement('div');
         empty.className = "text-xs text-zinc-500 italic";
@@ -358,7 +377,7 @@ function renderArrayContent(container, arr, parentKey, depth) {
 function renderArraySection(title, arr, fullKey, depth) {
     const wrapper = document.createElement('div');
 
-    const { content, card } = createCollapsible(wrapper, {
+    const { content, card: _card } = createCollapsible(wrapper, {
         title,
         defaultOpen: false,
         badgeText: `${arr.length}`,

@@ -7,9 +7,10 @@
  */
 
 import { invoke, listen } from '../api.js';
-import { showNotification, showModal, showConfirmModal, showUpdateNotesModal } from './notifications.js';
+import { showNotification, showUpdateNotesModal } from './notifications.js';
 import { translations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
+import { apiLogger } from '../utils/logger.js';
 
 /** P3: Guard flag to prevent concurrent update checks. */
 let _updateCheckInProgress = false;
@@ -47,13 +48,13 @@ export async function checkForClientUpdate() {
         // Listen for download progress
         const unlisten = await listen('core-download-status', (/** @type {{ payload: { status_text: string, progress: number } }} */ event) => {
             const { status_text, progress } = event.payload;
-            console.log(`[ClientUpdater] ${status_text} (${progress}%)`);
+            apiLogger.info(`[ClientUpdater] ${status_text} (${progress}%)`);
         });
 
         try {
             await invoke(COMMANDS.UPDATE_CLIENT);
             showNotification(
-                (t.clientUpdateSuccess || 'Update downloaded successfully') + ` (${info.version})`,
+                `${t.clientUpdateSuccess || 'Update downloaded successfully'} (${info.version})`,
                 'success'
             );
         } finally {

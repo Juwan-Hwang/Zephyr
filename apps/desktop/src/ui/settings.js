@@ -15,27 +15,24 @@ import {
     listen,
     openUrl,
     restartCore,
-    reloadConfig,
     isAutoStartEnabled,
     enableAutoStart,
     disableAutoStart,
     openConfigFolder,
-    closeAllConnections,
-    getConfig,
+    openPrismFolder,
     setSecret,
     setBaseUrl,
-    patchConfig,
 } from '../api.js';
-import { setWsSecret, setWsBaseUrl } from '../websocket.js';
+import { setWsSecret, setWsBaseUrl, connectTraffic } from '../websocket.js';
+import { updateTrafficData } from '../modules/traffic-chart.js';
 import { translations, setLanguage } from '../i18n.js';
 import { debounce } from '../utils/debounce.js';
-import { formatFileSize } from '../utils/format.js';
 import { settingsLogger } from '../utils/logger.js';
-import { showNotification, showModal, showConfirmModal, showUpdateNotesModal } from './notifications.js';
+import { showNotification, showConfirmModal, showUpdateNotesModal } from './notifications.js';
 import { applyTheme } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
-import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from './cache.js';
+import { invalidateSettingsCache } from './cache.js';
 import {
     DEFAULT_DNS_CONFIG,
     isValidIPv6,
@@ -47,22 +44,22 @@ import {
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
+import * as prism from './prism.js';
 
 // The following modules have not yet been extracted from ui.js.
 // We import them from ui.js for now; when they are extracted, these
 // imports will be updated to point to their own files.
 import { switchPage } from './navigation.js';
 import { initCustomDropdown } from './dropdown.js';
-import { syncCoreConfig } from './proxies.js';
-import { renderProxies } from './proxies.js';
+import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies.js';
 
-// ---------------------------------------------------------------------------
-//  Shared SVG icon snippets (kept local -- only the ones settings needs)
-// ---------------------------------------------------------------------------
-const SVG_ICONS = {
-    trash: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
-    refresh: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
-};
+// Settings submodules
+import { initThemeSettings } from './settings/theme.js';
+import { initTunnelSettings } from './settings/tunnels.js';
+import { initSubscriptionSettings } from './settings/subscriptions.js';
+
+let __langDropdown = null;
+let _dropUnlisten = null;
 
 // ---------------------------------------------------------------------------
 //  Utility: extract a human-readable name from a subscription URL
@@ -90,43 +87,9 @@ function extractNameFromUrl(url) {
             if (base.length > 2 && base !== 'config' && base !== 'clash') return base;
         }
         return u.hostname;
-    } catch (e) {
+    } catch {
         return null;
     }
-}
-
-// ---------------------------------------------------------------------------
-//  Utility: address validation (IPv4:port, [IPv6]:port, hostname:port)
-// ---------------------------------------------------------------------------
-/**
- * @param {string} addr
- * @returns {boolean}
- */
-function isValidAddress(addr) {
-    // IPv6 with port: [ipv6]:port
-    const ipv6Match = addr.match(/^\[([0-9a-fA-F:]+)\]:(\d+)$/);
-    if (ipv6Match) {
-        const port = parseInt(ipv6Match[2], 10);
-        return isValidIPv6(ipv6Match[1]) && port > 0 && port <= 65535;
-    }
-    // IPv4 with port
-    const ipv4Match = addr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d+)$/);
-    if (ipv4Match) {
-        const octets = [ipv4Match[1], ipv4Match[2], ipv4Match[3], ipv4Match[4]];
-        const validOctets = octets.every(o => {
-            const num = parseInt(o, 10);
-            return num >= 0 && num <= 255;
-        });
-        const port = parseInt(ipv4Match[5], 10);
-        return validOctets && port > 0 && port <= 65535;
-    }
-    // Hostname with port
-    const hostMatch = addr.match(/^([a-zA-Z0-9][-a-zA-Z0-9.]*):(\d+)$/);
-    if (hostMatch) {
-        const port = parseInt(hostMatch[2], 10);
-        return port > 0 && port <= 65535;
-    }
-    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +150,7 @@ export function initUwpExemption() {
             } catch (err) {
                 const error = toError(err);
                 showNotification(
-                    (/** @type {any} */(/** @type {any} */ (translations)[appStore.get('currentLang')]).notifUwpFailed || 'Failed') + ': ' + error,
+                    `${(/** @type {any} */(/** @type {any} */ (translations)[appStore.get('currentLang')]).notifUwpFailed || 'Failed')}: ${error}`,
                     'error'
                 );
             } finally {
@@ -247,14 +210,14 @@ function initFakeClient() {
         },
     });
 
-    const updateVisibility = () => {
+    function updateVisibility() {
         if (toggle.checked) {
             optionsContainer.classList.remove('max-h-0', 'opacity-0', 'overflow-hidden');
             optionsContainer.classList.add('max-h-40', 'opacity-100');
             if (select.value === 'custom' && customContainer) {
                 customContainer.classList.remove('hidden');
-            } else {
-                if (customContainer) customContainer.classList.add('hidden');
+            } else if (customContainer) {
+                customContainer.classList.add('hidden');
             }
             if (!versionsFetched) {
                 fetchLatestVersions();
@@ -264,9 +227,9 @@ function initFakeClient() {
             optionsContainer.classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
             setTimeout(() => { if (customContainer) customContainer.classList.add('hidden'); }, 300);
         }
-    };
+    }
 
-    const fetchLatestVersions = async () => {
+    async function fetchLatestVersions() {
         if (isFetching || versionsFetched) return;
         isFetching = true;
         spinner?.classList.remove('hidden');
@@ -308,7 +271,7 @@ function initFakeClient() {
             spinner?.classList.add('hidden');
             updateVisibility();
         }
-    };
+    }
 
     toggle.addEventListener('change', () => {
         localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
@@ -366,6 +329,19 @@ export async function initSettings() {
     const themeModeSlider = document.getElementById('setting-theme-mode-slider');
     const themeModeButtons = Array.from(document.querySelectorAll('[data-theme-mode]'));
     const appTitleIcon = /** @type {HTMLImageElement} */ (document.getElementById('app-title-icon'));
+
+    // ---- Forward declarations (used before their full definition below) ----
+    /** @type {any[]} */
+    let currentTunnels = [];
+
+    // ---- Subscription & Config management (delegated to settings/subscriptions.js) ----
+    // Initialized early so renderConfigs is available for language dropdown and drag-drop listeners.
+    const subApi = initSubscriptionSettings({
+        subAddBtn: document.getElementById('add-sub-btn'),
+        updateAllSubBtn: document.getElementById('update-all-sub-btn'),
+        configsList,
+    });
+    const renderConfigs = subApi.renderConfigs;
 
     // ---- Advanced settings navigation ----
     if (gotoAdvancedBtn) {
@@ -435,7 +411,7 @@ export async function initSettings() {
             },
         });
 
-        /** @type {any} */ (window).__langDropdown = langDropdown;
+        __langDropdown = langDropdown;
     }
 
     // ---- Load current settings ----
@@ -448,25 +424,20 @@ export async function initSettings() {
     if (nodeScrollToggle) nodeScrollToggle.checked = localStorage.getItem('nodeScroll') === 'true';
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
-    // ---- Opacity slider (with debounce) ----
-    const savedOpacity = localStorage.getItem('appOpacity') || '100';
-    if (opacitySlider) {
-        opacitySlider.value = savedOpacity;
-        if (opacityValText) opacityValText.textContent = `${savedOpacity}%`;
-        document.documentElement.style.setProperty('--app-opacity', String(Number(savedOpacity) / 100));
-
-        const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
-            document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
-            localStorage.setItem('appOpacity', val);
-        }, 50);
-
-        opacitySlider.addEventListener('input', (e) => {
-            const target = /** @type {HTMLInputElement} */ (e.target);
-            const val = target.value;
-            if (opacityValText) opacityValText.textContent = `${val}%`;
-            debouncedOpacity(val);
-        });
-    }
+    // ---- Theme + Opacity (delegated to settings/theme.js) ----
+    const _themeApi = initThemeSettings({
+        savedTheme: settings.theme,
+        appMainContainer,
+        appTitleIcon,
+        themeCircles,
+        customColorInput,
+        opacitySlider,
+        opacityValText,
+        themeModeContainer,
+        themeModeSlider,
+        themeModeButtons,
+        save: () => save(),
+    });
 
     // ---- Restore defaults ----
     if (restoreDefaultsBtn) {
@@ -556,7 +527,7 @@ export async function initSettings() {
                 }
 
                 currentTunnels = [];
-                renderTunnels();
+                tunnelApi.resetTunnels();
 
                 await trackResult('coreConfig', async () => {
                     const result = await saveConfigToCore({
@@ -592,7 +563,7 @@ export async function initSettings() {
                 invalidateSettingsCache();
 
                 localStorage.setItem('themeMode', 'auto');
-                setThemeMode('auto', false);
+                _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
                 localStorage.removeItem('appTheme');
@@ -617,128 +588,10 @@ export async function initSettings() {
         };
     }
 
-    // ---- Theme color handling ----
-    /**
-     * @param {string} themeStr
-     */
-    const applyColorTheme = (themeStr) => {
-        applyTheme(themeStr);
-    };
-
-    // ---- Theme mode handling ----
-    /**
-     * @param {boolean} isDark
-     */
-    const applyDarkMode = (isDark) => {
-        if (isDark) {
-            document.documentElement.classList.add('dark');
-            if (appTitleIcon) appTitleIcon.src = 'dark-icon.png';
-        } else {
-            document.documentElement.classList.remove('dark');
-            if (appTitleIcon) appTitleIcon.src = 'app-icon.png';
-        }
-        if (appMainContainer) appMainContainer.style.backgroundColor = '';
-    };
-
-    /** @type {string[]} */
-    const themeModeMap = ['light', 'auto', 'dark'];
-    let currentThemeMode = 'auto';
-    const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
-
-    const getStoredThemeMode = () => {
-        const savedThemeMode = localStorage.getItem('themeMode');
-        if (savedThemeMode && themeModeMap.includes(savedThemeMode)) return savedThemeMode;
-        const legacyDarkMode = localStorage.getItem('darkMode');
-        if (legacyDarkMode === 'true') return 'dark';
-        if (legacyDarkMode === 'false') return 'light';
-        return 'auto';
-    };
-
-    /**
-     * @param {string} mode
-     * @returns {boolean}
-     */
-    const resolveThemeModeToDark = (mode) => {
-        if (mode === 'dark') return true;
-        if (mode === 'light') return false;
-        return systemThemeMedia.matches;
-    };
-
-    /**
-     * @param {string} mode
-     */
-    const updateThemeModeUI = (mode) => {
-        const idx = themeModeMap.indexOf(mode);
-        if (themeModeSlider && idx !== -1) {
-            themeModeSlider.style.transform = `translateX(${idx * 100}%)`;
-        }
-        themeModeButtons.forEach((btn, btnIdx) => {
-            if (btnIdx === idx) {
-                btn.classList.add('text-zinc-100');
-                btn.classList.remove('text-zinc-400');
-            } else {
-                btn.classList.remove('text-zinc-100');
-                btn.classList.add('text-zinc-400');
-            }
-        });
-    };
-
-    /**
-     * @param {string} mode
-     * @param {boolean} [persist=true]
-     */
-    const setThemeMode = (mode, persist = true) => {
-        if (!themeModeMap.includes(mode)) return;
-        currentThemeMode = mode;
-        if (persist) {
-            localStorage.setItem('themeMode', mode);
-            localStorage.removeItem('darkMode');
-        }
-        updateThemeModeUI(mode);
-        applyDarkMode(resolveThemeModeToDark(mode));
-        Bus.emit(Events.THEME_MODE_CHANGED, mode);
-    };
-
-    setThemeMode(getStoredThemeMode(), false);
-
-    if (!themeModeContainer?.dataset.bound) {
-        if (themeModeContainer) themeModeContainer.dataset.bound = '1';
-        themeModeButtons.forEach((btn) => {
-            /** @type {HTMLElement} */ (btn).onclick = () => {
-                const mode = btn.getAttribute('data-theme-mode');
-                if (!mode) return;
-                setThemeMode(mode, true);
-            };
-        });
-    }
-
-    /**
-     * @param {MediaQueryListEvent} event
-     */
-    const systemThemeListener = (event) => {
-        if (currentThemeMode === 'auto') {
-            applyDarkMode(event.matches);
-            Bus.emit(Events.THEME_MODE_CHANGED, 'auto');
-        }
-    };
-    if (typeof systemThemeMedia.addEventListener === 'function') {
-        systemThemeMedia.addEventListener('change', systemThemeListener);
-    } else if (typeof systemThemeMedia.addListener === 'function') {
-        systemThemeMedia.addListener(systemThemeListener);
-    }
-
-    applyColorTheme(settings.theme);
-
-    if (customColorInput) {
-        customColorInput.onchange = () => {
-            const color = customColorInput.value;
-            applyColorTheme(color);
-            save();
-        };
-    }
+    // Theme color/mode/circles are handled by initThemeSettings above
 
     // ---- Settings persistence ----
-    const save = async () => {
+    async function save() {
         try {
             /** @type {any} */
             const currentSettings = await invoke(COMMANDS.GET_SETTINGS);
@@ -753,20 +606,20 @@ export async function initSettings() {
         } catch (err) {
             settingsLogger.error('Failed to save settings', err);
         }
-    };
+    }
 
     closeTrayToggle?.addEventListener('change', save);
     autoUpdateToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        showNotification(t.requireAppRestart || "更改已保存，需重启应用生效", "info");
+        showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
     });
     autoUpdateClientToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        showNotification(t.requireAppRestart || "更改已保存，需重启应用生效", "info");
+        showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
     });
     autostartToggle?.addEventListener('change', async () => {
         if (!autostartToggle) return;
@@ -790,7 +643,7 @@ export async function initSettings() {
      * @param {Record<string, any>} patch
      * @returns {Promise<boolean>}
      */
-    const saveConfigToCore = async (patch) => {
+    async function saveConfigToCore(patch) {
         try {
             /** @type {any} */
             const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch });
@@ -799,7 +652,7 @@ export async function initSettings() {
             if (result && !result.hot_reload_success) {
                     /** @type {any} */
                     const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                    showNotification(result.message || t2.requireRestart || "更改已保存，需重启核心生效", "info");
+                    showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
                 }
                 return true;
             } catch (err) {
@@ -810,31 +663,34 @@ export async function initSettings() {
             showNotification(error.toString() || t2.failedSaveSettings || 'Failed to save settings to core', 'error');
             return false;
         }
-    };
+    }
 
     // ---- Core settings toggles ----
-    unifiedDelayToggle?.addEventListener('change', () => {
+    unifiedDelayToggle?.addEventListener('change', async () => {
         if (!unifiedDelayToggle) return;
-        saveConfigToCore({ 'unified-delay': unifiedDelayToggle.checked });
+        const ok = await saveConfigToCore({ 'unified-delay': unifiedDelayToggle.checked });
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
+        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        else { unifiedDelayToggle.checked = !unifiedDelayToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
-    ipv6Toggle?.addEventListener('change', () => {
+    ipv6Toggle?.addEventListener('change', async () => {
         if (!ipv6Toggle) return;
-        saveConfigToCore({ ipv6: ipv6Toggle.checked });
+        const ok = await saveConfigToCore({ ipv6: ipv6Toggle.checked });
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
+        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        else { ipv6Toggle.checked = !ipv6Toggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
-    allowLanToggle?.addEventListener('change', () => {
+    allowLanToggle?.addEventListener('change', async () => {
         if (!allowLanToggle) return;
-        saveConfigToCore({ 'allow-lan': allowLanToggle.checked });
+        const ok = await saveConfigToCore({ 'allow-lan': allowLanToggle.checked });
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        showNotification(t.requireRestart || "更改已保存，需重启核心生效", "info");
+        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        else { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
     // ---- Geo data update ----
@@ -871,127 +727,13 @@ export async function initSettings() {
         }
     });
 
-    // ---- Tunnel management ----
-    /** @type {any[]} */
-    let currentTunnels = [];
-
-    const renderTunnels = () => {
-        if (!tunnelsList) return;
-
-        if (!currentTunnels || currentTunnels.length === 0) {
-            tunnelsList.innerHTML = '';
-            if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
-            if (tunnelsEmpty) tunnelsEmpty.style.display = 'block';
-            return;
-        }
-
-        if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
-        tunnelsList.innerHTML = '';
-
-        currentTunnels.forEach((tunnel, index) => {
-            const item = document.createElement('div');
-            item.className = 'flex items-center justify-between bg-black/20 border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all';
-
-            const info = document.createElement('div');
-            info.className = 'flex flex-col gap-1';
-
-            const topRow = document.createElement('div');
-            topRow.className = 'flex items-center gap-2';
-
-            const protocolBadge = document.createElement('span');
-            protocolBadge.className = 'type-badge text-zinc-300';
-            protocolBadge.textContent = tunnel.network.join(', ');
-
-            const target = document.createElement('span');
-            target.className = 'text-xs font-medium text-zinc-200';
-            target.textContent = tunnel.target;
-
-            topRow.appendChild(protocolBadge);
-            topRow.appendChild(target);
-
-            const listen = document.createElement('span');
-            listen.className = 'text-2xs text-zinc-500 font-mono';
-            /** @type {any} */
-            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            listen.textContent = `${t.listen || 'Listen'}: ${tunnel.address}`;
-
-            info.appendChild(topRow);
-            info.appendChild(listen);
-
-            const delBtn = document.createElement('button');
-            delBtn.className = 'btn-delete-icon';
-            delBtn.innerHTML = SVG_ICONS.trash;
-            delBtn.onclick = () => {
-                currentTunnels.splice(index, 1);
-                saveConfigToCore({ tunnels: currentTunnels });
-                renderTunnels();
-            };
-
-            item.appendChild(info);
-            item.appendChild(delBtn);
-            tunnelsList.appendChild(item);
-        });
-    };
-
-    addTunnelBtn?.addEventListener('click', async () => {
-        /** @type {any} */
-        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        const customHtml = `
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
-                    <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="input-mono">
-                </div>
-                <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Address'}</label>
-                    <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="input-mono">
-                </div>
-                <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
-                    <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="input-mono">
-                </div>
-            </div>
-        `;
-
-        const contentArea = /** @type {HTMLElement} */ (await showModal(t.addPortForwarding || "Add Port Forwarding", "", "", true, customHtml));
-        if (!contentArea) return;
-
-        const protocolInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-protocol-input'));
-        const addressInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-address-input'));
-        const targetInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-target-input'));
-
-        const protocolStr = protocolInput.value.trim();
-        const address = addressInput.value.trim();
-        const target = targetInput.value.trim();
-
-        if (!protocolStr || !address || !target) {
-            showNotification(t.valueEmpty || 'Value cannot be empty', 'error');
-            return;
-        }
-
-        const protocols = protocolStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
-        const validProtocols = ['tcp', 'udp'];
-        const invalidProtocols = protocols.filter(p => !validProtocols.includes(p));
-
-        if (protocols.length === 0 || invalidProtocols.length > 0) {
-            showNotification(t.invalidProtocol || 'Invalid protocol. Use tcp, udp, or both.', 'error');
-            return;
-        }
-
-        if (!isValidAddress(address)) {
-            showNotification(t.invalidAddressFormat || 'Invalid listen address format. Use host:port', 'error');
-            return;
-        }
-
-        if (!isValidAddress(target)) {
-            showNotification(t.invalidTargetFormat || 'Invalid target address format. Use host:port', 'error');
-            return;
-        }
-
-        const network = protocols;
-        currentTunnels.push({ network, address, target });
-        saveConfigToCore({ tunnels: currentTunnels });
-        renderTunnels();
+    // ---- Tunnel management (delegated to settings/tunnels.js) ----
+    const tunnelApi = initTunnelSettings({
+        addTunnelBtn,
+        tunnelsList,
+        tunnelsEmpty,
+        initialTunnels: currentTunnels,
+        saveConfigToCore,
     });
 
     // ---- Load settings from core ----
@@ -1008,7 +750,7 @@ export async function initSettings() {
             } else {
                 currentTunnels = [];
             }
-            renderTunnels();
+            tunnelApi.setTunnels(currentTunnels);
         } catch (err) {
             settingsLogger.error('Failed to load core config into settings', err);
         }
@@ -1025,8 +767,8 @@ export async function initSettings() {
     });
 
     // ---- Drag-and-drop import listener ----
-    if (/** @type {any} */ (window)._dropUnlisten) {
-        /** @type {any} */ (window)._dropUnlisten();
+    if (_dropUnlisten) {
+        _dropUnlisten();
     }
     if (typeof listen === 'function') {
         listen('profiles-imported', (/** @type {{ payload: number }} */ event) => {
@@ -1041,20 +783,11 @@ export async function initSettings() {
                 renderConfigs();
             }
         }).then(unlisten => {
-            /** @type {any} */ (window)._dropUnlisten = unlisten;
+            _dropUnlisten = unlisten;
         }).catch(e => settingsLogger.warn('Failed to listen for profiles-imported event', e));
     }
 
-    // ---- Theme circles ----
-    themeCircles.forEach(circle => {
-        /** @type {HTMLElement} */ (circle).onclick = () => {
-            const theme = circle.getAttribute('data-theme') || '';
-            applyTheme(theme);
-            appStore.set('currentTheme', theme);
-            Bus.emit(Events.THEME_CHANGED, theme);
-            save();
-        };
-    });
+    // Theme circles are handled by initThemeSettings above
 
     // ---- Node scroll toggle ----
     nodeScrollToggle?.addEventListener('change', () => {
@@ -1063,7 +796,7 @@ export async function initSettings() {
         // Clear the container to force full re-render (in-place update won't update CSS classes)
         const container = document.getElementById('proxies-list');
         if (container) container.innerHTML = '';
-        renderProxies();
+        Bus.emit(Events.CONFIG_UPDATED);
     });
 
     // ---- Core version ----
@@ -1090,7 +823,7 @@ export async function initSettings() {
         try {
             const appVersion = await invoke(COMMANDS.GET_APP_VERSION);
             appVersionText.textContent = appVersion;
-        } catch (e) {
+        } catch {
             appVersionText.textContent = '-';
         }
     }
@@ -1117,9 +850,10 @@ export async function initSettings() {
             setSecret(coreResult.secret);
             setWsSecret(coreResult.secret);
 
-            if (/** @type {any} */ (window)._trafficWsHandle) {
-                /** @type {any} */ (window)._trafficWsHandle.reconnect();
-            }
+            // Reconnect traffic WebSocket to the new core instance
+            connectTraffic((/** @type {any} */ data) => {
+                updateTrafficData(data);
+            });
 
             showNotification(t.notifUpdateSuccess, 'success');
             await loadCoreVersion();
@@ -1192,306 +926,222 @@ export async function initSettings() {
         };
     }
 
-    // ---- Subscription management ----
-    const subAddBtn = document.getElementById('add-sub-btn');
-    if (subAddBtn) {
-        subAddBtn.onclick = async () => {
-            /** @type {any} */
-            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            const url = /** @type {string} */ (await showModal(t.addSubscription, t.urlPlaceholder || "Subscription URL"));
-            if (!url) return;
-            /** @type {any} */
-            const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            showNotification(t2.notifDownloadingSub || "Downloading subscription...");
+    // ---- Extension Rules: Auto Apply toggle ----
+    const autoApplyToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('setting-auto-apply'));
+    if (autoApplyToggle) {
+        // Load current state
+        try {
+            const enabled = /** @type {boolean} */ (await invoke(COMMANDS.RULE_GET_AUTO_APPLY));
+            autoApplyToggle.checked = !!enabled;
+        } catch (err) {
+            settingsLogger.warn('Failed to load auto-apply state', err);
+        }
+
+        // Sync toggle with actual watcher state
+        try {
+            const watching = /** @type {boolean} */ (await prism.isWatching());
+            if (watching !== autoApplyToggle.checked) {
+                settingsLogger.warn('Auto-apply toggle and watcher state disagree, syncing', { toggle: autoApplyToggle.checked, watching });
+                autoApplyToggle.checked = watching;
+            }
+        } catch {
+            // isWatching may not be available — ignore
+        }
+
+        autoApplyToggle.addEventListener('change', async () => {
+            const checked = autoApplyToggle.checked;
             try {
-                const userAgent = getSubscriptionUserAgent();
-                const name = extractNameFromUrl(url) || 'subscription';
-                /** @type {any} */
-                const invokeArgs = { url, name };
-                if (userAgent) {
-                    invokeArgs.userAgent = userAgent;
+                await invoke(COMMANDS.RULE_SET_AUTO_APPLY, { enabled: checked });
+                if (checked) {
+                    await prism.startWatching();
+                } else {
+                    await prism.stopWatching();
                 }
-                await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+            } catch (err) {
+                settingsLogger.error('Failed to toggle auto-apply', err);
+                autoApplyToggle.checked = !checked;
+            }
+        });
+    }
 
-                invalidateConfigsCache();
-
-                /** @type {any} */
-                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = subSettings.last_config || 'config.yaml';
-                if (name === currentConfig || name === currentConfig + '.yaml') {
-                    await reloadConfig();
-                }
-
-                /** @type {any} */
-                const t3 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                showNotification(t3.notifSubSuccess, 'success');
-                renderConfigs();
+    // ---- Extension Rules: Manage Rule Files button ----
+    const manageRuleFilesBtn = document.getElementById('manage-rule-files-btn');
+    if (manageRuleFilesBtn) {
+        manageRuleFilesBtn.addEventListener('click', async () => {
+            try {
+                await openPrismFolder();
             } catch (err) {
                 const error = toError(err);
-                /** @type {any} */
-                const t4 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                showNotification(`${t4.notifSubFailed}: ${error}`, 'error');
+                showNotification(error.toString(), 'error');
             }
-        };
-    }
-
-    // ---- Update all subscriptions ----
-    const updateAllSubBtn = document.getElementById('update-all-sub-btn');
-    if (updateAllSubBtn) {
-        updateAllSubBtn.onclick = async () => {
-            /** @type {any} */
-            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            /** @type {any} */
-            const configs = await invoke(COMMANDS.LIST_CONFIGS);
-            const subConfigs = configs.filter(/** @param {any} c */ (c) => c.url_display);
-
-            if (subConfigs.length === 0) {
-                showNotification(t.notifNoSubToUpdate, 'info');
-                return;
-            }
-
-            const icon = updateAllSubBtn.querySelector('svg');
-            if (icon) icon.classList.add('animate-spin');
-            updateAllSubBtn.classList.add('opacity-50', 'pointer-events-none');
-
-            let successCount = 0;
-            let failCount = 0;
-            showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
-
-            for (const config of subConfigs) {
-                try {
-                    const userAgent = getSubscriptionUserAgent();
-                    const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
-                    await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent });
-                    successCount++;
-                } catch (err) {
-                    failCount++;
-                    settingsLogger.error(`Failed to update ${config.name}`, err);
-                }
-            }
-
-            invalidateConfigsCache();
-
-            /** @type {any} */
-            const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-            const currentConfig = subSettings.last_config || 'config.yaml';
-            const customArgs = subSettings.custom_args || [];
-            const wasCurrentUpdated = subConfigs.some(/** @param {any} c */ (c) => c.name === currentConfig);
-
-            if (wasCurrentUpdated && successCount > 0) {
-                await restartCore(currentConfig, customArgs);
-            }
-
-            if (icon) icon.classList.remove('animate-spin');
-            updateAllSubBtn.classList.remove('opacity-50', 'pointer-events-none');
-            renderConfigs();
-
-            if (failCount === 0) {
-                showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
-            } else {
-                showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'info');
-            }
-        };
-    }
-
-    // ---- Config management ----
-    const renderConfigs = async () => {
-        if (!configsList) return;
-
-        const [configs, cfgSettings] = await Promise.all([
-            getConfigsCached(),
-            getSettingsCached(),
-        ]);
-
-        const currentConfig = cfgSettings.last_config || 'config.yaml';
-        const customArgs = cfgSettings.custom_args || [];
-        /** @type {any} */
-        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-
-        configsList.innerHTML = '';
-        configs.forEach((/** @type {any} */ configInfo) => {
-            const name = configInfo.name;
-            const isCurrent = name === currentConfig;
-
-            const item = document.createElement('div');
-            item.className = `glass-card flex flex-col p-4 transition-all group cursor-pointer relative ${isCurrent ? 'ring-1 ring-accent/50 shadow-[0_0_20px_rgba(var(--color-accent-rgb),0.2)]' : 'hover:shadow-lg'}`;
-
-            const row = document.createElement('div');
-            row.className = "flex items-center justify-between";
-
-            const left = document.createElement('div');
-            left.className = 'flex items-center gap-3 pointer-events-none';
-
-            const dot = document.createElement('div');
-            dot.className = `w-2 h-2 rounded-full ${isCurrent ? 'bg-accent shadow-[0_0_8px_var(--color-accent-glow)]' : 'bg-zinc-700'}`;
-
-            const label = document.createElement('span');
-            label.className = `text-xs transition-colors ${isCurrent ? 'font-bold text-zinc-100' : 'text-zinc-400'}`;
-            label.textContent = name;
-
-            left.appendChild(dot);
-            left.appendChild(label);
-
-            const actions = document.createElement('div');
-            actions.className = 'flex items-center gap-2 transition-all opacity-0 group-hover:opacity-100';
-
-            // Delete button
-            const delBtn = document.createElement('button');
-            delBtn.className = 'btn-delete-icon';
-            delBtn.innerHTML = SVG_ICONS.trash;
-            delBtn.title = t.delete;
-            delBtn.onclick = async (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-
-                if (isCurrent) {
-                    showNotification(t.cannotDeleteActive || 'Cannot delete the active configuration', 'warning');
-                    return;
-                }
-
-                const confirmed = await showConfirmModal(
-                    t.delete || 'Delete',
-                    t.confirmDelete || `Are you sure you want to delete "${name}"?`
-                );
-                if (!confirmed) return;
-
-                try {
-                    await invoke(COMMANDS.DELETE_CONFIG, { name });
-                    invalidateConfigsCache();
-                    showNotification(t.notifDeleteSuccess, 'success');
-                    renderConfigs();
-                } catch (err) {
-                    const error = toError(err);
-                    showNotification(`${t.notifDeleteFailed}: ${error}`, 'error');
-                }
-            };
-
-            // Update button (only if has URL)
-            if (configInfo.url_display) {
-                const updateBtn = document.createElement('button');
-                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-zinc-500 hover:text-accent transition-all';
-                updateBtn.innerHTML = SVG_ICONS.refresh;
-                updateBtn.title = t.update;
-                updateBtn.onclick = async (e) => {
-                    e.stopPropagation();
-                    updateBtn.classList.add('animate-spin');
-                    try {
-                        const userAgent = getSubscriptionUserAgent();
-                        const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: configInfo.name });
-                        await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent });
-                        invalidateConfigsCache();
-                        if (isCurrent) {
-                            const cfgCustomArgs = cfgSettings.custom_args || [];
-                            await restartCore(configInfo.name, cfgCustomArgs);
-                        }
-                        showNotification(t.notifSubSuccess, 'success');
-                        renderConfigs();
-                    } catch (err) {
-                        const error = toError(err);
-                        showNotification(`${t.notifSubFailed}: ${error}`, 'error');
-                    } finally {
-                        updateBtn.classList.remove('animate-spin');
-                    }
-                };
-                actions.appendChild(updateBtn);
-            }
-
-            actions.appendChild(delBtn);
-
-            const switchConfig = async () => {
-                if (isCurrent || appStore.get('isNetworkUpdating')) return;
-
-                appStore.set('isNetworkUpdating', true);
-                item.classList.add('opacity-50', 'pointer-events-none');
-
-                try {
-                    /** @type {any} */
-                    const coreResult = await restartCore(name, customArgs);
-                    if (coreResult && coreResult.secret) {
-                        showNotification(t.configSuccess, 'success');
-
-                        /** @type {any} */
-                        const s = await invoke(COMMANDS.GET_SETTINGS);
-                        s.last_config = name;
-                        await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
-                        invalidateSettingsCache();
-
-                        await new Promise(r => setTimeout(r, 1000));
-                        await renderConfigs();
-                        await renderProxies();
-                        await syncCoreConfig();
-                        await closeAllConnections();
-                    }
-                } catch (err) {
-                    const error = toError(err);
-                    showNotification(error.toString(), 'error');
-                } finally {
-                    appStore.set('isNetworkUpdating', false);
-                    item.classList.remove('opacity-50', 'pointer-events-none');
-                }
-            };
-
-            item.onclick = switchConfig;
-
-            row.appendChild(left);
-            row.appendChild(actions);
-            item.appendChild(row);
-
-            // SubInfo (Traffic usage)
-            if (configInfo.sub_info) {
-                const parts = configInfo.sub_info.split(';').map(/** @param {string} s */ (s) => s.trim());
-                let upload = 0, download = 0, total = 0;
-                parts.forEach(/** @param {string} p */ (p) => {
-                    if (p.startsWith('upload=')) upload = parseInt(p.split('=')[1]) || 0;
-                    if (p.startsWith('download=')) download = parseInt(p.split('=')[1]) || 0;
-                    if (p.startsWith('total=')) total = parseInt(p.split('=')[1]) || 0;
-                });
-
-                if (total > 0) {
-                    const used = upload + download;
-                    const percentage = Math.min(100, Math.max(0, (used / total) * 100));
-
-                    const usageContainer = document.createElement('div');
-                    usageContainer.className = 'mt-3 mb-1 w-full';
-
-                    const textRow = document.createElement('div');
-                    textRow.className = 'flex justify-between text-2xs text-zinc-500 mb-1.5 px-0.5 uppercase tracking-wider font-bold';
-                    textRow.innerHTML = `<span>${formatFileSize(used)} ${t.usedSpace || 'used'}</span><span>${formatFileSize(total)} ${t.totalSpace || 'total'}</span>`;
-
-                    const barBg = document.createElement('div');
-                    barBg.className = 'h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5';
-
-                    const barFill = document.createElement('div');
-                    barFill.className = `h-full rounded-full transition-all duration-1000 ${percentage > 90 ? 'bg-rose-500' : 'bg-accent'}`;
-                    barFill.style.width = `${percentage}%`;
-
-                    barBg.appendChild(barFill);
-                    usageContainer.appendChild(textRow);
-                    usageContainer.appendChild(barBg);
-                    item.appendChild(usageContainer);
-                }
-            }
-
-            if (configInfo.url_display) {
-                const urlLabel = document.createElement('div');
-                urlLabel.className = 'text-2xs text-zinc-600 truncate mt-1 w-full';
-                urlLabel.textContent = configInfo.url_display;
-                item.appendChild(urlLabel);
-            }
-
-            configsList.appendChild(item);
         });
+    }
 
-        // Sync tray menu after rendering configs
-        try {
-            const { updateTrayMenu } = await import('./tray.js');
-            updateTrayMenu(true).catch(() => {});
-        } catch {}
-    };
+    // --- Smart Proxy Selector ---
+    const smartToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-toggle'));
+    const smartConfigBtn = document.getElementById('smart-config-btn');
 
-    renderConfigs();
+    if (smartToggle) {
+        // Initialize from backend smart config, fallback to localStorage for migration
+        const initSmartEnabled = async () => {
+            try {
+                const config = await prism.smartConfig();
+                smartToggle.checked = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
+            } catch {
+                smartToggle.checked = localStorage.getItem('smartEnabled') === 'true';
+            }
+            document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+        };
+        initSmartEnabled();
+
+        smartToggle.onchange = async () => {
+            document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+            try {
+                const config = await prism.smartConfig();
+                config.enabled = smartToggle.checked;
+                await prism.smartConfigSave(JSON.stringify(config));
+            } catch (err) {
+                settingsLogger.error('[smart] Failed to persist enabled state:', err);
+                // Fallback to localStorage
+                localStorage.setItem('smartEnabled', String(smartToggle.checked));
+            }
+            Bus.emit(Events.CONFIG_UPDATED);
+        };
+    }
+
+    // Smart Auto-Test toggle
+    const autoTestToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-auto-test-toggle'));
+    if (autoTestToggle) {
+        autoTestToggle.checked = localStorage.getItem('smartAutoTest') === 'true';
+        autoTestToggle.onchange = () => {
+            localStorage.setItem('smartAutoTest', String(autoTestToggle.checked));
+            if (autoTestToggle.checked) {
+                startSmartAutoTest();
+            } else {
+                stopSmartAutoTest();
+            }
+        };
+    }
+
+    // Smart config modal (replaces inline expandable panel)
+    if (smartConfigBtn) {
+        smartConfigBtn.onclick = async () => {
+            // Remove existing modal if any
+            document.getElementById('smart-config-modal')?.remove();
+
+            const t = /** @type {Record<string, string>} */ (translations)[appStore.get('currentLang')] ?? {};
+
+            // Load current config
+            let config = {};
+            try {
+                config = await prism.smartConfig();
+            } catch (err) {
+                settingsLogger.error('[smart] Failed to load config:', err);
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'smart-config-modal';
+            modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+            modal.innerHTML = `
+                <div class="glass-card w-[440px] p-6 space-y-5">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${t.smartProxyConfigTitle || 'Smart Proxy Settings'}</h3>
+                        <button id="smart-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightLatency || 'Latency Weight'}</label>
+                            <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightSuccess || 'Success Rate Weight'}</label>
+                            <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightStability || 'Stability Weight'}</label>
+                            <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyHalfLife || 'Half-life (hours)'}</label>
+                            <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyMinInterval || 'Min Test Interval (s)'}</label>
+                            <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyMaxInterval || 'Max Test Interval (s)'}</label>
+                            <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="input-mono text-xs">
+                        </div>
+                    </div>
+                    <div class="flex justify-end pt-1">
+                        <button id="smart-modal-done" class="btn-ghost text-xs px-4 py-2">${t.done || 'Done'}</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+
+            // Animate in
+            requestAnimationFrame(() => {
+                const panel = modal.querySelector('.glass-card');
+                if (panel) {
+                    panel.style.transform = 'scale(0.96)';
+                    panel.style.opacity = '0';
+                    requestAnimationFrame(() => {
+                        panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                        panel.style.transform = 'scale(1)';
+                        panel.style.opacity = '1';
+                    });
+                }
+            });
+
+            const closeModal = () => {
+                const panel = modal.querySelector('.glass-card');
+                if (panel) {
+                    panel.style.transition = 'all 0.15s ease-in';
+                    panel.style.transform = 'scale(0.96)';
+                    panel.style.opacity = '0';
+                    setTimeout(() => modal.remove(), 150);
+                } else {
+                    modal.remove();
+                }
+            };
+
+            document.getElementById('smart-modal-close')?.addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+            document.getElementById('smart-modal-done')?.addEventListener('click', closeModal);
+
+            // Save on input change (debounced)
+            const inputs = modal.querySelectorAll('input[type="number"]');
+            const saveConfig = debounce(async () => {
+                try {
+                    const configJson = {
+                        latency_weight: parseFloat(modal.querySelector('#smart-weight-latency')?.value || '0.4'),
+                        success_weight: parseFloat(modal.querySelector('#smart-weight-success')?.value || '0.4'),
+                        stability_weight: parseFloat(modal.querySelector('#smart-weight-stability')?.value || '0.2'),
+                        half_life_hours: parseFloat(modal.querySelector('#smart-half-life')?.value || '1.0'),
+                        min_interval_secs: parseInt(modal.querySelector('#smart-min-interval')?.value || '60', 10),
+                        max_interval_secs: parseInt(modal.querySelector('#smart-max-interval')?.value || '600', 10),
+                    };
+                    await prism.smartConfigSave(configJson);
+                } catch (err) {
+                    settingsLogger.error('[smart] Failed to save config:', err);
+                }
+            }, 500);
+            inputs.forEach(input => input.addEventListener('input', saveConfig));
+        };
+    }
 
     initFakeClient();
+
+    // Start smart auto-test scheduler if enabled
+    if (localStorage.getItem('smartAutoTest') === 'true') {
+        // Delay to ensure smart toggle state is initialized first
+        setTimeout(() => startSmartAutoTest(), 2000);
+    }
 }
 
 // ---------------------------------------------------------------------------

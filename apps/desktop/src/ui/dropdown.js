@@ -132,7 +132,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
 
     // Reposition on window resize/scroll while open
     window.addEventListener('resize', () => { if (!menu.classList.contains('hidden')) positionMenu(); });
-    window.addEventListener('scroll', () => { if (!menu.classList.contains('hidden')) positionMenu(); }, true);
+    window.addEventListener('scroll', () => { if (!menu.classList.contains('hidden')) positionMenu(); }, { capture: true, passive: true });
 
     // Initial sync
     syncUI();

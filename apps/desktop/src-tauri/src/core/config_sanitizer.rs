@@ -42,7 +42,7 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
 
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
-pub(super) fn url_decode_complete(input: &str) -> String {
+pub(crate) fn url_decode_complete(input: &str) -> String {
     let mut result = input.to_owned();
 
     // Decode iteratively until no more changes (handles nested encoding)
@@ -84,52 +84,53 @@ pub(super) fn url_decode_complete(input: &str) -> String {
     result
 }
 
-/// Sanitize configuration file name with comprehensive security checks
-pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
+/// Common base filename sanitization shared by config and prism file handlers.
+///
+/// Performs URL decoding, null byte removal, control character removal,
+/// path traversal rejection, directory separator rejection, and length check.
+pub(crate) fn sanitize_base_filename(raw: &str) -> Result<String, String> {
     // Step 1: Complete URL decoding to catch all encoded patterns
-    let decoded_path = url_decode_complete(config_path);
+    let decoded = url_decode_complete(raw);
 
     // Step 1.5: Check the decoded path for traversal BEFORE extracting the filename.
-    // Path::file_name() strips directory components, which would silently discard
-    // "../" segments and allow encoded path traversal to bypass security checks.
-    if decoded_path.contains("..") {
-        return Err("Path traversal detected: '..' is not allowed".to_owned());
-    }
-    // Also reject directory separators in the decoded path to prevent
-    // "foo/bar.yaml" from being silently reduced to "bar.yaml".
-    if decoded_path.contains('/') || decoded_path.contains('\\') {
+    if decoded.contains('/') || decoded.contains('\\') {
         return Err("Path traversal detected: directory separators are not allowed".to_owned());
+    }
+    // Reject bare ".." which is a real parent-directory reference.
+    // "file..name" and "..yaml" are safe filenames (no directory separator).
+    if decoded == ".." {
+        return Err("Path traversal detected: '..' is not allowed".to_owned());
     }
 
     // Step 2: Extract just the filename
-    let config_file_name = Path::new(&decoded_path)
+    // Path::new(".").file_name() returns None on Linux, but "." is a valid filename.
+    let filename = Path::new(&decoded)
         .file_name()
-        .ok_or_else(|| "Invalid config path: no filename component".to_owned())?
-        .to_str()
-        .ok_or("Invalid config filename encoding")?
+        .and_then(|f| f.to_str())
+        .unwrap_or(&decoded)
         .to_owned();
 
-    // Step 3: Security checks
-
-    // Check for path traversal attempts
-    if config_file_name.contains("..") {
-        return Err("Path traversal detected: '..' is not allowed".to_owned());
-    }
-
-    // Check for directory separators
-    if config_file_name.contains('/') || config_file_name.contains('\\') {
-        return Err("Path traversal detected: directory separators are not allowed".to_owned());
-    }
-
-    // Check for null bytes (could be used to bypass extension checks)
-    if config_file_name.contains('\0') {
+    // Step 3: Reject null bytes
+    if filename.contains('\0') {
         return Err("Invalid character in filename: null byte detected".to_owned());
     }
 
-    // Check for control characters
-    if config_file_name.chars().any(char::is_control) {
+    // Step 4: Reject control characters
+    if filename.chars().any(char::is_control) {
         return Err("Invalid character in filename: control characters not allowed".to_owned());
     }
+
+    // Step 5: Length limit
+    if filename.len() > 255 {
+        return Err("Filename too long: maximum 255 characters allowed".to_owned());
+    }
+
+    Ok(filename)
+}
+
+/// Sanitize configuration file name with comprehensive security checks
+pub(crate) fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
+    let config_file_name = sanitize_base_filename(config_path)?;
 
     // Validate extension
     let lower_name = config_file_name.to_lowercase();
@@ -160,7 +161,7 @@ pub(super) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
 }
 
 /// Validates that the resolved path is within the expected base directory
-pub(super) fn validate_path_within_dir(
+pub(crate) fn validate_path_within_dir(
     resolved_path: &Path,
     base_dir: &Path,
 ) -> Result<(), String> {

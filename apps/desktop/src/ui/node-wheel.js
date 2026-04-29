@@ -14,6 +14,223 @@ import { sortProxiesByLatency } from './proxies.js';
 let wheelHoverTimer = null;
 let isWheelOpen = false;
 
+/** @param {number} ms */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * @param {string} groupName
+ * @returns {Promise<string | null>}
+ */
+const getCurrentNodeForGroup = async (groupName) => {
+    const data = await getProxies();
+    /** @type {any} */
+    const d = data;
+    return d?.proxies?.[groupName]?.now || null;
+};
+
+/**
+ * @param {string} groupName
+ * @param {string | null} expectedName
+ * @param {number} [maxRetries]
+ * @param {number} [intervalMs]
+ * @returns {Promise<string | null>}
+ */
+const waitForCurrentNode = async (groupName, expectedName, maxRetries = 10, intervalMs = 250) => {
+    for (let i = 0; i < maxRetries; i++) {
+        const current = await getCurrentNodeForGroup(groupName);
+        if (!expectedName) return current;
+        if (current === expectedName) return current;
+        await sleep(intervalMs);
+    }
+    const finalCurrent = await getCurrentNodeForGroup(groupName);
+    return finalCurrent || expectedName;
+};
+
+/**
+ * Handle proxy switch within the wheel, including UI updates and recovery.
+ * @param {HTMLElement} trigger
+ * @param {string} mainGroup
+ * @param {string} name
+ * @param {boolean} isSelected
+ */
+async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
+    if (isSelected) {
+        closeWheel();
+        return;
+    }
+    const nameEl = trigger.querySelector('#current-node-name');
+    if (nameEl) {
+        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+        const t = /** @type {Record<string, string>} */(translations[langKey]);
+        nameEl.textContent = t.switching || "Switching...";
+    }
+    closeWheel();
+    abortLatencyTests();
+    const success = await switchProxy(mainGroup, name);
+    if (success) {
+        await closeAllConnections();
+        const updatedNode = await waitForCurrentNode(mainGroup, name);
+        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
+        const currentNodeEl = document.getElementById('current-node-name');
+        if (currentNodeEl) currentNodeEl.textContent = updatedNode || name;
+        const proxiesPage = document.querySelector('[data-page="proxies"]');
+        if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
+            import('./proxies.js').then(m => m.renderProxies());
+        }
+    } else {
+        import('./proxies.js').then(m => m.syncCoreConfig());
+        const revertedNode = await waitForCurrentNode(mainGroup, null);
+        const currentNodeEl = document.getElementById('current-node-name');
+        if (currentNodeEl && revertedNode) currentNodeEl.textContent = revertedNode;
+    }
+}
+
+/**
+ * Populate the wheel dropdown with proxy items and show it.
+ * @param {HTMLElement} trigger
+ * @param {HTMLElement} dropdown
+ * @param {HTMLElement} scrollContainer
+ * @param {HTMLElement} list
+ * @param {(item: Element, animate: boolean) => void} updateWheelVisualState
+ * @param {() => void} resetToCenterFocus
+ */
+async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, updateWheelVisualState, resetToCenterFocus) {
+    if (isWheelOpen) return;
+    isWheelOpen = true;
+
+    if (scrollContainer) {
+        scrollContainer.style.overflowY = 'auto';
+    }
+
+    try {
+        const proxyGroupsResult = await fetchProxyGroups();
+        if (!proxyGroupsResult) return;
+
+        const { data, mainGroup, current } = proxyGroupsResult;
+        /** @type {string[]} */
+        const proxies = [...proxyGroupsResult.proxies];
+
+        sortProxiesByLatency(proxies, data);
+
+        const fragment = document.createDocumentFragment();
+        /** @type {Element | null} */
+        let currentEl = null;
+
+        /**
+         * @param {string} idxStr
+         * @param {Element} wrapper
+         * @returns {HTMLElement}
+         */
+        const createWheelItem = (idxStr, wrapper) => {
+            const index = parseInt(idxStr, 10);
+            const name = proxies[index];
+            /** @type {any} */
+            const proxyData = data;
+            const proxy = proxyData.proxies[name];
+            const isSelected = name === current;
+
+            const item = document.createElement('div');
+            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-all duration-200 w-full h-full
+                ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-white' : 'bg-black/40 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`;
+
+            const dot = document.createElement('div');
+            let dotColor;
+            if (isSelected) dotColor = 'bg-accent animate-pulse';
+            else if (proxy.udp) dotColor = 'bg-green-500';
+            else dotColor = 'bg-zinc-600';
+            dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = "text-xs font-semibold tracking-wide truncate max-w-[180px]";
+            nameSpan.textContent = name;
+
+            item.appendChild(dot);
+            item.appendChild(nameSpan);
+
+            item.addEventListener('mouseenter', () => {
+                hoveredItem = wrapper;
+                updateWheelVisualState(wrapper, false);
+            });
+            item.addEventListener('mouseleave', () => {
+                hoveredItem = null;
+                resetToCenterFocus();
+            });
+
+            item.onclick = () => handleWheelProxySwitch(trigger, mainGroup, name, isSelected);
+            return item;
+        };
+
+        proxies.forEach((name, index) => {
+            const isSelected = name === current;
+            const wrapper = document.createElement('div');
+            wrapper.dataset.index = String(index);
+            wrapper.className = 'w-full shrink-0 flex items-center justify-center';
+            /** @type {HTMLElement} */ (wrapper).style.height = '32px';
+            /** @type {HTMLElement} */ (wrapper).style.scrollSnapAlign = 'center';
+            /** @type {HTMLElement} */ (wrapper).style.transformOrigin = 'center center';
+            /** @type {HTMLElement} */ (wrapper).style.transition = 'transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 220ms ease, box-shadow 220ms ease';
+            /** @type {HTMLElement} */ (wrapper).style.contentVisibility = 'auto';
+            /** @type {HTMLElement} */ (wrapper).style.containIntrinsicSize = '32px';
+
+            const item = createWheelItem(index.toString(), wrapper);
+            wrapper.appendChild(item);
+
+            fragment.appendChild(wrapper);
+            if (isSelected) currentEl = wrapper;
+        });
+
+        /** @type {any} */ (list)._virtObserver?.disconnect();
+
+        list.innerHTML = '';
+        list.appendChild(fragment);
+
+        dropdown.classList.remove('opacity-0', 'pointer-events-none');
+        /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(1)';
+        /** @type {HTMLElement} */ (trigger).style.opacity = '0';
+        /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'none';
+
+        if (currentEl && scrollContainer) {
+            /** @type {HTMLElement} */ (scrollContainer).offsetHeight;
+            /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'auto';
+            /** @type {HTMLElement} */ (currentEl).scrollIntoView({ block: 'center' });
+            setTimeout(() => { /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'smooth'; }, 50);
+        }
+        defaultActiveItem = currentEl || list.firstElementChild;
+        hoveredItem = null;
+        if (defaultActiveItem) {
+            updateWheelVisualState(defaultActiveItem, true);
+        }
+    } catch (err) {
+        nodeWheelLogger.error('Failed to load wheel nodes', err);
+    }
+}
+
+/** @type {Element | null} */
+let defaultActiveItem = null;
+/** @type {Element | null} */
+let hoveredItem = null;
+
+function closeWheel() {
+    if (!isWheelOpen) return;
+    isWheelOpen = false;
+    const dropdown = document.getElementById('node-wheel-dropdown');
+    const trigger = document.getElementById('node-wheel-trigger');
+    const scrollContainer = document.getElementById('node-wheel-scroll');
+    if (dropdown) {
+        dropdown.classList.add('opacity-0', 'pointer-events-none');
+        /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(0.92)';
+    }
+    if (trigger) {
+        /** @type {HTMLElement} */ (trigger).style.opacity = '1';
+        /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'auto';
+    }
+    if (scrollContainer) {
+        scrollContainer.style.overflowY = 'hidden';
+    }
+    hoveredItem = null;
+    if (wheelHoverTimer) clearTimeout(wheelHoverTimer);
+}
+
 export function initNodeWheel() {
     const trigger = document.getElementById('node-wheel-trigger');
     const dropdown = document.getElementById('node-wheel-dropdown');
@@ -23,54 +240,18 @@ export function initNodeWheel() {
 
     if (!trigger || !dropdown || !list || !container) return;
 
-    /** @param {number} ms */
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    /** @type {Element | null} */
-    let defaultActiveItem = null;
-    /** @type {Element | null} */
-    let hoveredItem = null;
-
-    /**
-     * @param {string} groupName
-     * @returns {Promise<string | null>}
-     */
-    const getCurrentNodeForGroup = async (groupName) => {
-        const data = await getProxies();
-        /** @type {any} */
-        const d = data;
-        return d?.proxies?.[groupName]?.now || null;
-    };
-
-    /**
-     * @param {string} groupName
-     * @param {string | null} expectedName
-     * @param {number} [maxRetries]
-     * @param {number} [intervalMs]
-     * @returns {Promise<string | null>}
-     */
-    const waitForCurrentNode = async (groupName, expectedName, maxRetries = 10, intervalMs = 250) => {
-        for (let i = 0; i < maxRetries; i++) {
-            const current = await getCurrentNodeForGroup(groupName);
-            if (!expectedName) return current;
-            if (current === expectedName) return current;
-            await sleep(intervalMs);
-        }
-        const finalCurrent = await getCurrentNodeForGroup(groupName);
-        return finalCurrent || expectedName;
-    };
-
     const getWheelItems = () => Array.from(list.children);
 
     const findCenterItem = () => {
         const items = getWheelItems();
         if (!items.length || !scrollContainer) return null;
         const rect = scrollContainer.getBoundingClientRect();
-        const centerY = rect.top + rect.height / 2;
+        const centerY = rect.top + (rect.height / 2);
         let nearest = items[0];
         let minDistance = Number.MAX_SAFE_INTEGER;
         items.forEach((item) => {
             const itemRect = item.getBoundingClientRect();
-            const itemCenterY = itemRect.top + itemRect.height / 2;
+            const itemCenterY = itemRect.top + (itemRect.height / 2);
             const distance = Math.abs(itemCenterY - centerY);
             if (distance < minDistance) {
                 minDistance = distance;
@@ -91,7 +272,7 @@ export function initNodeWheel() {
         items.forEach((item, index) => {
             const distance = index - activeIndex;
             const absDistance = Math.abs(distance);
-            const scale = absDistance === 0 ? 1.1 : Math.max(0.85, 0.98 - absDistance * 0.05);
+            const scale = absDistance === 0 ? 1.1 : Math.max(0.85, 0.98 - (absDistance * 0.05));
             const translateY = distance * 8;
             const opacity = absDistance > 4 ? 0.3 : 1 - Math.min(absDistance * 0.15, 0.6);
             /** @type {HTMLElement} */ (item).style.zIndex = `${100 - absDistance}`;
@@ -123,164 +304,7 @@ export function initNodeWheel() {
         }
     };
 
-    const openWheel = async () => {
-        if (isWheelOpen) return;
-        isWheelOpen = true;
-
-        // Re-enable scrolling BEFORE populating content
-        if (scrollContainer) {
-            scrollContainer.style.overflowY = 'auto';
-        }
-
-        try {
-            const proxyGroupsResult = await fetchProxyGroups();
-            if (!proxyGroupsResult) return;
-
-            const { data, mainGroup, current } = proxyGroupsResult;
-            /** @type {string[]} */
-            let proxies = [...proxyGroupsResult.proxies];
-
-            sortProxiesByLatency(proxies, data);
-
-            const fragment = document.createDocumentFragment();
-            /** @type {Element | null} */
-            let currentEl = null;
-
-            /**
-             * @param {string} idxStr
-             * @param {Element} wrapper
-             * @returns {HTMLElement}
-             */
-            const createWheelItem = (idxStr, wrapper) => {
-                const index = parseInt(idxStr, 10);
-                const name = proxies[index];
-                /** @type {any} */
-                const proxyData = data;
-                const proxy = proxyData.proxies[name];
-                const isSelected = name === current;
-
-                const item = document.createElement('div');
-                item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-all duration-200 w-full h-full
-                    ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-white' : 'bg-black/40 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`;
-
-                const dot = document.createElement('div');
-                dot.className = `w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-accent animate-pulse' : (proxy.udp ? 'bg-green-500' : 'bg-zinc-600')}`;
-
-                const nameSpan = document.createElement('span');
-                nameSpan.className = "text-xs font-semibold tracking-wide truncate max-w-[180px]";
-                nameSpan.textContent = name;
-
-                item.appendChild(dot);
-                item.appendChild(nameSpan);
-
-                item.addEventListener('mouseenter', () => {
-                    hoveredItem = wrapper;
-                    updateWheelVisualState(wrapper, false);
-                });
-                item.addEventListener('mouseleave', () => {
-                    hoveredItem = null;
-                    resetToCenterFocus();
-                });
-
-                item.onclick = async () => {
-                    if (isSelected) {
-                        closeWheel();
-                        return;
-                    }
-                    const nameEl = trigger.querySelector('#current-node-name');
-                    if (nameEl) {
-                        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-                        const t = /** @type {Record<string, string>} */(translations[langKey]);
-                        nameEl.textContent = t.switching || "Switching...";
-                    }
-                    closeWheel();
-                    abortLatencyTests();
-                    const success = await switchProxy(mainGroup, name);
-                    if (success) {
-                        await closeAllConnections();
-                        const updatedNode = await waitForCurrentNode(mainGroup, name);
-
-                        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
-
-                        const currentNodeEl = document.getElementById('current-node-name');
-                        if (currentNodeEl) currentNodeEl.textContent = updatedNode || name;
-
-                        const proxiesPage = document.querySelector('[data-page="proxies"]');
-                        if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
-                            import('./proxies.js').then(m => m.renderProxies());
-                        }
-                    } else {
-                        import('./proxies.js').then(m => m.syncCoreConfig());
-                        const revertedNode = await waitForCurrentNode(mainGroup, null);
-                        const currentNodeEl = document.getElementById('current-node-name');
-                        if (currentNodeEl && revertedNode) currentNodeEl.textContent = revertedNode;
-                    }
-                };
-                return item;
-            };
-
-            proxies.forEach((name, index) => {
-                const isSelected = name === current;
-                const wrapper = document.createElement('div');
-                wrapper.dataset.index = String(index);
-                wrapper.className = 'w-full shrink-0 flex items-center justify-center';
-                /** @type {HTMLElement} */ (wrapper).style.height = '32px';
-                /** @type {HTMLElement} */ (wrapper).style.scrollSnapAlign = 'center';
-                /** @type {HTMLElement} */ (wrapper).style.transformOrigin = 'center center';
-                /** @type {HTMLElement} */ (wrapper).style.transition = 'transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 220ms ease, box-shadow 220ms ease';
-                /** @type {HTMLElement} */ (wrapper).style.contentVisibility = 'auto';
-                /** @type {HTMLElement} */ (wrapper).style.containIntrinsicSize = '32px';
-
-                const item = createWheelItem(index.toString(), wrapper);
-                wrapper.appendChild(item);
-
-                fragment.appendChild(wrapper);
-                if (isSelected) currentEl = wrapper;
-            });
-
-            /** @type {any} */ (list)._virtObserver?.disconnect();
-
-            list.innerHTML = '';
-            list.appendChild(fragment);
-
-            // Show dropdown
-            dropdown.classList.remove('opacity-0', 'pointer-events-none');
-            /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(1)';
-            /** @type {HTMLElement} */ (trigger).style.opacity = '0';
-            /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'none';
-
-            // Scroll to current — wait for scroll-snap to re-activate after overflowY change
-            if (currentEl && scrollContainer) {
-                // Force reflow so scroll-snap CSS takes effect after overflowY: auto
-                void /** @type {HTMLElement} */ (scrollContainer).offsetHeight;
-                /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'auto';
-                /** @type {HTMLElement} */ (currentEl).scrollIntoView({ block: 'center' });
-                setTimeout(() => { /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'smooth'; }, 50);
-            }
-            defaultActiveItem = currentEl || list.firstElementChild;
-            hoveredItem = null;
-            if (defaultActiveItem) {
-                updateWheelVisualState(defaultActiveItem, true);
-            }
-        } catch (err) {
-            nodeWheelLogger.error('Failed to load wheel nodes', err);
-        }
-    };
-
-    const closeWheel = () => {
-        if (!isWheelOpen) return;
-        isWheelOpen = false;
-        dropdown.classList.add('opacity-0', 'pointer-events-none');
-        /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(0.92)';
-        /** @type {HTMLElement} */ (trigger).style.opacity = '1';
-        /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'auto';
-        // Disable scrolling on the container when closed
-        if (scrollContainer) {
-            scrollContainer.style.overflowY = 'hidden';
-        }
-        hoveredItem = null;
-        if (wheelHoverTimer) clearTimeout(wheelHoverTimer);
-    };
+    const openWheel = () => populateAndShowWheel(trigger, dropdown, scrollContainer, list, updateWheelVisualState, resetToCenterFocus);
 
     trigger.addEventListener('mouseenter', () => {
         if (wheelHoverTimer) clearTimeout(wheelHoverTimer);
@@ -303,27 +327,20 @@ export function initNodeWheel() {
             scrollFocusTimer = setTimeout(() => {
                 resetToCenterFocus();
             }, 60);
-        });
+        }, { passive: true });
     }
 
-    // Prevent underlying pages from scrolling when wheel is open.
-    // When closed, overflowY: hidden on scrollContainer prevents ghost scrolling.
-    // We use capture phase on the scroll container to allow native scroll (for CSS snap)
-    // while stopping propagation to prevent underlying page scroll.
     /** @type {any} */
     const win = window;
     if (!win._wheelListenerAdded) {
-        // Capture phase on scroll container: allow native scroll, stop propagation
         if (scrollContainer) {
             scrollContainer.addEventListener('wheel', (e) => {
                 if (isWheelOpen) {
-                    // Let native scroll happen, just don't bubble to document
                     e.stopPropagation();
                 }
             }, { passive: true, capture: true });
         }
 
-        // Document-level handler: block wheel on underlying pages when open
         document.addEventListener('wheel', (e) => {
             if (!isWheelOpen) return;
             e.preventDefault();

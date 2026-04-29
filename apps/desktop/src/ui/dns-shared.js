@@ -15,6 +15,7 @@ import { persistConfigChanges } from './advanced.js';
 import { invalidateSettingsCache } from './cache.js';
 import { translations, currentLang } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
+import { createFocusTrap } from '../utils/focus-trap.js';
 
 // ---------------------------------------------------------------------------
 //  Default DNS configuration
@@ -206,9 +207,9 @@ export async function initDnsRewriteToggle() {
         const config = await getConfig();
         const isEnabled = config?.dns?.enable === true;
         toggle.checked = isEnabled;
-    } catch (e) {
-        const savedState = localStorage.getItem('dnsRewrite');
-        toggle.checked = savedState === null ? true : savedState === 'true';
+    } catch {
+        toggle.checked = false;
+        toggle.disabled = true;
     }
 
     // Load saved DNS config into inputs
@@ -225,6 +226,7 @@ export async function initDnsRewriteToggle() {
             if (modal) {
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
+                createFocusTrap(modal, { onEscape: closeModal });
             }
         });
     }
@@ -303,7 +305,7 @@ export async function initDnsRewriteToggle() {
                 await closeAllConnections();
                 localStorage.setItem('dnsRewrite', 'true');
                 showNotification(t.notifDnsEnabled, 'success');
-            } catch (err) {
+            } catch {
                 showNotification(t.dnsEnableFailed || 'Failed to enable DNS Rewrite', 'error');
                 toggle.checked = false;
             }

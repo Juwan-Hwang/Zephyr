@@ -211,4 +211,7 @@ export const Events = Object.freeze({
     CONNECTIONS_FLUSHED: 'connections-flushed',
     TRAY_MENU_UPDATE: 'tray-menu-update',
     NOTIFICATION: 'notification',
+    PRISM_EVENT: 'prism-event',
+    PRISM_APPLIED: 'prism-applied',
+    PRISM_FAILED: 'prism-failed',
 });

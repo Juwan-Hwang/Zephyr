@@ -38,7 +38,7 @@ const PERSIST_DEBOUNCE_MS = 100;
  */
 export function createStore(storeName, initialState, { persist = true } = {}) {
     // Hydrate from localStorage
-    let state = hydrate(storeName, initialState);
+    const state = hydrate(storeName, initialState);
 
     /** @type {Map<string, Set<Function>>} key -> callbacks */
     const keySubs = new Map();

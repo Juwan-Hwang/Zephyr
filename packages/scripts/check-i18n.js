@@ -9,18 +9,22 @@
  * Reports:
  *   - Missing keys per locale (present in `en` but absent in target)
  *   - Empty-string keys per locale (present but will fallback to English)
+ *   - data-i18n / data-i18n-placeholder attributes used in HTML/JS but
+ *     missing from en translations
  *
  * Exit codes:
  *   0  — always (warnings only; ja/ko are known skeleton translations)
  *   1  — when --strict is passed AND issues are found
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const I18N_PATH = resolve(__dirname, '../../apps/desktop/src/i18n.js');
+const ROOT = resolve(__dirname, '../..');
+const I18N_PATH = resolve(ROOT, 'apps/desktop/src/i18n.js');
+const SRC_DIR = resolve(ROOT, 'apps/desktop/src');
 
 // ---------------------------------------------------------------------------
 // CLI flags
@@ -102,6 +106,45 @@ function extractEmptyKeys(block) {
 }
 
 // ---------------------------------------------------------------------------
+// data-i18n attribute extractor
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively walk SRC_DIR and extract all unique keys from
+ * data-i18n="key" and data-i18n-placeholder="key" attributes
+ * in .html and .js files.
+ */
+function extractDataI18nKeys(srcDir) {
+    const keys = new Set();
+    const attrRegex = /data-i18n(?:-placeholder)?="(\w+)"/g;
+
+    function walk(dir) {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name === 'node_modules' || entry.name === '.git') continue;
+                walk(full);
+            } else if (entry.isFile()) {
+                const ext = extname(entry.name);
+                if (ext !== '.html' && ext !== '.js') continue;
+                try {
+                    const content = readFileSync(full, 'utf-8');
+                    let m;
+                    while ((m = attrRegex.exec(content)) !== null) {
+                        keys.add(m[1]);
+                    }
+                    attrRegex.lastIndex = 0;
+                } catch { /* skip unreadable files */ }
+            }
+        }
+    }
+
+    walk(srcDir);
+    return keys;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -162,6 +205,28 @@ function main() {
         }
 
         console.log('');
+    }
+
+    // -----------------------------------------------------------------------
+    // Check data-i18n / data-i18n-placeholder attribute coverage
+    // -----------------------------------------------------------------------
+
+    console.log('========================================');
+    console.log('  data-i18n Attribute Coverage');
+    console.log('========================================\n');
+
+    const htmlI18nKeys = extractDataI18nKeys(SRC_DIR);
+    const htmlMissing = [...htmlI18nKeys].filter(k => !enKeys.has(k));
+
+    if (htmlMissing.length === 0) {
+        console.log(`OK — all ${htmlI18nKeys.size} data-i18n keys found in en translations\n`);
+    } else {
+        console.log(`MISSING — ${htmlMissing.length} data-i18n attribute(s) not in en translations:`);
+        for (const key of htmlMissing) {
+            console.log(`  - ${key}`);
+        }
+        console.log('');
+        totalIssues += htmlMissing.length;
     }
 
     console.log('----------------------------------------');

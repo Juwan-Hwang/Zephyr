@@ -52,7 +52,7 @@ class Logger {
      * @param {*[]} args
      * @protected
      */
-    _write(level, prefix, args) {
+    _write(_level, _prefix, _args) {
         // Default: no-op. Subclasses provide real output.
     }
 

@@ -117,7 +117,7 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     let core_running = state
         .0
         .lock()
-        .map(|guard| guard.process.is_some())
+        .map(|guard| guard.process().is_some())
         .unwrap_or(false);
 
     if !core_running {
@@ -223,8 +223,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         }
         "quit" => {
             let state = app.state::<MihomoState>();
-            let _ = crate::core_manager::stop_core(app.clone(), state);
-            let _ = sys_proxy::clear_sys_proxy();
+            let _ = crate::core_manager::stop_core_inner(app, &state);
+            if let Err(e) = sys_proxy::clear_sys_proxy() {
+                eprintln!("[warn] Failed to clear system proxy on exit: {e}");
+            }
             app.cleanup_before_exit();
             app.exit(0);
         }
@@ -273,7 +275,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
         let port = state
             .0
             .lock()
-            .map(|guard| guard.last_port.unwrap_or(7890))
+            .map(|guard| guard.last_port().unwrap_or(7890))
             .unwrap_or(7890);
         let server = format!("127.0.0.1:{port}");
         let _ = sys_proxy::enable_sysproxy(server, None);

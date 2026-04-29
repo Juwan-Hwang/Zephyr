@@ -131,6 +131,148 @@ export const SUBSCRIPTION = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Prism Engine
+// ---------------------------------------------------------------------------
+
+export const PRISM = Object.freeze({
+    APPLY: "prism_apply",
+    STATUS: "prism_status",
+    LIST_RULES: "prism_list_rules",
+    PREVIEW_RULES: "prism_preview_rules",
+    IS_PRISM_RULE: "prism_is_prism_rule",
+    INSERT_RULE: "prism_insert_rule",
+    INSERT_RULE_STR: "prism_insert_rule_str",
+    TOGGLE_GROUP: "prism_toggle_group",
+    TRACE_REPORT: "prism_trace_report",
+    TRACE_REPORT_TEXT: "prism_trace_report_text",
+    VALIDATE_CONFIG: "prism_validate_config",
+    LIST_PROFILES: "prism_list_profiles",
+    GET_CORE_INFO: "prism_get_core_info",
+    START_WATCHING: "prism_start_watching",
+    STOP_WATCHING: "prism_stop_watching",
+    IS_WATCHING: "prism_is_watching",
+    GET_STATS: "prism_get_stats",
+    READ_RAW_PROFILE: "prism_read_raw_profile",
+    REBUILD: "prism_rebuild",
+});
+
+// ---------------------------------------------------------------------------
+// Rule Library (R2)
+// ---------------------------------------------------------------------------
+
+export const RULE = Object.freeze({
+    // File CRUD
+    RULE_LIST: "rule_list",
+    RULE_READ: "rule_read",
+    RULE_CREATE: "rule_create",
+    RULE_UPDATE: "rule_update",
+    RULE_DELETE: "rule_delete",
+    RULE_RENAME: "rule_rename",
+    // Rule extraction
+    RULE_EXTRACT_FROM_PROFILE: "rule_extract_from_profile",
+    // Rule import
+    RULE_IMPORT_TEXT: "rule_import_text",
+    RULE_IMPORT_FILE: "rule_import_file",
+    RULE_IMPORT_URL: "rule_import_url",
+    // Group management
+    RULE_GROUP_LIST: "rule_group_list",
+    RULE_GROUP_CREATE: "rule_group_create",
+    RULE_GROUP_RENAME: "rule_group_rename",
+    RULE_GROUP_DELETE: "rule_group_delete",
+    RULE_GROUP_MOVE: "rule_group_move",
+    // Settings
+    RULE_GET_AUTO_APPLY: "rule_get_auto_apply",
+    RULE_SET_AUTO_APPLY: "rule_set_auto_apply",
+    // Folder
+    OPEN_PRISM_FOLDER: "open_prism_folder",
+});
+
+// ---------------------------------------------------------------------------
+// Plugin System
+// ---------------------------------------------------------------------------
+
+export const PLUGIN = Object.freeze({
+    DISCOVER: "plugin_discover",
+    LOAD: "plugin_load",
+    UNLOAD: "plugin_unload",
+    ENABLE: "plugin_enable",
+    DELETE: "plugin_delete",
+    LIST_LOADED: "plugin_list_loaded",
+    EXECUTE_HOOK: "plugin_execute_hook",
+    LIST_HOOKS: "plugin_list_hooks",
+    EXECUTE: "plugin_execute",
+    LIST_PERMISSIONS: "plugin_list_permissions",
+    CHECK_PERMISSION: "plugin_check_permission",
+});
+
+// ---------------------------------------------------------------------------
+// Script Engine
+// ---------------------------------------------------------------------------
+
+export const SCRIPT = Object.freeze({
+    EXECUTE: "script_execute",
+    VALIDATE: "script_validate",
+    GET_SANDBOX: "script_get_sandbox",
+    SET_SANDBOX: "script_set_sandbox",
+    GET_LIMITS: "script_get_limits",
+    SET_LIMITS: "script_set_limits",
+    GRANT_PLUGIN: "script_grant_plugin",
+    REVOKE_PLUGIN: "script_revoke_plugin",
+    CHECK_PLUGIN_PERMISSION: "script_check_plugin_permission",
+    IS_SANDBOX_SAFE: "script_is_sandbox_safe",
+});
+
+// ---------------------------------------------------------------------------
+// Smart Proxy Selector
+// ---------------------------------------------------------------------------
+
+export const SMART = Object.freeze({
+    SCORE: "smart_score",
+    CONFIG: "smart_config",
+    CONFIG_SAVE: "smart_config_save",
+    NEXT_INTERVAL: "smart_next_interval",
+    RANK: "smart_rank",
+    SELECT_BEST: "smart_select_best",
+    CLEAR_HISTORY: "smart_clear_history",
+    SCORE_AT: "smart_score_at",
+    VALIDATE_CONFIG: "smart_validate_config",
+    SCHEDULER_CONFIG: "smart_scheduler_config",
+    TRIM_HISTORY: "smart_trim_history",
+});
+
+// ---------------------------------------------------------------------------
+// Failover
+// ---------------------------------------------------------------------------
+
+export const FAILOVER = Object.freeze({
+    REPORT: "failover_report",
+    GET_POLICY: "failover_get_policy",
+    SET_POLICY: "failover_set_policy",
+    FAILURE_COUNT: "failover_failure_count",
+    RESET: "failover_reset",
+});
+
+// ---------------------------------------------------------------------------
+// KV Store
+// ---------------------------------------------------------------------------
+
+export const KV = Object.freeze({
+    GET: "kv_get",
+    SET: "kv_set",
+    DELETE: "kv_delete",
+    KEYS: "kv_keys",
+});
+
+// ---------------------------------------------------------------------------
+// Trace Advanced
+// ---------------------------------------------------------------------------
+
+export const TRACE_ADVANCED = Object.freeze({
+    STATISTICS: "trace_statistics",
+    FILTER_BY_SOURCE: "trace_filter_by_source",
+});
+
+// ---------------------------------------------------------------------------
 // Convenience: all command names in one flat object
 // ---------------------------------------------------------------------------
 
@@ -146,4 +288,17 @@ export const COMMANDS = Object.freeze({
     ...MISC,
     ...CRYPTO,
     ...SUBSCRIPTION,
+    ...PRISM,
+    ...RULE,
+    ...PLUGIN,
+    ...SCRIPT,
+    ...SMART,
+    ...FAILOVER,
+    ...KV,
+    ...TRACE_ADVANCED,
+    // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
+    CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
+    UPDATER, SHORTCUTS, SETTINGS, MISC, CRYPTO,
+    SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
+    FAILOVER, KV, TRACE_ADVANCED,
 });

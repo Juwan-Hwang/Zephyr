@@ -32,13 +32,7 @@ static DERIVED_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 static MACHINE_KEY_PERSISTED: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn get_machine_key() -> Vec<u8> {
-    // Use cached key if available (PBKDF2 is expensive)
-    DERIVED_KEY.get().cloned().unwrap_or_else(|| {
-        // Compute and cache the key
-        let key = compute_machine_key();
-        let _ = DERIVED_KEY.set(key.clone());
-        key
-    })
+    DERIVED_KEY.get_or_init(compute_machine_key).clone()
 }
 
 /// Compute the machine key (expensive operation - use `get_machine_key()` for cached access)
@@ -461,7 +455,9 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
 
     let meta_path = paths.profiles_dir.join("metadata.json");
     if let Ok(data) = serde_json::to_string_pretty(&obf_meta) {
-        let _ = write_file_secure(&meta_path, &data);
+        if let Err(e) = write_file_secure(&meta_path, &data) {
+            eprintln!("[warn] Failed to write metadata cache: {e}");
+        }
     }
 }
 

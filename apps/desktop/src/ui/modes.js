@@ -4,11 +4,9 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig } from '../api.js';
+import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
 import { persistConfigChanges } from './advanced.js';
-import { closeAllConnections } from '../api.js';
 import { fetchProxyGroups } from './proxy-groups.js';
-import { switchProxy } from '../api.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { Bus, Events } from './events.js';
@@ -30,7 +28,6 @@ export function initModeSelector() {
 
             appStore.set('isNetworkUpdating', true);
             if (container) container.classList.add('opacity-50', 'cursor-not-allowed');
-            showNotification(t.configuring);
 
             try {
                 // 1. Capture current node for inheritance
@@ -42,13 +39,20 @@ export function initModeSelector() {
                     }
                 } catch (e) { modesLogger.warn("Failed to capture node for inheritance", e); }
 
-                // 2. Switch mode
+                // 2. Switch mode (hot-reload via REST API — instant)
                 await patchConfig({ mode });
-                await persistConfigChanges({ mode });
                 updateModeUI(mode);
-                await closeAllConnections();
 
-                // 3. Inherit node in target mode
+                // 3. Persist to disk + close connections in background
+                // (persist is fire-and-forget; patchConfig success is the source of truth)
+                persistConfigChanges({ mode }).catch((e) =>
+                    modesLogger.warn("Failed to persist mode change", e)
+                );
+                closeAllConnections().catch((e) =>
+                    modesLogger.warn("Failed to close connections", e)
+                );
+
+                // 4. Inherit node in target mode
                 if (nodeToInherit && mode !== 'direct') {
                     const resultAfter = await fetchProxyGroups();
                     if (resultAfter && resultAfter.proxies.includes(nodeToInherit)) {

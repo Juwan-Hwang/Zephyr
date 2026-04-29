@@ -11,6 +11,15 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
+
+const DEFAULT_API_PORT: u16 = 9090;
+const DEFAULT_MIXED_PORT: u16 = 7890;
+#[cfg(target_os = "macos")]
+const PORT_WAIT_MAX_RETRIES: u32 = 50;
+#[cfg(target_os = "macos")]
+const PORT_WAIT_INTERVAL_MS: u64 = 100;
+const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
+const HEALTH_CHECK_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
 use super::tun_manager::{is_tun_mode, restart_core_as_root};
 use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
@@ -423,11 +432,11 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
         .and_then(|v| v.as_str())
         .and_then(|ext_ctrl| ext_ctrl.split(':').next_back())
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9090)
+        .unwrap_or(DEFAULT_API_PORT)
 }
 
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
-    let mut safe_custom_args = Vec::new();
+    let mut safe_custom_args = Vec::with_capacity(custom_args.len());
 
     let blocked_args = [
         "-d",
@@ -496,9 +505,9 @@ pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u1
 fn build_minimal_runtime_config(secret: &str) -> (String, u16) {
     (
         format!(
-            "mixed-port: 7890\nmode: rule\nlog-level: info\nunified-delay: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
+            "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
-        9090,
+        DEFAULT_API_PORT,
     )
 }
 
@@ -508,8 +517,8 @@ fn select_runtime_config(
     preferred_path: &Path,
     secret: &str,
 ) -> Result<(Option<String>, String, u16), String> {
-    let preferred_content = fs::read_to_string(preferred_path)
-        .map_err(|e| format!("Failed to read config {preferred_path:?}: {e}"))?;
+    let preferred_content =
+        fs::read_to_string(preferred_path).map_err(|e| format!("Failed to read config: {e}"))?;
     if let Some((final_config, config_port)) = prepare_runtime_config(&preferred_content, secret) {
         return Ok((Some(preferred_name.to_owned()), final_config, config_port));
     }
@@ -586,6 +595,185 @@ pub(super) fn generate_secret() -> String {
         .collect()
 }
 
+/// Wait for a TCP port to become free (macOS only).
+///
+/// After killing a process, the OS may keep the port occupied for a short period.
+/// This function polls until the port can be bound or the retry limit is reached.
+#[cfg(target_os = "macos")]
+async fn wait_for_port_free(port: u16) {
+    for i in 0..PORT_WAIT_MAX_RETRIES {
+        if std::net::TcpListener::bind(format!("127.0.0.1:{port}")).is_ok() {
+            eprintln!(
+                "[CORE] port {port} confirmed free after {}ms",
+                i * PORT_WAIT_INTERVAL_MS
+            );
+            break;
+        }
+        if i == PORT_WAIT_MAX_RETRIES - 1 {
+            eprintln!(
+                "[CORE] WARNING: port {port} still occupied after {}ms, proceeding anyway",
+                PORT_WAIT_MAX_RETRIES * PORT_WAIT_INTERVAL_MS
+            );
+        } else {
+            eprintln!(
+                "[CORE] waiting for port {port}... {}ms",
+                (i + 1) * PORT_WAIT_INTERVAL_MS
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(PORT_WAIT_INTERVAL_MS)).await;
+    }
+}
+
+/// Attach a log file to a `Command` for stdout/stderr redirection.
+fn attach_log_file(cmd: &mut Command, log_path: &Path) {
+    if let Ok(log_file) = std::fs::File::create(log_path) {
+        let stderr_handle = log_file.try_clone();
+        cmd.stdout(std::process::Stdio::from(log_file));
+        cmd.stderr(
+            stderr_handle
+                .map(std::process::Stdio::from)
+                .unwrap_or_else(|_| std::process::Stdio::null()),
+        );
+    } else {
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+    }
+}
+
+/// Spawn mihomo, detect immediate exit, and retry on cache lock issues.
+///
+/// Returns the successfully spawned `Child` process and the log file path, or an error string.
+async fn spawn_with_cache_retry(
+    exe_path: &Path,
+    safe_custom_args: &[String],
+    core_dir: &Path,
+) -> Result<(std::process::Child, PathBuf), String> {
+    let spawn_cmd = |log_suffix: &str| -> (Command, PathBuf) {
+        let mut cmd = Command::new(exe_path);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt as _;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        cmd.args(["-d", "."]);
+        cmd.args(["-f", "run_config.yaml"]);
+        for arg in safe_custom_args {
+            cmd.arg(arg);
+        }
+        cmd.current_dir(core_dir);
+
+        let log_path = std::env::temp_dir().join(format!(
+            "zephyr-mihomo-{}-{}-{}.log",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0),
+            log_suffix,
+        ));
+        (cmd, log_path)
+    };
+
+    let (mut cmd, log_path) = spawn_cmd("run");
+    attach_log_file(&mut cmd, &log_path);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn mihomo: {e}"))?;
+
+    // Track the actual log file path (may change on retry)
+    let mut actual_log_path = log_path.clone();
+
+    // Check if process exits immediately
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+
+            if detect_cache_lock_issue(&log) {
+                eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
+                let cache_path = core_dir.join("cache.db");
+                let _ = std::fs::remove_file(&cache_path);
+
+                let (mut retry_cmd, retry_log_path) = spawn_cmd("retry");
+                attach_log_file(&mut retry_cmd, &retry_log_path);
+
+                match retry_cmd.spawn() {
+                    Ok(mut retry_child) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        match retry_child.try_wait() {
+                            Ok(None) => {
+                                child = retry_child;
+                                actual_log_path = retry_log_path;
+                            }
+                            Ok(Some(retry_status)) => {
+                                let retry_log =
+                                    std::fs::read_to_string(&retry_log_path).unwrap_or_default();
+                                return Err(format!(
+                                    "mihomo retry also failed: {retry_status:?}, log: {retry_log}"
+                                ));
+                            }
+                            Err(e) => {
+                                return Err(format!("retry try_wait error: {e}"));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to spawn mihomo on retry: {e}"));
+                    }
+                }
+            } else {
+                return Err(format!("mihomo exited immediately: {status:?}, log: {log}"));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            return Err(format!("try_wait error: {e}"));
+        }
+    }
+
+    Ok((child, actual_log_path))
+}
+
+/// Perform an HTTP health check against the mihomo API.
+///
+/// Tries to connect via raw TCP and checks for HTTP 200/401 responses.
+/// Returns `Ok(())` if the core responds within the retry limit.
+async fn health_check(port: u16) -> Result<(), String> {
+    let mut is_healthy = false;
+    for _ in 0..HEALTH_CHECK_MAX_RETRIES {
+        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
+            let request =
+                format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+            if stream.write_all(request.as_bytes()).is_ok() {
+                let mut response = [0u8; 256];
+                if let Ok(n) = stream.read(&mut response) {
+                    let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
+                    if resp_str.starts_with("HTTP/1.1 200")
+                        || resp_str.starts_with("HTTP/1.1 401")
+                        || resp_str.starts_with("HTTP/1.0 200")
+                        || resp_str.starts_with("HTTP/1.0 401")
+                    {
+                        is_healthy = true;
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = tauri::async_runtime::spawn_blocking(|| {
+            std::thread::sleep(std::time::Duration::from_millis(HEALTH_CHECK_INTERVAL_MS));
+        })
+        .await;
+    }
+
+    if is_healthy {
+        Ok(())
+    } else {
+        Err("Core started but health check failed. Check the logs for details.".to_owned())
+    }
+}
+
+#[allow(clippy::cognitive_complexity)]
 #[tauri::command]
 pub async fn start_core(
     app: AppHandle,
@@ -594,11 +782,7 @@ pub async fn start_core(
     test: bool,
     custom_args: Vec<String>,
     secret: Option<String>,
-    rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<CoreStartResult, String> {
-    // Rate limit: max 1 call per 3 seconds
-    crate::rate_limit!(rate_limiter, "start_core", 3000);
-
     // Wait for any previous core start operation to complete (max 10s)
     let mut wait_ms = 0;
     while CORE_STARTING
@@ -606,18 +790,14 @@ pub async fn start_core(
         .is_err()
     {
         if wait_ms > 10000 {
-            // Timeout: force reset the flag to prevent permanent deadlock
-            // This can happen if previous start crashed without cleaning up
             eprintln!("[CORE] WARNING: Core start lock timeout, forcing reset");
             CORE_STARTING.store(false, Ordering::SeqCst);
-            // Try to acquire again after reset
             if CORE_STARTING
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                 .is_ok()
             {
-                break; // Successfully acquired after reset
+                break;
             }
-            // If still can't acquire, another thread is racing, wait more
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         wait_ms += 200;
@@ -632,15 +812,40 @@ pub async fn start_core(
     }
     let _guard = ResetGuard;
 
+    // Check if core is already running with the SAME config (under CORE_STARTING protection).
+    // If the requested config differs from the current one, we must restart to apply it.
+    {
+        let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        if lock.process().is_some() {
+            let same_config = lock
+                .last_config_path()
+                .is_some_and(|current| current == config_path);
+            if same_config {
+                if let Some(port) = lock.last_port() {
+                    return Ok(CoreStartResult {
+                        secret: lock.last_secret().to_owned(),
+                        port,
+                    });
+                }
+            }
+        }
+    }
+
     // Check if TUN mode is active via flag (memory-based, not from config file)
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
         let secret = restart_core_as_root(&app, true).await?;
-        return Ok(CoreStartResult { secret, port: 9090 });
+        return Ok(CoreStartResult {
+            secret,
+            port: DEFAULT_API_PORT,
+        });
     }
 
     // Kill any existing mihomo processes before starting a new one
-    kill_mihomo();
+    // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
+    tokio::task::spawn_blocking(kill_mihomo)
+        .await
+        .map_err(|e| format!("Kill task failed: {e}"))?;
 
     let paths = ensure_app_storage(&app)?;
 
@@ -649,23 +854,9 @@ pub async fn start_core(
     // If mihomo fails to start due to lock issues, we'll retry after removing it
     // This is handled in the spawn error handling below
 
-    // Wait for port 9090 to be truly free (max 5s)
-    // Even after process death, port release may have a few hundred ms delay
+    // Wait for port to be truly free (max 5s)
     #[cfg(target_os = "macos")]
-    {
-        for i in 0..50 {
-            if std::net::TcpListener::bind("127.0.0.1:9090").is_ok() {
-                eprintln!("[CORE] port 9090 confirmed free after {}ms", i * 100);
-                break;
-            }
-            if i == 49 {
-                eprintln!("[CORE] WARNING: port 9090 still occupied after 5s, proceeding anyway");
-            } else {
-                eprintln!("[CORE] waiting for port 9090... {}ms", (i + 1) * 100);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    }
+    wait_for_port_free(DEFAULT_API_PORT).await;
 
     let exe_path = get_core_exe_path(&app)?;
 
@@ -711,7 +902,7 @@ pub async fn start_core(
         );
     }
 
-    stop_core(app.clone(), state.clone())?;
+    stop_core_inner(&app, &state)?;
 
     let resolved_secret = secret.unwrap_or_else(generate_secret);
 
@@ -724,21 +915,6 @@ pub async fn start_core(
 
     let run_config_path = paths.core_dir.join("run_config.yaml");
     write_file_secure(&run_config_path, &final_config)?;
-
-    let mut cmd = Command::new(&exe_path);
-    #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt as _;
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    cmd.args(["-d", "."]);
-    cmd.args(["-f", "run_config.yaml"]);
-
-    for arg in &safe_custom_args {
-        cmd.arg(arg);
-    }
-
-    cmd.current_dir(&paths.core_dir);
 
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
@@ -755,190 +931,15 @@ pub async fn start_core(
         }
     }
 
-    // Write stdout/stderr to file to avoid pipe blocking, while still seeing errors
-    // Use temp directory with unique filename per process to avoid multi-instance conflicts
-    // Prefix with app name to avoid conflicts with other applications
-    let log_path = std::env::temp_dir().join(format!(
-        "zephyr-mihomo-{}-{}.log",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-
-    // Cleanup old zephyr-mihomo log files (older than 1 hour) to prevent accumulation
-    // Only scan for files matching our specific prefix to avoid interfering with other apps
-    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                // Only cleanup files with our specific prefix
-                if name.starts_with("zephyr-mihomo-") && name.ends_with(".log") {
-                    // Extract timestamp from the last segment before .log
-                    // Format: zephyr-mihomo-{pid}-{timestamp}.log
-                    // We parse from the end to be resilient to prefix changes
-                    if let Some(name_without_ext) = name.strip_suffix(".log") {
-                        if let Some(last_segment) = name_without_ext.rsplit('-').next() {
-                            if let Ok(ts) = last_segment.parse::<u128>() {
-                                // Delete logs older than 1 hour (3600000 ms)
-                                if now.saturating_sub(ts) > 3600000 {
-                                    let _ = std::fs::remove_file(entry.path());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Create or truncate log file
-    if let Ok(log_file) = std::fs::File::create(&log_path) {
-        // Clone the handle for stderr before converting to Stdio
-        let stderr_handle = log_file.try_clone();
-        cmd.stdout(std::process::Stdio::from(log_file));
-        cmd.stderr(
-            stderr_handle
-                .map(std::process::Stdio::from)
-                .unwrap_or_else(|_| std::process::Stdio::null()),
-        );
-    } else {
-        // Fallback to null if log file cannot be created
-        cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn mihomo: {e}"))?;
-
-    // Check if process exits immediately
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    match child.try_wait() {
-        Ok(Some(status)) => {
-            let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-
-            // Check if this looks like a cache/lock issue
-            let is_lock_issue = detect_cache_lock_issue(&log);
-
-            if is_lock_issue {
-                eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
-                let cache_path = paths.core_dir.join("cache.db");
-                let _ = std::fs::remove_file(&cache_path);
-
-                // Retry once after removing cache.db
-                let mut retry_cmd = Command::new(&exe_path);
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt as _;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    retry_cmd.creation_flags(CREATE_NO_WINDOW);
-                }
-                retry_cmd.args(["-d", "."]);
-                retry_cmd.args(["-f", "run_config.yaml"]);
-                for arg in &safe_custom_args {
-                    retry_cmd.arg(arg);
-                }
-                retry_cmd.current_dir(&paths.core_dir);
-
-                // Setup log file for retry
-                let retry_log_path = std::env::temp_dir().join(format!(
-                    "zephyr-mihomo-{}-{}-retry.log",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or(0)
-                ));
-                if let Ok(log_file) = std::fs::File::create(&retry_log_path) {
-                    let stderr_handle = log_file.try_clone();
-                    retry_cmd.stdout(std::process::Stdio::from(log_file));
-                    retry_cmd.stderr(
-                        stderr_handle
-                            .map(std::process::Stdio::from)
-                            .unwrap_or_else(|_| std::process::Stdio::null()),
-                    );
-                } else {
-                    retry_cmd.stdout(std::process::Stdio::null());
-                    retry_cmd.stderr(std::process::Stdio::null());
-                }
-
-                match retry_cmd.spawn() {
-                    Ok(mut retry_child) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                        match retry_child.try_wait() {
-                            Ok(None) => {
-                                // Retry successful, use this process
-                                child = retry_child;
-                                // Continue to health check below
-                            }
-                            Ok(Some(retry_status)) => {
-                                let retry_log =
-                                    std::fs::read_to_string(&retry_log_path).unwrap_or_default();
-                                return Err(format!(
-                                    "mihomo retry also failed: {retry_status:?}, log: {retry_log}"
-                                ));
-                            }
-                            Err(e) => {
-                                return Err(format!("retry try_wait error: {e}"));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        return Err(format!("Failed to spawn mihomo on retry: {e}"));
-                    }
-                }
-            } else {
-                return Err(format!("mihomo exited immediately: {status:?}, log: {log}"));
-            }
-        }
-        Ok(None) => {}
-        Err(e) => {
-            return Err(format!("try_wait error: {e}"));
-        }
-    }
+    // Spawn mihomo (stdout/stderr redirected to log file internally)
+    let (mut child, log_path) =
+        spawn_with_cache_retry(&exe_path, &safe_custom_args, &paths.core_dir).await?;
 
     // Use config port directly, rely on health check to verify
     let port = config_port;
 
     // HTTP Health Check via raw TCP
-    let mut is_healthy = false;
-    for _ in 0..20 {
-        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
-            let request =
-                format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(request.as_bytes()).is_ok() {
-                let mut response = [0u8; 256];
-                if let Ok(n) = stream.read(&mut response) {
-                    let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
-                    if resp_str.starts_with("HTTP/1.1 200")
-                        || resp_str.starts_with("HTTP/1.1 401")
-                        || resp_str.starts_with("HTTP/1.0 200")
-                        || resp_str.starts_with("HTTP/1.0 401")
-                    {
-                        is_healthy = true;
-                        break;
-                    }
-                }
-            }
-        }
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-        })
-        .await;
-    }
-
-    if !is_healthy {
-        let err_msg =
-            "Core started but health check failed. Check the logs for details.".to_owned();
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(err_msg);
-    }
+    health_check(port).await?;
 
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
@@ -950,12 +951,12 @@ pub async fn start_core(
         let _ = child.wait();
         return Err("Failed to lock state".to_owned());
     };
-    lock.process = Some(child);
-    lock.last_secret.clone_from(&resolved_secret);
-    lock.last_config_path = active_config_name;
-    lock.last_custom_args = Some(safe_custom_args);
-    lock.last_port = Some(port);
-    lock.last_log_path = Some(log_path.to_string_lossy().into_owned());
+    lock.set_process(Some(child));
+    lock.set_last_secret(resolved_secret.clone());
+    lock.set_last_config_path(active_config_name);
+    lock.set_last_custom_args(Some(safe_custom_args));
+    lock.set_last_port(Some(port));
+    lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
     drop(lock);
 
     Ok(CoreStartResult {
@@ -964,17 +965,16 @@ pub async fn start_core(
     })
 }
 
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
+/// Internal: stop the core process (no rate limiter reset).
+pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), String> {
     // Take the child process
     let child = {
         let mut lock = state
             .0
             .lock()
             .map_err(|e| format!("Failed to lock state: {e}"))?;
-        lock.last_port = None;
-        lock.process.take()
+        lock.set_last_port(None);
+        lock.take_process()
     };
 
     if let Some(mut child_process) = child {
@@ -983,7 +983,7 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
         let _ = child_process.wait();
     }
 
-    if let Ok(paths) = ensure_app_storage(&app) {
+    if let Ok(paths) = ensure_app_storage(app) {
         let run_config_path = paths.core_dir.join("run_config.yaml");
         if run_config_path.exists() {
             if let Err(e) = fs::remove_file(&run_config_path) {
@@ -992,6 +992,13 @@ pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String
         }
     }
 
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
+    stop_core_inner(&app, &state)?;
     Ok("Core stopped and cleaned up".to_owned())
 }
 

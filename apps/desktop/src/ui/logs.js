@@ -4,7 +4,8 @@
  *
  * Architecture:
  * ┌─────────────────────────────────────────────────────────────┐
- * │  Virtual Scroll Engine                                      │
+ * │  Virtual Scroll Engine (shared module)                      │
+ * │  ├─ createVirtualScroll() from utils/virtual-scroll.js     │
  * │  ├─ O(log n) binary search (Float64Array prefix-sum)        │
  * │  ├─ Scroll quantization (SCROLL_QUANTUM bins)               │
  * │  ├─ Overscan buffer (OVERSCAN_ROWS top/bottom)              │
@@ -31,9 +32,11 @@
  * @module ui/logs
  */
 
-import { readCoreLog } from '../api.js';
+import { readCoreLog, listen } from '../api.js';
 import { translations, currentLang } from '../i18n.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
+import { escapeHtml } from '../utils/sanitize.js';
+import { createVirtualScroll } from '../utils/virtual-scroll.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -69,28 +72,6 @@ const LEVEL_PRIORITY = Object.freeze({
     warn:  2,
     error: 3,
 });
-
-// ── HTML Entity Escaping (string-based, no DOM allocation) ─────────────────
-
-const _escapeMap = Object.freeze({
-    '&':  '&amp;',
-    '<':  '&lt;',
-    '>':  '&gt;',
-    '"':  '&quot;',
-    "'":  '&#39;',
-});
-const _escapeRe = /[&<>"']/g;
-
-/**
- * Escape HTML entities using string replacement — zero DOM allocations.
- * ~50x faster than createElement('div').textContent round-trip.
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-    if (typeof str !== 'string') return '';
-    return str.replace(_escapeRe, ch => /** @type {any} */ (_escapeMap)[ch]);
-}
 
 // ── Log Level Parser (regex compiled once, reused) ────────────────────────
 
@@ -138,10 +119,8 @@ let _spacerBottom = null;
 let _lineCountEl = null;
 /** @type {HTMLElement|null} */
 let _autoScrollBtn = null;
-/** @type {number|null} */
-let _debounceTimer = null;
 /** @type {number} */
-let _lastRenderedScrollTop = -1;
+let _debounceTimer = null;
 /** @type {number} */
 let _lastRenderedFilterHash = -1;
 /** @type {boolean} */
@@ -149,21 +128,17 @@ let _initialized = false;
 /** @type {(() => void)|null} */
 let _cleanupUnregister = null;
 
-// Virtual scroll state
-/** @type {Float64Array} Prefix-sum array: offsets[i] = sum of heights for items 0..i-1 */
-let _offsets = new Float64Array(0);
-/** @type {Map<number, number>} Measured heights cache: lineIndex → actual height */
-let _heightCache = new Map();
-/** @type {number} Version counter — incremented when filtered set changes */
-let _offsetVersion = 0;
-/** @type {number} Cached version at last rebuild */
-let _offsetsVersion = -1;
-/** @type {number} First visible item index */
-let _visibleStart = 0;
-/** @type {number} Last visible item index (inclusive) */
-let _visibleEnd = 0;
-/** @type {Set<number>} Currently mounted item indices */
-let _mountedSet = new Set();
+// Extension logs state
+/** @type {boolean} Whether the Extension Logs tab is currently active */
+let _extLogTabActive = false;
+/** @type {Array<{type: string, message: string, timestamp: string}>} Extension event log entries */
+let _extLogEvents = [];
+/** @type {(() => void)|null} Tauri event unlisten handle */
+let _prismEventUnlisten = null;
+
+// Virtual scroll instance (shared module)
+/** @type {ReturnType<typeof createVirtualScroll>|null} */
+let _vs = null;
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -181,6 +156,7 @@ export async function initLogsPage() {
         _container.innerHTML = buildPageHTML();
         cacheDOMRefs();
         bindEvents();
+        createVirtualScrollInstance();
         await fetchLogs();
         startPolling();
         return;
@@ -191,6 +167,7 @@ export async function initLogsPage() {
     _container.innerHTML = buildPageHTML();
     cacheDOMRefs();
     bindEvents();
+    createVirtualScrollInstance();
     await fetchLogs();
     startPolling();
 
@@ -204,6 +181,12 @@ export async function initLogsPage() {
  */
 export function destroyLogsPage() {
     stopPolling();
+    _vs?.destroy();
+    _vs = null;
+    if (_prismEventUnlisten) {
+        _prismEventUnlisten();
+        _prismEventUnlisten = null;
+    }
 }
 
 // ── State Management ───────────────────────────────────────────────────────
@@ -216,15 +199,11 @@ function resetState() {
     _autoScroll = true;
     _levelFilter = 'all';
     _searchQuery = '';
-    _lastRenderedScrollTop = -1;
     _lastRenderedFilterHash = -1;
-    _heightCache.clear();
-    _mountedSet.clear();
-    _offsets = new Float64Array(0);
-    _offsetVersion = 0;
-    _offsetsVersion = -1;
-    _visibleStart = 0;
-    _visibleEnd = 0;
+    _vs?.destroy();
+    _vs = null;
+    _extLogTabActive = false;
+    _extLogEvents = [];
     if (_debounceTimer) {
         clearTimeout(_debounceTimer);
         _debounceTimer = null;
@@ -270,8 +249,13 @@ function buildPageHTML() {
         <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
 
         <header class="flex items-center justify-between relative z-10 shrink-0">
-            <div>
+            <div class="flex items-center gap-4">
                 <h2 class="text-2xl font-light text-zinc-100" data-i18n="logsTitle">${t('logsTitle')}</h2>
+                <!-- Tab buttons -->
+                <div class="flex items-center gap-1 bg-black/5 dark:bg-white/5 rounded-lg p-0.5">
+                    <button id="log-tab-core" class="log-tab-btn active text-xs px-3 py-1 rounded-md transition-all" data-i18n="logTabCore">${t('logTabCore')}</button>
+                    <button id="log-tab-ext" class="log-tab-btn text-xs px-3 py-1 rounded-md transition-all" data-i18n="ruleLibraryLogTab">${t('ruleLibraryLogTab')}</button>
+                </div>
             </div>
             <div class="flex items-center gap-3">
                 <span id="log-line-count" class="text-xs text-zinc-500 tabular-nums">0 ${t('logLines')}</span>
@@ -282,30 +266,44 @@ function buildPageHTML() {
             </div>
         </header>
 
-        <!-- Filter bar -->
-        <div class="flex items-center gap-2 flex-wrap relative z-10">
-            <button class="log-level-btn active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
-            <button class="log-level-btn" data-level="debug" data-i18n="logLevelDebug">${t('logLevelDebug')}</button>
-            <button class="log-level-btn" data-level="info" data-i18n="logLevelInfo">${t('logLevelInfo')}</button>
-            <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
-            <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
-            <div class="flex-1"></div>
-            <!-- Search Box (Journal Style — consistent with rules page) -->
-            <div class="relative group flex items-center">
-                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+        <!-- Core Logs Panel -->
+        <div id="log-panel-core" class="flex-1 min-h-0 flex flex-col gap-4 relative z-10">
+            <!-- Filter bar -->
+            <div class="flex items-center gap-2 flex-wrap relative z-10">
+                <button class="log-level-btn active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
+                <button class="log-level-btn" data-level="debug" data-i18n="logLevelDebug">${t('logLevelDebug')}</button>
+                <button class="log-level-btn" data-level="info" data-i18n="logLevelInfo">${t('logLevelInfo')}</button>
+                <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
+                <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
+                <div class="flex-1"></div>
+                <!-- Search Box (Journal Style — consistent with rules page) -->
+                <div class="relative group flex items-center">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input id="log-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
                 </div>
-                <input id="log-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
+            </div>
+
+            <!-- Virtual scroll container -->
+            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
+                <div id="log-spacer-top" style="height:0"></div>
+                <div id="log-lines-container"></div>
+                <div id="log-spacer-bottom" style="height:0"></div>
             </div>
         </div>
 
-        <!-- Virtual scroll container -->
-        <div id="log-content" class="flex-1 overflow-y-auto rounded-2xl bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
-            <div id="log-spacer-top" style="height:0"></div>
-            <div id="log-lines-container"></div>
-            <div id="log-spacer-bottom" style="height:0"></div>
+        <!-- Extension Logs Panel -->
+        <div id="log-panel-ext" class="hidden flex-1 min-h-0 flex flex-col gap-4 relative z-10">
+            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
+                <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-zinc-600">
+                    <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <span data-i18n="ruleLibraryLogEmpty">${t('ruleLibraryLogEmpty')}</span>
+                </div>
+                <div id="log-ext-list" class="space-y-1"></div>
+            </div>
         </div>
     `;
 }
@@ -315,13 +313,123 @@ function buildPageHTML() {
 function bindEvents() {
     if (!_container) return;
 
+    // Tab switching
+    const tabCore = _container.querySelector('#log-tab-core');
+    const tabExt = _container.querySelector('#log-tab-ext');
+    const panelCore = _container.querySelector('#log-panel-core');
+    const panelExt = _container.querySelector('#log-panel-ext');
+
+    const switchToCoreTab = () => {
+        _extLogTabActive = false;
+        tabCore?.classList.add('active');
+        tabExt?.classList.remove('active');
+        panelCore?.classList.remove('hidden');
+        panelCore?.classList.add('flex', 'flex-col', 'gap-4');
+        panelExt?.classList.add('hidden');
+        panelExt?.classList.remove('flex', 'flex-col', 'gap-4');
+        // Show core log controls
+        _lineCountEl?.parentElement?.classList.remove('hidden');
+        _autoScrollBtn?.parentElement?.classList.remove('hidden');
+    };
+
+    const switchToExtTab = () => {
+        _extLogTabActive = true;
+        tabExt?.classList.add('active');
+        tabCore?.classList.remove('active');
+        panelExt?.classList.remove('hidden');
+        panelExt?.classList.add('flex', 'flex-col', 'gap-4');
+        panelCore?.classList.add('hidden');
+        panelCore?.classList.remove('flex', 'flex-col', 'gap-4');
+        // Hide core log controls
+        _lineCountEl?.parentElement?.classList.add('hidden');
+        _autoScrollBtn?.parentElement?.classList.add('hidden');
+    };
+
+    tabCore?.addEventListener('click', switchToCoreTab);
+    tabExt?.addEventListener('click', switchToExtTab);
+
+    // Listen for Prism engine events
+    if (_prismEventUnlisten) {
+        _prismEventUnlisten();
+        _prismEventUnlisten = null;
+    }
+    listen('prism-event', (/** @type {{ payload: any }} */ event) => {
+        const payload = event.payload;
+        if (!payload) return;
+
+        // PrismEvent is a Rust serde-tagged enum.  Serialized shape:
+        //   { "ConfigReloaded": { "success": true, "message": "..." } }
+        //   { "PatchFailed": { "patch_id": "...", "error": "..." } }
+        //   { "WatcherEvent": { "file": "...", "change_type": "..." } }
+        //   { "WatcherStatus": { "running": true, "watching_count": 1 } }
+        // Extract the variant name as the type and build a human-readable message.
+        let type = 'Unknown';
+        let message = '';
+        const variants = ['ConfigReloaded', 'PatchFailed', 'PatchApplied', 'WatcherEvent', 'WatcherStatus', 'RulesChanged'];
+        for (const v of variants) {
+            if (payload[v] !== undefined) {
+                type = v;
+                const data = payload[v];
+                if (typeof data === 'object' && data !== null) {
+                    if (data.message) message = data.message;
+                    else if (data.error) message = data.error;
+                    else if (data.file) message = `${data.change_type || 'changed'}: ${data.file}`;
+                    else if (v === 'WatcherStatus') message = data.running ? `Watching ${data.watching_count} dir(s)` : 'Watch stopped';
+                    else if (v === 'PatchApplied') {
+                        const pid = data.patch_id || data.id || '';
+                        const parts = [];
+                        const a = data.added || data.added_count || 0;
+                        const r = data.removed || data.removed_count || 0;
+                        const m = data.modified || data.modified_count || 0;
+                        if (a) parts.push(`+${a}`);
+                        if (r) parts.push(`-${r}`);
+                        if (m) parts.push(`~${m}`);
+                        const stats = parts.length ? ` [${parts.join(' ')}]` : '';
+                        const dur = data.duration || data.elapsed ? ` in ${data.duration || data.elapsed}` : '';
+                        message = `${pid}${stats}${dur}`;
+                    }
+                    else if (v === 'RulesChanged') {
+                        const parts = [];
+                        const a = data.added || data.added_count || 0;
+                        const r = data.removed || data.removed_count || 0;
+                        const m = data.modified || data.modified_count || 0;
+                        if (a) parts.push(`+${a} added`);
+                        if (r) parts.push(`-${r} removed`);
+                        if (m) parts.push(`~${m} modified`);
+                        message = parts.length ? parts.join(', ') : 'no changes';
+                    }
+                    else message = JSON.stringify(data);
+                } else {
+                    message = String(data);
+                }
+                break;
+            }
+        }
+
+        const entry = {
+            type,
+            message,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        };
+        _extLogEvents.push(entry);
+        // Cap at 500 events
+        if (_extLogEvents.length > 500) {
+            _extLogEvents = _extLogEvents.slice(-500);
+        }
+        renderExtLogEntry(entry);
+    }).then(unlisten => {
+        _prismEventUnlisten = unlisten;
+    }).catch(() => {
+        // Tauri event API not available (e.g. in browser dev mode)
+    });
+
     // Auto scroll toggle
     _autoScrollBtn?.addEventListener('click', () => {
         _autoScroll = !_autoScroll;
         _autoScrollBtn?.classList.toggle('active', _autoScroll);
         if (_autoScroll && _logContent) {
             _logContent.scrollTop = _logContent.scrollHeight;
-            scheduleRender();
+            render();
         }
     });
 
@@ -333,7 +441,7 @@ function bindEvents() {
             btn.classList.add('active');
             _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
             invalidateFilter();
-            scheduleRender();
+            render();
         });
     });
 
@@ -344,24 +452,14 @@ function bindEvents() {
         _debounceTimer = setTimeout(() => {
             _searchQuery = (searchInput?.value || '').trim();
             invalidateFilter();
-            scheduleRender();
+            render();
             _debounceTimer = null;
         }, DEBOUNCE_MS);
     });
 
-    // Detect manual scroll to disable auto-scroll
-    _logContent?.addEventListener('scroll', onScroll, { passive: true });
-
-    // Observe container resize for virtual scroll recalculation
-    if (_logContent && typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(() => scheduleRender());
-        ro.observe(_logContent);
-        // Store for cleanup
-        /** @type {any} */ (_logContent)._resizeObserver = ro;
-    }
 }
 
-// ── Scroll Handler ─────────────────────────────────────────────────────────
+// ── Scroll Handler (auto-scroll detection only; quantization handled by shared module) ──
 
 function onScroll() {
     if (!_logContent) return;
@@ -372,13 +470,6 @@ function onScroll() {
     if (!atBottom && _autoScroll) {
         _autoScroll = false;
         _autoScrollBtn?.classList.remove('active');
-    }
-
-    // Scroll quantization: only re-render if scrollTop changed by more than SCROLL_QUANTUM * ROW_HEIGHT_EST
-    const quantized = Math.floor(scrollTop / (SCROLL_QUANTUM * ROW_HEIGHT_EST));
-    const lastQuantized = Math.floor(_lastRenderedScrollTop / (SCROLL_QUANTUM * ROW_HEIGHT_EST));
-    if (quantized !== lastQuantized) {
-        scheduleRender();
     }
 }
 
@@ -393,40 +484,27 @@ async function fetchLogs() {
         if (result.rotated || result.next_offset < _offset) {
             _offset = 0;
             _allLines = [];
-            _heightCache.clear();
-            _mountedSet.clear();
-            // Clear all existing DOM lines
-            const linesContainer = _container?.querySelector('#log-lines-container');
-            if (linesContainer) linesContainer.innerHTML = '';
+            _vs?.clearHeightCache();
+            // invalidateFilter() will rebuild indices and call _vs.invalidate()
             invalidateFilter();
         } else {
             _offset = result.next_offset;
         }
 
         // Append new lines
-        const prevLen = _allLines.length;
         _allLines.push(...result.lines);
 
         // Ring buffer trim from head
         if (_allLines.length > MAX_LINES) {
             const excess = _allLines.length - MAX_LINES;
             _allLines = _allLines.slice(excess);
-
-            // Invalidate height cache for trimmed indices
-            for (let i = 0; i < excess; i++) {
-                _heightCache.delete(i);
-            }
-            // Shift remaining cache keys down
-            const newCache = new Map();
-            for (const [k, v] of _heightCache) {
-                if (k >= excess) newCache.set(k - excess, v);
-            }
-            _heightCache = newCache;
+            // Height cache indices shifted — invalidate to trigger full re-render
+            _vs?.clearHeightCache();
         }
 
         invalidateFilter();
         updateLineCount();
-        scheduleRender();
+        render();
     } catch {
         // Core not started yet or log file unavailable — ignore silently
     }
@@ -442,12 +520,8 @@ function computeFilterHash() {
 
 function invalidateFilter() {
     _lastRenderedFilterHash = -1;
-    _offsetVersion++;
-    // Clear mount state — filtered indices changed, all existing DOM nodes are stale
-    _mountedSet.clear();
-    const linesContainer = _container?.querySelector('#log-lines-container');
-    if (linesContainer) linesContainer.innerHTML = '';
     rebuildFilteredIndices();
+    _vs?.invalidate();
 }
 
 function rebuildFilteredIndices() {
@@ -482,212 +556,262 @@ function rebuildFilteredIndices() {
     }
 }
 
-// ── Virtual Scroll Engine ──────────────────────────────────────────────────
+// ── Virtual Scroll Instance ─────────────────────────────────────────────────
 
-/**
- * Rebuild the prefix-sum offset array using measured + estimated heights.
- * O(n) but only runs when filter set changes.
- */
-function rebuildOffsets() {
-    if (_offsetsVersion === _offsetVersion) return;
-    _offsetsVersion = _offsetVersion;
+function createVirtualScrollInstance() {
+    if (!_logContent || !_spacerTop || !_spacerBottom || !_container) return;
 
-    const n = _filteredIndices.length;
-    if (n === 0) {
-        _offsets = new Float64Array(0);
-        return;
-    }
+    _vs = createVirtualScroll({
+        container: _logContent,
+        spacerTop: _spacerTop,
+        spacerBottom: _spacerBottom,
+        linesContainer: _container.querySelector('#log-lines-container'),
+        itemCount: () => _filteredIndices.length,
+        renderItem: (idx, fragment) => {
+            const lineIdx = _filteredIndices[idx];
+            if (lineIdx === undefined) return;
+            const line = _allLines[lineIdx];
+            if (line === undefined) return;
 
-    // Reuse array if capacity sufficient
-    if (_offsets.length < n + 1) {
-        _offsets = new Float64Array(n + 1);
-    }
+            const isDark = document.documentElement.classList.contains('dark');
+            const levelColors = isDark ? LEVEL_COLORS_DARK : LEVEL_COLORS_LIGHT;
+            const level = parseLogLevel(line);
+            const color = levelColors[level] || (isDark ? '#a1a1aa' : '#71717a');
 
-    _offsets[0] = 0;
-    for (let i = 0; i < n; i++) {
-        const h = _heightCache.get(i) || ROW_HEIGHT_EST;
-        _offsets[i + 1] = _offsets[i] + h;
-    }
-}
+            const pre = document.createElement('pre');
+            pre.className = 'log-line whitespace-pre-wrap break-all min-h-[1.4em]';
+            pre.dataset.lineIdx = String(idx);
+            pre.style.color = color;
 
-/**
- * O(log n) binary search: find the first item whose cumulative offset > targetOffset.
- * @param {number} targetOffset
- * @returns {number} Item index
- */
-function bisectStart(targetOffset) {
-    const n = _filteredIndices.length;
-    if (n === 0) return 0;
+            // Build inner HTML with level highlighting + optional search highlight
+            let html = escapeHtml(line);
 
-    let lo = 0, hi = n;
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (_offsets[mid + 1] <= targetOffset) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    return lo;
-}
+            // Highlight search matches
+            const hasSearch = !!_searchQuery;
+            if (hasSearch) {
+                const searchEscaped = _searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const searchRe = new RegExp(`(${searchEscaped})`, 'gi');
+                html = html.replace(searchRe, '<mark class="bg-accent/30 text-accent rounded px-0.5">$1</mark>');
+            }
 
-/**
- * Compute the visible range based on current scroll position.
- * Returns [start, end] inclusive indices into _filteredIndices.
- * @returns {[number, number]}
- */
-function computeVisibleRange() {
-    if (!_logContent) return [0, 0];
+            // Highlight level tag with color (supports both [INFO] and level=info formats)
+            html = html.replace(
+                /(\[(?:DEBUG|INFO|WARN|WARNING|ERROR)\]|level=(?:debug|info|warn|warning|error))/gi,
+                (match) => {
+                    const m = match.match(/(?:DEBUG|INFO|WARN|WARNING|ERROR)/i);
+                    if (!m) return match;
+                    const key = m[0].toUpperCase() === 'WARNING' ? 'warn' : m[0].toLowerCase();
+                    const c = levelColors[/** @type {keyof typeof levelColors} */ (key)] || color;
+                    return `<span style="color:${c};font-weight:600">${match}</span>`;
+                }
+            );
 
-    const scrollTop = _logContent.scrollTop;
-    const viewportH = _logContent.clientHeight;
-
-    const start = Math.max(0, bisectStart(scrollTop) - OVERSCAN_ROWS);
-    const end = Math.min(
-        _filteredIndices.length - 1,
-        bisectStart(scrollTop + viewportH) + OVERSCAN_ROWS
-    );
-
-    // Cap total mounted items
-    const cappedEnd = Math.min(end, start + MAX_MOUNTED - 1);
-
-    return [start, Math.max(start, cappedEnd)];
+            pre.innerHTML = html;
+            fragment.appendChild(pre);
+        },
+        dataAttr: 'data-line-idx',
+        rowHeightEst: ROW_HEIGHT_EST,
+        overscanPx: OVERSCAN_ROWS * ROW_HEIGHT_EST,
+        scrollQuantumPx: SCROLL_QUANTUM * ROW_HEIGHT_EST,
+        maxMounted: MAX_MOUNTED,
+        onAutoScroll: () => {
+            if (_autoScroll && _logContent) {
+                _logContent.scrollTop = _logContent.scrollHeight;
+            }
+        },
+        onScroll: onScroll,
+    });
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
-/** @type {number|null} RAF id for render coalescing */
-let _renderRAF = null;
-
-function scheduleRender() {
-    if (_renderRAF !== null) return;
-    _renderRAF = requestAnimationFrame(() => {
-        _renderRAF = null;
-        render();
-    });
-}
-
 function render() {
-    if (!_logContent) return;
-
-    rebuildOffsets();
-    const [newStart, newEnd] = computeVisibleRange();
-    _lastRenderedScrollTop = _logContent.scrollTop;
-
-    const totalHeight = _filteredIndices.length > 0
-        ? _offsets[_filteredIndices.length]
-        : 0;
-
-    // Update spacers
-    const topH = newStart > 0 ? _offsets[newStart] : 0;
-    const bottomH = totalHeight - (newEnd >= 0 && newEnd + 1 < _offsets.length ? _offsets[newEnd + 1] : totalHeight);
-
-    if (_spacerTop) _spacerTop.style.height = `${topH}px`;
-    if (_spacerBottom) _spacerBottom.style.height = `${Math.max(0, bottomH)}px`;
-
-    // Determine mount/unmount sets
-    const toMount = new Set();
-    for (let i = newStart; i <= newEnd; i++) toMount.add(i);
-
-    const toUnmount = new Set(_mountedSet);
-    for (const idx of toMount) toUnmount.delete(idx);
-
-    const linesContainer = _container?.querySelector('#log-lines-container');
-    if (!linesContainer) return;
-
-    // Unmount items no longer visible
-    for (const idx of toUnmount) {
-        const el = linesContainer.querySelector(`[data-line-idx="${idx}"]`);
-        if (el) {
-            // Capture final height before removal
-            const h = el.getBoundingClientRect().height;
-            if (h > 0) _heightCache.set(idx, h);
-            el.remove();
-        }
-        _mountedSet.delete(idx);
-    }
-
-    // Mount new items
-    const isDark = document.documentElement.classList.contains('dark');
-    const levelColors = isDark ? LEVEL_COLORS_DARK : LEVEL_COLORS_LIGHT;
-    const hasSearch = !!_searchQuery;
-    const searchEscaped = hasSearch ? _searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
-    const searchRe = hasSearch ? new RegExp(`(${searchEscaped})`, 'gi') : null;
-    const fragment = document.createDocumentFragment();
-
-    for (const idx of toMount) {
-        if (_mountedSet.has(idx)) continue;
-
-        const lineIdx = _filteredIndices[idx];
-        if (lineIdx === undefined) continue;
-        const line = _allLines[lineIdx];
-        if (line === undefined) continue;
-
-        const level = parseLogLevel(line);
-        const color = levelColors[level] || (isDark ? '#a1a1aa' : '#71717a');
-
-        const pre = document.createElement('pre');
-        pre.className = 'log-line whitespace-pre-wrap break-all min-h-[1.4em]';
-        pre.dataset.lineIdx = String(idx);
-        pre.style.color = color;
-
-        // Build inner HTML with level highlighting + optional search highlight
-        let html = escapeHtml(line);
-
-        // Highlight search matches
-        if (searchRe) {
-            html = html.replace(searchRe, '<mark class="bg-accent/30 text-accent rounded px-0.5">$1</mark>');
-        }
-
-        // Highlight level tag with color (supports both [INFO] and level=info formats)
-        html = html.replace(
-            /(\[(?:DEBUG|INFO|WARN|WARNING|ERROR)\]|level=(?:debug|info|warn|warning|error))/gi,
-            (match) => {
-                const m = match.match(/(?:DEBUG|INFO|WARN|WARNING|ERROR)/i);
-                if (!m) return match;
-                const key = m[0].toUpperCase() === 'WARNING' ? 'warn' : m[0].toLowerCase();
-                const c = levelColors[/** @type {keyof typeof levelColors} */ (key)] || color;
-                return `<span style="color:${c};font-weight:600">${match}</span>`;
-            }
-        );
-
-        pre.innerHTML = html;
-        fragment.appendChild(pre);
-        _mountedSet.add(idx);
-    }
-
-    if (fragment.childElementCount > 0) {
-        linesContainer.appendChild(fragment);
-    }
-
-    // Measure newly mounted items after layout
-    if (fragment.childElementCount > 0) {
-        requestAnimationFrame(() => {
-            for (const idx of toMount) {
-                if (!_mountedSet.has(idx)) continue;
-                const el = linesContainer.querySelector(`[data-line-idx="${idx}"]`);
-                if (el) {
-                    const h = el.getBoundingClientRect().height;
-                    if (h > 0 && _heightCache.get(idx) !== h) {
-                        _heightCache.set(idx, h);
-                        // If height changed from estimate, schedule re-render for spacer update
-                        if (_offsets[idx + 1] !== undefined) {
-                            _offsetVersion++;
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Auto scroll to bottom
-    if (_autoScroll) {
-        _logContent.scrollTop = _logContent.scrollHeight;
-    }
+    if (_vs) _vs.scheduleRender();
 }
 
 function updateLineCount() {
     if (_lineCountEl) {
         _lineCountEl.textContent = `${_allLines.length} ${t('logLines')}`;
+    }
+}
+
+// ── Extension Logs Rendering ────────────────────────────────────────────────
+
+/** 事件类型 → 颜色映射（覆盖全部 6 种 PrismEvent 类型） */
+const EXT_EVENT_COLORS = Object.freeze({
+    PatchApplied:   '#60a5fa',
+    PatchFailed:    '#ef4444',
+    ConfigReloaded: '#f59e0b',
+    WatcherEvent:   '#a78bfa',
+    WatcherStatus:  '#34d399',
+    RulesChanged:   '#f472b6',
+});
+
+/**
+ * 根据事件类型和 payload 生成富文本消息 HTML。
+ * 对 6 种 PrismEvent 类型分别做特殊渲染：
+ *   - WatcherStatus: 显示 "Watcher started/stopped, watching N files"
+ *   - RulesChanged:   显示 "+N added, -M removed, ~K modified"
+ *   - PatchApplied:   显示 patch_id + 统计（added/removed/modified/duration）
+ *   - PatchFailed:    显示 patch_id + error
+ *   - ConfigReloaded: 显示 success/fail + message
+ *   - WatcherEvent:   显示 file + change_type
+ *
+ * @param {{ type: string, message: string, timestamp: string }} entry
+ * @returns {string} 安全的 HTML 片段
+ */
+function formatExtLogMessage(entry) {
+    // 尝试从 message 中解析出 JSON payload（后端可能将 payload 序列化在 message 字段中）
+    let payload = null;
+    try {
+        // message 可能是 JSON 字符串，也可能是纯文本
+        const parsed = JSON.parse(entry.message);
+        if (parsed && typeof parsed === 'object') payload = parsed;
+    } catch {
+        // 不是 JSON，使用原始 message
+    }
+
+    switch (entry.type) {
+        // ── WatcherStatus: Watcher 启停状态 ──
+        case 'WatcherStatus': {
+            if (payload) {
+                const running = payload.running ?? payload.status === 'running';
+                const fileCount = payload.file_count ?? payload.files ?? 0;
+                const statusText = running ? 'started' : 'stopped';
+                const icon = running
+                    ? '<span style="color:#34d399">&#9679;</span>'
+                    : '<span style="color:#ef4444">&#9679;</span>';
+                return `${icon} Watcher ${statusText}, watching <b>${escapeHtml(String(fileCount))}</b> files`;
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── RulesChanged: 规则变更统计 ──
+        case 'RulesChanged': {
+            if (payload) {
+                const added = payload.added ?? payload.added_count ?? 0;
+                const removed = payload.removed ?? payload.removed_count ?? 0;
+                const modified = payload.modified ?? payload.modified_count ?? 0;
+                const parts = [];
+                if (added > 0) parts.push(`<span style="color:#34d399">+${added} added</span>`);
+                if (removed > 0) parts.push(`<span style="color:#ef4444">-${removed} removed</span>`);
+                if (modified > 0) parts.push(`<span style="color:#f59e0b">~${modified} modified</span>`);
+                if (parts.length === 0) parts.push('<span style="color:#a1a1aa">no changes</span>');
+                return parts.join(', ');
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── PatchApplied: 补丁应用成功 ──
+        case 'PatchApplied': {
+            if (payload) {
+                const patchId = payload.patch_id ?? payload.id ?? '';
+                const added = payload.added ?? payload.added_count ?? 0;
+                const removed = payload.removed ?? payload.removed_count ?? 0;
+                const modified = payload.modified ?? payload.modified_count ?? 0;
+                const duration = payload.duration ?? payload.elapsed ?? '';
+                const durationStr = duration ? ` in ${escapeHtml(String(duration))}` : '';
+                const parts = [];
+                if (added > 0) parts.push(`<span style="color:#34d399">+${added}</span>`);
+                if (removed > 0) parts.push(`<span style="color:#ef4444">-${removed}</span>`);
+                if (modified > 0) parts.push(`<span style="color:#f59e0b">~${modified}</span>`);
+                const statsStr = parts.length > 0 ? ` [${parts.join(' ')}]` : '';
+                return `<b>${escapeHtml(String(patchId))}</b>${statsStr}${durationStr}`;
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── PatchFailed: 补丁应用失败 ──
+        case 'PatchFailed': {
+            if (payload) {
+                const patchId = payload.patch_id ?? payload.id ?? '';
+                const error = payload.error ?? payload.message ?? entry.message;
+                return `<b>${escapeHtml(String(patchId))}</b> — <span style="color:#ef4444">${escapeHtml(String(error))}</span>`;
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── ConfigReloaded: 配置重载结果 ──
+        case 'ConfigReloaded': {
+            if (payload) {
+                const success = payload.success ?? payload.ok ?? true;
+                const msg = payload.message ?? payload.detail ?? '';
+                const icon = success
+                    ? '<span style="color:#34d399">&#10003;</span>'
+                    : '<span style="color:#ef4444">&#10007;</span>';
+                const label = success ? 'success' : 'failed';
+                const msgStr = msg ? ` — ${escapeHtml(String(msg))}` : '';
+                return `${icon} ${label}${msgStr}`;
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── WatcherEvent: 文件变更事件 ──
+        case 'WatcherEvent': {
+            if (payload) {
+                const file = payload.file ?? payload.path ?? '';
+                const changeType = payload.change_type ?? payload.kind ?? payload.event ?? 'unknown';
+                // 变更类型颜色映射
+                const changeColors = {
+                    create: '#34d399', created: '#34d399', add: '#34d399',
+                    modify: '#f59e0b', modified: '#f59e0b', change: '#f59e0b',
+                    remove: '#ef4444', removed: '#ef4444', delete: '#ef4444',
+                };
+                const ctColor = changeColors[String(changeType).toLowerCase()] || '#a78bfa';
+                return `<span style="color:${ctColor}">${escapeHtml(String(changeType))}</span> <span class="font-mono">${escapeHtml(String(file))}</span>`;
+            }
+            return escapeHtml(entry.message);
+        }
+
+        // ── 未知类型：原始消息 ──
+        default:
+            return escapeHtml(entry.message);
+    }
+}
+
+/**
+ * 渲染单条扩展日志到 ext-log 列表。
+ * 支持 6 种 PrismEvent 类型的富文本渲染。
+ * @param {{ type: string, message: string, timestamp: string }} entry
+ */
+function renderExtLogEntry(entry) {
+    const emptyEl = _container?.querySelector('#log-ext-empty');
+    const listEl = _container?.querySelector('#log-ext-list');
+    if (!listEl) return;
+
+    // 隐藏空状态占位
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const color = EXT_EVENT_COLORS[entry.type] || '#a1a1aa';
+
+    const row = document.createElement('div');
+    row.className = 'flex items-start gap-3 py-1 border-b border-white/5 last:border-0';
+
+    // 时间戳
+    const ts = document.createElement('span');
+    ts.className = 'text-zinc-600 shrink-0 select-none';
+    ts.textContent = entry.timestamp;
+
+    // 事件类型徽章
+    const badge = document.createElement('span');
+    badge.className = 'shrink-0 px-1.5 py-0.5 rounded text-2xs font-bold';
+    badge.style.color = color;
+    badge.style.backgroundColor = `${color}15`;
+    badge.textContent = entry.type;
+
+    // 富文本消息（使用 innerHTML 展示格式化内容）
+    const msg = document.createElement('span');
+    msg.className = 'text-zinc-400 break-all';
+    msg.innerHTML = formatExtLogMessage(entry);
+
+    row.appendChild(ts);
+    row.appendChild(badge);
+    row.appendChild(msg);
+    listEl.appendChild(row);
+
+    // 自动滚动到底部
+    const extContent = _container?.querySelector('#log-ext-content');
+    if (extContent) {
+        extContent.scrollTop = extContent.scrollHeight;
     }
 }

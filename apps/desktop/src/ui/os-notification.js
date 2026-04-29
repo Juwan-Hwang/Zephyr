@@ -7,6 +7,8 @@
  */
 
 import { invoke } from '../api.js';
+import { COMMANDS } from '../_shared/index.js';
+import { apiLogger } from '../utils/logger.js';
 
 /**
  * Send an OS-level notification using the Tauri notification plugin.
@@ -17,9 +19,9 @@ import { invoke } from '../api.js';
  */
 export async function sendOSNotification(title, body) {
     try {
-        await invoke('rate_limited_send_notification', { title, body });
+        await invoke(COMMANDS.SEND_NOTIFICATION, { title, body });
     } catch (err) {
         // Silently fall back — OS notifications are non-critical
-        console.warn('[OSNotification] Failed to send notification:', err);
+        apiLogger.warn('[OSNotification] Failed to send notification:', err);
     }
 }

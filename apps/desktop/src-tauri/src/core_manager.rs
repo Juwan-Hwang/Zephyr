@@ -15,6 +15,7 @@ pub use core::{
     ensure_executable,
     fetch_text,
     get_config_url,
+    get_core_exe_path,
     get_core_version,
     init_tun_mode_from_config,
     // crypto
@@ -35,6 +36,7 @@ pub use core::{
     smart_kill_all_mihomo_as_root,
     start_core,
     stop_core,
+    stop_core_inner,
     try_acquire_tun_toggle,
     write_config_file,
     // secure_io

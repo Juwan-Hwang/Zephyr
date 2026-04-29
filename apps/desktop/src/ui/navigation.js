@@ -36,8 +36,9 @@ export function switchPage(pageId) {
  * @param {Function} [callbacks.onProxies] - Called when navigating to proxies page
  * @param {Function} [callbacks.onAdvanced] - Called when navigating to advanced page
  * @param {Function} [callbacks.onHome] - Called when navigating to home page
- * @param {Function} [callbacks.onRules] - Called when navigating to rules page
  * @param {Function} [callbacks.onConnections] - Called when navigating to connections page
+ * @param {Function} [callbacks.onRules] - Called when navigating to rules page
+ * @param {Function} [callbacks.onRuleLibrary] - Called when navigating to rule-library page
  * @param {Function} [callbacks.onLogs] - Called when navigating to logs page
  * @param {Function} [callbacks.onLeaveLogs] - Called when navigating away from logs page
  */
@@ -63,9 +64,11 @@ export function initNavigation(callbacks = {}) {
             navItems.forEach(i => {
                 i.classList.remove('bg-white/10', 'text-white', 'shadow-lg', 'ring-1', 'ring-white/20');
                 i.classList.add('text-zinc-500');
+                i.removeAttribute('aria-current');
             });
             item.classList.add('bg-white/10', 'text-white', 'shadow-lg', 'ring-1', 'ring-white/20');
             item.classList.remove('text-zinc-500');
+            item.setAttribute('aria-current', 'page');
 
             // Switch page
             if (targetPage) switchPage(targetPage);
@@ -78,8 +81,8 @@ export function initNavigation(callbacks = {}) {
                 callbacks.onAdvanced();
             } else if (targetPage === 'home' && callbacks.onHome) {
                 callbacks.onHome();
-            } else if (targetPage === 'rules' && callbacks.onRules) {
-                callbacks.onRules();
+            } else if (targetPage === 'rule-library' && callbacks.onRuleLibrary) {
+                callbacks.onRuleLibrary();
             } else if (targetPage === 'connections' && callbacks.onConnections) {
                 callbacks.onConnections();
             } else if (targetPage === 'logs' && callbacks.onLogs) {

@@ -41,7 +41,7 @@ fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
     let core_running = app_state
         .0
         .lock()
-        .map(|guard| guard.process.is_some())
+        .map(|guard| guard.process().is_some())
         .unwrap_or(false);
 
     // Log the security validation

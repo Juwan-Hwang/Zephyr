@@ -4,15 +4,18 @@
  * Extracted from ui.js for modularity.
  */
 
-import { escapeHtml } from '../utils/sanitize.js';
+import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
+import { getPolicyColor } from '../utils/rule-utils.js';
 import { rulesLogger } from '../utils/logger.js';
-import { showNotification, showModal, showConfirmModal } from './notifications.js';
+import { showNotification } from './notifications.js';
 import { initCustomDropdown } from './dropdown.js';
 import { translations, currentLang } from '../i18n.js';
 import { invoke, closeAllConnections } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchAndConvertSRRules } from '../rules.js';
 import { SVG_ICONS } from './icons.js';
+import { getActiveConfigContent } from './advanced.js';
+import { validateConfig, isPrismRule } from './prism.js';
 
 // --- State ---
 
@@ -34,13 +37,13 @@ export async function initRulesPage() {
             const configName = settings.last_config || 'config.yaml';
             const content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
             if (typeof jsyaml !== 'undefined') {
-                const config = jsyaml.load(content);
-                originalConfigRules = (/** @type {any} */ (config)).rules || [];
+                const _config = jsyaml.load(content);
+                originalConfigRules = (/** @type {any} */ (_config)).rules || [];
                 if (currentConfigRules.length === 0) {
                     currentConfigRules = [...originalConfigRules];
                 }
             }
-        } catch (e) {
+        } catch {
             // Silently ignore on first init
         }
     }
@@ -120,25 +123,6 @@ export async function initRulesPage() {
 
 // --- Internal ---
 
-async function getActiveConfigContent() {
-    const settings = await invoke(COMMANDS.GET_SETTINGS);
-    let configName = settings.last_config || 'config.yaml';
-    let content = '';
-    try {
-        content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
-        return { configName, content };
-    } catch (e) {
-        const configs = await invoke(COMMANDS.LIST_CONFIGS);
-        if (configs && configs.length > 0) {
-            configName = configs[0].name;
-            content = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: configName });
-            return { configName, content };
-        } else {
-            return null;
-        }
-    }
-}
-
 async function loadRules() {
     try {
         const activeConfig = await getActiveConfigContent();
@@ -155,8 +139,8 @@ async function loadRules() {
             showNotification(t.jsYamlError || 'js-yaml is not loaded. Check internet connection.', 'error');
             return;
         }
-        const config = jsyaml.load(content);
-        currentConfigRules = (/** @type {any} */ (config)).rules || [];
+        const _loadedConfig = jsyaml.load(content);
+        currentConfigRules = (/** @type {any} */ (_loadedConfig)).rules || [];
         originalConfigRules = [...currentConfigRules];
         renderRulesList();
         updateSaveRulesBtnVisibility();
@@ -166,18 +150,20 @@ async function loadRules() {
     }
 }
 
-function renderRulesList(searchQuery = '') {
+async function renderRulesList(searchQuery = '') {
     const container = document.getElementById('rules-list');
     if (!container) return;
     container.innerHTML = '';
 
     const query = searchQuery.toLowerCase();
 
-    currentConfigRules.forEach((rule, index) => {
-        if (query && !rule.toLowerCase().includes(query)) return;
+    for (let i = 0; i < currentConfigRules.length; i++) {
+        const rule = currentConfigRules[i];
+        const index = i;
+        if (query && !rule.toLowerCase().includes(query)) continue;
 
         const parts = typeof rule === 'string' ? rule.split(',').map((/** @type {string} */ s) => s.trim()) : [];
-        if (parts.length < 2) return;
+        if (parts.length < 2) continue;
 
         const type = parts[0];
         const value = parts[1];
@@ -185,6 +171,13 @@ function renderRulesList(searchQuery = '') {
 
         const item = document.createElement('div');
         item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 transition-transform duration-300 cursor-pointer';
+
+        // Mark Prism-managed rules with a visual indicator
+        const isPrismManaged = await isPrismRule(index);
+        if (isPrismManaged) {
+            item.classList.add('ring-1', 'ring-purple-500/30');
+            item.title = 'This rule is managed by Prism Engine';
+        }
 
         // SECURITY FIX: use setAttribute for title instead of innerHTML with escaped value
         item.innerHTML = `
@@ -195,14 +188,14 @@ function renderRulesList(searchQuery = '') {
             <div class="flex items-center gap-2">
                 <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
 
-                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeHtml(/** @type {any} */ (translations)[currentLang].moveToTop || 'Move to Top')}">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToTop || 'Move to Top')}">
+                    ${SVG_ICONS.arrowUp}
                 </button>
-                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeHtml(/** @type {any} */ (translations)[currentLang].moveToBottom || 'Move to Bottom')}">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToBottom || 'Move to Bottom')}">
+                    ${SVG_ICONS.arrowDown}
                 </button>
                 <button class="btn-delete-rule opacity-0 group-hover:opacity-100 btn-delete-icon">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    ${SVG_ICONS.trash}
                 </button>
             </div>
         `;
@@ -235,8 +228,8 @@ function renderRulesList(searchQuery = '') {
         (/** @type {HTMLElement} */ (item.querySelector('.btn-move-top-rule')))?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (index > 0) {
-                const rule = currentConfigRules.splice(index, 1)[0];
-                currentConfigRules.unshift(rule);
+                const movedRule = currentConfigRules.splice(index, 1)[0];
+                currentConfigRules.unshift(movedRule);
                 renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
                 updateSaveRulesBtnVisibility();
             }
@@ -245,8 +238,8 @@ function renderRulesList(searchQuery = '') {
         (/** @type {HTMLElement} */ (item.querySelector('.btn-move-bottom-rule')))?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (index < currentConfigRules.length - 1) {
-                const rule = currentConfigRules.splice(index, 1)[0];
-                currentConfigRules.push(rule);
+                const movedRule = currentConfigRules.splice(index, 1)[0];
+                currentConfigRules.push(movedRule);
                 renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
                 updateSaveRulesBtnVisibility();
             }
@@ -260,15 +253,7 @@ function renderRulesList(searchQuery = '') {
         });
 
         container.appendChild(item);
-    });
-}
-
-/** @param {string} policy */
-function getPolicyColor(policy) {
-    const p = policy.toUpperCase();
-    if (p === 'DIRECT') return 'text-green-400';
-    if (p === 'REJECT') return 'text-rose-500';
-    return 'text-accent';
+    }
 }
 
 async function importSRRules() {
@@ -289,7 +274,7 @@ async function importSRRules() {
         updateSaveRulesBtnVisibility();
         showNotification(/** @type {any} */ (translations)[currentLang].notifSRImportSuccess, 'success');
         input.value = '';
-    } catch (err) {
+    } catch {
         showNotification(/** @type {any} */ (translations)[currentLang].notifSRImportFailed, 'error');
     } finally {
         btn.textContent = originalText;
@@ -309,16 +294,27 @@ async function saveRules() {
         if (!activeConfig) {
             throw new Error("No valid configuration file found to save rules.");
         }
-        const { configName, content } = activeConfig;
+        const { configName: _configName, content } = activeConfig;
 
         if (typeof jsyaml === 'undefined') {
             const t = /** @type {any} */ (translations)[currentLang];
             showNotification(t.jsYamlSaveError || 'js-yaml is not loaded. Cannot save/load rules.', 'error');
             return;
         }
-        const config = jsyaml.load(content);
+        const _saveConfig = jsyaml.load(content);
 
-        const result = await invoke('update_config', { patch: { rules: currentConfigRules } });
+        // Validate rules config before applying
+        try {
+            const testConfig = jsyaml.dump({ rules: currentConfigRules });
+            const isValid = await validateConfig(testConfig);
+            if (!isValid) {
+                rulesLogger.warn('Rules validation failed, applying anyway');
+            }
+        } catch (validationErr) {
+            rulesLogger.warn('Rules validation skipped:', validationErr);
+        }
+
+        const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch: { rules: currentConfigRules } });
         await closeAllConnections();
 
         originalConfigRules = [...currentConfigRules];

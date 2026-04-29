@@ -21,10 +21,24 @@
  */
 export function escapeHtml(str) {
     if (typeof str !== 'string') return '';
-    str = str.normalize('NFKC');
+    const normalized = str.normalize('NFKC');
     const div = document.createElement('div');
-    div.textContent = str;
+    div.textContent = normalized;
     return div.innerHTML;
+}
+
+/**
+ * Escape a string for safe use inside HTML attribute values (double-quoted).
+ * Extends {@link escapeHtml} by also escaping `"` and `'`.
+ *
+ * @param {string} str - Raw string to escape
+ * @returns {string} Attribute-safe string
+ */
+export function escapeAttr(str) {
+    if (typeof str !== 'string') return '';
+    return escapeHtml(str)
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 // ---------------------------------------------------------------------------
@@ -127,12 +141,12 @@ function isSafeUrl(url, allowDataImages) {
  */
 export function sanitizeHtml(input, options = {}) {
     if (typeof input !== 'string' || !input) return '';
-    input = input.normalize('NFKC');
+    const normalized = input.normalize('NFKC');
 
     if (!IS_BROWSER) {
         // SSR fallback: strip all tags, return plain text
         // Loop until stable to prevent reassembly attacks (e.g. <<script>> → <script>)
-        let sanitized = input;
+        let sanitized = normalized;
         let prev = '';
         while (sanitized !== prev) {
             prev = sanitized;
@@ -162,7 +176,7 @@ export function sanitizeHtml(input, options = {}) {
     // Parse with shared DOMParser
     const parser = getParser();
     if (!parser) return '';
-    const doc = parser.parseFromString(input, 'text/html');
+    const doc = parser.parseFromString(normalized, 'text/html');
 
     // Recursive sanitizer — walks the tree depth-first
     /** @param {Node} node */

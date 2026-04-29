@@ -53,8 +53,8 @@ let _chartResizeDebounce = null;
  * Each property stores `{ r, g, b }` for fast interpolation.
  * @type {{ accent: { r: number, g: number, b: number }, secondary: { r: number, g: number, b: number } }}
  */
-let currentColors = {
-  accent: { r: 139, g: 92, b: 246 },
+const currentColors = {
+  accent: { r: 175, g: 82, b: 222 },
   secondary: { r: 59, g: 130, b: 246 },
 };
 
@@ -63,7 +63,7 @@ let currentColors = {
  * @type {{ accent: { r: number, g: number, b: number }, secondary: { r: number, g: number, b: number } }}
  */
 let targetColors = {
-  accent: { r: 139, g: 92, b: 246 },
+  accent: { r: 175, g: 82, b: 222 },
   secondary: { r: 59, g: 130, b: 246 },
 };
 
@@ -72,7 +72,7 @@ let colorTransitionStart = 0;
 
 /** Snapshot of colours at the moment the transition began. */
 let colorTransitionFrom = {
-  accent: { r: 139, g: 92, b: 246 },
+  accent: { r: 175, g: 82, b: 222 },
   secondary: { r: 59, g: 130, b: 246 },
 };
 
@@ -93,9 +93,9 @@ let isColorTransitioning = false;
  */
 function lerpColor(a, b, t) {
   return {
-    r: Math.round(a.r + (b.r - a.r) * t),
-    g: Math.round(a.g + (b.g - a.g) * t),
-    b: Math.round(a.b + (b.b - a.b) * t),
+    r: Math.round(a.r + ((b.r - a.r) * t)),
+    g: Math.round(a.g + ((b.g - a.g) * t)),
+    b: Math.round(a.b + ((b.b - a.b) * t)),
   };
 }
 
@@ -343,8 +343,7 @@ function renderChart() {
   let maxVal = Math.max(...validData.map((d) => Math.max(d.up, d.down)));
   maxVal = Math.max(maxVal, 1024 * 10);
 
-  const getX = (/** @type {number} */ i) => (i / (MAX_DATA_POINTS - 1)) * width;
-  const getY = (/** @type {number} */ v) => height - (v / maxVal) * (height - 20) - 10;
+  const getY = (/** @type {number} */ v) => height - ((v / maxVal) * (height - 20)) - 10;
 
   // Downstream — accent colour
   drawArea(

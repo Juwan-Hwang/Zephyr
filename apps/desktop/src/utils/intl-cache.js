@@ -30,12 +30,12 @@ function _dtfKey(locale, options) {
  * @returns {Intl.DateTimeFormat}
  */
 export function getDateTimeFormat(locale, options) {
-    locale = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en');
-    options = options || {};
-    const key = _dtfKey(locale, options);
+    const resolvedLocale = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en');
+    const resolvedOptions = options || {};
+    const key = _dtfKey(resolvedLocale, resolvedOptions);
     let fmt = _dateTimeFormatCache.get(key);
     if (!fmt) {
-        fmt = new Intl.DateTimeFormat(locale, options);
+        fmt = new Intl.DateTimeFormat(resolvedLocale, resolvedOptions);
         _dateTimeFormatCache.set(key, fmt);
     }
     return fmt;

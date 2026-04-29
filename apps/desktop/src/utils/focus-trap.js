@@ -64,11 +64,9 @@ export function createFocusTrap(container, options = {}) {
                 e.preventDefault();
                 last.focus();
             }
-        } else {
-            if (document.activeElement === last) {
-                e.preventDefault();
-                first.focus();
-            }
+        } else if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
         }
     }
 
