@@ -15,7 +15,7 @@ use super::secure_io::write_file_secure;
 const DEFAULT_API_PORT: u16 = 9090;
 const DEFAULT_MIXED_PORT: u16 = 7890;
 #[cfg(target_os = "macos")]
-const PORT_WAIT_MAX_RETRIES: u32 = 50;
+const PORT_WAIT_MAX_RETRIES: u64 = 50;
 #[cfg(target_os = "macos")]
 const PORT_WAIT_INTERVAL_MS: u64 = 100;
 const HEALTH_CHECK_MAX_RETRIES: u32 = 20;

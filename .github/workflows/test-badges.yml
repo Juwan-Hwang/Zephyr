@@ -1,0 +1,65 @@
+name: Test Badges
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  update-badges:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # === Rust Tests ===
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Count Rust tests
+        id: rust
+        working-directory: apps/desktop/src-tauri
+        run: |
+          COUNT=$(cargo test -- --list 2>&1 | grep -cE '\btest\b$')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      # === JS Tests ===
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Count JS tests
+        id: js
+        run: |
+          pnpm install --frozen-lockfile
+          cd apps/desktop
+          COUNT=$(pnpm vitest run --reporter=verbose 2>&1 | grep -oP '\d+(?=\s+passed)' | tail -1)
+          if [ -z "$COUNT" ]; then
+            COUNT=$(grep -rP '^\s*(it|test)\(' src --include="*.test.js" | wc -l)
+          fi
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      # === Update Gist Badges ===
+      - name: Update Rust badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ secrets.GIST_ID }}
+          filename: rust-tests.json
+          label: Rust Tests
+          message: ${{ steps.rust.outputs.count }}
+          color: green
+
+      - name: Update JS badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ secrets.GIST_ID }}
+          filename: js-tests.json
+          label: JS Tests
+          message: ${{ steps.js.outputs.count }}
+          color: brightgreen

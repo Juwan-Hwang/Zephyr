@@ -318,6 +318,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
+          targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           workspaces: apps/desktop/src-tauri -> target
@@ -343,6 +344,10 @@ jobs:
 
       - name: Build CSS
         run: pnpm --filter @zephyr/desktop build:css
+
+      - name: Check macOS target compilation
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --target x86_64-apple-darwin
 
       - name: Build Rust (release)
         working-directory: apps/desktop/src-tauri
