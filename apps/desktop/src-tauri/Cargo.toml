@@ -85,7 +85,7 @@ winreg = "0.52"
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
 [dev-dependencies]
-mockall = "0.13"
+mockall = "0.14"
 
 [profile.release]
 opt-level = 3
