@@ -63,7 +63,7 @@ toml = "0.8"
 glib = ">= 0.20, < 1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_System_Registry",
     "Win32_Networking_WinHttp",
