@@ -30,6 +30,7 @@ export const CONFIG_FILES = Object.freeze({
     LIST_CONFIGS: "list_configs",
     GET_CONFIG_URL: "get_config_url",
     DELETE_CONFIG: "delete_config",
+    RENAME_CONFIG: "rename_config",
     READ_CONFIG_FILE: "read_config_file",
     WRITE_CONFIG_FILE: "write_config_file",
     OPEN_FOLDER: "open_config_folder",

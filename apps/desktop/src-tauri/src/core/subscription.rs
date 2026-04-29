@@ -11,6 +11,118 @@ use super::{MihomoState, MAX_RESPONSE_SIZE};
 
 // ── Pure functions for subscription content sanitization ─────────────────
 
+/// Extract a name from the rules' policy-group field.
+/// Scans up to 10 rules, returns the first non-generic policy-group name.
+/// Example: `DOMAIN-SUFFIX,abpchina.org,VPN07` → `Some("VPN07")`
+/// Returns `None` if rules are empty, unparseable, or all names are generic.
+fn extract_name_from_rules(content: &str) -> Option<String> {
+    let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
+
+    let rules_seq = yaml.get("rules").and_then(|r| r.as_sequence())?;
+
+    if rules_seq.is_empty() {
+        return None;
+    }
+
+    let max_scan = 10.min(rules_seq.len());
+    for rule_val in rules_seq.iter().take(max_scan) {
+        let rule_str = match rule_val.as_str() {
+            Some(s) => s,
+            None => continue, // Skip non-string rules (e.g. mappings)
+        };
+
+        // Split by comma, take the 3rd field (policy-group name)
+        // Format: TYPE,MATCH,policy-group[,options...]
+        let name = match rule_str.split(',').nth(2) {
+            Some(n) => n.trim(),
+            None => continue,
+        };
+
+        // Skip generic / built-in names (case-insensitive)
+        let upper = name.to_uppercase();
+        if upper.is_empty()
+            || upper == "DIRECT"
+            || upper == "REJECT"
+            || upper == "MATCH"
+            || upper == "PROXY"
+            || upper == "PASS"
+            || upper == "DROP"
+        {
+            continue;
+        }
+
+        // Sanity: reasonable length and safe filename characters
+        // Allow letters (including CJK), digits, hyphens, underscores, spaces
+        if name.len() > 64 {
+            continue;
+        }
+        let is_safe = name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
+        if !is_safe {
+            continue;
+        }
+
+        return Some(name.to_owned());
+    }
+
+    None
+}
+
+/// Parse filename from a Content-Disposition header value.
+/// Supports both `filename="name"` and `filename*=UTF-8''encoded_name` (RFC 5987).
+fn parse_content_disposition_filename(header_value: &str) -> Option<String> {
+    // Try filename*= first (RFC 5987, takes precedence)
+    for raw_part in header_value.split(';') {
+        let part = raw_part.trim();
+        if let Some(raw_encoded) = part.strip_prefix("filename*=") {
+            let encoded = raw_encoded.trim_matches('"');
+            // Format: charset''percent-encoded-name
+            if let Some(name) = encoded.split("''").last() {
+                let decoded = percent_decode(name);
+                let trimmed = decoded.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_owned());
+                }
+            }
+        }
+    }
+    // Fallback to filename=
+    for raw_part in header_value.split(';') {
+        let part = raw_part.trim();
+        if let Some(filename) = part.strip_prefix("filename=") {
+            let trimmed = filename.trim_matches('"').trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Decode percent-encoded string (e.g. "%E4%B8%AD%E6%96%87" → "中文").
+fn percent_decode(input: &str) -> String {
+    let mut result = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes.get(i) == Some(&b'%') && i + 2 < bytes.len() {
+            if let Some(hex) = bytes.get(i + 1..i + 3) {
+                if let Ok(byte) = u8::from_str_radix(&String::from_utf8_lossy(hex), 16) {
+                    result.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        if let Some(&b) = bytes.get(i) {
+            result.push(b);
+        }
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|_| input.to_owned())
+}
+
 /// Attempt to base64-decode content that does not already contain Clash markers.
 /// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
 /// and contain a `proxies:` key.
@@ -252,13 +364,16 @@ async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> 
 }
 
 #[tauri::command]
+#[allow(clippy::cognitive_complexity)]
 pub async fn download_sub(
     app: AppHandle,
     url: String,
     name: String,
     user_agent: Option<String>,
+    overwrite: Option<bool>,
     rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<String, String> {
+    let do_overwrite = overwrite.unwrap_or(false);
     // Rate limit: max 1 call per 5 seconds
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
 
@@ -312,13 +427,25 @@ pub async fn download_sub(
             .unwrap_or(&url)
             .to_owned();
 
+        // Try to extract filename from Content-Disposition header
+        let disp_filename = resp
+            .headers()
+            .get("content-disposition")
+            .and_then(|h| h.to_str().ok())
+            .and_then(parse_content_disposition_filename);
+
         let bytes = read_response_body(resp).await?;
 
-        Ok::<(Vec<u8>, String, String), String>((bytes, sub_info_header, final_url))
+        Ok::<(Vec<u8>, String, String, Option<String>), String>((
+            bytes,
+            sub_info_header,
+            final_url,
+            disp_filename,
+        ))
     };
 
     let mut last_error = String::new();
-    let mut result: Option<(Vec<u8>, String, String)> = None;
+    let mut result: Option<(Vec<u8>, String, String, Option<String>)> = None;
 
     // Try direct connection first
     match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
@@ -383,7 +510,7 @@ pub async fn download_sub(
         }
     }
 
-    let (bytes, sub_info_header, final_url) = result.ok_or_else(|| {
+    let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
         if last_error.is_empty() {
             "Network error occurred during download".to_owned()
         } else {
@@ -426,7 +553,65 @@ pub async fn download_sub(
     } else {
         format!("{safe_name}.yaml")
     };
+
+    // Only apply enhanced naming (Content-Disposition / rules) for new subscriptions.
+    // When updating (do_overwrite == true), always use the frontend-provided name directly.
+    if !do_overwrite {
+        let rule_name = extract_name_from_rules(&content);
+
+        // Priority 1: Content-Disposition filename
+        if let Some(dfn) = &disp_filename {
+            let stem = if dfn.to_lowercase().ends_with(".yaml") {
+                &dfn[..dfn.len() - 5]
+            } else if dfn.to_lowercase().ends_with(".yml") {
+                &dfn[..dfn.len() - 4]
+            } else {
+                dfn.as_str()
+            };
+            if !stem.is_empty() && stem.len() <= 64 {
+                clean_name = format!("{stem}.yaml");
+            }
+        }
+        // Priority 2: Rule-extracted name
+        else if let Some(rn) = &rule_name {
+            clean_name = format!("{rn}.yaml");
+        }
+    }
+
     clean_name = super::config_sanitizer::sanitize_config_file_name(&clean_name)?;
+
+    // When overwrite is true (updating an existing subscription), write directly.
+    // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
+    if !do_overwrite && paths.profiles_dir.join(&clean_name).exists() {
+        let stem = clean_name
+            .strip_suffix(".yaml")
+            .or_else(|| clean_name.strip_suffix(".yml"))
+            .unwrap_or(&clean_name);
+        let ext = clean_name.strip_prefix(stem).unwrap_or(".yaml");
+        let mut max_suffix = 1u32;
+        for dir_entry in std::fs::read_dir(&paths.profiles_dir)
+            .ok()
+            .into_iter()
+            .flatten()
+        {
+            let entry = match dir_entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if let Some(entry_name) = entry.file_name().to_str() {
+                if let Some(suffix_str) = entry_name
+                    .strip_prefix(format!("{stem}-").as_str())
+                    .and_then(|rest| rest.strip_suffix(ext))
+                {
+                    if let Ok(n) = suffix_str.parse::<u32>() {
+                        max_suffix = max_suffix.max(n + 1);
+                    }
+                }
+            }
+        }
+        clean_name = format!("{stem}-{max_suffix}{ext}");
+    }
+
     let target_path = paths.profiles_dir.join(&clean_name);
     super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 

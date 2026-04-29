@@ -30,6 +30,7 @@ pub use core::{
     // core_log
     read_core_log,
     release_tun_toggle,
+    rename_config,
     restart_core_as_root_cmd,
     set_tun_enabled,
     set_tun_mode,

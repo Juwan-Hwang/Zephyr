@@ -106,7 +106,7 @@ export function initSubscriptionSettings({
                 const userAgent = getSubscriptionUserAgent();
                 const name = extractNameFromUrl(url) || 'subscription';
                 /** @type {any} */
-                const invokeArgs = { url, name };
+                const invokeArgs = { url, name, overwrite: false };
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
@@ -160,7 +160,7 @@ export function initSubscriptionSettings({
                 try {
                     const userAgent = getSubscriptionUserAgent();
                     const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
-                    await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent });
+                    await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent, overwrite: true });
                     successCount++;
                 } catch (err) {
                     failCount++;
@@ -317,6 +317,36 @@ export function initSubscriptionSettings({
         const profileStem = name.replace(/\.(yaml|yml)$/i, '');
 
         const menu = createContextMenuContainer(e);
+
+        // --- "Rename" item ---
+        const renameItem = document.createElement('div');
+        renameItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        renameItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.rename || 'Rename')}</span>`;
+        renameItem.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            removeContextMenu();
+            const currentStem = name.replace(/\.(yaml|yml)$/i, '');
+            // @ts-expect-error showModal signature mismatch
+            const newName = /** @type {string} */ (await showModal(t.rename || 'Rename', '', currentStem));
+            if (!newName || !newName.trim()) return;
+            const trimmed = newName.trim();
+            if (trimmed === currentStem) return;
+            try {
+                await invoke(COMMANDS.RENAME_CONFIG, { oldName: name, newName: trimmed });
+                invalidateConfigsCache();
+                invalidateSettingsCache();
+                showNotification(`${t.notifRenameSuccess || 'Renamed'}: ${trimmed}`, 'success');
+                renderConfigs();
+            } catch (err) {
+                showNotification(String(err), 'error');
+            }
+        });
+        menu.appendChild(renameItem);
+
+        // --- Separator ---
+        const renameSep = document.createElement('div');
+        renameSep.className = 'my-1 border-t border-white/5';
+        menu.appendChild(renameSep);
 
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
@@ -585,7 +615,7 @@ export function initSubscriptionSettings({
 
             const label = document.createElement('span');
             label.className = `text-xs transition-colors ${isCurrent ? 'font-bold text-zinc-100' : 'text-zinc-400'}`;
-            label.textContent = name;
+            label.textContent = name.replace(/\.(yaml|yml)$/i, '');
 
             left.appendChild(dot);
             left.appendChild(label);
@@ -636,7 +666,7 @@ export function initSubscriptionSettings({
                     try {
                         const userAgent = getSubscriptionUserAgent();
                         const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: configInfo.name });
-                        await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent });
+                        await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent, overwrite: true });
                         invalidateConfigsCache();
                         if (isCurrent) {
                             const cfgCustomArgs = cfgSettings.custom_args || [];

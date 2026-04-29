@@ -13,8 +13,9 @@ use config_manager::{read_config, update_config};
 use core_manager::{
     delete_config, disable_tun_cmd, download_sub, ensure_app_storage, fetch_text, get_config_url,
     get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd, kill_mihomo,
-    list_configs, open_config_folder, read_config_file, restart_core_as_root_cmd, set_tun_enabled,
-    smart_kill_all_mihomo_as_root, start_core, stop_core, write_config_file, CoreData, MihomoState,
+    list_configs, open_config_folder, read_config_file, rename_config, restart_core_as_root_cmd,
+    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, write_config_file,
+    CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -145,6 +146,12 @@ fn save_settings(
             .map_err(|e| format!("Settings lock failed: {e}"))?;
         *guard = settings.clone();
     }
+    persist_settings(&app, &settings)
+}
+
+/// Persist settings to settings.json (without touching in-memory state).
+/// Used by `rename_config` to persist `last_config` changes.
+pub(crate) fn persist_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let path = app
         .path()
         .app_data_dir()
@@ -153,7 +160,7 @@ fn save_settings(
         fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {e}"))?;
     }
     let file_path = path.join("settings.json");
-    let json_str = serde_json::to_string(&settings)
+    let json_str = serde_json::to_string(settings)
         .map_err(|e| format!("Failed to serialize settings: {e}"))?;
     core_manager::write_file_secure(&file_path, &json_str)
         .map_err(|e| format!("Failed to write settings.json: {e}"))?;
@@ -415,6 +422,7 @@ pub fn run() {
             get_config_url,
             download_sub,
             delete_config,
+            rename_config,
             get_latest_version,
             update_core,
             enable_sysproxy,

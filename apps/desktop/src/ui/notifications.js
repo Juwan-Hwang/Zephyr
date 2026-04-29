@@ -7,6 +7,8 @@
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { markdownToHtml } from '../utils/markdown.js';
 import { sanitizeHtml } from '../utils/sanitize.js';
+import { translations } from '../i18n.js';
+import { appStore } from './state.js';
 
 /**
  * Show a toast notification.
@@ -287,8 +289,7 @@ export function showConfirmModal(title, message = '') {
 // ---------------------------------------------------------------------------
 
 /**
- * Show a modal with rendered Markdown release notes.
- * Automatically removes the "下载说明" / "Download" section.
+ * Show a modal with rendered Markdown release notes and confirm/cancel buttons.
  * Content is scrollable.
  * @param {string} title - Modal title
  * @param {string} releaseNotesMd - Raw Markdown release notes
@@ -296,14 +297,25 @@ export function showConfirmModal(title, message = '') {
  */
 export function showUpdateNotesModal(title, releaseNotesMd) {
     const html = sanitizeHtml(markdownToHtml(releaseNotesMd || ''));
-    const customHtml = `
-        <div class="space-y-1">${html}</div>
-    `;
+    const customHtml = `<div class="space-y-1">${html}</div>`;
 
-    // We modify the DOM after showModal renders it
-
-    return showModal(title, '', '', true, customHtml).then(result => {
-        // Restore original classes (no-op if showModal already cleaned up)
+    // Use isCustomContent=true for scrollable layout, but restore confirm/cancel buttons via onReady.
+    const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
+    const updateBtnText = t.update || 'Update';
+    let originalConfirmText = '';
+    return showModal(title, '', '', true, customHtml, () => {
+        const confirmBtn = document.getElementById('modal-confirm');
+        const cancelBtn = document.getElementById('modal-cancel');
+        if (confirmBtn) {
+            originalConfirmText = confirmBtn.textContent;
+            confirmBtn.classList.remove('hidden');
+            confirmBtn.textContent = updateBtnText;
+        }
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+    }).then(result => {
+        // Restore confirm button text after modal closes
+        const confirmBtn = document.getElementById('modal-confirm');
+        if (confirmBtn && originalConfirmText) confirmBtn.textContent = originalConfirmText;
         return !!result;
     });
 }

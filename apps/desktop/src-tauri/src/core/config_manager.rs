@@ -1,6 +1,7 @@
+use crate::core_manager::MihomoState;
 use std::fs;
 use std::process::Command;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::core_process::ensure_app_storage;
@@ -262,6 +263,98 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
     }
 
     Ok(target.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+
+    // Sanitize old name
+    let mut clean_old = if old_name.ends_with(".yaml") || old_name.ends_with(".yml") {
+        old_name.clone()
+    } else {
+        format!("{old_name}.yaml")
+    };
+    clean_old = sanitize_config_file_name(&clean_old)?;
+    if clean_old == "run_config.yaml" {
+        return Err("Cannot rename the active temp config".to_owned());
+    }
+
+    // Sanitize new name
+    let mut clean_new = if new_name.ends_with(".yaml") || new_name.ends_with(".yml") {
+        new_name
+    } else {
+        format!("{new_name}.yaml")
+    };
+    clean_new = sanitize_config_file_name(&clean_new)?;
+    if clean_new == "run_config.yaml" {
+        return Err("Cannot use reserved name 'run_config'".to_owned());
+    }
+
+    let old_path = paths.profiles_dir.join(&clean_old);
+    let new_path = paths.profiles_dir.join(&clean_new);
+    validate_path_within_dir(&old_path, &paths.profiles_dir)?;
+    validate_path_within_dir(&new_path, &paths.profiles_dir)?;
+
+    if !old_path.exists() {
+        return Err(format!("Config '{clean_old}' does not exist"));
+    }
+    if clean_old == clean_new {
+        return Err("New name is the same as the current name".to_owned());
+    }
+    if new_path.exists() {
+        return Err(format!("A config named '{clean_new}' already exists"));
+    }
+
+    // Rename file
+    std::fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename config: {e}"))?;
+
+    // Update metadata
+    let mut metadata = load_metadata(&paths);
+    if let Some(meta) = metadata.configs.remove(&clean_old) {
+        metadata.configs.insert(clean_new.clone(), meta);
+    }
+    // Also try original name in case metadata was stored differently
+    if old_name != clean_old {
+        if let Some(meta) = metadata.configs.remove(&old_name) {
+            metadata.configs.insert(clean_new.clone(), meta);
+        }
+    }
+    save_metadata(&paths, &metadata);
+
+    // Update last_config setting if it references the old name
+    let needs_update = {
+        let state = app.state::<crate::SettingsState>();
+        let inner = &state.0;
+        inner.lock().ok().is_some_and(|s| {
+            s.last_config.as_deref() == Some(&clean_old)
+                || s.last_config.as_deref() == Some(&old_name)
+        })
+    };
+    if needs_update {
+        // Persist settings.json and update in-memory state
+        {
+            let state = app.state::<crate::SettingsState>();
+            if let Ok(mut guard) = state.0.lock() {
+                guard.last_config = Some(clean_new.clone());
+                let settings = guard.clone();
+                drop(guard);
+                if let Err(e) = crate::persist_settings(&app, &settings) {
+                    eprintln!("[rename_config] Failed to persist settings: {e}");
+                }
+            };
+        }
+        // Sync runtime MihomoState.last_config_path
+        {
+            let mihomo = app.state::<MihomoState>();
+            if let Ok(mut guard) = mihomo.0.lock() {
+                guard.set_last_config_path(Some(clean_new.clone()));
+            };
+        }
+    }
+
+    Ok(format!("Config renamed to {clean_new}"))
 }
 
 #[cfg(test)]

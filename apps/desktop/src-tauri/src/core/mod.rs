@@ -144,7 +144,7 @@ pub mod tun_manager;
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
 pub use config_manager::{
     delete_config, get_config_url, list_configs, open_config_folder, read_config_file,
-    write_config_file,
+    rename_config, write_config_file,
 };
 pub use core_log::read_core_log;
 pub use core_process::{
