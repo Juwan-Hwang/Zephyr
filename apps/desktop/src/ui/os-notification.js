@@ -7,7 +7,7 @@
  */
 
 import { invoke } from '../api.js';
-import { COMMANDS } from '../_shared/index.js';
+import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from '../utils/logger.js';
 
 /**
