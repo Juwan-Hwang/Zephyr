@@ -695,28 +695,58 @@ pub async fn update_core(
 
     let exe_path = paths.core_dir.join(core_manager::core_binary_name());
 
-    // On Windows, try multiple times to replace the file
+    // Atomic replace sequence:
+    // 1. rename exe_path -> backup_path  (move old binary out of the way)
+    // 2. rename temp_exe_path -> exe_path (move new binary in)
+    // 3. On success: delete backup
+    // 4. On failure: delete exe_path, rename backup_path -> exe_path
+    let backup_path = paths
+        .core_dir
+        .join(format!("{}.backup", core_manager::core_binary_name()));
+
+    // Step 1: Move old binary to backup (must succeed to guarantee rollback)
+    if exe_path.exists() {
+        // Clean up stale backup first
+        let _ = std::fs::remove_file(&backup_path);
+        std::fs::rename(&exe_path, &backup_path).map_err(|e| {
+            format!("Failed to move current binary to backup (update aborted for safety): {e}")
+        })?;
+    }
+
+    // Step 2: Move new binary into place (target no longer exists, so rename will work)
     let mut retries = 5;
     loop {
-        if let Err(_e) = std::fs::rename(&temp_exe_path, &exe_path) {
-            if let Err(e2) = std::fs::copy(&temp_exe_path, &exe_path) {
+        match std::fs::rename(&temp_exe_path, &exe_path) {
+            Ok(()) => break,
+            Err(e) => {
                 retries -= 1;
                 if retries == 0 {
                     let _ = std::fs::remove_file(&temp_exe_path);
-                    return Err(format!("Failed to replace core binary: {e2}. Please close any running mihomo processes and try again."));
+                    // Restore backup
+                    if backup_path.exists() {
+                        let _ = std::fs::rename(&backup_path, &exe_path);
+                    }
+                    return Err(format!(
+                        "Failed to install new core binary: {e}. Please close any running mihomo processes and try again."
+                    ));
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            } else {
-                let _ = std::fs::remove_file(&temp_exe_path);
-                break;
             }
-        } else {
-            let _ = std::fs::remove_file(&temp_exe_path);
-            break;
         }
     }
 
-    install_core_binary(app)?;
+    // Step 2b: Set executable permissions (may fail on some platforms)
+    if let Err(e) = install_core_binary(app) {
+        // Rollback: remove failed binary, restore backup
+        eprintln!("[update_core] install_core_binary failed: {e}, rolling back...");
+        let _ = std::fs::remove_file(&exe_path);
+        if backup_path.exists() {
+            let _ = std::fs::rename(&backup_path, &exe_path);
+        }
+        return Err(format!(
+            "Failed to set executable permissions: {e}. Rolled back to previous version."
+        ));
+    }
 
     let (last_config, last_args, last_secret) = {
         let lock = state
@@ -746,10 +776,36 @@ pub async fn update_core(
         last_args,
         last_secret,
     )
-    .await?;
-    emit_core_download_status(&window, "Core ready", 100);
-
-    Ok(result)
+    .await;
+    match result {
+        Ok(r) => {
+            // Step 3: New core started — delete backup
+            let _ = std::fs::remove_file(&backup_path);
+            emit_core_download_status(&window, "Core ready", 100);
+            Ok(r)
+        }
+        Err(e) => {
+            // Step 4: Rollback — atomic rename swap
+            eprintln!("[update_core] New core failed to start: {e}, attempting rollback...");
+            let rollback_ok = if backup_path.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                // Remove the failed new binary, then rename backup back
+                let _ = std::fs::remove_file(&exe_path);
+                std::fs::rename(&backup_path, &exe_path).is_ok()
+            } else {
+                false
+            };
+            if rollback_ok {
+                Err(format!(
+                    "New core failed to start: {e}. Rolled back to previous version. Please restart the application."
+                ))
+            } else {
+                Err(format!(
+                    "New core failed to start: {e}. Rollback not available — manual repair may be needed."
+                ))
+            }
+        }
+    }
 }
 
 #[command]
@@ -908,22 +964,65 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         let _ = e;
     })?;
 
-    // Apply updates
+    // Apply updates — atomic swap pattern with rollback on failure.
+    // Both geo files must succeed or neither is applied.
     emit_core_download_status(&window, "Applying updates...", 95);
     let final_geoip = paths.core_dir.join("geoip.dat");
     let final_geosite = paths.core_dir.join("geosite.dat");
 
+    // Use timestamped backup names to avoid stale backup conflicts
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let old_geoip = paths.core_dir.join(format!("geoip.dat.bak.{ts}"));
+    let old_geosite = paths.core_dir.join(format!("geosite.dat.bak.{ts}"));
+
+    // Move current files out of the way via rename (not copy).
+    // This ensures the target path is free for the new file's rename.
+    // Abort if rename fails — without backup, rollback is impossible.
     if final_geoip.exists() {
-        let _ = std::fs::remove_file(&final_geoip);
+        std::fs::rename(&final_geoip, &old_geoip)
+            .map_err(|e| format!("Failed to backup geoip.dat (update aborted for safety): {e}"))?;
     }
     if final_geosite.exists() {
-        let _ = std::fs::remove_file(&final_geosite);
+        std::fs::rename(&final_geosite, &old_geosite).map_err(|e| {
+            format!("Failed to backup geosite.dat (update aborted for safety): {e}")
+        })?;
     }
 
-    std::fs::rename(&geoip_path, &final_geoip)
-        .map_err(|e| format!("Failed to apply geoip: {e}"))?;
-    std::fs::rename(&geosite_path, &final_geosite)
-        .map_err(|e| format!("Failed to apply geosite: {e}"))?;
+    // Apply geoip (target path is now free)
+    if let Err(e) = std::fs::rename(&geoip_path, &final_geoip) {
+        // Restore old geoip (target should be free since rename failed)
+        if old_geoip.exists() {
+            let _ = std::fs::rename(&old_geoip, &final_geoip);
+        }
+        let _ = std::fs::remove_file(&geosite_path);
+        let _ = std::fs::remove_file(&old_geosite);
+        return Err(format!("Failed to apply geoip: {e}"));
+    }
+
+    // Apply geosite (target path is now free)
+    if let Err(e) = std::fs::rename(&geosite_path, &final_geosite) {
+        // geosite failed — rollback geoip too (both must succeed together)
+        // Remove new geoip first so rename back won't hit "target exists"
+        let _ = std::fs::remove_file(&final_geoip);
+        if old_geoip.exists() {
+            let _ = std::fs::rename(&old_geoip, &final_geoip);
+        }
+        if old_geosite.exists() {
+            let _ = std::fs::rename(&old_geosite, &final_geosite);
+        }
+        let _ = std::fs::remove_file(&old_geoip);
+        let _ = std::fs::remove_file(&old_geosite);
+        return Err(format!(
+            "Failed to apply geosite: {e}. Both geo files rolled back."
+        ));
+    }
+
+    // Clean up backups
+    let _ = std::fs::remove_file(&old_geoip);
+    let _ = std::fs::remove_file(&old_geosite);
 
     emit_core_download_status(&window, "Geo database update complete", 100);
     Ok("Geo databases updated successfully".to_owned())
@@ -1067,6 +1166,13 @@ pub async fn update_client(window: Window) -> Result<String, String> {
                 format!("SHA256 verification failed: {e}. Installer deleted for security.")
             })?;
         }
+    } else {
+        // No digest available — refuse to open unverified installer for security
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(
+            "No integrity digest available for this release. Installer was deleted for security."
+                .to_owned(),
+        );
     }
 
     emit_core_download_status(&window, "Opening installer...", 95);

@@ -1,13 +1,21 @@
 use std::fs;
 use std::path::Path;
 
+/// Write a file with restricted permissions (owner-only, equivalent to Unix 0600).
+///
+/// On Unix: sets file mode to 0600.
+/// On Windows: sets DACL to grant access to current user + SYSTEM only.
+///
+/// Returns `Err` if either the file write or permission setting fails.
+/// Callers can distinguish "secure write succeeded" from "file written but insecure".
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to set permissions on {path:?}: {e}"))?;
     }
 
     #[cfg(target_os = "windows")]
@@ -58,18 +66,19 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             );
 
             if handle == INVALID_HANDLE_VALUE {
-                #[cfg(debug_assertions)]
-                eprintln!("[SECURITY] Failed to open file for DACL modification");
-                return Ok(()); // Non-fatal: file was written, just permissions not set
+                return Err(format!(
+                    "[SECURITY] Failed to open file for DACL modification — file permissions may be insecure: {path:?}"
+                ));
             }
 
             // Get current process token to find the user
             let mut token_handle: HANDLE = ptr::null_mut();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) == 0 {
                 CloseHandle(handle);
-                #[cfg(debug_assertions)]
-                eprintln!("[SECURITY] Failed to open process token");
-                return Ok(());
+                return Err(
+                    "[SECURITY] Failed to open process token — file permissions may be insecure"
+                        .to_owned(),
+                );
             }
 
             // Get token user info size
@@ -94,9 +103,10 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             {
                 CloseHandle(token_handle);
                 CloseHandle(handle);
-                #[cfg(debug_assertions)]
-                eprintln!("[SECURITY] Failed to get token user info");
-                return Ok(());
+                return Err(
+                    "[SECURITY] Failed to get token user info — file permissions may be insecure"
+                        .to_owned(),
+                );
             }
 
             let token_user = &*(buffer.as_ptr() as *const TOKEN_USER);
@@ -137,9 +147,10 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             {
                 CloseHandle(token_handle);
                 CloseHandle(handle);
-                #[cfg(debug_assertions)]
-                eprintln!("[SECURITY] Failed to create SYSTEM SID");
-                return Ok(());
+                return Err(
+                    "[SECURITY] Failed to create SYSTEM SID — file permissions may be insecure"
+                        .to_owned(),
+                );
             }
 
             ea[1].grfAccessPermissions = GENERIC_ALL;
@@ -155,13 +166,12 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
             let mut new_acl: *mut ACL = ptr::null_mut();
             if SetEntriesInAclW(2, ea.as_ptr(), ptr::null_mut(), &mut new_acl) != ERROR_SUCCESS {
                 CloseHandle(handle);
-                #[cfg(debug_assertions)]
-                eprintln!("[SECURITY] Failed to create ACL");
-                return Ok(());
+                return Err(
+                    "[SECURITY] Failed to create ACL — file permissions may be insecure".to_owned(),
+                );
             }
 
             // Apply the security descriptor to the file
-            // SetSecurityInfo returns ERROR_SUCCESS (0) on success, non-zero on failure
             if SetSecurityInfo(
                 handle,
                 SE_FILE_OBJECT,
@@ -175,19 +185,13 @@ pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
                 LocalFree(new_acl as *mut _);
                 CloseHandle(handle);
                 return Err(
-                    "Failed to set file security info - file may have insecure permissions"
+                    "Failed to set file security info — file may have insecure permissions"
                         .to_owned(),
                 );
             }
 
             LocalFree(new_acl as *mut _);
             CloseHandle(handle);
-
-            // Note: Windows administrators can always take ownership of files.
-            // This is equivalent to Unix 0600 - protects against regular users,
-            // not against privileged accounts.
-            #[cfg(debug_assertions)]
-            eprintln!("[SECURITY] Successfully set file permissions (owner-only, equivalent to Unix 0600)");
         }
     }
 

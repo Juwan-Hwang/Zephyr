@@ -476,7 +476,14 @@ pub async fn download_sub(
 
         if let Some(proxy_url_val) = proxy_url {
             // When using proxy, skip DNS pre-resolve pinning to let the proxy
-            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
+            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs).
+            //
+            // SSRF protection coverage for proxy paths:
+            // - ✅ Initial URL host validated (private host check before any request)
+            // - ✅ Redirect policy blocks redirects to private hosts/IPs
+            // - ⚠️  Proxy-side SSRF (proxy resolving to internal IPs) is NOT
+            //     preventable client-side — this is inherent to any proxy architecture.
+            //     Mitigate by only configuring trusted proxies.
             let client_mihomo =
                 build_http_client_with_proxy(user_agent.as_deref(), None, Some(proxy_url_val));
             if let Ok(client) = client_mihomo {
@@ -491,25 +498,10 @@ pub async fn download_sub(
         }
     }
 
-    if result.is_none() {
-        if let Some(sys_proxy_url) = crate::sys_proxy::get_sys_proxy_address() {
-            println!("[download_sub] Trying system proxy: {sys_proxy_url}");
-            // When using proxy, skip DNS pre-resolve pinning to let the proxy
-            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs)
-            let client_sys =
-                build_http_client_with_proxy(user_agent.as_deref(), None, Some(sys_proxy_url));
-            if let Ok(client) = client_sys {
-                match do_download(client, url.clone()).await {
-                    Ok(data) => result = Some(data),
-                    Err(e) => {
-                        println!("[download_sub] System proxy failed: {e}");
-                        last_error = e;
-                    }
-                }
-            }
-        }
-    }
-
+    // Two-tier download strategy: direct → Mihomo proxy.
+    // System proxy fallback is intentionally removed to reduce SSRF attack surface.
+    // The Mihomo proxy path is trusted (user-configured), while system proxy
+    // could be set by any application/malware on the system.
     let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
         if last_error.is_empty() {
             "Network error occurred during download".to_owned()
@@ -627,11 +619,58 @@ pub async fn download_sub(
             },
         },
     );
-    save_metadata(&paths, &metadata);
-
     let final_content = content;
 
-    write_file_secure(&target_path, &final_content)?;
+    // Best-effort atomic config + metadata update (compensating transactions, not ACID):
+    //   Overwrite: target -> backup, temp -> target, save_metadata, cleanup backup
+    //   New:      temp -> target, save_metadata, remove target on failure
+    // Crash between steps may leave .bak.<uuid> residuals — cleaned up at startup.
+    let is_overwrite = target_path.exists();
+
+    // Use UUID suffix to avoid conflicts from concurrent updates or crash residuals
+    let unique_id = uuid::Uuid::new_v4().to_string()[..8].to_owned();
+    let backup_path =
+        is_overwrite.then(|| target_path.with_extension(format!("yaml.bak.{unique_id}")));
+    let temp_path = target_path.with_extension(format!("yaml.tmp.{unique_id}"));
+
+    // Write new config to temp file
+    write_file_secure(&temp_path, &final_content)?;
+
+    // Overwrite: move old config to backup first
+    if let Some(bp) = backup_path.as_ref() {
+        std::fs::rename(&target_path, bp).map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            format!("Failed to backup existing config (update aborted): {e}")
+        })?;
+    }
+
+    // Move temp to final path (same directory — rename is always atomic, no copy fallback)
+    if let Err(e) = std::fs::rename(&temp_path, &target_path) {
+        let _ = std::fs::remove_file(&temp_path);
+        if let Some(bp) = backup_path.as_ref() {
+            if bp.exists() {
+                let _ = std::fs::rename(bp, &target_path);
+            }
+        }
+        return Err(format!("Failed to apply config file: {e}"));
+    }
+
+    // Save metadata — last step so failure can be cleanly rolled back
+    if let Err(e) = save_metadata(&paths, &metadata) {
+        // Rollback config to previous state
+        let _ = std::fs::remove_file(&target_path);
+        if let Some(bp) = backup_path.as_ref() {
+            if bp.exists() {
+                let _ = std::fs::rename(bp, &target_path);
+            }
+        }
+        return Err(format!("Metadata save failed (config rolled back): {e}"));
+    }
+
+    // Success — clean up backup
+    if let Some(bp) = backup_path.as_ref() {
+        let _ = std::fs::remove_file(bp);
+    }
 
     Ok(format!("Config saved as {clean_name}"))
 }

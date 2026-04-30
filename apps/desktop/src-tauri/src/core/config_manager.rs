@@ -145,7 +145,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
             fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
             let mut metadata = load_metadata(&paths);
             metadata.configs.remove(&yml_name);
-            save_metadata(&paths, &metadata);
+            save_metadata(&paths, &metadata)?;
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
@@ -173,7 +173,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     if name != clean_name {
         metadata.configs.remove(&name);
     }
-    save_metadata(&paths, &metadata);
+    save_metadata(&paths, &metadata)?;
 
     Ok(format!("Config {name} deleted"))
 }
@@ -321,7 +321,7 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
             metadata.configs.insert(clean_new.clone(), meta);
         }
     }
-    save_metadata(&paths, &metadata);
+    save_metadata(&paths, &metadata)?;
 
     // Update last_config setting if it references the old name
     let needs_update = {

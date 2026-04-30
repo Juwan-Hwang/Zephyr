@@ -440,7 +440,7 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
     }
 }
 
-pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
+pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result<(), String> {
     let mut obf_meta = ProfilesMetadata::default();
     #[allow(clippy::iter_over_hash_type)]
     for (k, v) in &meta.configs {
@@ -454,11 +454,10 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) {
     }
 
     let meta_path = paths.profiles_dir.join("metadata.json");
-    if let Ok(data) = serde_json::to_string_pretty(&obf_meta) {
-        if let Err(e) = write_file_secure(&meta_path, &data) {
-            eprintln!("[warn] Failed to write metadata cache: {e}");
-        }
-    }
+    let data = serde_json::to_string_pretty(&obf_meta)
+        .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
+    write_file_secure(&meta_path, &data)?;
+    Ok(())
 }
 
 /// Clean up metadata entries for configs that no longer exist on disk
@@ -502,7 +501,9 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
     }
 
     if changed {
-        save_metadata(paths, &metadata);
+        if let Err(e) = save_metadata(paths, &metadata) {
+            eprintln!("[warn] Failed to save metadata during cleanup: {e}");
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 # ============================================================
 # Zephyr Security Scan Pipeline
-# All third-party Actions pinned to immutable commit SHA
+# Note: Some Actions use version tags (e.g. @v4) for convenience.
+# Pinning all Actions to immutable commit SHA is a future goal.
 # ============================================================
 
 name: Security Scan
