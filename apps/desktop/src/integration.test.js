@@ -15,7 +15,7 @@
 // A failure here means a "silent" integration bug that unit tests cannot catch.
 
 import { describe, it, expect } from 'vitest';
-import { COMMANDS, PRISM, RULE } from './_shared/index.js';
+import { COMMANDS, PRISM, RULE } from '@zephyr/shared';
 import { translations } from './i18n.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
