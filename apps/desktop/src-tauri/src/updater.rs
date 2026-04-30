@@ -313,6 +313,10 @@ fn extract_from_zip(
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        // Reject symlinks outright — not silently skip
+        if file.is_symlink() {
+            return Err("Refusing to extract symlink from ZIP".to_owned());
+        }
         let name = file.name();
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
             return Err(format!("Malicious ZIP path detected: {name}"));
@@ -323,6 +327,17 @@ fn extract_from_zip(
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let matched = lower.ends_with("/mihomo") || lower == "mihomo";
         if matched || lower.ends_with(expected) {
+            // Zip bomb detection: check uncompressed size and compression ratio
+            let uncompressed = file.size();
+            let compressed = file.compressed_size();
+            if uncompressed > 200 * 1024 * 1024 {
+                return Err("ZIP entry uncompressed size exceeds 200 MB limit".to_owned());
+            }
+            if compressed > 0 && uncompressed > compressed.saturating_mul(200) {
+                return Err(
+                    "Suspicious ZIP compression ratio detected (possible zip bomb)".to_owned(),
+                );
+            }
             let mut out_file = std::fs::File::create(exe_path).map_err(|e| e.to_string())?;
             let written = std::io::copy(&mut file, &mut out_file).map_err(|e| e.to_string())?;
             if written == 0 {
@@ -339,6 +354,7 @@ fn extract_from_gz(
     exe_path: &std::path::Path,
 ) -> Result<(), String> {
     let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+    let compressed_size = file.metadata().map_err(|e| e.to_string())?.len();
     let mut decoder = GzDecoder::new(file);
 
     let temp_tar_path = archive_path.with_extension("tar");
@@ -355,6 +371,14 @@ fn extract_from_gz(
         if total_decompressed > 200 * 1024 * 1024 {
             let _ = std::fs::remove_file(&temp_tar_path);
             return Err("Decompressed gz too large".to_owned());
+        }
+        // Bomb ratio check: use multiplication to avoid integer division edge cases
+        if total_decompressed > 64 * 1024
+            && compressed_size > 0
+            && total_decompressed > compressed_size.saturating_mul(200)
+        {
+            let _ = std::fs::remove_file(&temp_tar_path);
+            return Err("Suspicious compression ratio detected (possible zip bomb)".to_owned());
         }
         temp_decompressed
             .write_all(buffer.get(..n).unwrap_or(&[]))
@@ -377,6 +401,12 @@ fn extract_from_gz(
             .map_err(|e| format!("Failed to parse tar entries: {e}"))?
         {
             let mut entry_inner = entry.map_err(|e| e.to_string())?;
+            // Reject symlinks and hard links outright
+            let entry_type = entry_inner.header().entry_type();
+            if entry_type.is_symlink() || entry_type.is_hard_link() {
+                let _ = std::fs::remove_file(&temp_tar_path);
+                return Err("Refusing to extract linked TAR entry".to_owned());
+            }
             let path = entry_inner.path().map_err(|e| e.to_string())?;
             let path_str = path.to_string_lossy().replace('\\', "/");
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
