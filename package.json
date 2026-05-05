@@ -16,8 +16,8 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.2.4",
-    "@tauri-apps/cli": "2.10.1",
-    "eslint": "10.2.1",
+    "@tauri-apps/cli": "2.11.0",
+    "eslint": "10.3.0",
     "happy-dom": "^20.9.0",
     "tailwindcss": "4.2.4",
     "typescript": "^6.0.2",
