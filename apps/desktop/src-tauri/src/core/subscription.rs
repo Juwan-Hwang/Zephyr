@@ -276,13 +276,14 @@ pub(crate) const fn is_private_ip(ip: IpAddr) -> bool {
 pub(crate) fn is_private_host(host: &str) -> bool {
     let host_lower = host.to_lowercase();
 
-    // Quick checks for common localnames
+    // Only allow these local hostname patterns for user-entered private addresses:
+    // - localhost / *.localhost (standard loopback)
+    // - *.local (mDNS / local network)
+    // Note: .test/.example/.invalid are IANA reserved but not commonly used for
+    // actual local services. We exclude them for stricter security boundaries.
     if host_lower == "localhost"
         || host_lower.ends_with(".localhost")
         || host_lower.ends_with(".local")
-        || host_lower.ends_with(".test")
-        || host_lower.ends_with(".example")
-        || host_lower.ends_with(".invalid")
     {
         return true;
     }
@@ -295,10 +296,19 @@ pub(crate) fn is_private_host(host: &str) -> bool {
     false
 }
 
-/// Validate URL and its resolved IPs for SSRF protection
+/// Validate URL and its resolved IPs for SSRF protection.
+/// Returns `(host, resolved_addr, user_entered_private)` where `user_entered_private`
+/// is `true` only when the host itself is a private/local address (e.g. `192.168.x.x`,
+/// `10.x.x.x`, `localhost`). In that case the request is allowed but DNS pinning is
+/// skipped so the proxy/system can resolve it.
+///
+/// Security boundary:
+/// - **Allowed**: user explicitly enters a private host → skip DNS pinning.
+/// - **Rejected**: public domain resolves to a private IP → SSRF, blocked.
+/// - **Rejected**: redirect to a private address → blocked by `redirect_policy`.
 pub(crate) fn validate_subscription_url_with_ip(
     url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>), String> {
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     // Only allow http and https schemes
@@ -310,24 +320,43 @@ pub(crate) fn validate_subscription_url_with_ip(
     // Extract host
     let host = parsed_url.host_str().ok_or("URL must have a host")?;
 
-    if is_private_host(host) {
-        return Err("Access to private/local addresses is not allowed".to_owned());
+    // Check if user explicitly entered a private/local host.
+    // This is the ONLY case where private IPs are allowed.
+    let user_entered_private = is_private_host(host);
+
+    if user_entered_private {
+        // User explicitly typed a private address (e.g. http://192.168.1.2/sub).
+        // Allow it, but return None for resolved_addr (no DNS pinning).
+        return Ok((host.to_owned(), None, true));
     }
 
+    // Host is a public domain — resolve and verify all IPs are public.
     // Fix Med-3: DNS Rebinding / SSRF TOCTOU
-    // Resolve here and return the resolved SocketAddr so we can pin it in reqwest.
-    let mut resolved_addr = None;
-    // Use the correct port based on URL scheme
     let default_port = if scheme == "https" { 443 } else { 80 };
-    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
-        .map_err(|e| format!("Failed to resolve host: {e}"))?;
+    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(
+        &format!("{host}:{default_port}"),
+    )
+    .map_err(|e| format!("Failed to resolve host: {e}"))?
+    .collect();
+
+    validate_public_host_addrs(host, &addrs)
+}
+
+/// Core validation logic for a public host's resolved addresses.
+/// Extracted so tests can inject mock DNS results without real DNS.
+fn validate_public_host_addrs(
+    host: &str,
+    addrs: &[std::net::SocketAddr],
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+    let mut resolved_addr = None;
 
     for addr in addrs {
         if is_private_ip(addr.ip()) {
+            // Public domain resolving to a private IP = SSRF, always block.
             return Err("Access to private/local resolved addresses is not allowed".to_owned());
         }
         if resolved_addr.is_none() {
-            resolved_addr = Some(addr);
+            resolved_addr = Some(*addr);
         }
     }
 
@@ -335,7 +364,7 @@ pub(crate) fn validate_subscription_url_with_ip(
         return Err("Could not resolve any IP address for the host".to_owned());
     }
 
-    Ok((host.to_owned(), resolved_addr))
+    Ok((host.to_owned(), resolved_addr, false))
 }
 
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {
@@ -379,8 +408,14 @@ pub async fn download_sub(
 
     let safe_name = validate_subscription_name(&name)?;
 
-    let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
-    let resolve_pin = resolved_addr.map(|addr| (host.clone(), addr));
+    let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
+    // For user-entered private addresses, skip DNS pinning (proxy/system handles resolution).
+    // For public addresses, use DNS pinning to prevent DNS rebinding.
+    let resolve_pin = if user_entered_private {
+        None
+    } else {
+        resolved_addr.map(|addr| (host.clone(), addr))
+    };
 
     let do_download = |client: reqwest::Client, url: String| async move {
         let resp = client.get(&url).send().await.map_err(|e| {
@@ -677,8 +712,12 @@ pub async fn download_sub(
 
 #[tauri::command]
 pub async fn fetch_text(url: String) -> Result<String, String> {
-    let (host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
-    let resolve_pin = resolved_addr.map(|addr| (host, addr));
+    let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
+    let resolve_pin = if user_entered_private {
+        None
+    } else {
+        resolved_addr.map(|addr| (host, addr))
+    };
     let client = build_http_client(None, resolve_pin)?;
 
     let resp = client.get(&url).send().await.map_err(|e| {
@@ -724,14 +763,19 @@ mod tests {
 
     #[test]
     fn test_is_private_host() {
+        // Allowed local hostname patterns
         assert!(is_private_host("localhost"));
         assert!(is_private_host("my.localhost"));
         assert!(is_private_host("my.local"));
-        assert!(is_private_host("my.test"));
-        assert!(is_private_host("my.example"));
-        assert!(is_private_host("my.invalid"));
+        // Private IPs
         assert!(is_private_host("127.0.0.1"));
         assert!(is_private_host("10.0.0.1"));
+        assert!(is_private_host("192.168.1.1"));
+        // NOT allowed: IANA reserved domains (stricter policy)
+        assert!(!is_private_host("my.test"));
+        assert!(!is_private_host("my.example"));
+        assert!(!is_private_host("my.invalid"));
+        // Public domains
         assert!(!is_private_host("example.com"));
         assert!(!is_private_host("8.8.8.8"));
     }
@@ -768,4 +812,136 @@ mod tests {
         let encoded_no_proxies = base64_standard.encode(no_proxies);
         assert!(try_decode_base64_content(&encoded_no_proxies).is_none());
     }
+
+    // ── validate_subscription_url_with_ip: user-entered private hosts ──
+
+    #[test]
+    fn test_validate_private_ip_allowed() {
+        // User explicitly enters a private IP → allowed, no DNS pinning
+        let result = validate_subscription_url_with_ip("http://192.168.1.2/sub");
+        assert!(result.is_ok());
+        let (host, resolved_addr, user_entered_private) = result.unwrap();
+        assert_eq!(host, "192.168.1.2");
+        assert!(resolved_addr.is_none(), "private host should not return a resolved addr");
+        assert!(user_entered_private);
+    }
+
+    #[test]
+    fn test_validate_127001_allowed() {
+        let result = validate_subscription_url_with_ip("http://127.0.0.1:8080/sub");
+        assert!(result.is_ok());
+        let (_, resolved_addr, user_entered_private) = result.unwrap();
+        assert!(resolved_addr.is_none());
+        assert!(user_entered_private);
+    }
+
+    #[test]
+    fn test_validate_10_x_allowed() {
+        let result = validate_subscription_url_with_ip("http://10.0.0.5/sub");
+        assert!(result.is_ok());
+        let (_, _, user_entered_private) = result.unwrap();
+        assert!(user_entered_private);
+    }
+
+    #[test]
+    fn test_validate_localhost_allowed() {
+        let result = validate_subscription_url_with_ip("http://localhost/sub");
+        assert!(result.is_ok());
+        let (_, resolved_addr, user_entered_private) = result.unwrap();
+        assert!(resolved_addr.is_none());
+        assert!(user_entered_private);
+    }
+
+    // ── validate_subscription_url_with_ip: public hosts ──
+
+    #[test]
+    fn test_validate_public_ip_returns_pin() {
+        // Public IP like 8.8.8.8 → allowed with DNS pinning
+        let result = validate_subscription_url_with_ip("http://8.8.8.8/sub");
+        assert!(result.is_ok());
+        let (host, resolved_addr, user_entered_private) = result.unwrap();
+        assert_eq!(host, "8.8.8.8");
+        assert!(resolved_addr.is_some(), "public IP should return a resolved addr for pinning");
+        assert!(!user_entered_private);
+    }
+
+    #[test]
+    fn test_validate_invalid_schemes_rejected() {
+        assert!(validate_subscription_url_with_ip("ftp://192.168.1.1/sub").is_err());
+        assert!(validate_subscription_url_with_ip("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_with_ip("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn test_validate_no_host_rejected() {
+        assert!(validate_subscription_url_with_ip("http:///sub").is_err());
+    }
+
+    // ── validate_public_host_addrs: mock DNS tests ──
+
+    #[test]
+    fn test_public_host_with_public_ip_allowed() {
+        let addrs: Vec<std::net::SocketAddr> = vec![
+            "1.2.3.4:80".parse().unwrap(),
+        ];
+        let result = validate_public_host_addrs("example.com", &addrs);
+        assert!(result.is_ok());
+        let (_, resolved_addr, user_entered_private) = result.unwrap();
+        assert!(resolved_addr.is_some());
+        assert!(!user_entered_private);
+    }
+
+    #[test]
+    fn test_public_host_resolving_to_private_ip_rejected() {
+        // Public domain resolves to 192.168.1.1 → SSRF, must be blocked
+        let addrs: Vec<std::net::SocketAddr> = vec![
+            "192.168.1.1:80".parse().unwrap(),
+        ];
+        let result = validate_public_host_addrs("attacker.com", &addrs);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("private/local resolved"));
+    }
+
+    #[test]
+    fn test_public_host_resolving_to_loopback_rejected() {
+        let addrs: Vec<std::net::SocketAddr> = vec![
+            "127.0.0.1:80".parse().unwrap(),
+        ];
+        let result = validate_public_host_addrs("evil.com", &addrs);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_public_host_resolving_to_link_local_rejected() {
+        let addrs: Vec<std::net::SocketAddr> = vec![
+            "169.254.1.1:80".parse().unwrap(),
+        ];
+        let result = validate_public_host_addrs("evil.com", &addrs);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_public_host_mixed_ips_rejected() {
+        // If ANY resolved IP is private, the whole thing is blocked
+        let addrs: Vec<std::net::SocketAddr> = vec![
+            "1.2.3.4:80".parse().unwrap(),
+            "192.168.1.1:80".parse().unwrap(),
+        ];
+        let result = validate_public_host_addrs("dual-homed.com", &addrs);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_public_host_empty_addrs_rejected() {
+        let addrs: Vec<std::net::SocketAddr> = vec![];
+        let result = validate_public_host_addrs("empty.com", &addrs);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Could not resolve"));
+    }
+
+    // ── Redirect policy: private redirects are blocked ──
+    // The redirect_policy in build_http_client_with_proxy calls is_private_host
+    // and is_private_ip for every redirect target. Those functions are tested
+    // above. A full integration test with a mock HTTP server is out of scope
+    // for unit tests.
 }

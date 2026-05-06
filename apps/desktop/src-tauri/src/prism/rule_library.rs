@@ -364,10 +364,15 @@ pub async fn rule_import_url(
 ) -> Result<String, String> {
     state.check_rate_limit("rule_import_url")?;
     // C-3: Validate URL scheme and resolve DNS to prevent SSRF (rebinding/TOCTOU)
-    let (validated_host, resolved_addr) = validate_subscription_url_with_ip(&url)?;
+    let (validated_host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
 
-    // Pin resolved IP to prevent DNS rebinding between validation and request
-    let resolve_pin = resolved_addr.map(|addr| (validated_host, addr));
+    // For user-entered private addresses, skip DNS pinning.
+    // For public addresses, pin resolved IP to prevent DNS rebinding.
+    let resolve_pin = if user_entered_private {
+        None
+    } else {
+        resolved_addr.map(|addr| (validated_host, addr))
+    };
 
     // M-3: Add connection and read timeouts (async client)
     let client = crate::core_manager::core::subscription::build_http_client(None, resolve_pin)
