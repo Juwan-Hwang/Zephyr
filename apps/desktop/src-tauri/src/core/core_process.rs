@@ -133,8 +133,51 @@ pub const fn ensure_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Detect portable mode.
+/// Portable mode is activated when a `.portable` marker file exists next to the executable.
+/// On Linux (`AppImage`), the `APPIMAGE` env var is used since `current_exe()` returns
+/// a temporary mount point.
+pub(crate) fn is_portable_mode() -> bool {
+    // AppImage: check the directory containing the .AppImage file
+    #[cfg(target_os = "linux")]
+    if let Ok(appimage_path) = std::env::var("APPIMAGE") {
+        if let Some(dir) = std::path::Path::new(&appimage_path).parent() {
+            if dir.join(".portable").exists() {
+                return true;
+            }
+        }
+    }
+
+    // Windows / general: check the directory containing the executable
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|dir| dir.join(".portable")))
+        .map(|marker| marker.exists())
+        .unwrap_or(false)
+}
+
+/// Get the portable data directory (exe or `AppImage` location)
+fn portable_data_dir() -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    if let Ok(appimage_path) = std::env::var("APPIMAGE") {
+        if let Some(dir) = std::path::Path::new(&appimage_path).parent() {
+            return Ok(dir.to_path_buf());
+        }
+    }
+
+    std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {e}"))?
+        .parent()
+        .ok_or_else(|| "Cannot determine exe directory".to_owned())
+        .map(std::path::Path::to_path_buf)
+}
+
 pub fn resolve_app_paths(app: &AppHandle) -> Result<AppPaths, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = if is_portable_mode() {
+        portable_data_dir()?
+    } else {
+        app.path().app_data_dir().map_err(|e| e.to_string())?
+    };
     let core_dir = app_data_dir.join("core");
     let profiles_dir = app_data_dir.join("profiles");
 
@@ -183,6 +226,11 @@ fn get_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
+    // Portable mode: no migration needed, core files are already in the exe directory
+    if is_portable_mode() {
+        return Ok(());
+    }
+
     // First, check bundled resources (for full installer)
     if let Some(bundled_dir) = get_bundled_dir(app) {
         if bundled_dir != paths.core_dir && bundled_dir.exists() {
@@ -292,7 +340,8 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
 
     #[cfg(target_os = "windows")]
     {
-        if is_new {
+        // Skip ACL in portable mode (setting ACL on USB/removable paths is unnecessary)
+        if is_new && !is_portable_mode() {
             use std::os::windows::process::CommandExt as _;
             use std::process::Command;
             if let Ok(username) = std::env::var("USERNAME") {

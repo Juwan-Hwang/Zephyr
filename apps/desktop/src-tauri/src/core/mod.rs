@@ -149,7 +149,7 @@ pub use config_manager::{
 pub use core_log::read_core_log;
 pub use core_process::{
     core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_version,
-    kill_mihomo, start_core, stop_core, stop_core_inner,
+    kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner,
 };
 pub use crypto::is_machine_key_persisted;
 pub use secure_io::write_file_secure;

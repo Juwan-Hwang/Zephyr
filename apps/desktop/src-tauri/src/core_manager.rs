@@ -31,6 +31,7 @@ pub use core::{
     read_core_log,
     release_tun_toggle,
     rename_config,
+    resolve_app_paths,
     restart_core_as_root_cmd,
     set_tun_enabled,
     set_tun_mode,

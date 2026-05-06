@@ -298,6 +298,15 @@ function initFakeClient() {
 //  initSettings -- main entry point
 // ---------------------------------------------------------------------------
 export async function initSettings() {
+    // Portable mode: hide unsupported options
+    const isPortable = await invoke('get_portable_mode');
+    if (isPortable) {
+        const autostartRow = document.getElementById('row-autostart');
+        const clientUpdateRow = document.getElementById('row-client-update');
+        if (autostartRow) autostartRow.style.display = 'none';
+        if (clientUpdateRow) clientUpdateRow.style.display = 'none';
+    }
+
     const langSelect = /** @type {HTMLSelectElement} */ (document.getElementById('setting-lang'));
     const closeTrayToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-close-tray'));
     const autoUpdateToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-auto-update'));
@@ -420,7 +429,7 @@ export async function initSettings() {
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
-    if (autostartToggle) autostartToggle.checked = await isAutoStartEnabled();
+    if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
     if (nodeScrollToggle) nodeScrollToggle.checked = localStorage.getItem('nodeScroll') === 'true';
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
@@ -621,22 +630,24 @@ export async function initSettings() {
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
     });
-    autostartToggle?.addEventListener('change', async () => {
-        if (!autostartToggle) return;
-        const enabled = autostartToggle.checked;
-        try {
-            if (enabled) {
-                await enableAutoStart();
-            } else {
-                await disableAutoStart();
+    if (!isPortable) {
+        autostartToggle?.addEventListener('change', async () => {
+            if (!autostartToggle) return;
+            const enabled = autostartToggle.checked;
+            try {
+                if (enabled) {
+                    await enableAutoStart();
+                } else {
+                    await disableAutoStart();
+                }
+                await save();
+            } catch (err) {
+                const error = toError(err);
+                autostartToggle.checked = !enabled;
+                showNotification(error.toString(), 'error');
             }
-            await save();
-        } catch (err) {
-            const error = toError(err);
-            autostartToggle.checked = !enabled;
-            showNotification(error.toString(), 'error');
-        }
-    });
+        });
+    }
 
     // ---- Save config to core ----
     /**

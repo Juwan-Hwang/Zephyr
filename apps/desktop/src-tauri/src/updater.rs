@@ -1127,6 +1127,11 @@ pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
 /// Download and open the Zephyr client installer.
 #[command]
 pub async fn update_client(window: Window) -> Result<String, String> {
+    // Portable mode: cannot self-update (exe is locked while running)
+    if crate::core_manager::core::core_process::is_portable_mode() {
+        return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
+    }
+
     emit_core_download_status(&window, "Checking for Zephyr updates...", 5);
 
     let info = get_latest_client_version().await?;

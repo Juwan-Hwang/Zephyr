@@ -288,8 +288,9 @@ async function initApp() {
         }
       }
 
-      // Check client update if auto_update_client is enabled
-      if (settings.auto_update_client) {
+      // Check client update if auto_update_client is enabled (skip in portable mode)
+      const isPortable = await invoke('get_portable_mode');
+      if (!isPortable && settings.auto_update_client) {
         try {
           const info = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSION);
           const currentVersion = await invoke(COMMANDS.GET_APP_VERSION);

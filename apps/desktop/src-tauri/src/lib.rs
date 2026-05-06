@@ -152,10 +152,8 @@ fn save_settings(
 /// Persist settings to settings.json (without touching in-memory state).
 /// Used by `rename_config` to persist `last_config` changes.
 pub(crate) fn persist_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+    let paths = core_manager::resolve_app_paths(app)?;
+    let path = paths.app_data_dir;
     if !path.exists() {
         fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {e}"))?;
     }
@@ -257,6 +255,12 @@ fn get_app_version() -> String {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Expose portable mode status to the frontend
+#[tauri::command]
+fn get_portable_mode() -> bool {
+    crate::core_manager::core::core_process::is_portable_mode()
+}
+
 // rust-analyzer cannot resolve proc-macro `tauri::generate_context!()` without OUT_DIR at IDE analysis time.
 // This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
 #[allow(rust_analyzer::proc_macro_unresolved)]
@@ -274,7 +278,10 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(AutostartBuilder::new().build());
+        // Skip autostart plugin in portable mode (path is not fixed)
+        if !crate::core_manager::core::core_process::is_portable_mode() {
+            builder = builder.plugin(AutostartBuilder::new().build());
+        }
     }
 
     builder = builder
@@ -309,7 +316,8 @@ pub fn run() {
             ensure_app_storage(app.handle())?;
             // Initialize TUN mode flag from config (before tray init so icon is correct)
             let _ = init_tun_mode_from_config(app.handle());
-            let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let paths = core_manager::resolve_app_paths(app.handle())?;
+            let config_dir = paths.app_data_dir;
             let settings_file = config_dir.join("settings.json");
             let settings = if settings_file.exists() {
                 let content = fs::read_to_string(settings_file).unwrap_or_default();
@@ -416,6 +424,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            get_portable_mode,
             start_core,
             stop_core,
             list_configs,
