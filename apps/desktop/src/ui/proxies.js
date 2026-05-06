@@ -597,6 +597,7 @@ export function initProxyControls() {
     // Smart Select Best: one-click switch to the best-scoring node
     const selectBestBtn = document.getElementById('select-best-btn');
     if (selectBestBtn) {
+        syncSmartUiVisibility();
         selectBestBtn.onclick = async () => {
             try {
                 const best = await smartSelectBest();
@@ -1045,9 +1046,28 @@ export async function renderProxies() {
     }
 }
 
+// --- Smart UI visibility sync ---
+
+/** Sync Best button visibility and --smart-enabled CSS var with backend config. */
+async function syncSmartUiVisibility() {
+    const selectBestBtn = document.getElementById('select-best-btn');
+    if (!selectBestBtn) return;
+
+    try {
+        const config = await smartConfig();
+        const enabled = config.enabled ?? false;
+        document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+        selectBestBtn.style.display = enabled ? '' : 'none';
+    } catch {
+        document.documentElement.style.setProperty('--smart-enabled', '0');
+        selectBestBtn.style.display = 'none';
+    }
+}
+
 // --- Event Bus: react to config updates from other modules (e.g. settings.js) ---
 
-Bus.on(Events.CONFIG_UPDATED, () => {
+Bus.on(Events.CONFIG_UPDATED, async () => {
+    await syncSmartUiVisibility();
     renderProxies();
 });
 

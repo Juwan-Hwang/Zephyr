@@ -275,7 +275,13 @@ impl PrismHost for ZephyrPrismHost {
         write_file_secure(&tmp_path, config)?;
 
         let exe = crate::core_manager::get_core_exe_path(&self.app)?;
-        let output = std::process::Command::new(&exe)
+        let mut cmd = std::process::Command::new(&exe);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt as _;
+            cmd.creation_flags(crate::core_manager::CREATE_NO_WINDOW);
+        }
+        let output = cmd
             .args(["-t", "-f"])
             .arg(&tmp_path)
             .output()
