@@ -31,6 +31,18 @@ html:not(.dark) * {
 
 @config "../tailwind.config.js";
 
+/* ── Font stack with Linux fallbacks ── */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+    "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
+    "Courier New", monospace;
+  --color-accent: var(--accent-primary);
+  --color-accent-glow: var(--accent-glow);
+}
+
 /* ── Tailwind v4 Custom Utilities ── */
 @utility text-2xs {
   font-size: 0.625rem;
@@ -229,11 +241,6 @@ input[type="range"],
 
 .group:hover .scrolling-text {
     animation: text-scroll 4s linear infinite alternate;
-}
-
-@theme {
-  --color-accent: var(--accent-primary);
-  --color-accent-glow: var(--accent-glow);
 }
 
 :root {

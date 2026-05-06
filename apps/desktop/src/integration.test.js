@@ -132,7 +132,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         // dns-shared.js
         'COMMANDS.SAVE_SETTINGS',
         // settings.js
-        'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
+        'COMMANDS.SET_UI_SCALE', 'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
         'COMMANDS.UPDATE_CONFIG', 'COMMANDS.UPDATE_GEO_DATA', 'COMMANDS.READ_CONFIG',
         'COMMANDS.UPDATE_CORE', 'COMMANDS.UPDATE_CLIENT',
         'COMMANDS.DELETE_CONFIG', 'COMMANDS.GET_CONFIG_URL',
@@ -340,7 +340,7 @@ describe('COMMANDS namespace collision check', () => {
                 TRAY: { CHANGE_TRAY_ICON: 'change_tray_icon', GET_TRAY_MENU_STATE: 'get_tray_menu_state', SET_TRAY_MENU_STATE: 'set_tray_menu_state', UPDATE_TRAY_FULL_MENU: 'update_tray_full_menu', UPDATE_TRAY_TOGGLE_STATES: 'update_tray_toggle_states', GET_TRAY_STATUS: 'get_tray_status', GET_TRAY_PROXY_STATUS: 'get_tray_proxy_status' },
                 UPDATER: { GET_LATEST_VERSION: 'get_latest_version', UPDATE_CORE: 'update_core', UPDATE_GEO_DATA: 'update_geo_data', GET_LATEST_CLIENT_VERSION: 'get_latest_client_version', UPDATE_CLIENT: 'update_client', GET_LATEST_CLIENT_VERSIONS: 'get_latest_client_versions' },
                 SHORTCUTS: { REGISTER_SHORTCUT: 'rate_limited_register_shortcut', UNREGISTER_SHORTCUT: 'rate_limited_unregister_shortcut' },
-                SETTINGS: { GET_SETTINGS: 'get_settings', SAVE_SETTINGS: 'save_settings' },
+                SETTINGS: { GET_SETTINGS: 'get_settings', SAVE_SETTINGS: 'save_settings', SET_UI_SCALE: 'set_ui_scale' },
                 MISC: { GET_APP_VERSION: 'get_app_version', SHOW_MAIN_WINDOW: 'show_main_window', SEND_NOTIFICATION: 'rate_limited_send_notification', EXEMPT_UWP_APPS: 'exempt_uwp_apps' },
                 CRYPTO: { IS_MACHINE_KEY_PERSISTED: 'is_machine_key_persisted' },
                 SUBSCRIPTION: { DOWNLOAD_SUB: 'download_sub', FETCH_TEXT: 'fetch_text' },
@@ -640,6 +640,7 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'dns_nameservers',
         'dns_fallbacks',
         'auto_apply',
+        'ui_scale',
     ];
 
     // All settings.xxx property accesses in frontend JS code
@@ -654,6 +655,7 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'autostart',         // settings.js
         'dns_nameservers',   // dns-shared.js
         'dns_fallbacks',     // dns-shared.js
+        'ui_scale',          // main.js, settings.js
     ];
 
     it('every frontend settings.xxx access has a matching Rust struct field', () => {

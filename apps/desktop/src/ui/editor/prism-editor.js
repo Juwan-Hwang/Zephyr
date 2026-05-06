@@ -44,7 +44,7 @@ function zephyrTheme() {
             color: 'var(--text-primary, #e4e4e7)',
         },
         '.cm-content': {
-            fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
+            fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'DejaVu Sans Mono', 'Ubuntu Mono', monospace",
             padding: '0.75rem 0',
             caretColor: 'var(--color-accent, #6366f1)',
         },
@@ -103,7 +103,7 @@ function zephyrTheme() {
             color: '#fff',
         },
         '.cm-completionLabel': {
-            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            fontFamily: "'SF Mono', 'Fira Code', 'DejaVu Sans Mono', monospace",
             fontSize: '0.75rem',
         },
         '.cm-completionDetail': {

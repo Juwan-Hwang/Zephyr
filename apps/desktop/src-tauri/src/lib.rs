@@ -118,6 +118,8 @@ struct Settings {
     dns_fallbacks: Option<Vec<String>>,
     #[serde(default)]
     auto_apply: bool,
+    #[serde(default)]
+    ui_scale: f64,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -261,6 +263,23 @@ fn get_portable_mode() -> bool {
     crate::core_manager::core::core_process::is_portable_mode()
 }
 
+/// Set UI scale factor (1.0 = 100%, 1.25 = 125%, etc.)
+/// Persists to settings.json and returns the new scale value.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<f64, String> {
+    if !(0.5..=2.0).contains(&scale) {
+        return Err("Scale must be between 0.5 and 2.0".to_owned());
+    }
+    let settings_state = app.state::<SettingsState>();
+    let mut settings = settings_state.0.lock().map_err(|e| e.to_string())?;
+    settings.ui_scale = scale;
+    let settings_clone = settings.clone();
+    drop(settings);
+    persist_settings(&app, &settings_clone)?;
+    Ok(scale)
+}
+
 // rust-analyzer cannot resolve proc-macro `tauri::generate_context!()` without OUT_DIR at IDE analysis time.
 // This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
 #[allow(rust_analyzer::proc_macro_unresolved)]
@@ -334,6 +353,7 @@ pub fn run() {
                     dns_nameservers: None,
                     dns_fallbacks: None,
                     auto_apply: false,
+                    ui_scale: 1.0,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
@@ -425,6 +445,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_portable_mode,
+            set_ui_scale,
             start_core,
             stop_core,
             list_configs,

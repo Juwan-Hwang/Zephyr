@@ -143,6 +143,11 @@ async function initApp() {
     const settings = await invoke(COMMANDS.GET_SETTINGS);
     apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
 
+    // Apply saved UI scale early (before UI renders)
+    if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
+      document.documentElement.style.fontSize = `${settings.ui_scale * 16}px`;
+    }
+
     const tStartCore = performance.now();
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];

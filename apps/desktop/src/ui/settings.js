@@ -423,6 +423,35 @@ export async function initSettings() {
         __langDropdown = langDropdown;
     }
 
+    // ---- UI Scale buttons ----
+    const uiScaleButtons = document.querySelectorAll('.ui-scale-btn');
+    const applyUiScale = (scale) => {
+        // Update button states
+        uiScaleButtons.forEach(btn => {
+            btn.classList.remove('bg-purple-500/30', 'text-purple-300', 'bg-purple-500/20', 'text-purple-600');
+            btn.classList.add('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
+        });
+        const activeBtn = document.getElementById(`ui-scale-${Math.round(scale * 100)}`);
+        if (activeBtn) {
+            activeBtn.classList.remove('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
+            activeBtn.classList.add('bg-purple-500/20', 'dark:bg-purple-500/30', 'text-purple-600', 'dark:text-purple-300');
+        }
+        // Apply scale via fontSize on html element
+        document.documentElement.style.fontSize = `${scale * 16}px`;
+    };
+
+    uiScaleButtons.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const scaleValue = parseInt(btn.id.replace('ui-scale-', '')) / 100;
+            try {
+                await invoke(COMMANDS.SET_UI_SCALE, { scale: scaleValue });
+                applyUiScale(scaleValue);
+            } catch (_e) {
+                // silently ignore — non-critical
+            }
+        });
+    });
+
     // ---- Load current settings ----
     /** @type {any} */
     const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -432,6 +461,11 @@ export async function initSettings() {
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
     if (nodeScrollToggle) nodeScrollToggle.checked = localStorage.getItem('nodeScroll') === 'true';
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
+
+    // Apply saved UI scale
+    if (settings.ui_scale && settings.ui_scale > 0) {
+        applyUiScale(settings.ui_scale);
+    }
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
