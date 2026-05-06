@@ -16,7 +16,7 @@ dependencies = [
  "clash-prism-smart",
  "flate2",
  "futures-util",
- "glib 0.22.6",
+ "glib 0.22.7",
  "hex",
  "hmac",
  "mockall",
@@ -1845,9 +1845,9 @@ dependencies = [
 
 [[package]]
 name = "glib"
-version = "0.22.6"
+version = "0.22.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f075bd737d1fa842a944a4a1dc209838caa7e0e2ddf8aefb9ddf76538bc3ed7"
+checksum = "c207e04e51605dcf7b2924c41591b3a10e1438eaac5bcf448fb91f325381104a"
 dependencies = [
  "bitflags 2.11.1",
  "futures-channel",
