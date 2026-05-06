@@ -1,14 +1,16 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr Logo" width="128" height="128">
+<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - Modern Mihomo GUI Client Logo" width="128" height="128">
 
 # Zephyr
 
 **安全至上 · 极简美学 · 轻量高效**
 
+[English](README_en.md) | [简体中文](README.md)
+
 > 一款为颜值而生、以安全为核的现代 Mihomo GUI 客户端，内置 Prism Engine 规则引擎。
 >
-> A modern Mihomo GUI client built with Tauri v2, Rust, native JavaScript, Tailwind CSS, and Prism Engine.
+> A modern, security-focused Mihomo (Clash Meta) GUI client built with Tauri v2, Rust, native JavaScript, Tailwind CSS, and Prism Engine.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#安装)
@@ -36,14 +38,14 @@ Zephyr 的开发起因很简单：目前我还没有找到符合自己审美的 
 
 ## 截图
 
-![主页 - 浅色模式](apps/desktop/assets/screenshot-home.png)
+![Zephyr 主页 - macOS 浅色模式 Mihomo 代理客户端界面](apps/desktop/assets/screenshot-home.png)
 
 <details>
 <summary>更多截图</summary>
 
 | 设置页面 | 深色模式 |
 |:---:|:---:|
-| ![设置](apps/desktop/assets/screenshot-settings.png) | ![深色模式](apps/desktop/assets/screenshot-dark.png) |
+| ![Zephyr 设置页面 - 系统代理与 TUN 配置](apps/desktop/assets/screenshot-settings.png) | ![Zephyr 深色模式 - 代理节点管理界面](apps/desktop/assets/screenshot-dark.png) |
 
 </details>
 
@@ -88,13 +90,14 @@ Zephyr 内置基于 `clash-prism-*` crate 的规则引擎，用来增强 Mihomo 
 ### 安全特性
 
 - **机器绑定加密**：配置加密使用硬件指纹派生密钥
-- **SSRF 防护**：订阅和规则 URL 下载前进行 DNS 验证与私有 IP 拦截
+- **SSRF 防护**：订阅和规则 URL 下载前进行 DNS 验证；重定向到内网地址会被拦截（用户主动输入内网地址允许）
+- **DNS 防泄漏**：TUN 模式自动注入 `dns-hijack`，劫持所有 DNS 流量到 Mihomo
 - **配置清洗**：递归移除危险 YAML 字段，限制 provider 路径遍历
 - **脚本权限控制**：脚本执行受资源限制和权限限制约束
 - **输入验证**：IPC 命令入口做长度、格式和 UTF-8 安全处理
 - **速率限制**：双重限流 — 原有命令固定冷却时间 + Prism 命令滑动窗口
-- **文件安全**：安全权限、UUID 临时文件、压缩包路径遍历防护
-- **更新完整性**：SHA256 校验、可信主机限制和资源名校验
+- **文件安全**：安全权限、UUID 临时文件、压缩包路径遍历防护、符号链接拒绝、压缩炸弹检测
+- **更新完整性**：SHA256 校验、可信主机限制和资源名校验、原子更新与自动回滚
 - **深链安全**：限制 `clash://` 协议入口和 URL scheme
 - **CSP 与构建加固**：限制脚本和连接来源，release 启用 LTO、strip、`panic=abort`
 
@@ -110,6 +113,7 @@ Zephyr 内置基于 `clash-prism-*` crate 的规则引擎，用来增强 Mihomo 
 ### UI / UX
 
 - 透明无边框窗口与自定义标题栏
+- **UI 缩放**：0.5x - 2.0x 界面缩放，适配不同分辨率
 - 虚拟滚动日志、分级过滤和正则搜索
 - CodeMirror 6 编辑器，支持 Prism DSL 高亮与补全
 - 代理节点卡片 3D 交互效果
@@ -136,16 +140,26 @@ Zephyr 内置基于 `clash-prism-*` crate 的规则引擎，用来增强 Mihomo 
 
 ## 安装
 
-从 GitHub Releases 下载对应平台的安装包。
+从 [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases) 下载对应平台的安装包。
 
-Zephyr 的发布包通常分为两类：
+Zephyr 的发布包分为三类：
 
-| 类型 | 说明 |
-|:---:|:---|
-| Full | 包含 Mihomo 核心和 GeoIP / GeoSite 数据，适合首次安装 |
-| Lite | 体积更小，不包含完整核心资源，适合已有本地核心资源的用户 |
+| 类型 | 说明 | 适用场景 |
+|:---:|------|---------|
+| **Full** | 包含 Mihomo 核心和 GeoIP / GeoSite 数据 | 首次安装、离线使用 |
+| **Lite** | 体积更小，不包含核心资源 | 已有本地核心资源 |
+| **Portable** | 解压即用，数据存储在程序目录 | U 盘携带、多设备使用 |
 
-平台支持以实际 Release 产物为准。Tauri bundle 当前配置为构建 Windows、macOS、Linux 目标。
+### 便携版使用
+
+1. 下载 `Zephyr-windows-portable.zip` 或 `Zephyr-linux-portable.tar.gz`
+2. 解压到任意目录
+3. 确保目录中存在 `.portable` 标记文件
+4. 运行可执行文件
+
+> **便携版限制**：不支持开机自启和客户端内更新。详见 [PORTABLE.md](PORTABLE.md)。
+
+平台支持以实际 Release 产物为准。
 
 ---
 
