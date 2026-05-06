@@ -49,6 +49,46 @@ fn extract_secret_from_yaml(content: &str) -> Option<String> {
 
 use serde_yaml::Value as YamlValue;
 
+/// Ensure dns-hijack list contains both UDP (`any:53`) and TCP (`tcp://any:53`) entries.
+/// This prevents DNS leaks by hijacking all DNS traffic to mihomo.
+fn ensure_dns_hijack_entries(tun_map: &mut serde_yaml::Mapping) {
+    const ANY_UDP: &str = "any:53";
+    const ANY_TCP: &str = "tcp://any:53";
+
+    let dns_hijack_key = YamlValue::String("dns-hijack".to_owned());
+    let any_udp_val = YamlValue::String(ANY_UDP.to_owned());
+    let any_tcp_val = YamlValue::String(ANY_TCP.to_owned());
+
+    match tun_map.entry(dns_hijack_key) {
+        serde_yaml::mapping::Entry::Occupied(mut entry) => {
+            // Existing dns-hijack entry - ensure it contains both entries
+            match entry.get_mut() {
+                YamlValue::Sequence(seq) => {
+                    if !seq.contains(&any_udp_val) {
+                        seq.push(any_udp_val);
+                    }
+                    if !seq.contains(&any_tcp_val) {
+                        seq.push(any_tcp_val);
+                    }
+                }
+                // If it's not a sequence (e.g., a string or other type), replace it
+                YamlValue::Null
+                | YamlValue::Bool(_)
+                | YamlValue::Number(_)
+                | YamlValue::String(_)
+                | YamlValue::Mapping(_)
+                | YamlValue::Tagged(_) => {
+                    entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
+                }
+            }
+        }
+        serde_yaml::mapping::Entry::Vacant(entry) => {
+            // No dns-hijack entry - create new sequence
+            entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
+        }
+    }
+}
+
 /// Update TUN enable setting in YAML config content using `serde_yaml`.
 /// Returns updated content with TUN block modified or appended.
 fn update_tun_in_yaml(content: &str, enable: bool) -> String {
@@ -75,6 +115,8 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
                 tun_map
                     .entry(YamlValue::String("auto-detect-interface".to_owned()))
                     .or_insert_with(|| YamlValue::Bool(true));
+                // Hijack all DNS traffic to prevent leaks (UDP + TCP)
+                ensure_dns_hijack_entries(tun_map);
             }
         }
     }
@@ -266,6 +308,151 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 #[allow(dead_code)]
 pub const fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
     Ok(String::new())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    // Helper to extract dns-hijack values from YAML string
+    fn extract_dns_hijack(content: &str) -> Option<Vec<String>> {
+        let yaml = serde_yaml::from_str::<YamlValue>(content).ok()?;
+        let mapping = yaml.as_mapping()?;
+        let tun = mapping
+            .get(YamlValue::String("tun".to_owned()))?
+            .as_mapping()?;
+        let hijack = tun
+            .get(YamlValue::String("dns-hijack".to_owned()))?
+            .as_sequence()?;
+        hijack
+            .iter()
+            .map(|v| v.as_str().map(std::borrow::ToOwned::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn test_update_tun_enable_no_tun_section() {
+        // Case: no tun section at all
+        let content = "proxies:\n  - name: test\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_no_dns_hijack() {
+        // Case: tun exists but no dns-hijack
+        let content = "tun:\n  enable: false\n  stack: system\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_empty_dns_hijack() {
+        // Case: dns-hijack: []
+        let content = "tun:\n  enable: false\n  dns-hijack: []\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_partial_dns_hijack_udp_only() {
+        // Case: dns-hijack: [any:53] - missing TCP
+        let content = "tun:\n  enable: false\n  dns-hijack:\n    - any:53\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_partial_dns_hijack_tcp_only() {
+        // Case: dns-hijack: [tcp://any:53] - missing UDP
+        let content = "tun:\n  enable: false\n  dns-hijack:\n    - tcp://any:53\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_complete_dns_hijack_unchanged() {
+        // Case: dns-hijack already complete - should not duplicate
+        let content = "tun:\n  enable: false\n  dns-hijack:\n    - any:53\n    - tcp://any:53\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert_eq!(hijack.len(), 2);
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_enable_dns_hijack_wrong_type() {
+        // Case: dns-hijack is a string instead of sequence - should replace
+        let content = "tun:\n  enable: false\n  dns-hijack: \"any:53\"\n";
+        let updated = update_tun_in_yaml(content, true);
+
+        let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
+        assert!(hijack.contains(&"any:53".to_owned()));
+        assert!(hijack.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    fn test_update_tun_disable_no_dns_hijack_added() {
+        // Case: enable=false should NOT add dns-hijack
+        let content = "tun:\n  enable: true\n";
+        let updated = update_tun_in_yaml(content, false);
+
+        // dns-hijack should not be present when disabling
+        let yaml = serde_yaml::from_str::<YamlValue>(&updated).expect("valid yaml");
+        let tun = yaml
+            .as_mapping()
+            .and_then(|m| m.get(YamlValue::String("tun".to_owned())))
+            .and_then(YamlValue::as_mapping)
+            .expect("should have tun mapping");
+        assert!(tun
+            .get(YamlValue::String("dns-hijack".to_owned()))
+            .is_none());
+        assert_eq!(
+            tun.get(YamlValue::String("enable".to_owned()))
+                .and_then(YamlValue::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_ensure_dns_hijack_entries_directly() {
+        // Direct test of ensure_dns_hijack_entries
+        let mut tun_map = serde_yaml::Mapping::new();
+        ensure_dns_hijack_entries(&mut tun_map);
+
+        let hijack = tun_map
+            .get(YamlValue::String("dns-hijack".to_owned()))
+            .and_then(YamlValue::as_sequence)
+            .expect("should have dns-hijack sequence");
+        let values: Vec<String> = hijack
+            .iter()
+            .map(|v| v.as_str().expect("should be string").to_owned())
+            .collect();
+        assert!(values.contains(&"any:53".to_owned()));
+        assert!(values.contains(&"tcp://any:53".to_owned()));
+    }
 }
 
 /// Check if there's a root-owned mihomo process running

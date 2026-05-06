@@ -478,6 +478,7 @@ tun:
   stack: system
   dns-hijack:
     - any:53
+    - tcp://any:53
 proxies:
   - name: "test"
     type: ss

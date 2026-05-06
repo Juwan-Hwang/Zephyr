@@ -333,11 +333,10 @@ pub(crate) fn validate_subscription_url_with_ip(
     // Host is a public domain — resolve and verify all IPs are public.
     // Fix Med-3: DNS Rebinding / SSRF TOCTOU
     let default_port = if scheme == "https" { 443 } else { 80 };
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(
-        &format!("{host}:{default_port}"),
-    )
-    .map_err(|e| format!("Failed to resolve host: {e}"))?
-    .collect();
+    let addrs: Vec<std::net::SocketAddr> =
+        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+            .map_err(|e| format!("Failed to resolve host: {e}"))?
+            .collect();
 
     validate_public_host_addrs(host, &addrs)
 }
@@ -822,7 +821,10 @@ mod tests {
         assert!(result.is_ok());
         let (host, resolved_addr, user_entered_private) = result.unwrap();
         assert_eq!(host, "192.168.1.2");
-        assert!(resolved_addr.is_none(), "private host should not return a resolved addr");
+        assert!(
+            resolved_addr.is_none(),
+            "private host should not return a resolved addr"
+        );
         assert!(user_entered_private);
     }
 
@@ -861,7 +863,10 @@ mod tests {
         assert!(result.is_ok());
         let (host, resolved_addr, user_entered_private) = result.unwrap();
         assert_eq!(host, "8.8.8.8");
-        assert!(resolved_addr.is_some(), "public IP should return a resolved addr for pinning");
+        assert!(
+            resolved_addr.is_some(),
+            "public IP should return a resolved addr for pinning"
+        );
         assert!(!user_entered_private);
     }
 
@@ -881,9 +886,7 @@ mod tests {
 
     #[test]
     fn test_public_host_with_public_ip_allowed() {
-        let addrs: Vec<std::net::SocketAddr> = vec![
-            "1.2.3.4:80".parse().unwrap(),
-        ];
+        let addrs: Vec<std::net::SocketAddr> = vec!["1.2.3.4:80".parse().unwrap()];
         let result = validate_public_host_addrs("example.com", &addrs);
         assert!(result.is_ok());
         let (_, resolved_addr, user_entered_private) = result.unwrap();
@@ -894,9 +897,7 @@ mod tests {
     #[test]
     fn test_public_host_resolving_to_private_ip_rejected() {
         // Public domain resolves to 192.168.1.1 → SSRF, must be blocked
-        let addrs: Vec<std::net::SocketAddr> = vec![
-            "192.168.1.1:80".parse().unwrap(),
-        ];
+        let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("attacker.com", &addrs);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("private/local resolved"));
@@ -904,18 +905,14 @@ mod tests {
 
     #[test]
     fn test_public_host_resolving_to_loopback_rejected() {
-        let addrs: Vec<std::net::SocketAddr> = vec![
-            "127.0.0.1:80".parse().unwrap(),
-        ];
+        let addrs: Vec<std::net::SocketAddr> = vec!["127.0.0.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("evil.com", &addrs);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_public_host_resolving_to_link_local_rejected() {
-        let addrs: Vec<std::net::SocketAddr> = vec![
-            "169.254.1.1:80".parse().unwrap(),
-        ];
+        let addrs: Vec<std::net::SocketAddr> = vec!["169.254.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("evil.com", &addrs);
         assert!(result.is_err());
     }
