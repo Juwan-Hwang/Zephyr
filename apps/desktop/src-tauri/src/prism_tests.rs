@@ -1159,7 +1159,10 @@ rules:
                     let parts: Vec<&str> = s.splitn(4, ',').collect();
                     if parts.len() >= 3 {
                         let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
-                        if BUILTIN_POLICIES.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
+                        if BUILTIN_POLICIES
+                            .iter()
+                            .any(|b| b.eq_ignore_ascii_case(policy))
+                        {
                             lines.push(format!("    - {s}"));
                         } else {
                             let mut rebuilt = String::new();

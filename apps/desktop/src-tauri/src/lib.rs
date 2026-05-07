@@ -120,6 +120,8 @@ struct Settings {
     auto_apply: bool,
     #[serde(default)]
     ui_scale: f64,
+    #[serde(default)]
+    config_order: Vec<String>,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -354,6 +356,7 @@ pub fn run() {
                     dns_fallbacks: None,
                     auto_apply: false,
                     ui_scale: 1.0,
+                    config_order: Vec::new(),
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

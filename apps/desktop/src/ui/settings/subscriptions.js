@@ -649,26 +649,232 @@ export function initSubscriptionSettings({
     };
 
     // ---- Config management (renderConfigs) ----
-    async function renderConfigs() {
+    async function renderConfigs(forceFresh = false) {
         if (!configsList) return;
 
-        const [configs, cfgSettings] = await Promise.all([
-            getConfigsCached(),
-            getSettingsCached(),
-        ]);
+        const cfgSettings = forceFresh
+            ? await invoke(COMMANDS.GET_SETTINGS)
+            : await getSettingsCached();
+        const configs = await getConfigsCached();
 
         const currentConfig = cfgSettings.last_config || 'config.yaml';
         const customArgs = cfgSettings.custom_args || [];
+        const configOrder = cfgSettings.config_order || [];
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
 
+        // Sort configs by saved order; new configs appear at the end
+        const sortedConfigs = [...configs].sort((a, b) => {
+            const idxA = configOrder.indexOf(a.name);
+            const idxB = configOrder.indexOf(b.name);
+            if (idxA === -1 && idxB === -1) return 0;
+            if (idxA === -1) return 1;
+            if (idxB === -1) return -1;
+            return idxA - idxB;
+        });
+
         configsList.innerHTML = '';
-        configs.forEach((/** @type {any} */ configInfo) => {
+
+        // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
+        // Bind document-level listeners only once
+        if (!configsList._dragBound) {
+            configsList._dragBound = true;
+            let dragState = null;
+
+            configsList.addEventListener('mousedown', (e) => {
+                const card = e.target.closest('[data-config-name]');
+                if (!card || e.button !== 0) return;
+                dragState = { el: card, name: card.dataset.configName, startY: e.clientY, moved: false };
+            });
+
+            // iOS-style live reorder: cards slide to make room
+            const gap = 12;
+
+            document.addEventListener('mousemove', (e) => {
+                if (!dragState) return;
+                if (!dragState.moved && Math.abs(e.clientY - dragState.startY) < 5) return;
+
+                // First move - create floating clone and placeholder
+                if (!dragState.moved) {
+                    dragState.moved = true;
+                    const rect = dragState.el.getBoundingClientRect();
+                    dragState.elHeight = rect.height;
+                    dragState.el.style.opacity = '0';
+                    dragState.el.style.pointerEvents = 'none';
+
+                    // Create floating clone that follows mouse exactly
+                    const clone = dragState.el.cloneNode(true);
+                    clone.style.cssText = `
+                        position: fixed;
+                        left: ${rect.left}px;
+                        top: ${rect.top}px;
+                        width: ${rect.width}px;
+                        pointer-events: none;
+                        z-index: 1000;
+                        opacity: 0.95;
+                        transform: scale(1.05);
+                        box-shadow: 0 20px 40px rgba(0,0,0,0.3), 0 0 0 1px rgba(124,139,160,0.2);
+                        transition: transform 0.1s ease;
+                    `;
+                    document.body.appendChild(clone);
+                    dragState.clone = clone;
+                    dragState.offsetY = e.clientY - rect.top;
+                    dragState.currentIndex = [...configsList.children].indexOf(dragState.el);
+                }
+
+                // Move clone with mouse (no spring - direct follow for responsiveness)
+                const cloneY = e.clientY - dragState.offsetY;
+                dragState.clone.style.top = cloneY + 'px';
+
+                // Calculate which position we're hovering over
+                const cards = [...configsList.querySelectorAll('[data-config-name]')];
+                const listRect = configsList.getBoundingClientRect();
+                const relativeY = e.clientY - listRect.top + configsList.scrollTop;
+
+                let newIndex = 0;
+                for (let i = 0; i < cards.length; i++) {
+                    const card = cards[i];
+                    if (card === dragState.el) continue;
+                    const cardRect = card.getBoundingClientRect();
+                    const cardMid = cardRect.top + cardRect.height / 2 - listRect.top + configsList.scrollTop;
+                    if (relativeY > cardMid) {
+                        newIndex = i + (cards.indexOf(card) < dragState.currentIndex ? 1 : 0);
+                    }
+                }
+                dragState.targetIndex = newIndex;
+
+                // Animate all cards to their new positions
+                cards.forEach((card, i) => {
+                    if (card === dragState.el) return;
+
+                    let targetIndex = i;
+                    if (i >= dragState.currentIndex && i < newIndex) {
+                        // Card needs to move up (dragging down)
+                        targetIndex = i;
+                    } else if (i > newIndex && i <= dragState.currentIndex) {
+                        // Card needs to move down (dragging up)
+                        targetIndex = i;
+                    }
+
+                    // Calculate visual offset based on placeholder position
+                    let offset = 0;
+                    if (dragState.currentIndex < i && i <= newIndex) {
+                        // Card is above placeholder, needs to slide up
+                        offset = -(dragState.elHeight + gap);
+                    } else if (newIndex <= i && i < dragState.currentIndex) {
+                        // Card is below placeholder, needs to slide down
+                        offset = dragState.elHeight + gap;
+                    }
+
+                    card.style.transform = `translateY(${offset}px)`;
+                    card.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0.2, 1)';
+                });
+
+                dragState.targetIndex = newIndex;
+            });
+
+            document.addEventListener('mouseup', async (e) => {
+                if (!dragState) return;
+                const { el, name, moved, clone, targetIndex, currentIndex } = dragState;
+                dragState = null;
+
+                if (!moved) {
+                    // Just a click, restore and exit
+                    el.style.opacity = '';
+                    el.style.pointerEvents = '';
+                    return;
+                }
+
+                e.stopImmediatePropagation();
+
+                if (clone) {
+                    const cards = [...configsList.querySelectorAll('[data-config-name]')];
+                    const targetCard = cards[targetIndex];
+
+                    if (targetCard && targetCard !== el) {
+                        // 1. First, clear all transforms so cards are at their natural positions
+                        //    (clone still covers the visual gap)
+                        cards.forEach(c => {
+                            c.style.transition = 'none';
+                            c.style.transform = '';
+                        });
+
+                        // 2. Now move DOM (cards are at natural positions)
+                        const insertBeforeEl = targetIndex > currentIndex
+                            ? targetCard.nextSibling
+                            : targetCard;
+                        if (insertBeforeEl) {
+                            configsList.insertBefore(el, insertBeforeEl);
+                        } else {
+                            configsList.appendChild(el);
+                        }
+
+                        // 3. Animate clone to el's new natural position
+                        const elFinalRect = el.getBoundingClientRect();
+                        const cloneRect = clone.getBoundingClientRect();
+                        const deltaY = elFinalRect.top - cloneRect.top;
+
+                        const animation = clone.animate([
+                            { transform: 'translateY(0) scale(1.05)', opacity: 0.95 },
+                            { transform: `translateY(${deltaY}px) scale(1)`, opacity: 1 }
+                        ], {
+                            duration: 150,
+                            easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
+                            fill: 'forwards'
+                        });
+
+                        animation.onfinish = async () => {
+                            // 4. Clone arrived at el's position — instant handoff
+                            el.style.opacity = '';
+                            el.style.pointerEvents = '';
+                            clone.remove();
+
+                            // 5. Save order (with error handling)
+                            try {
+                                const newOrder = [...configsList.querySelectorAll('[data-config-name]')]
+                                    .map(c => c.dataset.configName);
+                                const s = await invoke(COMMANDS.GET_SETTINGS);
+                                s.config_order = newOrder;
+                                await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+                                invalidateSettingsCache();
+                            } catch (err) {
+                                showNotification(String(err), 'error');
+                                await renderConfigs(true);
+                            }
+                        };
+                    } else {
+                        // No valid target - snap back
+                        const startRect = el.getBoundingClientRect();
+                        const cloneRect = clone.getBoundingClientRect();
+                        const deltaY = startRect.top - cloneRect.top;
+
+                        clone.animate([
+                            { transform: 'translateY(0) scale(1.05)' },
+                            { transform: `translateY(${deltaY}px) scale(1)` }
+                        ], {
+                            duration: 200,
+                            easing: 'cubic-bezier(0.2, 0, 0.2, 1)'
+                        }).onfinish = () => {
+                            clone.remove();
+                            el.style.opacity = '';
+                            el.style.pointerEvents = '';
+                            cards.forEach(c => {
+                                c.style.transform = '';
+                                c.style.transition = '';
+                            });
+                        };
+                    }
+                }
+            }, true);
+        }
+
+        sortedConfigs.forEach((/** @type {any} */ configInfo) => {
             const name = configInfo.name;
             const isCurrent = name === currentConfig;
 
             const item = document.createElement('div');
             item.className = `glass-card flex flex-col p-4 transition-all group cursor-pointer relative ${isCurrent ? 'ring-1 ring-accent/50 shadow-[0_0_20px_rgba(var(--color-accent-rgb),0.2)]' : 'hover:shadow-lg'}`;
+            item.dataset.configName = name;
 
             const row = document.createElement('div');
             row.className = "flex items-center justify-between";
