@@ -199,7 +199,12 @@ pub fn rule_extract_from_profile(
     // Replace proxy group names with {{proxy}} for cross-subscription reuse.
     // Built-in policies (DIRECT, REJECT, PASS) are kept as-is.
     const BUILTIN_POLICIES: &[&str] = &["DIRECT", "REJECT", "PASS"];
-    let mut lines = Vec::with_capacity(rules.len() + 3);
+    let mut lines = Vec::with_capacity(rules.len() + 5);
+    // Mark as disabled by default so the context menu doesn't show a false "checked"
+    // state before the user explicitly applies the rule.
+    lines.push("__when__:".to_owned());
+    lines.push("  enabled: false".to_owned());
+    lines.push(String::new());
     lines.push("rules:".to_owned());
     lines.push("  $append:".to_owned());
     for rule in rules {

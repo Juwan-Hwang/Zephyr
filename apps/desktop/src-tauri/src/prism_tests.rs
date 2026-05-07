@@ -1146,21 +1146,54 @@ rules:
                 .and_then(|v| v.as_sequence())
                 .expect("no rules section found");
 
-            let mut lines = Vec::with_capacity(rules.len() + 1);
+            // Build content following the same logic as rule_extract_from_profile()
+            const BUILTIN_POLICIES: &[&str] = &["DIRECT", "REJECT", "PASS"];
+            let mut lines = Vec::with_capacity(rules.len() + 5);
+            lines.push("__when__:".to_owned());
+            lines.push("  enabled: false".to_owned());
+            lines.push(String::new());
             lines.push("rules:".to_owned());
+            lines.push("  $append:".to_owned());
             for rule in rules {
                 if let Some(s) = rule.as_str() {
-                    lines.push(format!("  - {s}"));
+                    let parts: Vec<&str> = s.splitn(4, ',').collect();
+                    if parts.len() >= 3 {
+                        let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
+                        if BUILTIN_POLICIES.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
+                            lines.push(format!("    - {s}"));
+                        } else {
+                            let mut rebuilt = String::new();
+                            if let Some(p0) = parts.first() {
+                                rebuilt.push_str(p0);
+                            }
+                            rebuilt.push(',');
+                            if let Some(p1) = parts.get(1) {
+                                rebuilt.push_str(p1);
+                            }
+                            rebuilt.push_str(",{{proxy}}");
+                            let mut line = String::from("    - ");
+                            line.push_str(&rebuilt);
+                            if let Some(opts) = parts.get(3) {
+                                line.push(',');
+                                line.push_str(opts);
+                            }
+                            lines.push(line);
+                        }
+                    } else {
+                        lines.push(format!("    - {s}"));
+                    }
                 }
             }
             let content = lines.join("\n") + "\n";
 
+            // Regression test: ensure extracted rules are disabled by default
+            assert!(content.contains("__when__:\n  enabled: false"), "extracted rule should have __when__: enabled: false to avoid false 'checked' state in UI");
             assert_eq!(count_rules(&content), 4);
-            assert!(content.starts_with("rules:\n"));
-            assert!(content.contains("DOMAIN-SUFFIX,example.com,Proxy"));
-            assert!(content.contains("DOMAIN-KEYWORD,google,Proxy"));
+            assert!(content.contains("rules:\n"));
+            assert!(content.contains("DOMAIN-SUFFIX,example.com,{{proxy}}"));
+            assert!(content.contains("DOMAIN-KEYWORD,google,{{proxy}}"));
             assert!(content.contains("GEOIP,CN,DIRECT"));
-            assert!(content.contains("MATCH,Proxy"));
+            assert!(content.contains("MATCH,{{proxy}}"));
         }
     }
 

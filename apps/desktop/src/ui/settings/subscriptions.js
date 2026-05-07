@@ -242,6 +242,69 @@ export function initSubscriptionSettings({
     }
 
     /**
+     * Parse __when__ block from rule file content.
+     * Returns { enabled: boolean, profiles: string[] } or null if no __when__.
+     */
+    function parseWhenBlock(/** @type {string} */ content) {
+        if (!/__when__\s*:/i.test(content)) return null;
+
+        const lines = content.split('\n');
+        let inWhen = false;
+        let whenIndent = 0;
+        const result = { enabled: true, profiles: [] };
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Enter __when__ block
+            if (/^__when__\s*:/i.test(trimmed)) {
+                inWhen = true;
+                whenIndent = line.search(/\S/);
+                // Check inline enabled: false (e.g., __when__: { enabled: false })
+                const inline = trimmed.match(/enabled\s*:\s*(false|true)/i);
+                if (inline) result.enabled = inline[1].toLowerCase() !== 'false';
+                continue;
+            }
+
+            if (!inWhen) continue;
+
+            // Exit when block ends (less indented or same level non-empty line)
+            const currentIndent = line.search(/\S/);
+            if (trimmed && currentIndent <= whenIndent) break;
+
+            // Parse enabled field
+            if (/^enabled\s*:/i.test(trimmed)) {
+                result.enabled = !/false/i.test(trimmed);
+                continue;
+            }
+
+            // Parse profile field
+            const profileMatch = trimmed.match(/^profile\s*:\s*(.+)$/);
+            if (profileMatch) {
+                const value = profileMatch[1].trim();
+                // Flow array: [a, b, c]
+                if (value.startsWith('[')) {
+                    const arr = value.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
+                    result.profiles.push(...arr);
+                } else {
+                    // Single value
+                    result.profiles.push(value);
+                }
+                continue;
+            }
+
+            // Block sequence: - item
+            if (trimmed.startsWith('- ')) {
+                const item = trimmed.slice(2).trim();
+                if (item) result.profiles.push(item);
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Add a profile name to the __when__ block's profile field.
      * Handles flow array, block sequence, and single value formats.
      */
@@ -424,22 +487,24 @@ export function initSubscriptionSettings({
                     checkbox.checked = false;
                     checkbox.dataset.filename = file.filename;
 
-                    // Read the rule file to check binding
+                    // Check binding by parsing __when__ block from rule file.
+                    // - __when__.enabled === false → unchecked (explicitly disabled)
+                    // - __when__.profile contains current profile → checked
+                    // - no __when__ → global rule, checked (assumes already applied)
                     invoke(COMMANDS.RULE_READ, { filename: file.filename })
                         .then((content) => {
                             const str = /** @type {string} */ (content || '');
-                            // No __when__ means the rule applies to ALL profiles → checked
-                            if (!/__when__\s*:/i.test(str)) {
+                            const whenBlock = parseWhenBlock(str);
+                            if (!whenBlock) {
+                                // No __when__ → global rule, assume applied
                                 checkbox.checked = true;
                                 return;
                             }
-                            // Extract only the __when__ block (indented lines under __when__:)
-                            // to avoid false positives from profile names appearing in rules.
-                            const whenMatch = str.match(/^__when__\s*:\s*\n((?: {2}.*\n)*)/m);
-                            const whenContent = whenMatch ? whenMatch[0] : str;
-                            const escaped = profileStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            const matched = new RegExp(`\\b${escaped}\\b`, 'i').test(whenContent);
-                            checkbox.checked = matched;
+                            if (whenBlock.enabled === false) {
+                                checkbox.checked = false;
+                                return;
+                            }
+                            checkbox.checked = whenBlock.profiles.includes(profileStem);
                         })
                         .catch(() => {});
 
@@ -530,7 +595,8 @@ export function initSubscriptionSettings({
                             );
                         } catch (err) {
                             rulesLogger.error(`[rule-toggle] FAILED`, err);
-                            checkbox.checked = !checkbox.checked;
+                            // Restore to previous state (opposite of target)
+                            checkbox.checked = !targetChecked;
                             showNotification(String(err), 'error');
                         } finally {
                             checkbox.disabled = false;
@@ -540,7 +606,7 @@ export function initSubscriptionSettings({
 
                     const label = document.createElement('span');
                     label.className = 'truncate';
-                    label.textContent = file.filename.replace(/\.(yaml|yml)$/i, '');
+                    label.textContent = file.filename.replace(/\.yaml\.prism\.yaml$/i, '').replace(/\.(yaml|yml)$/i, '');
 
                     const count = document.createElement('span');
                     count.className = 'ml-auto text-2xs text-zinc-600 shrink-0';

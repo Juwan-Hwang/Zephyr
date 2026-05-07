@@ -2,8 +2,7 @@
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from './utils/logger.js';
-import { Bus } from './ui/events.js';
-import { Events } from './ui/events.js';
+import { Bus, Events } from './ui/events.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Internal state (declared early — used by apiFetch below)
