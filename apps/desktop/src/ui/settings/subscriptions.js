@@ -160,7 +160,12 @@ export function initSubscriptionSettings({
                 try {
                     const userAgent = getSubscriptionUserAgent();
                     const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
-                    await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: config.name, userAgent, overwrite: true });
+                    /** @type {any} */
+                    const invokeArgs = { url: fullUrl, name: config.name, overwrite: true };
+                    if (userAgent) {
+                        invokeArgs.userAgent = userAgent;
+                    }
+                    await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
                     successCount++;
                 } catch (err) {
                     failCount++;
@@ -747,15 +752,6 @@ export function initSubscriptionSettings({
                 cards.forEach((card, i) => {
                     if (card === dragState.el) return;
 
-                    let targetIndex = i;
-                    if (i >= dragState.currentIndex && i < newIndex) {
-                        // Card needs to move up (dragging down)
-                        targetIndex = i;
-                    } else if (i > newIndex && i <= dragState.currentIndex) {
-                        // Card needs to move down (dragging up)
-                        targetIndex = i;
-                    }
-
                     // Calculate visual offset based on placeholder position
                     let offset = 0;
                     if (dragState.currentIndex < i && i <= newIndex) {
@@ -775,7 +771,7 @@ export function initSubscriptionSettings({
 
             document.addEventListener('mouseup', async (e) => {
                 if (!dragState) return;
-                const { el, name, moved, clone, targetIndex, currentIndex } = dragState;
+                const { el, moved, clone, targetIndex, currentIndex } = dragState;
                 dragState = null;
 
                 if (!moved) {
@@ -938,7 +934,12 @@ export function initSubscriptionSettings({
                     try {
                         const userAgent = getSubscriptionUserAgent();
                         const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: configInfo.name });
-                        await invoke(COMMANDS.DOWNLOAD_SUB, { url: fullUrl, name: configInfo.name, userAgent, overwrite: true });
+                        /** @type {any} */
+                        const invokeArgs = { url: fullUrl, name: configInfo.name, overwrite: true };
+                        if (userAgent) {
+                            invokeArgs.userAgent = userAgent;
+                        }
+                        await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
                         invalidateConfigsCache();
                         if (isCurrent) {
                             const cfgCustomArgs = cfgSettings.custom_args || [];

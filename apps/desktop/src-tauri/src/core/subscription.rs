@@ -454,12 +454,9 @@ pub async fn download_sub(
             .unwrap_or("")
             .to_owned();
 
-        let final_url = resp
-            .headers()
-            .get("profile-web-page-url")
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or(&url)
-            .to_owned();
+        // Use original URL for metadata storage, not profile-web-page-url
+        // profile-web-page-url often points to HTML pages, not the actual subscription endpoint
+        let final_url = url.clone();
 
         // Try to extract filename from Content-Disposition header
         let disp_filename = resp

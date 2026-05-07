@@ -256,10 +256,18 @@ function initFakeClient() {
                 if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
             }
 
-            if (savedType && savedType.startsWith('clash-verge')) select.value = versions.verge;
-            else if (savedType && savedType.startsWith('mihomo-party')) select.value = versions.mihomo_party;
-            else if (savedType && savedType.startsWith('Flclash')) select.value = versions.flclash;
-            else select.value = savedType;
+            if (savedType && savedType.startsWith('clash-verge')) {
+                select.value = versions.verge;
+                localStorage.setItem('fakeClientType', versions.verge);
+            } else if (savedType && savedType.startsWith('mihomo-party')) {
+                select.value = versions.mihomo_party;
+                localStorage.setItem('fakeClientType', versions.mihomo_party);
+            } else if (savedType && savedType.startsWith('Flclash')) {
+                select.value = versions.flclash;
+                localStorage.setItem('fakeClientType', versions.flclash);
+            } else {
+                select.value = savedType;
+            }
 
             if (fakeClientDropdown) fakeClientDropdown.syncUI();
 
