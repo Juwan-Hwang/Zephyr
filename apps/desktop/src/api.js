@@ -2,6 +2,8 @@
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from './utils/logger.js';
+import { Bus } from './ui/events.js';
+import { Events } from './ui/events.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Internal state (declared early — used by apiFetch below)
@@ -496,6 +498,7 @@ export async function restartCore(configPath, customArgs = []) {
   setSecret(coreResult.secret);
   setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
   setWsSecret(coreResult.secret);
+  Bus.emit(Events.CORE_RESTARTED);
   return coreResult;
 }
 

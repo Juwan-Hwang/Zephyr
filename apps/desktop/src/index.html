@@ -826,11 +826,11 @@
                         <h3 class="text-2xs font-bold text-zinc-500 uppercase tracking-wider mb-4 ml-1" data-i18n="smartProxy">Smart Proxy Selector</h3>
                         <div class="glass-card p-5 space-y-4">
                             <div class="flex items-center justify-between">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-4">
-                                        <div class="text-zinc-400">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                                        </div>
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                                    </div>
+                                    <div>
                                         <div class="flex items-center gap-3">
                                             <p class="text-sm font-semibold text-zinc-200" data-i18n="smartProxy">Smart Proxy Selector</p>
                                             <button id="smart-config-btn" class="text-zinc-500 hover:text-accent transition-colors" title="Configure">
@@ -840,24 +840,25 @@
                                                 </svg>
                                             </button>
                                         </div>
+                                        <p class="text-2xs text-zinc-500" data-i18n="smartProxyDesc">Auto-select best proxy using EMA scoring</p>
                                     </div>
-                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="smartProxyDesc">Auto-select best proxy using EMA scoring</p>
                                 </div>
                                 <label class="ios-switch">
                                     <input type="checkbox" id="smart-toggle">
                                     <span class="switch-slider"></span>
                                 </label>
                             </div>
+                            <div class="h-px bg-white/5"></div>
                             <!-- Smart Auto-Test -->
                             <div class="flex items-center justify-between">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-4">
-                                        <div class="text-zinc-400">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                        </div>
-                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="smartAutoTest">Auto Speed Test</p>
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                                     </div>
-                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="smartAutoTestDesc">Periodically test all proxies to keep scores accurate</p>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="smartAutoTest">Auto Speed Test</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="smartAutoTestDesc">Periodically test all proxies to keep scores accurate</p>
+                                    </div>
                                 </div>
                                 <label class="ios-switch">
                                     <input type="checkbox" id="smart-auto-test-toggle">

@@ -207,6 +207,7 @@ export const Events = Object.freeze({
     SYS_PROXY_CHANGED: 'sys-proxy-changed',
     CONFIG_SYNCED: 'config-synced',
     CONFIG_UPDATED: 'config-updated',
+    CORE_RESTARTED: 'core-restarted',
     RULES_CHANGED: 'rules-changed',
     CONNECTIONS_FLUSHED: 'connections-flushed',
     TRAY_MENU_UPDATE: 'tray-menu-update',

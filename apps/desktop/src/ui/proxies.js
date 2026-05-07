@@ -580,7 +580,15 @@ export function initProxyControls() {
 
     if (sortBtn) {
         sortBtn.onclick = async () => {
-            const modes = ['default', 'name', 'latency', 'smart'];
+            const smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+            const modes = smartEnabled
+                ? ['default', 'name', 'latency', 'smart']
+                : ['default', 'name', 'latency'];
+            const currentMode = appStore.get('currentSortMode');
+            // If current mode is 'smart' but smart is now disabled, reset to default
+            if (!smartEnabled && currentMode === 'smart') {
+                appStore.set('currentSortMode', 'default');
+            }
             const idx = (modes.indexOf(appStore.get('currentSortMode')) + 1) % modes.length;
             appStore.set('currentSortMode', modes[idx]);
 
@@ -1053,14 +1061,28 @@ async function syncSmartUiVisibility() {
     const selectBestBtn = document.getElementById('select-best-btn');
     if (!selectBestBtn) return;
 
+    let enabled;
     try {
         const config = await smartConfig();
-        const enabled = config.enabled ?? false;
-        document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
-        selectBestBtn.style.display = enabled ? '' : 'none';
+        // Backend only returns `enabled` if smart.toml has the key.
+        // Fallback to localStorage for migration scenarios.
+        enabled = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
     } catch {
-        document.documentElement.style.setProperty('--smart-enabled', '0');
-        selectBestBtn.style.display = 'none';
+        // Fallback to localStorage on error
+        enabled = localStorage.getItem('smartEnabled') === 'true';
+    }
+
+    document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+    selectBestBtn.style.display = enabled ? '' : 'none';
+
+    // Reset sort mode to default if smart is disabled but current mode is smart
+    if (!enabled && appStore.get('currentSortMode') === 'smart') {
+        appStore.set('currentSortMode', 'default');
+        const sortLabel = document.getElementById('sort-label');
+        if (sortLabel) {
+            const t = /** @type {any} */ (translations)[currentLang];
+            sortLabel.textContent = t.sortDefault;
+        }
     }
 }
 

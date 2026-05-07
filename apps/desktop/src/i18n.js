@@ -481,8 +481,8 @@ export const translations = {
         ruleLibraryNoChanges: "No changes contributed by this file",
         ruleLibrarySelectProfile: "Select Profile",
         // Smart Proxy Selector
-        smartProxy: "Smart Proxy Selector",
-        smartProxyDesc: "Auto-select best proxy using EMA scoring",
+        smartProxy: "Node Scoring",
+        smartProxyDesc: "Enable EMA scoring for proxy nodes",
         smartProxyConfigTitle: "Smart Proxy Settings",
         smartProxyWeightLatency: "Latency Weight",
         smartProxyWeightSuccess: "Success Rate Weight",
@@ -971,8 +971,8 @@ export const translations = {
         ruleLibraryNoChanges: "此文件未贡献任何变更",
         ruleLibrarySelectProfile: "选择配置",
         // 智能代理选择
-        smartProxy: "智能代理选择",
-        smartProxyDesc: "使用 EMA 评分自动选择最佳节点",
+        smartProxy: "节点评分",
+        smartProxyDesc: "启用节点 EMA 评分",
         smartProxyConfigTitle: "智能代理设置",
         smartProxyWeightLatency: "延迟权重",
         smartProxyWeightSuccess: "成功率权重",
@@ -1097,8 +1097,8 @@ export const translations = {
         logLines: "行",
         // スマートプロキシセレクター
         sortSmart: "スマート",
-        smartProxy: "スマートプロキシセレクター",
-        smartProxyDesc: "EMAスコアリングで最適なプロキシを自動選択",
+        smartProxy: "ノードスコアリング",
+        smartProxyDesc: "プロキシノードのEMAスコアリングを有効化",
         smartProxyConfigTitle: "スマートプロキシ設定",
         smartProxyWeightLatency: "レイテンシ重み",
         smartProxyWeightSuccess: "成功率重み",

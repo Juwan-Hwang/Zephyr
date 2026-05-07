@@ -16,6 +16,21 @@ import { invalidateSettingsCache } from './cache.js';
 import { translations, currentLang } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
+import { Bus, Events } from './events.js';
+
+// ---------------------------------------------------------------------------
+//  Helper: DNS rewrite enabled state (default true for new users)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if DNS rewrite is saved as enabled in localStorage.
+ * Default to true for new users (security feature).
+ * @returns {boolean}
+ */
+function isDnsRewriteSavedEnabled() {
+    const saved = localStorage.getItem('dnsRewrite');
+    return saved === null ? true : saved === 'true';
+}
 
 // ---------------------------------------------------------------------------
 //  Default DNS configuration
@@ -206,7 +221,23 @@ export async function initDnsRewriteToggle() {
         /** @type {{dns?: {enable?: boolean}}} */
         const config = await getConfig();
         const isEnabled = config?.dns?.enable === true;
-        toggle.checked = isEnabled;
+        const savedEnabled = isDnsRewriteSavedEnabled();
+
+        // If user previously enabled DNS rewrite but core restarted without it,
+        // re-apply automatically.
+        if (savedEnabled && !isEnabled) {
+            try {
+                await applyDnsRewrite();
+                toggle.checked = true;
+                // Persist the decision so CORE_RESTARTED handler won't hit null
+                localStorage.setItem('dnsRewrite', 'true');
+            } catch {
+                // Core may not be ready yet; sync toggle with runtime state
+                toggle.checked = false;
+            }
+        } else {
+            toggle.checked = isEnabled;
+        }
     } catch {
         toggle.checked = false;
         toggle.disabled = true;
@@ -323,5 +354,24 @@ export async function initDnsRewriteToggle() {
                 toggle.checked = true;
             }
         }
+    });
+
+    // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle)
+    Bus.on(Events.CORE_RESTARTED, async () => {
+        if (!isDnsRewriteSavedEnabled()) return;
+
+        for (let i = 0; i < 5; i++) {
+            try {
+                await applyDnsRewrite();
+                if (toggle) toggle.checked = true;
+                // Persist the decision so future checks won't hit null
+                localStorage.setItem('dnsRewrite', 'true');
+                return;
+            } catch {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        if (toggle) toggle.checked = false;
     });
 }

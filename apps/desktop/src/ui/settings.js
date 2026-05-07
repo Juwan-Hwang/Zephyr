@@ -1041,14 +1041,14 @@ export async function initSettings() {
 
         smartToggle.onchange = async () => {
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+            // Always sync to localStorage as fallback for migration scenarios
+            localStorage.setItem('smartEnabled', String(smartToggle.checked));
             try {
                 const config = await prism.smartConfig();
                 config.enabled = smartToggle.checked;
                 await prism.smartConfigSave(JSON.stringify(config));
             } catch (err) {
                 settingsLogger.error('[smart] Failed to persist enabled state:', err);
-                // Fallback to localStorage
-                localStorage.setItem('smartEnabled', String(smartToggle.checked));
             }
             Bus.emit(Events.CONFIG_UPDATED);
         };
@@ -1058,6 +1058,18 @@ export async function initSettings() {
     const autoTestToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-auto-test-toggle'));
     if (autoTestToggle) {
         autoTestToggle.checked = localStorage.getItem('smartAutoTest') === 'true';
+        // Disable auto-test toggle when smart is off
+        const syncAutoTestState = () => {
+            const smartOn = smartToggle?.checked ?? false;
+            autoTestToggle.disabled = !smartOn;
+            if (!smartOn && autoTestToggle.checked) {
+                autoTestToggle.checked = false;
+                localStorage.setItem('smartAutoTest', 'false');
+                stopSmartAutoTest();
+            }
+        };
+        syncAutoTestState();
+
         autoTestToggle.onchange = () => {
             localStorage.setItem('smartAutoTest', String(autoTestToggle.checked));
             if (autoTestToggle.checked) {
@@ -1066,6 +1078,15 @@ export async function initSettings() {
                 stopSmartAutoTest();
             }
         };
+
+        // Re-sync when smart toggle changes (must be set after smartToggle.onchange)
+        if (smartToggle) {
+            const origSmartOnChange = smartToggle.onchange;
+            smartToggle.onchange = async () => {
+                await origSmartOnChange?.call(smartToggle);
+                syncAutoTestState();
+            };
+        }
     }
 
     // Smart config modal (replaces inline expandable panel)
