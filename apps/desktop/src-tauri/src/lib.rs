@@ -155,6 +155,10 @@ fn save_settings(
 
 /// Persist settings to settings.json (without touching in-memory state).
 /// Used by `rename_config` to persist `last_config` changes.
+///
+/// NOTE: Settings are stored as plaintext JSON. Do NOT add sensitive fields
+/// (tokens, passwords, API keys) to the `Settings` struct — use `crypto.rs`
+/// obfuscation or the system keychain instead.
 pub(crate) fn persist_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let paths = core_manager::resolve_app_paths(app)?;
     let path = paths.app_data_dir;

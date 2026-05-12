@@ -8,15 +8,21 @@ use super::config_sanitizer::remove_dangerous_keys;
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
 fn quote_short_id_values(content: &str) -> String {
-    static SHORT_ID_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = SHORT_ID_PATTERN.get_or_init(|| {
-        regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#).unwrap()
+    // Regex: match "short-id:" at line start, capture the unquoted value
+    // (?:^|\n) = line start, (\s*short-id:\s*) = key with indent,
+    // ([^\s"'\n][^\s\n]*) = unquoted value (not starting with quote)
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
+            Ok(re) => re,
+            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
+        }
     });
     re.replace_all(content, |caps: &regex::Captures| {
         let prefix = &caps[1];
         let value = &caps[2];
         let newline = if caps[0].starts_with('\n') { "\n" } else { "" };
-        format!("{}{}\"{}\"", newline, prefix, value)
+        format!("{newline}{prefix}\"{value}\"")
     })
     .into_owned()
 }
@@ -957,14 +963,14 @@ mod tests {
 
     #[test]
     fn test_quote_short_id_values_simple() {
-        let yaml = r#"short-id: abc123"#;
+        let yaml = r"short-id: abc123";
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
     }
 
     #[test]
     fn test_quote_short_id_values_hex_like() {
-        let yaml = r#"short-id: 34010e92"#;
+        let yaml = r"short-id: 34010e92";
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "34010e92""#);
     }
@@ -1006,8 +1012,7 @@ proxies:
 
     #[test]
     fn test_quote_short_id_values_preserves_original() {
-        // Integration test: parse quoted YAML and verify value is preserved
-        let yaml = r#"short-id: 34010e92"#;
+        let yaml = r"short-id: 34010e92";
         let quoted = quote_short_id_values(yaml);
         let value: serde_yaml::Value = serde_yaml::from_str(&quoted).unwrap();
         assert_eq!(value.get("short-id").unwrap().as_str(), Some("34010e92"));
@@ -1038,9 +1043,9 @@ proxies:
 
     #[test]
     fn test_quote_short_id_values_no_false_match() {
-        let yaml = r#"not-short-id: 443"#;
+        let yaml = r"not-short-id: 443";
         let result = quote_short_id_values(yaml);
-        assert_eq!(result, r#"not-short-id: 443"#);
+        assert_eq!(result, r"not-short-id: 443");
     }
 
     #[test]

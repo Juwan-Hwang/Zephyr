@@ -215,10 +215,11 @@ fn compute_machine_key() -> Vec<u8> {
         if key_path_ref.exists() {
             if let Ok(existing_key) = fs::read_to_string(&key_path_ref) {
                 let trimmed = existing_key.trim();
-                if !trimmed.is_empty() && trimmed.len() >= 32 {
-                    // Use the stored key directly (already has enough entropy)
-                    MACHINE_KEY_PERSISTED.store(true, Ordering::SeqCst);
-                    return trimmed.as_bytes().get(..32).unwrap_or(&[]).to_vec();
+                if let Ok(decoded) = hex::decode(trimmed) {
+                    if decoded.len() == 32 {
+                        MACHINE_KEY_PERSISTED.store(true, Ordering::SeqCst);
+                        return decoded;
+                    }
                 }
             }
         }
@@ -226,44 +227,11 @@ fn compute_machine_key() -> Vec<u8> {
         // Generate new random key (32 bytes is sufficient for AES-256)
         let mut key_buf = [0u8; 32];
         rand::rng().fill(&mut key_buf);
-        let random_key: Vec<u8> = key_buf.to_vec();
 
-        // Persist the key (critical for data recovery)
-        if write_file_secure(&key_path_ref, &String::from_utf8_lossy(&random_key)).is_ok() {
+        // Persist the key as hex to avoid UTF-8 corruption
+        if write_file_secure(&key_path_ref, &hex::encode(key_buf)).is_ok() {
             MACHINE_KEY_PERSISTED.store(true, Ordering::SeqCst);
-            return random_key;
-        }
-    }
-
-    // Last resort: try current_exe directory as before
-    if let Some(app_data_dir) = std::env::current_exe()
-        .ok()
-        .as_ref()
-        .and_then(|p| p.parent())
-        .map(std::path::Path::to_path_buf)
-    {
-        let key_path = app_data_dir.join(MACHINE_KEY_FILE);
-
-        // Try to read existing key
-        if key_path.exists() {
-            if let Ok(existing_key) = fs::read_to_string(&key_path) {
-                let trimmed = existing_key.trim();
-                if !trimmed.is_empty() && trimmed.len() >= 32 {
-                    MACHINE_KEY_PERSISTED.store(true, Ordering::SeqCst);
-                    return trimmed.as_bytes().get(..32).unwrap_or(&[]).to_vec();
-                }
-            }
-        }
-
-        // Generate new random key
-        let mut key_buf = [0u8; 32];
-        rand::rng().fill(&mut key_buf);
-        let random_key: Vec<u8> = key_buf.to_vec();
-
-        // Persist the key
-        if write_file_secure(&key_path, &String::from_utf8_lossy(&random_key)).is_ok() {
-            MACHINE_KEY_PERSISTED.store(true, Ordering::SeqCst);
-            return random_key;
+            return key_buf.to_vec();
         }
     }
 
@@ -287,10 +255,10 @@ pub fn is_machine_key_persisted() -> bool {
     MACHINE_KEY_PERSISTED.load(Ordering::SeqCst)
 }
 
-/// Encrypt a string using AES-256-GCM with the machine key
-/// Returns base64-encoded ciphertext with version prefix and nonce prepended
+/// Encrypt a string using AES-256-GCM with the machine key.
+/// Returns base64-encoded ciphertext with version prefix and nonce prepended.
 /// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
-pub(super) fn obfuscate_string(s: &str) -> String {
+pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
     use aes_gcm::{
         aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
@@ -298,140 +266,103 @@ pub(super) fn obfuscate_string(s: &str) -> String {
 
     let key_bytes = get_machine_key();
 
-    // Key should already be 32 bytes from PBKDF2 or random generation
-    // If not exactly 32 bytes, something is wrong - fail closed
     if key_bytes.len() != 32 {
-        eprintln!(
-            "[Security] CRITICAL: Invalid key length {}, expected 32",
+        return Err(format!(
+            "Invalid key length {}, expected 32",
             key_bytes.len()
-        );
-        return String::new();
+        ));
     }
 
-    let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {e:?}");
-            return String::new();
-        }
-    };
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
 
-    // Generate random nonce
     let nonce_bytes: [u8; 12] = rand::rng().random();
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // Encrypt
-    match cipher.encrypt(nonce, s.as_bytes()) {
-        Ok(ciphertext) => {
-            // Format: "v2:" + nonce + ciphertext
-            let mut result = b"v2:".to_vec();
-            result.extend(&nonce_bytes);
-            result.extend(ciphertext);
-            base64_standard.encode(&result)
-        }
-        Err(e) => {
-            eprintln!("[Security] CRITICAL: AES encryption failed: {e:?}");
-            String::new()
-        }
-    }
+    let ciphertext = cipher
+        .encrypt(nonce, s.as_bytes())
+        .map_err(|e| format!("AES encryption failed: {e}"))?;
+
+    let mut result = b"v2:".to_vec();
+    result.extend(&nonce_bytes);
+    result.extend(ciphertext);
+    Ok(base64_standard.encode(&result))
 }
 
-/// Decrypt a string encrypted with AES-256-GCM
-/// Expects base64-encoded ciphertext with "v2:" prefix
-pub(super) fn deobfuscate_string(s: &str) -> String {
+/// Decrypt a string encrypted with AES-256-GCM.
+/// Expects base64-encoded ciphertext with "v2:" prefix.
+pub(super) fn deobfuscate_string(s: &str) -> Result<String, String> {
     use aes_gcm::{
         aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
     };
 
-    if let Ok(decoded) = base64_standard.decode(s) {
-        // Check for version prefix
-        if !decoded.starts_with(b"v2:") {
-            eprintln!("[Security] CRITICAL: Unknown or missing encryption version prefix");
-            return String::new();
-        }
+    let decoded = base64_standard
+        .decode(s)
+        .map_err(|e| format!("Invalid base64 encoding: {e}"))?;
 
-        if decoded.len() < 31 {
-            // "v2:" (3) + nonce (12) + auth tag (16) minimum
-            eprintln!("[Security] Invalid v2 ciphertext: too short");
-            return String::new();
-        }
-
-        // Extract nonce (bytes 3-15) and ciphertext (bytes 15-)
-        let nonce_bytes = decoded.get(3..15).unwrap_or(&[]);
-        let ciphertext = decoded.get(15..).unwrap_or(&[]);
-
-        let key_bytes = get_machine_key();
-
-        // Key should already be 32 bytes from PBKDF2 or random generation
-        if key_bytes.len() != 32 {
-            eprintln!(
-                "[Security] CRITICAL: Invalid key length {}, expected 32",
-                key_bytes.len()
-            );
-            return String::new();
-        }
-
-        let cipher = match Aes256Gcm::new_from_slice(&key_bytes) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[Security] CRITICAL: Failed to initialize AES cipher: {e:?}");
-                return String::new();
-            }
-        };
-
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        match cipher.decrypt(nonce, ciphertext) {
-            Ok(plaintext) => String::from_utf8_lossy(&plaintext).into_owned(),
-            Err(e) => {
-                eprintln!(
-                    "[Security] CRITICAL: AES decryption failed - data may be tampered: {e:?}"
-                );
-                String::new()
-            }
-        }
-    } else {
-        eprintln!("[Security] CRITICAL: Invalid base64 encoding");
-        String::new()
+    if !decoded.starts_with(b"v2:") {
+        return Err("Unknown or missing encryption version prefix".to_owned());
     }
+
+    if decoded.len() < 31 {
+        return Err("Invalid v2 ciphertext: too short".to_owned());
+    }
+
+    let nonce_bytes = decoded
+        .get(3..15)
+        .ok_or("Invalid ciphertext: missing nonce")?;
+    let ciphertext = decoded
+        .get(15..)
+        .ok_or("Invalid ciphertext: missing data")?;
+
+    let key_bytes = get_machine_key();
+
+    if key_bytes.len() != 32 {
+        return Err(format!(
+            "Invalid key length {}, expected 32",
+            key_bytes.len()
+        ));
+    }
+
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
+
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| format!("AES decryption failed - data may be tampered: {e}"))?;
+
+    Ok(String::from_utf8_lossy(&plaintext).into_owned())
 }
 
 pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
     let meta_path = paths.profiles_dir.join("metadata.json");
     match fs::read_to_string(&meta_path) {
-        Ok(data) => {
-            match serde_json::from_str::<ProfilesMetadata>(&data) {
-                Ok(mut meta) => {
-                    #[allow(clippy::iter_over_hash_type)]
-                    for config in meta.configs.values_mut() {
-                        if let Some(url) = &config.url {
-                            // URL should start with http, if not it's obfuscated
-                            if !url.starts_with("http") {
-                                config.url = Some(deobfuscate_string(url));
-                            }
-                        }
-                        if let Some(info) = &config.sub_info {
-                            // sub_info should contain '=' and ';' in format: upload=X; download=Y; total=Z; expire=T
-                            // If it doesn't contain both, it's obfuscated
-                            // Note: base64 can contain '=' as padding, so we check for ';'
-                            if !info.contains(';') {
-                                config.sub_info = Some(deobfuscate_string(info));
-                            }
+        Ok(data) => match serde_json::from_str::<ProfilesMetadata>(&data) {
+            Ok(mut meta) => {
+                #[allow(clippy::iter_over_hash_type)]
+                for config in meta.configs.values_mut() {
+                    if let Some(url) = &config.url {
+                        if !url.starts_with("http") {
+                            config.url = deobfuscate_string(url).ok();
                         }
                     }
-                    meta
+                    if let Some(info) = &config.sub_info {
+                        if !info.contains(';') {
+                            config.sub_info = deobfuscate_string(info).ok();
+                        }
+                    }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[Metadata] Warning: Failed to parse metadata.json: {e}. Using default."
-                    );
-                    ProfilesMetadata::default()
-                }
+                meta
             }
-        }
+            Err(e) => {
+                eprintln!("[Metadata] Warning: Failed to parse metadata.json: {e}. Using default.");
+                ProfilesMetadata::default()
+            }
+        },
         Err(e) => {
-            // Only log warning if file exists but cannot be read
             if meta_path.exists() {
                 eprintln!("[Metadata] Warning: Failed to read metadata.json: {e}. Using default.");
             }
@@ -447,8 +378,8 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
         obf_meta.configs.insert(
             k.clone(),
             ConfigMetadata {
-                url: v.url.as_ref().map(|s| obfuscate_string(s)),
-                sub_info: v.sub_info.as_ref().map(|s| obfuscate_string(s)),
+                url: v.url.as_ref().and_then(|s| obfuscate_string(s).ok()),
+                sub_info: v.sub_info.as_ref().and_then(|s| obfuscate_string(s).ok()),
             },
         );
     }

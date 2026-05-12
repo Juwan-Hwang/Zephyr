@@ -34,12 +34,18 @@ fn read_log_file(
     let mut lines = Vec::with_capacity(capped_max_lines);
     let mut bytes_read = if rotated { 0 } else { start_offset };
 
+    const MAX_LINE_LENGTH: usize = 64 * 1024; // 64 KB per line
+
     for _ in 0..capped_max_lines {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(n) => {
                 bytes_read += n as u64;
+                if line.len() > MAX_LINE_LENGTH {
+                    line.truncate(MAX_LINE_LENGTH);
+                    line.push_str("... [truncated]");
+                }
                 lines.push(line);
             }
             Err(e) => return Err(format!("Failed to read log: {e}")),

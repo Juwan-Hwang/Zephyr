@@ -441,7 +441,8 @@ rules:
   - MATCH,DIRECT
 ";
 
-    fs::write(path, default_config).map_err(|e| format!("Failed to create default config: {e}"))?;
+    write_file_secure(path, default_config)
+        .map_err(|e| format!("Failed to create default config: {e}"))?;
 
     println!("Created default config at {path:?}");
     Ok(())

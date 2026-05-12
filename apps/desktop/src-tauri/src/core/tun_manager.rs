@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use super::core_process::resolve_app_paths;
 #[cfg(target_os = "macos")]
 use super::core_process::{ensure_executable, generate_secret, resolve_app_paths};
+use super::secure_io::write_file_secure;
 use super::{TUN_MODE_ACTIVE, TUN_TOGGLING};
 
 /// Set TUN mode active state
@@ -91,7 +92,7 @@ fn ensure_dns_hijack_entries(tun_map: &mut serde_yaml::Mapping) {
 
 /// Update TUN enable setting in YAML config content using `serde_yaml`.
 /// Returns updated content with TUN block modified or appended.
-fn update_tun_in_yaml(content: &str, enable: bool) -> String {
+fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, String> {
     let mut yaml = serde_yaml::from_str::<YamlValue>(content)
         .unwrap_or_else(|_| YamlValue::Mapping(serde_yaml::Mapping::new()));
 
@@ -121,7 +122,8 @@ fn update_tun_in_yaml(content: &str, enable: bool) -> String {
         }
     }
 
-    serde_yaml::to_string(&yaml).unwrap_or_else(|_| content.to_owned())
+    serde_yaml::to_string(&yaml)
+        .map_err(|e| format!("Failed to serialize YAML after TUN toggle: {e}"))
 }
 
 /// Extract TUN enable status from YAML config content using `serde_yaml`.
@@ -160,7 +162,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
 
         // Update TUN setting
-        let mut updated = update_tun_in_yaml(&content, enable_tun);
+        let mut updated = update_tun_in_yaml(&content, enable_tun)?;
 
         // Ensure secret is present and up-to-date
         let mut found_secret = false;
@@ -186,7 +188,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
         updated = lines.join("\n");
 
-        std::fs::write(&config_file, &updated)
+        write_file_secure(&config_file, &updated)
             .map_err(|e| format!("Failed to write config: {e}"))?;
     }
 
@@ -339,7 +341,7 @@ mod tests {
     fn test_update_tun_enable_no_tun_section() {
         // Case: no tun section at all
         let content = "proxies:\n  - name: test\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -350,7 +352,7 @@ mod tests {
     fn test_update_tun_enable_no_dns_hijack() {
         // Case: tun exists but no dns-hijack
         let content = "tun:\n  enable: false\n  stack: system\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -361,7 +363,7 @@ mod tests {
     fn test_update_tun_enable_empty_dns_hijack() {
         // Case: dns-hijack: []
         let content = "tun:\n  enable: false\n  dns-hijack: []\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -372,7 +374,7 @@ mod tests {
     fn test_update_tun_enable_partial_dns_hijack_udp_only() {
         // Case: dns-hijack: [any:53] - missing TCP
         let content = "tun:\n  enable: false\n  dns-hijack:\n    - any:53\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -383,7 +385,7 @@ mod tests {
     fn test_update_tun_enable_partial_dns_hijack_tcp_only() {
         // Case: dns-hijack: [tcp://any:53] - missing UDP
         let content = "tun:\n  enable: false\n  dns-hijack:\n    - tcp://any:53\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -394,7 +396,7 @@ mod tests {
     fn test_update_tun_enable_complete_dns_hijack_unchanged() {
         // Case: dns-hijack already complete - should not duplicate
         let content = "tun:\n  enable: false\n  dns-hijack:\n    - any:53\n    - tcp://any:53\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert_eq!(hijack.len(), 2);
@@ -406,7 +408,7 @@ mod tests {
     fn test_update_tun_enable_dns_hijack_wrong_type() {
         // Case: dns-hijack is a string instead of sequence - should replace
         let content = "tun:\n  enable: false\n  dns-hijack: \"any:53\"\n";
-        let updated = update_tun_in_yaml(content, true);
+        let updated = update_tun_in_yaml(content, true).expect("YAML update should succeed");
 
         let hijack = extract_dns_hijack(&updated).expect("should have dns-hijack");
         assert!(hijack.contains(&"any:53".to_owned()));
@@ -417,7 +419,7 @@ mod tests {
     fn test_update_tun_disable_no_dns_hijack_added() {
         // Case: enable=false should NOT add dns-hijack
         let content = "tun:\n  enable: true\n";
-        let updated = update_tun_in_yaml(content, false);
+        let updated = update_tun_in_yaml(content, false).expect("YAML update should succeed");
 
         // dns-hijack should not be present when disabling
         let yaml = serde_yaml::from_str::<YamlValue>(&updated).expect("valid yaml");
@@ -571,9 +573,10 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
     let content =
         std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
-    let updated = update_tun_in_yaml(&content, enable);
+    let updated = update_tun_in_yaml(&content, enable)?;
 
-    std::fs::write(&config_file, updated).map_err(|e| format!("Failed to write config: {e}"))?;
+    write_file_secure(&config_file, &updated)
+        .map_err(|e| format!("Failed to write config: {e}"))?;
 
     Ok(())
 }
