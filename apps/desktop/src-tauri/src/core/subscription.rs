@@ -414,20 +414,14 @@ async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> 
     Ok(bytes)
 }
 
-#[tauri::command]
 #[allow(clippy::cognitive_complexity)]
-pub async fn download_sub(
-    app: AppHandle,
+async fn download_sub_inner(
+    app: &AppHandle,
     url: String,
     name: String,
     user_agent: Option<String>,
-    overwrite: Option<bool>,
-    rate_limiter: State<'_, crate::RateLimiter>,
+    overwrite: bool,
 ) -> Result<String, String> {
-    let do_overwrite = overwrite.unwrap_or(false);
-    // Rate limit: max 1 call per 5 seconds
-    crate::rate_limit!(rate_limiter, "download_sub", 5000);
-
     let safe_name = validate_subscription_name(&name)?;
 
     let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
@@ -595,7 +589,7 @@ pub async fn download_sub(
         );
     }
 
-    let paths = ensure_app_storage(&app)?;
+    let paths = ensure_app_storage(app)?;
 
     let mut clean_name = if safe_name.ends_with(".yaml") || safe_name.ends_with(".yml") {
         safe_name.clone()
@@ -604,8 +598,8 @@ pub async fn download_sub(
     };
 
     // Only apply enhanced naming (Content-Disposition / rules) for new subscriptions.
-    // When updating (do_overwrite == true), always use the frontend-provided name directly.
-    if !do_overwrite {
+    // When updating (overwrite == true), always use the frontend-provided name directly.
+    if !overwrite {
         let rule_name = extract_name_from_rules(&content);
 
         // Priority 1: Content-Disposition filename
@@ -631,7 +625,7 @@ pub async fn download_sub(
 
     // When overwrite is true (updating an existing subscription), write directly.
     // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
-    if !do_overwrite && paths.profiles_dir.join(&clean_name).exists() {
+    if !overwrite && paths.profiles_dir.join(&clean_name).exists() {
         let stem = clean_name
             .strip_suffix(".yaml")
             .or_else(|| clean_name.strip_suffix(".yml"))
@@ -730,6 +724,64 @@ pub async fn download_sub(
     }
 
     Ok(format!("Config saved as {clean_name}"))
+}
+
+/// Tauri command wrapper: single subscription download with rate limiting.
+#[tauri::command]
+pub async fn download_sub(
+    app: AppHandle,
+    url: String,
+    name: String,
+    user_agent: Option<String>,
+    overwrite: Option<bool>,
+    rate_limiter: State<'_, crate::RateLimiter>,
+) -> Result<String, String> {
+    crate::rate_limit!(rate_limiter, "download_sub", 5000);
+    download_sub_inner(&app, url, name, user_agent, overwrite.unwrap_or(false)).await
+}
+
+/// Batch update result for a single subscription.
+#[derive(serde::Serialize)]
+pub struct BatchUpdateResult {
+    pub name: String,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Tauri command: batch update multiple subscriptions without per-item rate limiting.
+#[tauri::command]
+pub async fn download_sub_batch(
+    app: AppHandle,
+    items: Vec<BatchUpdateItem>,
+    user_agent: Option<String>,
+) -> Result<Vec<BatchUpdateResult>, String> {
+    let mut results = Vec::with_capacity(items.len());
+    for item in items {
+        let name = item.name.clone();
+        let result =
+            download_sub_inner(&app, item.url, name.clone(), user_agent.clone(), true).await;
+        match result {
+            Ok(_) => results.push(BatchUpdateResult {
+                name,
+                success: true,
+                error: None,
+            }),
+            Err(e) => results.push(BatchUpdateResult {
+                name,
+                success: false,
+                error: Some(e),
+            }),
+        }
+    }
+    Ok(results)
+}
+
+/// Input item for batch subscription update.
+#[derive(serde::Deserialize)]
+pub struct BatchUpdateItem {
+    pub url: String,
+    pub name: String,
 }
 
 #[tauri::command]

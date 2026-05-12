@@ -11,6 +11,7 @@ pub use core::{
     disable_tun_cmd,
     // subscription
     download_sub,
+    download_sub_batch,
     ensure_app_storage,
     ensure_executable,
     fetch_text,

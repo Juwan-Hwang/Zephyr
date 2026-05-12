@@ -11,11 +11,11 @@ pub mod uwp_loopback;
 
 use config_manager::{read_config, update_config};
 use core_manager::{
-    delete_config, disable_tun_cmd, download_sub, ensure_app_storage, fetch_text, get_config_url,
-    get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd, kill_mihomo,
-    list_configs, open_config_folder, read_config_file, rename_config, restart_core_as_root_cmd,
-    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, write_config_file,
-    CoreData, MihomoState,
+    delete_config, disable_tun_cmd, download_sub, download_sub_batch, ensure_app_storage,
+    fetch_text, get_config_url, get_core_version, init_tun_mode_from_config,
+    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
+    rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
+    start_core, stop_core, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -458,6 +458,7 @@ pub fn run() {
             list_configs,
             get_config_url,
             download_sub,
+            download_sub_batch,
             delete_config,
             rename_config,
             get_latest_version,

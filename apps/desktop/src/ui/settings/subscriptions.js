@@ -156,20 +156,27 @@ export function initSubscriptionSettings({
             let failCount = 0;
             showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
 
+            // Build batch items: resolve URL for each subscription
+            const userAgent = getSubscriptionUserAgent();
+            const batchItems = [];
             for (const config of subConfigs) {
-                try {
-                    const userAgent = getSubscriptionUserAgent();
-                    const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
-                    /** @type {any} */
-                    const invokeArgs = { url: fullUrl, name: config.name, overwrite: true };
-                    if (userAgent) {
-                        invokeArgs.userAgent = userAgent;
-                    }
-                    await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+                const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
+                batchItems.push({ url: fullUrl, name: config.name });
+            }
+
+            // Single batch call — no per-item rate limiting
+            /** @type {Array<{name: string, success: boolean, error?: string}>} */
+            const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
+                items: batchItems,
+                userAgent: userAgent || null,
+            });
+
+            for (const r of results) {
+                if (r.success) {
                     successCount++;
-                } catch (err) {
+                } else {
                     failCount++;
-                    rulesLogger.error(`[settings] Failed to update ${config.name}`, err);
+                    rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
                 }
             }
 
@@ -945,7 +952,7 @@ export function initSubscriptionSettings({
                             const cfgCustomArgs = cfgSettings.custom_args || [];
                             await restartCore(configInfo.name, cfgCustomArgs);
                         }
-                        showNotification(t.notifSubSuccess, 'success');
+                        showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
                         renderConfigs();
                     } catch (err) {
                         const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));

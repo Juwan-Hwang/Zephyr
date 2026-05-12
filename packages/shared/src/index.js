@@ -129,6 +129,7 @@ export const MISC = Object.freeze({
 
 export const SUBSCRIPTION = Object.freeze({
     DOWNLOAD_SUB: "download_sub",
+    DOWNLOAD_SUB_BATCH: "download_sub_batch",
     FETCH_TEXT: "fetch_text",
 });
 
