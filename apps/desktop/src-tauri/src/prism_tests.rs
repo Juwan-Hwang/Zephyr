@@ -1135,7 +1135,7 @@ rules:
     - 'DOMAIN-SUFFIX,example.com,Proxy'
     - 'DOMAIN-KEYWORD,google,Proxy'
     - 'GEOIP,CN,DIRECT'
-    - 'MATCH,Proxy'
+    - 'MATCH,*,Proxy'
 ";
 
             let yaml: serde_yaml::Value =
@@ -1196,7 +1196,7 @@ rules:
             assert!(content.contains("DOMAIN-SUFFIX,example.com,{{proxy}}"));
             assert!(content.contains("DOMAIN-KEYWORD,google,{{proxy}}"));
             assert!(content.contains("GEOIP,CN,DIRECT"));
-            assert!(content.contains("MATCH,{{proxy}}"));
+            assert!(content.contains("MATCH,*,{{proxy}}"));
         }
     }
 

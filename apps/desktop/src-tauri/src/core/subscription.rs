@@ -4,6 +4,23 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager as _, State};
 
 use super::config_sanitizer::remove_dangerous_keys;
+
+/// Quote `short-id` values in YAML content before parsing.
+/// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+fn quote_short_id_values(content: &str) -> String {
+    static SHORT_ID_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = SHORT_ID_PATTERN.get_or_init(|| {
+        regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#).unwrap()
+    });
+    re.replace_all(content, |caps: &regex::Captures| {
+        let prefix = &caps[1];
+        let value = &caps[2];
+        let newline = if caps[0].starts_with('\n') { "\n" } else { "" };
+        format!("{}{}\"{}\"", newline, prefix, value)
+    })
+    .into_owned()
+}
+
 use super::core_process::ensure_app_storage;
 use super::crypto::{load_metadata, save_metadata};
 use super::secure_io::write_file_secure;
@@ -550,6 +567,9 @@ pub async fn download_sub(
     }
 
     if content.contains("proxies:") || content.contains("proxy-groups:") {
+        // Quote short-id values before parsing to prevent scientific notation corruption
+        content = quote_short_id_values(&content);
+
         match serde_yaml::from_str::<serde_yaml::Value>(&content) {
             Ok(mut yaml_val) => {
                 // Use module-level function to remove dangerous keys
@@ -933,9 +953,100 @@ mod tests {
         assert!(result.unwrap_err().contains("Could not resolve"));
     }
 
-    // ── Redirect policy: private redirects are blocked ──
-    // The redirect_policy in build_http_client_with_proxy calls is_private_host
-    // and is_private_ip for every redirect target. Those functions are tested
-    // above. A full integration test with a mock HTTP server is out of scope
-    // for unit tests.
+    // ── short-id value quoting tests ──
+
+    #[test]
+    fn test_quote_short_id_values_simple() {
+        let yaml = r#"short-id: abc123"#;
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_hex_like() {
+        let yaml = r#"short-id: 34010e92"#;
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, r#"short-id: "34010e92""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_already_quoted() {
+        let yaml = r#"short-id: "abc123""#;
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_nested() {
+        let yaml = r#"
+proxies:
+  - name: "test"
+    reality-opts:
+      short-id: 34010e92
+"#;
+        let result = quote_short_id_values(yaml);
+        assert!(result.contains(r#"short-id: "34010e92""#));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiple() {
+        let yaml = r#"
+proxies:
+  - name: "p1"
+    reality-opts:
+      short-id: 03E60665
+  - name: "p2"
+    reality-opts:
+      short-id: 34010e92
+"#;
+        let result = quote_short_id_values(yaml);
+        assert!(result.contains(r#"short-id: "03E60665""#));
+        assert!(result.contains(r#"short-id: "34010e92""#));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_preserves_original() {
+        // Integration test: parse quoted YAML and verify value is preserved
+        let yaml = r#"short-id: 34010e92"#;
+        let quoted = quote_short_id_values(yaml);
+        let value: serde_yaml::Value = serde_yaml::from_str(&quoted).unwrap();
+        assert_eq!(value.get("short-id").unwrap().as_str(), Some("34010e92"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_roundtrip() {
+        let yaml = r#"
+proxies:
+  - name: "test"
+    reality-opts:
+      short-id: 34010e92
+"#;
+        let quoted = quote_short_id_values(yaml);
+        let value: serde_yaml::Value = serde_yaml::from_str(&quoted).unwrap();
+        let serialized = serde_yaml::to_string(&value).unwrap();
+        let reparsed: serde_yaml::Value = serde_yaml::from_str(&serialized).unwrap();
+        let proxy = reparsed
+            .get("proxies")
+            .unwrap()
+            .as_sequence()
+            .unwrap()
+            .first()
+            .unwrap();
+        let short_id = proxy.get("reality-opts").unwrap().get("short-id").unwrap();
+        assert_eq!(short_id.as_str(), Some("34010e92"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_no_false_match() {
+        let yaml = r#"not-short-id: 443"#;
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, r#"not-short-id: 443"#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_with_indent() {
+        let yaml = "    short-id: 34010e92\n";
+        let result = quote_short_id_values(yaml);
+        assert!(result.contains(r#"short-id: "34010e92""#));
+    }
 }
