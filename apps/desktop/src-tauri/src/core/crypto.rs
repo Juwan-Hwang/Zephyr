@@ -334,7 +334,7 @@ pub(super) fn deobfuscate_string(s: &str) -> Result<String, String> {
         .decrypt(nonce, ciphertext)
         .map_err(|e| format!("AES decryption failed - data may be tampered: {e}"))?;
 
-    Ok(String::from_utf8_lossy(&plaintext).into_owned())
+    String::from_utf8(plaintext).map_err(|e| format!("Decrypted data is not valid UTF-8: {e}"))
 }
 
 pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {

@@ -13,6 +13,19 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
                 map.remove(serde_yaml::Value::String(key.to_owned()));
             }
 
+            // Remove Clash-for-Windows legacy keys that have no effect in mihomo
+            // but could be used to inject unexpected behavior
+            for key in [
+                "cfw-bypass",
+                "cfw-bypass-domain",
+                "cfw-profiles-path",
+                "cfw-conn-break-strategy",
+                "prepend-proxy-groups",
+                "append-proxy-groups",
+            ] {
+                map.remove(serde_yaml::Value::String(key.to_owned()));
+            }
+
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
             let is_provider = map.contains_key(serde_yaml::Value::String("type".to_owned()))
@@ -107,7 +120,10 @@ pub(crate) fn sanitize_base_filename(raw: &str) -> Result<String, String> {
     let filename = Path::new(&decoded)
         .file_name()
         .and_then(|f| f.to_str())
-        .unwrap_or(&decoded)
+        .unwrap_or_else(|| {
+            eprintln!("[config_sanitizer] Warning: Path::new({decoded:?}).file_name() returned None, using raw input");
+            &decoded
+        })
         .to_owned();
 
     // Step 3: Reject null bytes

@@ -677,6 +677,12 @@ async fn wait_for_port_free(port: u16) {
 /// Attach a log file to a `Command` for stdout/stderr redirection.
 fn attach_log_file(cmd: &mut Command, log_path: &Path) {
     if let Ok(log_file) = std::fs::File::create(log_path) {
+        // Restrict log file permissions to owner-only (sensitive URLs/domains may be logged)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(log_path, std::fs::Permissions::from_mode(0o600));
+        }
         let stderr_handle = log_file.try_clone();
         cmd.stdout(std::process::Stdio::from(log_file));
         cmd.stderr(

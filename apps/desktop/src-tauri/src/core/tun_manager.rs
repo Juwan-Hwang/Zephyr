@@ -36,16 +36,14 @@ pub fn is_tun_toggling() -> bool {
     TUN_TOGGLING.load(Ordering::SeqCst)
 }
 
-/// Extract secret from YAML config content (simple line-by-line parsing)
+/// Extract secret from YAML config content using the YAML parser.
+/// This avoids issues with line-by-line parsing (multi-line strings, comments, etc.).
 #[cfg(target_os = "macos")]
 fn extract_secret_from_yaml(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("secret:") {
-            return trimmed.split(':').nth(1).map(|s| s.trim().to_owned());
-        }
-    }
-    None
+    let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
+    yaml.get("secret")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned())
 }
 
 use serde_yaml::Value as YamlValue;
@@ -94,7 +92,7 @@ fn ensure_dns_hijack_entries(tun_map: &mut serde_yaml::Mapping) {
 /// Returns updated content with TUN block modified or appended.
 fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, String> {
     let mut yaml = serde_yaml::from_str::<YamlValue>(content)
-        .unwrap_or_else(|_| YamlValue::Mapping(serde_yaml::Mapping::new()));
+        .map_err(|e| format!("Failed to parse YAML config: {e}"))?;
 
     if let Some(mapping) = yaml.as_mapping_mut() {
         let tun = mapping

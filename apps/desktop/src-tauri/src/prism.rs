@@ -34,7 +34,7 @@ use clash_prism_script::{KvStore, SandboxConfig};
 use clash_prism_smart::history::NodeHistory;
 use clash_prism_smart::SmartConfig;
 
-use crate::core_manager::ensure_app_storage;
+use crate::core_manager::{core::secure_io::write_file_secure, ensure_app_storage};
 
 // ---------------------------------------------------------------------------
 // Sub-modules
@@ -155,7 +155,7 @@ impl PrismInner {
                     map.len()
                 );
                 // Re-persist the sanitized version so we don't need to fix it again
-                let _ = std::fs::write(&path, &sanitized);
+                let _ = write_file_secure(&path, &sanitized);
                 map
             }
             Err(e) => {
@@ -175,7 +175,8 @@ impl PrismInner {
         let path = prism_dir.join("smart_history.json");
         let mut json_val: serde_json::Value = serde_json::to_value(histories).unwrap_or_default();
         sanitize_nulls_to_zero(&mut json_val);
-        if let Err(e) = std::fs::write(&path, serde_json::to_string(&json_val).unwrap_or_default())
+        if let Err(e) =
+            write_file_secure(&path, &serde_json::to_string(&json_val).unwrap_or_default())
         {
             eprintln!("[prism] Failed to save smart_history.json: {e}");
         }

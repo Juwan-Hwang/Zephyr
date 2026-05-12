@@ -148,14 +148,17 @@ fn percent_decode(input: &str) -> String {
 
 /// Attempt to base64-decode content that does not already contain Clash markers.
 /// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
-/// and contain a `proxies:` key.
+/// and contain a `proxies:` key (required for a valid Clash config).
 fn try_decode_base64_content(content: &str) -> Option<String> {
     let trimmed = content.replace(&['\r', '\n', ' ', '\t'][..], "");
     let decoded_bytes = base64_standard.decode(&trimmed).ok()?;
     let decoded_str = String::from_utf8(decoded_bytes).ok()?;
-    (serde_yaml::from_str::<serde_yaml::Value>(&decoded_str).is_ok()
-        && decoded_str.contains("proxies:"))
-    .then_some(decoded_str)
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(&decoded_str).ok()?;
+    // Validate it looks like a Clash config: must have proxies (array)
+    let has_proxies = yaml_val
+        .get("proxies")
+        .is_some_and(serde_yaml::Value::is_sequence);
+    has_proxies.then_some(decoded_str)
 }
 
 /// Validate and sanitize a subscription name to prevent path traversal and injection attacks.

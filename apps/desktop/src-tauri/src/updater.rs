@@ -118,6 +118,15 @@ async fn fetch_latest_release() -> Result<GithubRelease, String> {
         return Err(format!("GitHub API returned status: {}", response.status()));
     }
 
+    // Limit response body size to prevent memory exhaustion from malicious responses
+    const MAX_RELEASE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+    let content_length = response.content_length().unwrap_or(0);
+    if content_length > MAX_RELEASE_SIZE {
+        return Err(format!(
+            "Release info too large: {content_length} bytes (max {MAX_RELEASE_SIZE} bytes)"
+        ));
+    }
+
     response
         .json::<GithubRelease>()
         .await

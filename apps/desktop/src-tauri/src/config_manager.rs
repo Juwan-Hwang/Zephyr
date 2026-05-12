@@ -72,7 +72,10 @@ fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettings) 
 
     // Restore external-controller: always bind to localhost
     if let Some(ctrl) = &settings.external_controller {
-        let port = ctrl.split(':').next_back().unwrap_or("9090");
+        let port = ctrl.split(':').next_back().unwrap_or_else(|| {
+            eprintln!("[config_manager] Warning: external-controller has no port, using 9090");
+            "9090"
+        });
         map.insert(
             YamlValue::String("external-controller".to_owned()),
             YamlValue::String(format!("127.0.0.1:{port}")),
@@ -210,19 +213,24 @@ pub async fn update_config(
         if profile_name != "run_config.yaml" {
             let profile_path = paths.profiles_dir.join(&profile_name);
             if profile_path.exists() {
-                let profile_content = fs::read_to_string(&profile_path).unwrap_or_default();
-                let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
-                    .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
-                if let Ok(mut profile_yaml) = serde_yaml::from_str::<YamlValue>(&profile_content) {
-                    remove_dangerous_keys(&mut profile_yaml, false);
-                    if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
+                if let Ok(profile_content) = fs::read_to_string(&profile_path) {
+                    let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
+                        .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
+                    if let Ok(mut profile_yaml) =
+                        serde_yaml::from_str::<YamlValue>(&profile_content)
+                    {
                         remove_dangerous_keys(&mut profile_yaml, false);
-                        if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                            if let Err(e) = crate::core_manager::write_file_secure(
-                                &profile_path,
-                                &new_profile_content,
-                            ) {
-                                eprintln!("[warn] Failed to update profile {profile_name}: {e}");
+                        if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
+                            remove_dangerous_keys(&mut profile_yaml, false);
+                            if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
+                                if let Err(e) = crate::core_manager::write_file_secure(
+                                    &profile_path,
+                                    &new_profile_content,
+                                ) {
+                                    eprintln!(
+                                        "[warn] Failed to update profile {profile_name}: {e}"
+                                    );
+                                }
                             }
                         }
                     }
@@ -238,7 +246,10 @@ pub async fn update_config(
         .and_then(|v| v.as_str())
     {
         if let Some(p) = ext_ctrl.split(':').next_back() {
-            p.parse::<u16>().unwrap_or(port)
+            p.parse::<u16>().unwrap_or_else(|_| {
+                eprintln!("[config_manager] Warning: failed to parse external-controller port, using default");
+                port
+            })
         } else {
             port
         }
@@ -310,7 +321,8 @@ pub(crate) fn update_config_core<I: ConfigIo>(
     // 1. Read existing config
     let mut current_yaml: YamlValue = if io.path_exists(run_config_path) {
         let content = io.read_to_string(run_config_path)?;
-        serde_yaml::from_str(&content).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
+        serde_yaml::from_str(&content)
+            .map_err(|e| format!("Failed to parse run_config.yaml: {e}"))?
     } else {
         YamlValue::Mapping(Mapping::new())
     };
