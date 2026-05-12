@@ -175,7 +175,7 @@ async function renderRulesList(searchQuery = '') {
         // Mark Prism-managed rules with a visual indicator
         const isPrismManaged = await isPrismRule(index);
         if (isPrismManaged) {
-            item.classList.add('ring-1', 'ring-purple-500/30');
+            item.classList.add('ring-1', 'ring-accent/30');
             item.title = 'This rule is managed by Prism Engine';
         }
 

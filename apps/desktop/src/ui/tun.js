@@ -49,7 +49,7 @@ export function initTunToggle() {
         if (spinner) spinner.classList.remove('hidden');
         if (statusText) {
             statusText.textContent = t.configuringTun;
-            statusText.classList.add('text-purple-400');
+            statusText.classList.add('text-accent');
         }
 
         try {
@@ -76,7 +76,7 @@ export function initTunToggle() {
                         if (spinner) spinner.classList.add('hidden');
                         if (statusText) {
                             statusText.textContent = t.virtualAdapter;
-                            statusText.classList.remove('text-purple-400');
+                            statusText.classList.remove('text-accent');
                         }
                         appStore.set('isNetworkUpdating', false);
                         return;
@@ -118,7 +118,7 @@ export function initTunToggle() {
 
             if (statusText) {
                 statusText.textContent = enable ? t.proxyActive : t.virtualAdapter;
-                if (!enable) statusText.classList.remove('text-purple-400');
+                if (!enable) statusText.classList.remove('text-accent');
             }
             if (spinner) spinner.classList.add('hidden');
             appStore.set('isNetworkUpdating', false);
@@ -129,7 +129,7 @@ export function initTunToggle() {
             appStore.set('isTunEnabled', !enable);
             if (statusText) {
                 statusText.textContent = t.virtualAdapter;
-                statusText.classList.remove('text-purple-400');
+                statusText.classList.remove('text-accent');
             }
             if (spinner) spinner.classList.add('hidden');
             showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');

@@ -437,7 +437,7 @@ function getSourceBadge(source) {
         return { cls: 'bg-blue-500/15 text-blue-400', label: t.ruleLibraryExtracted || 'Extracted' };
     }
     if (s.includes('import')) {
-        return { cls: 'bg-purple-500/15 text-purple-400', label: t.ruleLibraryImported || 'Imported' };
+        return { cls: 'bg-accent/15 text-accent', label: t.ruleLibraryImported || 'Imported' };
     }
     return { cls: 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400', label: t.ruleLibraryManual || 'Manual' };
 }
@@ -662,7 +662,7 @@ function getGroupBadgeColor(label) {
     // 预定义的柔和色彩方案（bg + text）
     const palette = [
         'bg-blue-500/15 text-blue-400',
-        'bg-purple-500/15 text-purple-400',
+        'bg-accent/15 text-accent',
         'bg-emerald-500/15 text-emerald-400',
         'bg-amber-500/15 text-amber-400',
         'bg-rose-500/15 text-rose-400',

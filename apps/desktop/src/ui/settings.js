@@ -436,16 +436,19 @@ export async function initSettings() {
     const applyUiScale = (scale) => {
         // Update button states
         uiScaleButtons.forEach(btn => {
-            btn.classList.remove('bg-purple-500/30', 'text-purple-300', 'bg-purple-500/20', 'text-purple-600');
+            btn.classList.remove('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
             btn.classList.add('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
         });
         const activeBtn = document.getElementById(`ui-scale-${Math.round(scale * 100)}`);
         if (activeBtn) {
             activeBtn.classList.remove('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
-            activeBtn.classList.add('bg-purple-500/20', 'dark:bg-purple-500/30', 'text-purple-600', 'dark:text-purple-300');
+            activeBtn.classList.add('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
         }
-        // Apply scale via fontSize on html element
-        document.documentElement.style.fontSize = `${scale * 16}px`;
+        // Apply scale via CSS custom property --ui-scale
+        // The actual transform/size is handled by CSS on #app-main-container.
+        // This avoids inline style conflicts with Tailwind classes and ensures
+        // the scale is applied consistently on startup.
+        document.documentElement.style.setProperty('--ui-scale', String(scale));
     };
 
     uiScaleButtons.forEach(btn => {

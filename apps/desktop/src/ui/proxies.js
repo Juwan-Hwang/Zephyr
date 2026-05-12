@@ -477,7 +477,7 @@ export function initProxyControls() {
             const icon = document.getElementById('test-icon');
             const _t = /** @type {any} */ (translations)[currentLang];
 
-            icon?.classList.add('animate-spin', 'text-purple-400');
+            icon?.classList.add('animate-spin', 'text-accent');
             testBtn.classList.add('opacity-50', 'cursor-not-allowed');
 
             try {
@@ -572,7 +572,7 @@ export function initProxyControls() {
                 } else {
                     applyLatencySortToDom(true);
                 }
-                icon?.classList.remove('animate-spin', 'text-purple-400');
+                icon?.classList.remove('animate-spin', 'text-accent');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
         };

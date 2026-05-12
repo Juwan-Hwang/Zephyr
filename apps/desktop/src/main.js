@@ -145,7 +145,7 @@ async function initApp() {
 
     // Apply saved UI scale early (before UI renders)
     if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
-      document.documentElement.style.fontSize = `${settings.ui_scale * 16}px`;
+      document.documentElement.style.setProperty('--ui-scale', String(settings.ui_scale));
     }
 
     const tStartCore = performance.now();

@@ -27,6 +27,10 @@ html:not(.dark) * {
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
+:root {
+  --ui-scale: 1;
+}
+
 @import "tailwindcss";
 
 @config "../tailwind.config.js";
@@ -411,6 +415,17 @@ input:checked + .switch-slider:before {
 }
 .ios-switch.switch-sm input:checked + .switch-slider:before {
     transform: translateX(14px);
+}
+
+/* UI Scale — applied on body to avoid conflicting with #app-main-container transitions */
+body {
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
+  width: calc(100% / var(--ui-scale));
+  height: calc(100% / var(--ui-scale));
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Main container background driven by theme + opacity variable */

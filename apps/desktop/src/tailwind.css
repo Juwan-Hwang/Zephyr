@@ -27,6 +27,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 html:not(.dark) * {
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
+:root {
+  --ui-scale: 1;
+}
 @layer theme, base, components, utilities;
 @layer theme {
   :root, :host {
@@ -63,7 +66,6 @@ html:not(.dark) * {
     --color-purple-300: oklch(82.7% 0.119 306.383);
     --color-purple-400: oklch(71.4% 0.203 305.504);
     --color-purple-500: oklch(62.7% 0.265 303.9);
-    --color-purple-600: oklch(55.8% 0.288 302.321);
     --color-pink-400: oklch(71.8% 0.202 349.761);
     --color-pink-500: oklch(65.6% 0.241 354.308);
     --color-rose-300: oklch(81% 0.117 11.638);
@@ -1546,24 +1548,6 @@ html:not(.dark) * {
       background-color: color-mix(in oklab, var(--color-pink-500) 15%, transparent);
     }
   }
-  .bg-purple-500\/15 {
-    background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 15%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--color-purple-500) 15%, transparent);
-    }
-  }
-  .bg-purple-500\/20 {
-    background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 20%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--color-purple-500) 20%, transparent);
-    }
-  }
-  .bg-purple-500\/30 {
-    background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 30%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--color-purple-500) 30%, transparent);
-    }
-  }
   .bg-purple-500\/80 {
     background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 80%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -2029,9 +2013,6 @@ html:not(.dark) * {
   .text-pink-400 {
     color: var(--color-pink-400);
   }
-  .text-purple-300 {
-    color: var(--color-purple-300);
-  }
   .text-purple-400 {
     color: var(--color-purple-400);
   }
@@ -2043,9 +2024,6 @@ html:not(.dark) * {
     @supports (color: color-mix(in lab, red, red)) {
       color: color-mix(in oklab, var(--color-purple-500) 70%, transparent);
     }
-  }
-  .text-purple-600 {
-    color: var(--color-purple-600);
   }
   .text-red-400 {
     color: var(--color-red-400);
@@ -2236,12 +2214,6 @@ html:not(.dark) * {
     --tw-ring-color: color-mix(in srgb, #000 20%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       --tw-ring-color: color-mix(in oklab, var(--color-black) 20%, transparent);
-    }
-  }
-  .ring-purple-500\/30 {
-    --tw-ring-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 30%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      --tw-ring-color: color-mix(in oklab, var(--color-purple-500) 30%, transparent);
     }
   }
   .ring-transparent {
@@ -2894,11 +2866,11 @@ html:not(.dark) * {
       }
     }
   }
-  .dark\:bg-purple-500\/30 {
+  .dark\:bg-accent\/30 {
     &:is(.dark *) {
-      background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 30%, transparent);
+      background-color: var(--color-accent);
       @supports (color: color-mix(in lab, red, red)) {
-        background-color: color-mix(in oklab, var(--color-purple-500) 30%, transparent);
+        background-color: color-mix(in oklab, var(--color-accent) 30%, transparent);
       }
     }
   }
@@ -2990,11 +2962,6 @@ html:not(.dark) * {
       @supports (color: color-mix(in lab, red, red)) {
         color: color-mix(in oklab, var(--color-blue-400) 70%, transparent);
       }
-    }
-  }
-  .dark\:text-purple-300 {
-    &:is(.dark *) {
-      color: var(--color-purple-300);
     }
   }
   .dark\:text-purple-400 {
@@ -3350,6 +3317,13 @@ input:checked + .switch-slider:before {
 }
 .ios-switch.switch-sm input:checked + .switch-slider:before {
   transform: translateX(14px);
+}
+body {
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
+  width: calc(100% / var(--ui-scale));
+  height: calc(100% / var(--ui-scale));
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 #app-main-container {
   background-color: rgb(255 255 255 / var(--app-opacity, 0.6));
