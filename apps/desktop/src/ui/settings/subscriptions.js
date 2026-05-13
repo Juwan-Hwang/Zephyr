@@ -1148,7 +1148,7 @@ export function initSubscriptionSettings({
                         const { saveProxySelection } = await import('../proxy-memory.js');
                         await saveProxySelection(currentConfig, currentProxyGroups.current);
                     }
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
 
                 appStore.set('isNetworkUpdating', true);
                 item.classList.add('opacity-50', 'pointer-events-none');
@@ -1177,7 +1177,7 @@ export function initSubscriptionSettings({
                         try {
                             const { restoreProxySelection } = await import('../proxy-memory.js');
                             await restoreProxySelection(name);
-                        } catch (e) { /* ignore */ }
+                        } catch (_e) { /* ignore */ }
 
                         // NOW render configs — updateTrayMenu will see the correct node
                         await renderConfigs();

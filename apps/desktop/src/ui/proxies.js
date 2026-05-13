@@ -906,7 +906,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         const currentProfile = appStore.get('currentProfile') || 'config.yaml';
                         const { saveProxySelection } = await import('./proxy-memory.js');
                         await saveProxySelection(currentProfile, name);
-                    } catch (e) { /* ignore */ }
+                    } catch (_e) { /* ignore */ }
 
                     if (appStore.get('currentSortMode') === 'smart') {
                         await applySmartSortToDom();

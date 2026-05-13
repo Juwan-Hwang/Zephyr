@@ -5,10 +5,9 @@
  * @module ui/proxy-memory
  */
 
-import { invoke } from '../api.js';
+import { invoke, switchProxy } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups } from './proxy-groups.js';
-import { switchProxy } from '../api.js';
 
 /**
  * Save current proxy selection for a profile.
