@@ -438,15 +438,16 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
             }
 
             // Migrate proxy selection key
-            if let Some(node) = guard.last_proxy_selection.remove(&clean_old) {
+            let node_to_migrate = guard.last_proxy_selection.remove(&clean_old).or_else(|| {
+                if old_name != clean_old {
+                    guard.last_proxy_selection.remove(&old_name)
+                } else {
+                    None
+                }
+            });
+            if let Some(node) = node_to_migrate {
                 guard.last_proxy_selection.insert(clean_new.clone(), node);
                 dirty = true;
-            }
-            if old_name != clean_old {
-                if let Some(node) = guard.last_proxy_selection.remove(&old_name) {
-                    guard.last_proxy_selection.insert(clean_new.clone(), node);
-                    dirty = true;
-                }
             }
 
             if dirty {
