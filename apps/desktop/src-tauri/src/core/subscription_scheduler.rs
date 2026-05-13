@@ -6,11 +6,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::AppHandle;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::sync::Semaphore;
+use tokio::time::{interval, timeout, MissedTickBehavior};
 
 use super::core_process::ensure_app_storage;
 use super::crypto::load_metadata;
 use super::subscription::download_sub_inner;
+
+/// Maximum concurrent downloads during auto-update.
+const MAX_CONCURRENT_UPDATES: usize = 3;
+
+/// Download timeout per subscription (15 seconds).
+const DOWNLOAD_TIMEOUT_SECS: u64 = 15;
 
 /// Scheduler state shared between the task and external control.
 pub struct SchedulerState {
@@ -18,6 +25,8 @@ pub struct SchedulerState {
     running: AtomicBool,
     /// Shutdown signal.
     shutdown: AtomicBool,
+    /// Guard to prevent concurrent `trigger_auto_update` calls.
+    trigger_guard: AtomicBool,
 }
 
 impl SchedulerState {
@@ -26,24 +35,37 @@ impl SchedulerState {
         Self {
             running: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
+            trigger_guard: AtomicBool::new(false),
         }
     }
 
     /// Check if scheduler is currently running.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
+        self.running.load(Ordering::SeqCst)
     }
 
     /// Signal the scheduler to shutdown.
     pub fn shutdown(&self) {
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.store(true, Ordering::SeqCst);
     }
 
     /// Check if shutdown was requested.
     #[must_use]
     pub fn should_shutdown(&self) -> bool {
-        self.shutdown.load(Ordering::Relaxed)
+        self.shutdown.load(Ordering::SeqCst)
+    }
+
+    /// Try to acquire trigger guard. Returns true if acquired.
+    pub fn try_acquire_trigger(&self) -> bool {
+        self.trigger_guard
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// Release trigger guard.
+    pub fn release_trigger(&self) {
+        self.trigger_guard.store(false, Ordering::SeqCst);
     }
 }
 
@@ -75,15 +97,16 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
+        // Check shutdown before starting work
         if state.should_shutdown() {
-            state.running.store(false, Ordering::Relaxed);
+            state.running.store(false, Ordering::SeqCst);
             return;
         }
 
-        state.running.store(true, Ordering::Relaxed);
+        state.running.store(true, Ordering::SeqCst);
 
         // Check all subscriptions for updates
-        match check_and_update_subscriptions(&app).await {
+        match check_and_update_subscriptions(&app, &state).await {
             Ok(updated_count) => {
                 if updated_count > 0 {
                     println!("[Scheduler] Updated {updated_count} subscription(s)");
@@ -92,13 +115,23 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
             Err(e) => eprintln!("[Scheduler] Error checking subscriptions: {e}"),
         }
 
+        // Check shutdown again before waiting
+        if state.should_shutdown() {
+            state.running.store(false, Ordering::SeqCst);
+            return;
+        }
+
         // Wait for next check
         check_interval.tick().await;
     }
 }
 
 /// Check each subscription and update if its interval has passed.
-async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String> {
+/// Uses concurrent downloads with semaphore limiting.
+async fn check_and_update_subscriptions(
+    app: &AppHandle,
+    state: &Arc<SchedulerState>,
+) -> Result<usize, String> {
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
@@ -107,40 +140,85 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let mut updated = 0;
+    // Collect subscriptions that need updating
+    let to_update: Vec<(String, String)> = metadata
+        .configs
+        .iter()
+        .filter_map(|(name, meta)| {
+            // Skip if no URL or no interval set
+            let url = meta.url.as_ref()?;
+            let interval_secs = meta.auto_update_interval.filter(|&s| s > 0)?;
 
-    // TODO: The scheduler currently uses the default User-Agent (Zephyr/version).
-    // Custom User-Agent settings are stored in frontend localStorage and are not
-    // accessible to the backend. Consider moving User-Agent configuration to the
-    // backend Settings struct so the scheduler can respect per-subscription UA prefs.
-
-    #[allow(clippy::iter_over_hash_type)]
-    for (name, meta) in &metadata.configs {
-        // Skip if no URL or no interval set
-        let Some(url) = &meta.url else {
-            continue;
-        };
-        let Some(interval_secs) = meta.auto_update_interval.filter(|&s| s > 0) else {
-            continue;
-        };
-
-        // Calculate time since last update
-        let last_updated = meta.last_updated.unwrap_or(0);
-        let elapsed = now.saturating_sub(last_updated);
-
-        // Only update if interval has passed
-        if elapsed >= interval_secs {
-            match download_sub_inner(app, url.clone(), name.clone(), None, true).await {
-                Ok(_) => {
-                    updated += 1;
-                }
-                Err(e) => eprintln!("[Scheduler] Failed to auto-update subscription `{name}`: {e}"),
+            // Skip if file doesn't exist (stale metadata entry)
+            if !paths.profiles_dir.join(name).exists() {
+                return None;
             }
-        }
+
+            // Calculate time since last update
+            let last_updated = meta.last_updated.unwrap_or(0);
+            let elapsed = now.saturating_sub(last_updated);
+
+            // Only include if interval has passed
+            (elapsed >= interval_secs).then(|| (name.clone(), url.clone()))
+        })
+        .collect();
+
+    if to_update.is_empty() {
+        return Ok(0);
     }
 
-    // download_sub_inner already persists last_updated with completion-time timestamp,
-    // so no additional metadata save is needed here.
+    // Use semaphore to limit concurrent downloads
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UPDATES));
+    let mut tasks = Vec::with_capacity(to_update.len());
+
+    for (name, url) in to_update {
+        // Check shutdown before spawning each task
+        if state.should_shutdown() {
+            break;
+        }
+
+        let permit = Arc::clone(&semaphore);
+        let app_clone = app.clone();
+
+        let task = tauri::async_runtime::spawn(async move {
+            let _permit = permit.acquire().await.ok()?;
+            // Use timeout to prevent hanging on slow servers
+            let result = timeout(
+                Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
+                download_sub_inner(&app_clone, url, name.clone(), None, true),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(_)) => {
+                    println!("[Scheduler] Updated {name}");
+                    Some(())
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[Scheduler] Failed to update {name}: {e}");
+                    None
+                }
+                Err(_) => {
+                    eprintln!("[Scheduler] Timeout updating {name}");
+                    None
+                }
+            }
+        });
+
+        tasks.push(task);
+    }
+
+    // Wait for all tasks to complete
+    let mut updated = 0;
+    for task in tasks {
+        if task.await.ok().flatten().is_some() {
+            updated += 1;
+        }
+        // Check shutdown between waiting for tasks
+        if state.should_shutdown() {
+            break;
+        }
+    }
 
     Ok(updated)
 }
@@ -156,7 +234,19 @@ pub fn get_scheduler_status(state: tauri::State<Arc<SchedulerState>>) -> serde_j
 }
 
 /// Command to trigger immediate update (for testing).
+/// Rate-limited: only one concurrent call allowed.
 #[tauri::command]
-pub async fn trigger_auto_update(app: AppHandle) -> Result<usize, String> {
-    check_and_update_subscriptions(&app).await
+pub async fn trigger_auto_update(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<SchedulerState>>,
+) -> Result<usize, String> {
+    // Rate limit: only one concurrent trigger allowed
+    if !state.try_acquire_trigger() {
+        return Err("Auto-update already in progress".to_owned());
+    }
+
+    let result = check_and_update_subscriptions(&app, &state).await;
+
+    state.release_trigger();
+    result
 }

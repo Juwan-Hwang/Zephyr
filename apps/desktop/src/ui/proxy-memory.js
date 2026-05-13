@@ -8,6 +8,13 @@
 import { invoke, switchProxy } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups } from './proxy-groups.js';
+import { getSettingsCached } from './cache.js';
+import { proxyMemoryLogger } from '../utils/logger.js';
+
+/** Maximum retries for waiting mihomo to be ready. */
+const MAX_READY_RETRIES = 10;
+/** Delay between retries in ms. */
+const READY_RETRY_DELAY = 100;
 
 /**
  * Save current proxy selection for a profile.
@@ -18,22 +25,48 @@ import { fetchProxyGroups } from './proxy-groups.js';
 export async function saveProxySelection(profileName, nodeName) {
     try {
         await invoke(COMMANDS.UPDATE_PROXY_SELECTION, { profileName, nodeName });
-    } catch { /* ignore */ }
+    } catch (e) {
+        proxyMemoryLogger.warn('Failed to save proxy selection:', e);
+    }
+}
+
+/**
+ * Wait for mihomo to be ready by polling proxy groups.
+ * @returns {Promise<boolean>} Whether mihomo is ready
+ */
+async function waitForMihomoReady() {
+    for (let i = 0; i < MAX_READY_RETRIES; i++) {
+        try {
+            const result = await fetchProxyGroups();
+            if (result && result.proxies && result.proxies.length > 0) {
+                return true;
+            }
+        } catch {
+            // Ignore errors, keep retrying
+        }
+        await new Promise((r) => setTimeout(r, READY_RETRY_DELAY));
+    }
+    return false;
 }
 
 /**
  * Restore proxy selection for a profile after core restart.
+ * Uses polling to wait for mihomo to be ready instead of hardcoded delay.
  * @param {string} profileName - Profile filename
  * @returns {Promise<boolean>} Whether restoration succeeded
  */
 export async function restoreProxySelection(profileName) {
     try {
-        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        const settings = await getSettingsCached();
         const savedNode = settings.last_proxy_selection?.[profileName];
         if (!savedNode) return false;
 
-        // Wait for mihomo to be ready
-        await new Promise((r) => setTimeout(r, 500));
+        // Wait for mihomo to be ready (poll with retries)
+        const ready = await waitForMihomoReady();
+        if (!ready) {
+            proxyMemoryLogger.warn('Mihomo not ready after retries');
+            return false;
+        }
 
         const proxyGroupsResult = await fetchProxyGroups();
         if (!proxyGroupsResult) return false;
@@ -43,7 +76,10 @@ export async function restoreProxySelection(profileName) {
             return await switchProxy(mainGroup, savedNode);
         }
         return false;
-    } catch { return false; }
+    } catch (e) {
+        proxyMemoryLogger.warn('Failed to restore proxy selection:', e);
+        return false;
+    }
 }
 
 /**
@@ -53,7 +89,7 @@ export async function restoreProxySelection(profileName) {
  */
 export async function getProxySelection(profileName) {
     try {
-        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        const settings = await getSettingsCached();
         return settings.last_proxy_selection?.[profileName] || null;
     } catch {
         return null;

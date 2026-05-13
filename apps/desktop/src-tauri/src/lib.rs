@@ -640,8 +640,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_handle, event| {
+    app.run(|handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            // Signal scheduler to shutdown gracefully
+            if let Some(scheduler_state) = handle
+                .try_state::<Arc<core_manager::core::subscription_scheduler::SchedulerState>>()
+            {
+                scheduler_state.shutdown();
+            }
             kill_mihomo();
             // Smart kill: only prompts for password if there's actually a root mihomo running
             let _ = smart_kill_all_mihomo_as_root();

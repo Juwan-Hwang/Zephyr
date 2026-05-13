@@ -22,7 +22,7 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
 import { formatFileSize } from '../../utils/format.js';
-import { escapeHtml } from '../../utils/sanitize.js';
+import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
 import { SVG_ICONS } from '../icons.js';
 import { syncCoreConfig } from '../proxies.js';
@@ -99,53 +99,58 @@ const autoUpdateOptions = [
 ];
     const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
 
-    // Build dropdown menu items
+    // Build dropdown menu items (escape labels for XSS safety)
     const dropdownMenuItems = autoUpdateOptions.map(opt => 
-        `<button type="button" data-value="${opt.value}" data-label="${opt.label}" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">${opt.label}</button>`
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">${escapeHtml(opt.label)}</button>`
     ).join('');
+
+    // Remove any existing modal to prevent duplicate IDs
+    const existingModal = document.getElementById('edit-subscription-modal');
+    if (existingModal) existingModal.remove();
 
     // Create modal overlay (matching smart proxy config style)
     const modal = document.createElement('div');
     modal.id = 'edit-subscription-modal';
     modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+    // Escape all translation strings for XSS safety
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${t.editSubscription || 'Edit Subscription'}</h3>
+                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
                 <button id="edit-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.rename || 'Name'}</label>
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="input-common text-xs">
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.subscriptionUrl || 'Subscription URL'}</label>
-                    <input id="edit-url" type="text" value="" placeholder="${t.subscriptionUrlPlaceholder || 'Enter new URL to replace'}" class="input-common text-xs placeholder-zinc-600">
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-zinc-600">
                 </div>
             </div>
             <!-- Auto-update dropdown in bottom right -->
             <div class="flex items-center justify-between pt-2">
                 <div class="flex items-center gap-2">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.autoUpdateInterval || 'Auto Update'}</label>
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
                     <div id="edit-auto-update-wrap" class="relative">
                         <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
-                            <span id="edit-auto-update-label">${currentIntervalLabel}</span>
+                            <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
                             <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
                         <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30 w-40">
                             ${dropdownMenuItems}
                         </div>
                         <select id="edit-auto-update" class="hidden">
-                            ${autoUpdateOptions.map(opt => `<option value="${opt.value}" ${opt.value === String(currentInterval) ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                            ${autoUpdateOptions.map(opt => `<option value="${opt.value}" ${opt.value === String(currentInterval) ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
                         </select>
                     </div>
                 </div>
                 <div class="flex justify-end gap-2">
-                    <button id="edit-modal-cancel" class="btn-ghost text-xs px-4 py-2">${t.cancel || 'Cancel'}</button>
-                    <button id="edit-modal-save" class="btn-accent text-xs px-4 py-2">${t.save || 'Save'}</button>
+                    <button id="edit-modal-cancel" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.cancel || 'Cancel')}</button>
+                    <button id="edit-modal-save" class="btn-accent text-xs px-4 py-2">${escapeHtml(t.save || 'Save')}</button>
                 </div>
             </div>
         </div>

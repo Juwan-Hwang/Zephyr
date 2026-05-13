@@ -18,11 +18,12 @@ import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
 import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
-import { getConfigCached, getProxiesCached, invalidateProxiesCache } from './cache.js';
+import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
 import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig } from './prism.js';
 import { fetchProxyGroups as fetchProxyGroupsShared } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
+import { saveProxySelection } from './proxy-memory.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -901,11 +902,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                 if (success) {
                     setActiveNode(card, container);
 
-                    // Save proxy selection for current profile
+                    // Save proxy selection for current profile (use cached settings)
                     try {
-                        const settings = await invoke(COMMANDS.GET_SETTINGS);
+                        const settings = await getSettingsCached();
                         const currentProfile = settings.last_config || 'config.yaml';
-                        const { saveProxySelection } = await import('./proxy-memory.js');
                         await saveProxySelection(currentProfile, name);
                     } catch (_e) { /* ignore */ }
 
