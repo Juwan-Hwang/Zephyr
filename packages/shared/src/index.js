@@ -31,6 +31,7 @@ export const CONFIG_FILES = Object.freeze({
     UPDATE_CONFIG_URL: "update_config_url",
     UPDATE_SUBSCRIPTION_INTERVAL: "update_subscription_interval",
     UPDATE_PROXY_SELECTION: "update_proxy_selection",
+    UPDATE_SUBSCRIPTION_USER_AGENT: "update_subscription_user_agent",
     DELETE_CONFIG: "delete_config",
     RENAME_CONFIG: "rename_config",
     READ_CONFIG_FILE: "read_config_file",

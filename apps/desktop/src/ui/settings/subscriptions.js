@@ -78,6 +78,9 @@ function formatLastUpdated(timestamp, t) {
 // This is set by initSubscriptionSettings and used by showEditPanel
 let moduleRenderConfigs = null;
 
+/** Track active edit modal dropdown for proper cleanup. */
+let activeEditDropdown = null;
+
 /**
  * Show the edit panel for a subscription.
  * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null}} configInfo
@@ -106,7 +109,11 @@ const autoUpdateOptions = [
 
     // Remove any existing modal to prevent duplicate IDs
     const existingModal = document.getElementById('edit-subscription-modal');
-    if (existingModal) existingModal.remove();
+    if (existingModal) {
+        activeEditDropdown?.dispose();
+        activeEditDropdown = null;
+        existingModal.remove();
+    }
 
     // Create modal overlay (matching smart proxy config style)
     const modal = document.createElement('div');
@@ -170,6 +177,7 @@ const autoUpdateOptions = [
         labelId: 'edit-auto-update-label',
         selectId: 'edit-auto-update',
     });
+    activeEditDropdown = autoUpdateDropdown;
 
     // Animate in (matching smart proxy config)
     requestAnimationFrame(() => {
@@ -187,6 +195,7 @@ const autoUpdateOptions = [
 
     const closeModal = () => {
         autoUpdateDropdown?.dispose();
+        activeEditDropdown = null;
         const panel = modal.querySelector('.glass-card');
         if (panel) {
             panel.style.transition = 'all 0.15s ease-in';

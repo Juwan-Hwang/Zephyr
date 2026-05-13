@@ -103,6 +103,13 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
             return;
         }
 
+        // Acquire trigger guard to prevent concurrent execution with trigger_auto_update
+        if !state.try_acquire_trigger() {
+            // Another instance is running, skip this cycle
+            check_interval.tick().await;
+            continue;
+        }
+
         state.running.store(true, Ordering::SeqCst);
 
         // Check all subscriptions for updates
@@ -114,6 +121,9 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
             }
             Err(e) => eprintln!("[Scheduler] Error checking subscriptions: {e}"),
         }
+
+        // Release trigger guard
+        state.release_trigger();
 
         // Check shutdown again before waiting
         if state.should_shutdown() {
@@ -136,9 +146,12 @@ async fn check_and_update_subscriptions(
     let metadata = load_metadata(&paths);
 
     // Read subscription_user_agent from settings.json (set by frontend)
+    // Use tokio::fs to avoid blocking the async runtime
     let settings_path = paths.app_data_dir.join("settings.json");
     let user_agent: Option<String> = if settings_path.exists() {
-        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+        let content = tokio::fs::read_to_string(&settings_path)
+            .await
+            .unwrap_or_default();
         serde_json::from_str::<serde_json::Value>(&content)
             .ok()
             .and_then(|v| v.get("subscription_user_agent")?.as_str().map(String::from))

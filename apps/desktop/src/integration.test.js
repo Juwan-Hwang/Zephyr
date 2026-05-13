@@ -34,7 +34,7 @@ describe('Backend ↔ Frontend IPC command contract', () => {
     // This keeps the test in sync automatically as new commands are added.
     const NAMESPACE_REFS = new Set([
         'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
-        'SHORTCUTS', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
+        'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
         'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED',
     ]);
     const backendCommands = Object.values(COMMANDS).filter(

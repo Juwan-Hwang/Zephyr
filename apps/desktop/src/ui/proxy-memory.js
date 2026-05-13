@@ -12,7 +12,7 @@ import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
-const MAX_READY_RETRIES = 10;
+const MAX_READY_RETRIES = 50;
 /** Delay between retries in ms. */
 const READY_RETRY_DELAY = 100;
 

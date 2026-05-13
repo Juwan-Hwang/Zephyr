@@ -186,6 +186,26 @@ fn update_proxy_selection(
     persist_settings(&app, &settings)
 }
 
+/// Atomically update the subscription User-Agent in settings.
+/// Avoids Read-Modify-Write race condition.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_subscription_user_agent(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    user_agent: Option<String>,
+) -> Result<(), String> {
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.subscription_user_agent = user_agent.filter(|s| !s.is_empty());
+        guard.clone()
+    };
+    persist_settings(&app, &settings)
+}
+
 /// Persist settings to settings.json (without touching in-memory state).
 /// Used by `rename_config` to persist `last_config` changes.
 ///
@@ -509,6 +529,7 @@ pub fn run() {
             get_settings,
             save_settings,
             update_proxy_selection,
+            update_subscription_user_agent,
             get_core_version,
             exempt_uwp_apps,
             read_config_file,
