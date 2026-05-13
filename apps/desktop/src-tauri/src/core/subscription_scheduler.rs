@@ -149,12 +149,15 @@ async fn check_and_update_subscriptions(
 
     // Read subscription_user_agent from in-memory SettingsState (set by frontend)
     let user_agent: Option<String> = {
-        let settings_state = app.state::<crate::SettingsState>();
-        settings_state
-            .0
-            .lock()
-            .ok()
-            .and_then(|guard| guard.subscription_user_agent.clone())
+        let ss = app.state::<crate::SettingsState>();
+        let lock = ss.0.lock();
+        match lock {
+            Ok(guard) => guard.subscription_user_agent.clone(),
+            Err(e) => {
+                eprintln!("[Scheduler] Failed to acquire settings lock for user agent: {e}");
+                None
+            }
+        }
     };
 
     let now = std::time::SystemTime::now()

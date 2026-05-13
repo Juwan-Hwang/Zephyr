@@ -67,14 +67,17 @@ export async function restoreProxySelection(profileName) {
         // Read directly from backend to avoid stale cache
         const settings = await invoke(COMMANDS.GET_SETTINGS);
         const savedNode = settings.last_proxy_selection?.[profileName];
-        if (!savedNode) return false;
 
-        // Wait for mihomo to be ready (poll with retries)
+        // Always wait for mihomo to be ready, even if no saved node exists.
+        // Callers removed their hardcoded delays and rely on this function
+        // to ensure the core is ready before proceeding.
         const ready = await waitForMihomoReady();
         if (!ready) {
             proxyMemoryLogger.warn('Mihomo not ready after retries');
             return false;
         }
+
+        if (!savedNode) return false;
 
         const proxyGroupsResult = await fetchProxyGroups();
         if (!proxyGroupsResult) return false;

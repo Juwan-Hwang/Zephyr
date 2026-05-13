@@ -425,39 +425,41 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     let mut last_config_updated = false;
     {
         let state = app.state::<crate::SettingsState>();
-        if let Ok(mut guard) = state.0.lock() {
-            let mut dirty = false;
+        let mut guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut dirty = false;
 
-            // Update last_config if it references the old name
-            if guard.last_config.as_deref() == Some(&clean_old)
-                || guard.last_config.as_deref() == Some(&old_name)
-            {
-                guard.last_config = Some(clean_new.clone());
-                dirty = true;
-                last_config_updated = true;
-            }
+        // Update last_config if it references the old name
+        if guard.last_config.as_deref() == Some(&clean_old)
+            || guard.last_config.as_deref() == Some(&old_name)
+        {
+            guard.last_config = Some(clean_new.clone());
+            dirty = true;
+            last_config_updated = true;
+        }
 
-            // Migrate proxy selection key
-            let node_to_migrate = guard.last_proxy_selection.remove(&clean_old).or_else(|| {
-                if old_name != clean_old {
-                    guard.last_proxy_selection.remove(&old_name)
-                } else {
-                    None
-                }
-            });
-            if let Some(node) = node_to_migrate {
-                guard.last_proxy_selection.insert(clean_new.clone(), node);
-                dirty = true;
+        // Migrate proxy selection key
+        let node_to_migrate = guard.last_proxy_selection.remove(&clean_old).or_else(|| {
+            if old_name != clean_old {
+                guard.last_proxy_selection.remove(&old_name)
+            } else {
+                None
             }
+        });
+        if let Some(node) = node_to_migrate {
+            guard.last_proxy_selection.insert(clean_new.clone(), node);
+            dirty = true;
+        }
 
-            if dirty {
-                let settings = guard.clone();
-                drop(guard);
-                if let Err(e) = crate::persist_settings(&app, &settings) {
-                    eprintln!("[rename_config] Failed to persist settings: {e}");
-                }
+        if dirty {
+            let settings = guard.clone();
+            drop(guard);
+            if let Err(e) = crate::persist_settings(&app, &settings) {
+                eprintln!("[rename_config] Failed to persist settings: {e}");
             }
-        };
+        }
     }
 
     // Sync runtime MihomoState.last_config_path
