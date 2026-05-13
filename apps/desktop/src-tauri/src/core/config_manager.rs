@@ -20,21 +20,37 @@ fn update_metadata_entry<F>(
 ) where
     F: FnOnce(&mut ConfigMetadata),
 {
-    if !metadata.configs.contains_key(safe_name) {
-        let url = get_config_url(app, safe_name).ok();
-        metadata.configs.insert(
-            safe_name.to_owned(),
+    let entry = metadata
+        .configs
+        .entry(safe_name.to_owned())
+        .or_insert_with(|| {
+            let url = get_config_url(app, safe_name).ok();
             ConfigMetadata {
                 url,
                 sub_info: None,
                 last_updated: None,
                 auto_update_interval: None,
-            },
-        );
+            }
+        });
+    update(entry);
+}
+
+/// Common validation for config update commands.
+/// Returns sanitized name and app paths if valid.
+fn validate_config_for_update(
+    app: &AppHandle,
+    name: &str,
+) -> Result<(super::AppPaths, String), String> {
+    let safe_name = sanitize_config_file_name(name)?;
+    if safe_name == "run_config.yaml" {
+        return Err("Cannot modify the active temp config".to_owned());
     }
-    if let Some(entry) = metadata.configs.get_mut(safe_name) {
-        update(entry);
+    let paths = ensure_app_storage(app)?;
+    let config_path = paths.profiles_dir.join(&safe_name);
+    if !config_path.exists() {
+        return Err(format!("Config not found: {safe_name}"));
     }
+    Ok((paths, safe_name))
 }
 
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
@@ -158,17 +174,7 @@ pub async fn update_config_url(
     name: String,
     new_url: String,
 ) -> Result<(), String> {
-    let safe_name = sanitize_config_file_name(&name)?;
-    if safe_name == "run_config.yaml" {
-        return Err("Cannot modify the active temp config".to_owned());
-    }
-    let paths = ensure_app_storage(&app)?;
-
-    // Validate the config file exists
-    let config_path = paths.profiles_dir.join(&safe_name);
-    if !config_path.exists() {
-        return Err(format!("Config not found: {safe_name}"));
-    }
+    let (paths, safe_name) = validate_config_for_update(&app, &name)?;
 
     // Trim whitespace before validation and storage
     let trimmed_url = new_url.trim();
@@ -195,17 +201,7 @@ pub async fn update_subscription_interval(
     name: String,
     interval: u64,
 ) -> Result<(), String> {
-    let safe_name = sanitize_config_file_name(&name)?;
-    if safe_name == "run_config.yaml" {
-        return Err("Cannot modify the active temp config".to_owned());
-    }
-    let paths = ensure_app_storage(&app)?;
-
-    // Validate the config file exists
-    let config_path = paths.profiles_dir.join(&safe_name);
-    if !config_path.exists() {
-        return Err(format!("Config not found: {safe_name}"));
-    }
+    let (paths, safe_name) = validate_config_for_update(&app, &name)?;
 
     let mut metadata = load_metadata(&paths);
     update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
