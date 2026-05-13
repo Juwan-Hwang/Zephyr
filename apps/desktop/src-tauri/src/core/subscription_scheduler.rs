@@ -244,7 +244,9 @@ pub async fn trigger_auto_update(
         return Err("Auto-update already in progress".to_owned());
     }
 
+    state.running.store(true, Ordering::SeqCst);
     let result = check_and_update_subscriptions(&app, &state).await;
+    state.running.store(false, Ordering::SeqCst);
 
     state.release_trigger();
     result

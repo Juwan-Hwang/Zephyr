@@ -175,12 +175,17 @@ fn update_proxy_selection(
     profile_name: String,
     node_name: String,
 ) -> Result<(), String> {
+    // Validate inputs to prevent settings bloat from webview
+    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
+    if safe_name.len() > 256 || node_name.len() > 256 {
+        return Err("Profile name or node name too long".to_owned());
+    }
     let settings = {
         let mut guard = state
             .0
             .lock()
             .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.last_proxy_selection.insert(profile_name, node_name);
+        guard.last_proxy_selection.insert(safe_name, node_name);
         guard.clone()
     };
     persist_settings(&app, &settings)

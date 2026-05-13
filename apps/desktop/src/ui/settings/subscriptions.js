@@ -218,7 +218,10 @@ async function showEditPanel(configInfo) {
         const newUrl = document.getElementById('edit-url')?.value.trim() || '';
         const newInterval = parseInt(document.getElementById('edit-auto-update')?.value || '0', 10);
 
-        if (!newName) return;
+        if (!newName) {
+            showNotification(t.subscriptionNameRequired || 'Subscription name is required', 'error');
+            return;
+        }
 
         try {
             // Rename if name changed
