@@ -93,13 +93,13 @@ async function showEditPanel(configInfo) {
     // Get current auto-update interval for this subscription (stored in metadata)
     const currentInterval = configInfo.auto_update_interval || 0;
 
-// Auto-update options
-const autoUpdateOptions = [
-    { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
-    { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
-    { value: '86400', label: t.autoUpdate1d || 'Every day' },
-    { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
-];
+    // Auto-update options
+    const autoUpdateOptions = [
+        { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
+        { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
+        { value: '86400', label: t.autoUpdate1d || 'Every day' },
+        { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
+    ];
     const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
 
     // Build dropdown menu items (escape labels for XSS safety)
@@ -1181,7 +1181,6 @@ export function initSubscriptionSettings({
                         await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
                         invalidateSettingsCache();
 
-                        await new Promise(r => setTimeout(r, 1000));
                         await closeAllConnections();
                         // Re-apply prism patches against the new profile so that
                         // __when__.profile conditions are evaluated correctly.

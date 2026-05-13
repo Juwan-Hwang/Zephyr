@@ -153,6 +153,8 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         'COMMANDS.UPDATE_PROXY_SELECTION', 'COMMANDS.GET_SETTINGS',
         // tray.js (proxy memory)
         'COMMANDS.UPDATE_PROXY_SELECTION', 'COMMANDS.GET_SETTINGS',
+        // settings.js (UA sync)
+        'COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT',
     ];
 
     it('every COMMANDS.* access in UI code resolves to a defined value', () => {

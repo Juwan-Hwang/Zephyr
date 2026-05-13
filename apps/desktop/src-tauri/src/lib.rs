@@ -135,7 +135,7 @@ struct Settings {
     subscription_user_agent: Option<String>,
 }
 
-struct SettingsState(Arc<Mutex<Settings>>);
+pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]

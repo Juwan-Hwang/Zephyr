@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 use tokio::time::{interval, timeout, MissedTickBehavior};
 
 use super::core_process::ensure_app_storage;
@@ -122,6 +122,8 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
             Err(e) => eprintln!("[Scheduler] Error checking subscriptions: {e}"),
         }
 
+        state.running.store(false, Ordering::SeqCst);
+
         // Release trigger guard
         state.release_trigger();
 
@@ -145,19 +147,14 @@ async fn check_and_update_subscriptions(
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
-    // Read subscription_user_agent from settings.json (set by frontend)
-    // Use tokio::fs to avoid blocking the async runtime
-    let settings_path = paths.app_data_dir.join("settings.json");
-    let user_agent: Option<String> = if settings_path.exists() {
-        let content = tokio::fs::read_to_string(&settings_path)
-            .await
-            .unwrap_or_default();
-        serde_json::from_str::<serde_json::Value>(&content)
+    // Read subscription_user_agent from in-memory SettingsState (set by frontend)
+    let user_agent: Option<String> = {
+        let settings_state = app.state::<crate::SettingsState>();
+        settings_state
+            .0
+            .lock()
             .ok()
-            .and_then(|v| v.get("subscription_user_agent")?.as_str().map(String::from))
-            .filter(|s| !s.is_empty())
-    } else {
-        None
+            .and_then(|guard| guard.subscription_user_agent.clone())
     };
 
     let now = std::time::SystemTime::now()

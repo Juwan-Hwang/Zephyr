@@ -5,9 +5,37 @@ use tauri::{AppHandle, Manager as _};
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::core_process::ensure_app_storage;
-use super::crypto::{cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata};
+use super::crypto::{
+    cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata, ProfilesMetadata,
+};
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
+
+/// Update a field on an existing metadata entry (or create the entry first).
+fn update_metadata_entry<F>(
+    metadata: &mut ProfilesMetadata,
+    safe_name: &str,
+    app: &AppHandle,
+    update: F,
+) where
+    F: FnOnce(&mut ConfigMetadata),
+{
+    if !metadata.configs.contains_key(safe_name) {
+        let url = get_config_url(app, safe_name).ok();
+        metadata.configs.insert(
+            safe_name.to_owned(),
+            ConfigMetadata {
+                url,
+                sub_info: None,
+                last_updated: None,
+                auto_update_interval: None,
+            },
+        );
+    }
+    if let Some(entry) = metadata.configs.get_mut(safe_name) {
+        update(entry);
+    }
+}
 
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
 pub(super) fn mask_url(url: &str) -> String {
@@ -152,20 +180,9 @@ pub async fn update_config_url(
     }
 
     let mut metadata = load_metadata(&paths);
-    let entry = metadata
-        .configs
-        .entry(safe_name.clone())
-        .or_insert_with(|| {
-            // Legacy config without metadata — seed from file comments if possible
-            let url = get_config_url(&app, &safe_name).ok();
-            ConfigMetadata {
-                url,
-                sub_info: None,
-                last_updated: None,
-                auto_update_interval: None,
-            }
-        });
-    entry.url = Some(trimmed_url.to_owned());
+    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
+        entry.url = Some(trimmed_url.to_owned());
+    });
     save_metadata(&paths, &metadata)?;
 
     Ok(())
@@ -191,20 +208,9 @@ pub async fn update_subscription_interval(
     }
 
     let mut metadata = load_metadata(&paths);
-    let entry = metadata
-        .configs
-        .entry(safe_name.clone())
-        .or_insert_with(|| {
-            // Legacy config without metadata — seed from file comments if possible
-            let url = get_config_url(&app, &safe_name).ok();
-            ConfigMetadata {
-                url,
-                sub_info: None,
-                last_updated: None,
-                auto_update_interval: None,
-            }
-        });
-    entry.auto_update_interval = (interval > 0).then_some(interval);
+    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
+        entry.auto_update_interval = (interval > 0).then_some(interval);
+    });
     save_metadata(&paths, &metadata)?;
 
     Ok(())

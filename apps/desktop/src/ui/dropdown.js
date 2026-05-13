@@ -28,6 +28,10 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     if (wrap.dataset.dropdownInit) return;
     wrap.dataset.dropdownInit = '1';
 
+    // AbortController for clean removal of all event listeners
+    const ac = new AbortController();
+    const { signal } = ac;
+
     const arrow = trigger.querySelector('.dropdown-arrow');
     let isPortalActive = false;
 
@@ -50,7 +54,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
                 el.scrollBy({ top: delta, behavior: 'smooth' });
             }
         });
-    }, { passive: false });
+    }, { passive: false, signal });
 
     const closeMenu = () => {
         menu.classList.add('hidden');
@@ -98,15 +102,15 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         item.addEventListener('mouseenter', () => {
             menu.querySelectorAll(`[${optionAttr}]`).forEach(i => i.classList.remove('active'));
             item.classList.add('active');
-        });
+        }, { signal });
     });
-    menu.addEventListener('mouseleave', syncUI);
+    menu.addEventListener('mouseleave', syncUI, { signal });
 
     // Toggle
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
         menu.classList.contains('hidden') ? openMenu() : closeMenu();
-    });
+    }, { signal });
 
     // Option click
     menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
@@ -118,7 +122,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             syncUI();
             closeMenu();
             if (onChange) onChange(val, select);
-        });
+        }, { signal });
     });
 
     // Close on outside click / Escape
@@ -134,10 +138,10 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     const onWinResize = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
     const onWinScroll = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
 
-    document.addEventListener('click', onDocClick);
-    document.addEventListener('keydown', onDocKeydown);
-    window.addEventListener('resize', onWinResize);
-    window.addEventListener('scroll', onWinScroll, { capture: true, passive: true });
+    document.addEventListener('click', onDocClick, { signal });
+    document.addEventListener('keydown', onDocKeydown, { signal });
+    window.addEventListener('resize', onWinResize, { signal });
+    window.addEventListener('scroll', onWinScroll, { capture: true, passive: true, signal });
 
     // Initial sync
     syncUI();
@@ -147,10 +151,8 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         getValue: () => select.value,
         syncUI,
         dispose: () => {
-            document.removeEventListener('click', onDocClick);
-            document.removeEventListener('keydown', onDocKeydown);
-            window.removeEventListener('resize', onWinResize);
-            window.removeEventListener('scroll', onWinScroll, { capture: true });
+            // Abort all listeners (document, window, trigger, menu, options)
+            ac.abort();
             closeMenu();
             delete wrap.dataset.dropdownInit;
         },

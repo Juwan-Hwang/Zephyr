@@ -35,13 +35,16 @@ export async function saveProxySelection(profileName, nodeName) {
 
 /**
  * Wait for mihomo to be ready by polling proxy groups.
+ * Considers the API ready if proxy groups are returned (even with empty proxy list,
+ * e.g., in DIRECT mode where no proxy candidates exist).
  * @returns {Promise<boolean>} Whether mihomo is ready
  */
 async function waitForMihomoReady() {
     for (let i = 0; i < MAX_READY_RETRIES; i++) {
         try {
             const result = await fetchProxyGroups();
-            if (result && result.proxies && result.proxies.length > 0) {
+            // API is ready if we get a valid response with groups data
+            if (result && (result.proxies || result.mainGroup)) {
                 return true;
             }
         } catch {
