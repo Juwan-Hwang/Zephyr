@@ -1160,12 +1160,15 @@ export function initSubscriptionSettings({
                 if (isCurrent || appStore.get('isNetworkUpdating')) return;
 
                 // Save current proxy selection before switching
+                // Read last_config live to avoid stale closure if profile changed via tray
                 try {
                     const { fetchProxyGroups } = await import('../proxy-groups.js');
                     const currentProxyGroups = await fetchProxyGroups();
                     if (currentProxyGroups && currentProxyGroups.current) {
+                        const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
+                        const activeConfig = liveSettings.last_config || 'config.yaml';
                         const { saveProxySelection } = await import('../proxy-memory.js');
-                        await saveProxySelection(currentConfig, currentProxyGroups.current);
+                        await saveProxySelection(activeConfig, currentProxyGroups.current);
                     }
                 } catch (_e) { /* ignore */ }
 
