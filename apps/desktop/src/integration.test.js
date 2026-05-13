@@ -135,7 +135,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         'COMMANDS.SET_UI_SCALE', 'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
         'COMMANDS.UPDATE_CONFIG', 'COMMANDS.UPDATE_GEO_DATA', 'COMMANDS.READ_CONFIG',
         'COMMANDS.UPDATE_CORE', 'COMMANDS.UPDATE_CLIENT',
-        'COMMANDS.DELETE_CONFIG', 'COMMANDS.GET_CONFIG_URL',
+        'COMMANDS.DELETE_CONFIG',
         // Rule Library (settings.js)
         'COMMANDS.RULE_EXTRACT_FROM_PROFILE', 'COMMANDS.RULE_LIST',
         'COMMANDS.RULE_GROUP_LIST', 'COMMANDS.RULE_READ', 'COMMANDS.RULE_UPDATE',
@@ -334,7 +334,7 @@ describe('COMMANDS namespace collision check', () => {
         const allEntries = [
             ...Object.entries({
                 CORE: { START_CORE: 'start_core', STOP_CORE: 'stop_core', GET_CORE_VERSION: 'get_core_version', READ_CONFIG: 'read_config', UPDATE_CONFIG: 'update_config', READ_LOG: 'read_core_log' },
-                CONFIG_FILES: { LIST_CONFIGS: 'list_configs', GET_CONFIG_URL: 'get_config_url', DELETE_CONFIG: 'delete_config', READ_CONFIG_FILE: 'read_config_file', WRITE_CONFIG_FILE: 'write_config_file', OPEN_FOLDER: 'open_config_folder' },
+                CONFIG_FILES: { LIST_CONFIGS: 'list_configs', DELETE_CONFIG: 'delete_config', READ_CONFIG_FILE: 'read_config_file', WRITE_CONFIG_FILE: 'write_config_file', OPEN_FOLDER: 'open_config_folder' },
                 SYS_PROXY: { ENABLE_SYSPROXY: 'enable_sysproxy', DISABLE_SYSPROXY: 'disable_sysproxy', GET_SYS_PROXY: 'get_sys_proxy' },
                 TUN: { SET_TUN_ENABLED: 'set_tun_enabled', RELEASE_TUN_TOGGLE: 'release_tun_toggle', RESTART_AS_ROOT: 'restart_core_as_root_cmd', DISABLE_CMD: 'disable_tun_cmd' },
                 TRAY: { CHANGE_TRAY_ICON: 'change_tray_icon', GET_TRAY_MENU_STATE: 'get_tray_menu_state', SET_TRAY_MENU_STATE: 'set_tray_menu_state', UPDATE_TRAY_FULL_MENU: 'update_tray_full_menu', UPDATE_TRAY_TOGGLE_STATES: 'update_tray_toggle_states', GET_TRAY_STATUS: 'get_tray_status', GET_TRAY_PROXY_STATUS: 'get_tray_proxy_status' },

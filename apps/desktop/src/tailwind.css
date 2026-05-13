@@ -345,8 +345,8 @@ html:not(.dark) * {
   .top-\[14px\] {
     top: 14px;
   }
-  .top-\[55\%\] {
-    top: 55%;
+  .top-\[40px\] {
+    top: 40px;
   }
   .top-\[calc\(100\%\+6px\)\] {
     top: calc(100% + 6px);
@@ -860,6 +860,9 @@ html:not(.dark) * {
   }
   .w-28 {
     width: calc(var(--spacing) * 28);
+  }
+  .w-32 {
+    width: calc(var(--spacing) * 32);
   }
   .w-40 {
     width: calc(var(--spacing) * 40);
@@ -2094,6 +2097,11 @@ html:not(.dark) * {
   }
   .underline {
     text-decoration-line: underline;
+  }
+  .placeholder-zinc-600 {
+    &::placeholder {
+      color: var(--color-zinc-600);
+    }
   }
   .accent-accent {
     accent-color: var(--color-accent);
@@ -3367,7 +3375,7 @@ html:not(.dark) .glass-card:hover {
   border-color: rgba(255, 255, 255, 0.8);
   box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
-html:not(.dark) .bg-black\/20, html:not(.dark) .bg-black\/40, html:not(.dark) .bg-white\/5, html:not(.dark) .bg-white\/10 {
+html:not(.dark) .bg-black\/20, html:not(.dark) .bg-black\/30, html:not(.dark) .bg-black\/40, html:not(.dark) .bg-white\/5, html:not(.dark) .bg-white\/10 {
   background-color: rgba(15, 23, 42, 0.05);
 }
 html:not(.dark) .border-white\/5, html:not(.dark) .border-white\/10 {
@@ -3375,6 +3383,18 @@ html:not(.dark) .border-white\/5, html:not(.dark) .border-white\/10 {
 }
 html:not(.dark) .ring-white\/20 {
   --tw-ring-color: rgba(30, 41, 59, 0.2);
+}
+html:not(.dark) .ring-offset-zinc-900 {
+  --tw-ring-offset-color: #f1f5f9;
+}
+html:not(.dark) .hover\:border-white\/10:hover {
+  border-color: rgba(30, 41, 59, 0.2);
+}
+html:not(.dark) .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+html:not(.dark) .active\:bg-white\/\[0\.06\]:active {
+  background-color: rgba(0, 0, 0, 0.06);
 }
 html:not(.dark) {
   --text-primary: #0f172a;
@@ -3549,7 +3569,7 @@ html:not(.dark) .type-badge {
   display: none;
 }
 html:root[style*="--smart-enabled: 1"] .score-badge, html:root[style*="--smart-enabled:1"] .score-badge {
-  display: block;
+  display: inline-flex;
 }
 .score-badge.score-medium {
   background-color: rgba(234, 179, 8, 0.15);
@@ -3877,7 +3897,7 @@ html:not(.dark) .select-common::placeholder, html:not(.dark) .input-common::plac
 }
 .proxy-wrapper {
   content-visibility: auto;
-  contain-intrinsic-size: 0 96px;
+  contain-intrinsic-size: auto 96px;
 }
 .proxy-wrapper:hover {
   content-visibility: visible;

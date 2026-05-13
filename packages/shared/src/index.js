@@ -28,7 +28,8 @@ export const CORE = Object.freeze({
 
 export const CONFIG_FILES = Object.freeze({
     LIST_CONFIGS: "list_configs",
-    GET_CONFIG_URL: "get_config_url",
+    UPDATE_CONFIG_URL: "update_config_url",
+    UPDATE_SUBSCRIPTION_INTERVAL: "update_subscription_interval",
     DELETE_CONFIG: "delete_config",
     RENAME_CONFIG: "rename_config",
     READ_CONFIG_FILE: "read_config_file",

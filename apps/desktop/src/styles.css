@@ -483,6 +483,7 @@ html:not(.dark) .glass-card:hover {
 }
 
 html:not(.dark) .bg-black\/20,
+html:not(.dark) .bg-black\/30,
 html:not(.dark) .bg-black\/40,
 html:not(.dark) .bg-white\/5,
 html:not(.dark) .bg-white\/10 {
@@ -496,6 +497,22 @@ html:not(.dark) .border-white\/10 {
 
 html:not(.dark) .ring-white\/20 {
   --tw-ring-color: rgba(30, 41, 59, 0.2);
+}
+
+html:not(.dark) .ring-offset-zinc-900 {
+  --tw-ring-offset-color: #f1f5f9;
+}
+
+html:not(.dark) .hover\:border-white\/10:hover {
+  border-color: rgba(30, 41, 59, 0.2);
+}
+
+html:not(.dark) .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+html:not(.dark) .active\:bg-white\/\[0\.06\]:active {
+  background-color: rgba(0, 0, 0, 0.06);
 }
 
 /* Light mode text color overrides via CSS variables */
@@ -606,7 +623,7 @@ html:not(.dark) .type-badge {
 }
 html:root[style*="--smart-enabled: 1"] .score-badge,
 html:root[style*="--smart-enabled:1"] .score-badge {
-  display: block;
+  display: inline-flex;
 }
 .score-badge.score-medium {
   background-color: rgba(234, 179, 8, 0.15);
@@ -966,7 +983,7 @@ html:not(.dark) .textarea-common::placeholder {
 /* Proxy card wrapper: content-visibility for virtual scroll perf */
 .proxy-wrapper {
   content-visibility: auto;
-  contain-intrinsic-size: 0 96px;
+  contain-intrinsic-size: auto 96px;
 }
 .proxy-wrapper:hover {
   content-visibility: visible;

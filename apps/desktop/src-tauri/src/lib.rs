@@ -10,12 +10,14 @@ pub mod updater;
 pub mod uwp_loopback;
 
 use config_manager::{read_config, update_config};
+use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     delete_config, disable_tun_cmd, download_sub, download_sub_batch, ensure_app_storage,
-    fetch_text, get_config_url, get_core_version, init_tun_mode_from_config,
-    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
-    rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
-    start_core, stop_core, write_config_file, CoreData, MihomoState,
+    fetch_text, get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd,
+    kill_mihomo, list_configs, open_config_folder, read_config_file, rename_config,
+    restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root, start_core,
+    stop_core, update_config_url, update_subscription_interval, write_config_file, CoreData,
+    MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -122,6 +124,14 @@ struct Settings {
     ui_scale: f64,
     #[serde(default)]
     config_order: Vec<String>,
+    /// Auto-update interval for subscriptions in seconds. 0 = disabled.
+    #[serde(default)]
+    auto_update_subs_interval: u64,
+    /// Per-profile last selected proxy node.
+    /// Key: profile filename (e.g., "my-sub.yaml")
+    /// Value: proxy node name (e.g., "香港01")
+    #[serde(default)]
+    last_proxy_selection: std::collections::HashMap<String, String>,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -361,12 +371,18 @@ pub fn run() {
                     auto_apply: false,
                     ui_scale: 1.0,
                     config_order: Vec::new(),
+                    auto_update_subs_interval: 0,
+                    last_proxy_selection: std::collections::HashMap::new(),
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
 
             // Initialize Prism Engine extension
             app.manage(prism::PrismState::new(app.handle()));
+
+            // Start subscription auto-update scheduler (each sub has its own interval in metadata)
+            let scheduler_state = start_scheduler(app.handle().clone());
+            app.manage(scheduler_state);
 
             // Init Tray using the new tray module
             init_tray(app.handle())?;
@@ -456,7 +472,8 @@ pub fn run() {
             start_core,
             stop_core,
             list_configs,
-            get_config_url,
+            update_config_url,
+            update_subscription_interval,
             download_sub,
             download_sub_batch,
             delete_config,
@@ -565,6 +582,8 @@ pub fn run() {
             prism::smart_score_at,
             prism::smart_validate_config,
             prism::smart_scheduler_config,
+            core_manager::core::subscription_scheduler::get_scheduler_status,
+            core_manager::core::subscription_scheduler::trigger_auto_update,
             prism::smart_trim_history,
             // Failover
             prism::failover_report,

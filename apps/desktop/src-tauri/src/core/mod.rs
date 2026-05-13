@@ -25,6 +25,10 @@ pub struct ConfigInfo {
     pub url: Option<String>,
     pub url_display: Option<String>,
     pub sub_info: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_updated: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_update_interval: Option<u64>,
 }
 
 pub struct CoreData {
@@ -139,12 +143,15 @@ pub mod core_process;
 pub mod crypto;
 pub mod secure_io;
 pub mod subscription;
+pub mod subscription_scheduler;
+#[cfg(test)]
+pub mod subscription_scheduler_test;
 pub mod tun_manager;
 
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
 pub use config_manager::{
-    delete_config, get_config_url, list_configs, open_config_folder, read_config_file,
-    rename_config, write_config_file,
+    delete_config, list_configs, open_config_folder, read_config_file, rename_config,
+    update_config_url, update_subscription_interval, write_config_file,
 };
 pub use core_log::read_core_log;
 pub use core_process::{

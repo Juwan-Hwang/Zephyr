@@ -14,7 +14,7 @@
  * @param {string} opts.selectId - Hidden native select id
  * @param {Function} [opts.onChange] - Callback when selection changes
  * @param {string} [opts.optionAttr='data-value'] - Attribute to match options
- * @returns {{ setValue: Function, getValue: Function, syncUI: Function }|undefined}
+ * @returns {{ setValue: Function, getValue: Function, syncUI: Function, dispose: Function }|undefined}
  */
 export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectId, onChange, optionAttr = 'data-value' }) {
     const wrap = document.getElementById(wrapId);
@@ -122,17 +122,22 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     });
 
     // Close on outside click / Escape
-    document.addEventListener('click', (e) => {
+    const onDocClick = (e) => {
         if (!(e.target instanceof Element)) return;
         if (!e.target.closest(`#${wrapId}`) && !e.target.closest(`#${menuId}`)) closeMenu();
-    });
-    document.addEventListener('keydown', (e) => {
+    };
+    const onDocKeydown = (e) => {
         if (e.key === 'Escape') closeMenu();
-    });
+    };
 
     // Reposition on window resize/scroll while open
-    window.addEventListener('resize', () => { if (!menu.classList.contains('hidden')) positionMenu(); });
-    window.addEventListener('scroll', () => { if (!menu.classList.contains('hidden')) positionMenu(); }, { capture: true, passive: true });
+    const onWinResize = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
+    const onWinScroll = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
+
+    document.addEventListener('click', onDocClick);
+    document.addEventListener('keydown', onDocKeydown);
+    window.addEventListener('resize', onWinResize);
+    window.addEventListener('scroll', onWinScroll, { capture: true, passive: true });
 
     // Initial sync
     syncUI();
@@ -141,5 +146,13 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         setValue: (/** @type {string} */ val) => { select.value = val; syncUI(); },
         getValue: () => select.value,
         syncUI,
+        dispose: () => {
+            document.removeEventListener('click', onDocClick);
+            document.removeEventListener('keydown', onDocKeydown);
+            window.removeEventListener('resize', onWinResize);
+            window.removeEventListener('scroll', onWinScroll, { capture: true });
+            closeMenu();
+            delete wrap.dataset.dropdownInit;
+        },
     };
 }

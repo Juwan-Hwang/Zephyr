@@ -44,27 +44,34 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
-                        let (url, sub_info) = if let Some(meta) = metadata.configs.get(name) {
-                            (meta.url.clone(), meta.sub_info.clone())
-                        } else {
-                            // Fallback to reading old comments
-                            let mut url = None;
-                            let mut sub_info = None;
-                            if let Ok(file) = std::fs::File::open(&path) {
-                                use std::io::{BufRead as _, BufReader};
-                                let reader = BufReader::new(file);
-                                for line in reader.lines().take(50).map_while(Result::ok) {
-                                    if line.starts_with("# URL: ") {
-                                        url = Some(line.replace("# URL: ", "").trim().to_owned());
-                                    } else if line.starts_with("# SUB_INFO: ") {
-                                        sub_info = Some(
-                                            line.replace("# SUB_INFO: ", "").trim().to_owned(),
-                                        );
+                        let (url, sub_info, last_updated, auto_update_interval) =
+                            if let Some(meta) = metadata.configs.get(name) {
+                                (
+                                    meta.url.clone(),
+                                    meta.sub_info.clone(),
+                                    meta.last_updated,
+                                    meta.auto_update_interval,
+                                )
+                            } else {
+                                // Fallback to reading old comments
+                                let mut url = None;
+                                let mut sub_info = None;
+                                if let Ok(file) = std::fs::File::open(&path) {
+                                    use std::io::{BufRead as _, BufReader};
+                                    let reader = BufReader::new(file);
+                                    for line in reader.lines().take(50).map_while(Result::ok) {
+                                        if line.starts_with("# URL: ") {
+                                            url =
+                                                Some(line.replace("# URL: ", "").trim().to_owned());
+                                        } else if line.starts_with("# SUB_INFO: ") {
+                                            sub_info = Some(
+                                                line.replace("# SUB_INFO: ", "").trim().to_owned(),
+                                            );
+                                        }
                                     }
                                 }
-                            }
-                            (url, sub_info)
-                        };
+                                (url, sub_info, None, None)
+                            };
 
                         let url_display = url.as_ref().map(|u| mask_url(u));
 
@@ -73,6 +80,8 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                             url,
                             url_display,
                             sub_info,
+                            last_updated,
+                            auto_update_interval,
                         });
                     }
                 }
@@ -84,13 +93,12 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
 }
 
 /// Get the full (unmasked) subscription URL for a given config name.
-/// This is the only endpoint that exposes the raw URL, used exclusively for subscription updates.
-#[tauri::command]
-pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, String> {
+/// Internal use only — NOT exposed as a Tauri command to prevent URL leakage to the frontend.
+pub fn get_config_url(app: &AppHandle, name: &str) -> Result<String, String> {
     // Reuse comprehensive sanitization (URL decode, path traversal check, etc.)
-    let safe_name = sanitize_config_file_name(&name)?;
+    let safe_name = sanitize_config_file_name(name)?;
 
-    let paths = ensure_app_storage(&app)?;
+    let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
     // Look up URL from metadata first
@@ -113,6 +121,60 @@ pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, Stri
     }
 
     Err(format!("No subscription URL found for config: {name}"))
+}
+
+/// Update the subscription URL for an existing config in metadata.
+#[tauri::command]
+pub async fn update_config_url(
+    app: AppHandle,
+    name: String,
+    new_url: String,
+) -> Result<(), String> {
+    let safe_name = sanitize_config_file_name(&name)?;
+    let paths = ensure_app_storage(&app)?;
+
+    // Validate the config file exists
+    let config_path = paths.profiles_dir.join(&safe_name);
+    if !config_path.exists() {
+        return Err(format!("Config not found: {safe_name}"));
+    }
+
+    // Structural URL validation
+    let parsed = url::Url::parse(&new_url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("URL must use http:// or https://".to_owned());
+    }
+
+    let mut metadata = load_metadata(&paths);
+    let entry = metadata
+        .configs
+        .get_mut(&safe_name)
+        .ok_or_else(|| format!("No metadata found for config: {safe_name}"))?;
+    entry.url = Some(new_url);
+    save_metadata(&paths, &metadata)?;
+
+    Ok(())
+}
+
+/// Update the auto-update interval for a subscription.
+#[tauri::command]
+pub async fn update_subscription_interval(
+    app: AppHandle,
+    name: String,
+    interval: u64,
+) -> Result<(), String> {
+    let safe_name = sanitize_config_file_name(&name)?;
+    let paths = ensure_app_storage(&app)?;
+
+    let mut metadata = load_metadata(&paths);
+    let entry = metadata
+        .configs
+        .get_mut(&safe_name)
+        .ok_or_else(|| format!("No metadata found for config: {safe_name}"))?;
+    entry.auto_update_interval = if interval > 0 { Some(interval) } else { None };
+    save_metadata(&paths, &metadata)?;
+
+    Ok(())
 }
 
 #[tauri::command]
