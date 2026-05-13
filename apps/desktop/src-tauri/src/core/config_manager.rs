@@ -131,6 +131,9 @@ pub async fn update_config_url(
     new_url: String,
 ) -> Result<(), String> {
     let safe_name = sanitize_config_file_name(&name)?;
+    if safe_name == "run_config.yaml" {
+        return Err("Cannot modify the active temp config".to_owned());
+    }
     let paths = ensure_app_storage(&app)?;
 
     // Validate the config file exists
@@ -176,7 +179,16 @@ pub async fn update_subscription_interval(
     interval: u64,
 ) -> Result<(), String> {
     let safe_name = sanitize_config_file_name(&name)?;
+    if safe_name == "run_config.yaml" {
+        return Err("Cannot modify the active temp config".to_owned());
+    }
     let paths = ensure_app_storage(&app)?;
+
+    // Validate the config file exists
+    let config_path = paths.profiles_dir.join(&safe_name);
+    if !config_path.exists() {
+        return Err(format!("Config not found: {safe_name}"));
+    }
 
     let mut metadata = load_metadata(&paths);
     let entry = metadata

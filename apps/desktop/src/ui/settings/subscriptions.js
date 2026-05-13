@@ -231,12 +231,10 @@ const autoUpdateOptions = [
 
             closeModal();
             // Show notification based on what was changed
-            const urlChanged = !!newUrl;
-            const isZh = appStore.get('currentLang') === 'zh';
-            if (urlChanged) {
-                showNotification(isZh ? '订阅链接已更新' : 'Subscription URL updated', 'success');
+            if (newUrl) {
+                showNotification(t.notifUrlUpdated || 'Subscription URL updated', 'success');
             } else {
-                showNotification(isZh ? '设置已保存' : 'Settings saved', 'success');
+                showNotification(t.notifSettingsSaved || 'Settings saved', 'success');
             }
             // Force fresh render to get updated metadata
             moduleRenderConfigs?.(true);

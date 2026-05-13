@@ -109,6 +109,11 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
 
     let mut updated = 0;
 
+    // TODO: The scheduler currently uses the default User-Agent (Zephyr/version).
+    // Custom User-Agent settings are stored in frontend localStorage and are not
+    // accessible to the backend. Consider moving User-Agent configuration to the
+    // backend Settings struct so the scheduler can respect per-subscription UA prefs.
+
     #[allow(clippy::iter_over_hash_type)]
     for (name, meta) in &metadata.configs {
         // Skip if no URL or no interval set
