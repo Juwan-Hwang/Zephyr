@@ -80,7 +80,7 @@ let moduleRenderConfigs = null;
 
 /**
  * Show the edit panel for a subscription.
- * @param {{name: string, url_display?: string | null, last_updated?: number | null}} configInfo
+ * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null}} configInfo
  */
 async function showEditPanel(configInfo) {
     const t = translations[appStore.get('currentLang')] || {};
@@ -90,13 +90,15 @@ async function showEditPanel(configInfo) {
     // Get current auto-update interval for this subscription (stored in metadata)
     const currentInterval = configInfo.auto_update_interval || 0;
 
-    // Auto-update options (12h, 1d, 3d only)
-    const autoUpdateOptions = [
-        { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
-        { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
-        { value: '86400', label: t.autoUpdate1d || 'Every day' },
-        { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
-    ];
+// Auto-update options
+const autoUpdateOptions = [
+    { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
+    { value: '21600', label: t.autoUpdate6h || 'Every 6 hours' },
+    { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
+    { value: '86400', label: t.autoUpdate1d || 'Every day' },
+    { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
+    { value: '604800', label: t.autoUpdate7d || 'Every week' },
+];
     const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
 
     // Build dropdown menu items
@@ -210,14 +212,16 @@ async function showEditPanel(configInfo) {
                 invalidateSettingsCache();
             }
 
+            // Resolve target filename after potential rename (preserve original extension)
+            const originalExt = configInfo.name.match(/\.(yaml|yml)$/i)?.[0] || '.yaml';
+            const targetName = newName !== currentStem ? (newName.endsWith('.yaml') || newName.endsWith('.yml') ? newName : `${newName}${originalExt}`) : configInfo.name;
+
             // Update URL if user entered a new one
             if (newUrl) {
-                const targetName = newName !== currentStem ? `${newName}.yaml` : configInfo.name;
                 await invoke(COMMANDS.UPDATE_CONFIG_URL, { name: targetName, newUrl });
             }
 
             // Save auto-update interval for this subscription
-            const targetName = newName !== currentStem ? `${newName}.yaml` : configInfo.name;
             await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: targetName, interval: newInterval });
             invalidateConfigsCache();
 
@@ -560,7 +564,7 @@ export function initSubscriptionSettings({
      * Show a context menu anchored at (x, y) for the given subscription card.
      *
      * @param {MouseEvent} e
-     * @param {{ name: string, url_display?: string }} configInfo
+     * @param {{ name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null }} configInfo
      */
     const showSubscriptionContextMenu = async (e, configInfo) => {
         e.preventDefault();

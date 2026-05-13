@@ -1,7 +1,4 @@
-// @ts-check
-/**
- * Tests for subscription auto-update scheduler.
- */
+//! Tests for subscription auto-update scheduler.
 
 #[cfg(test)]
 mod tests {
@@ -16,7 +13,7 @@ mod tests {
 
     #[test]
     fn test_scheduler_state_default() {
-        let state: SchedulerState = Default::default();
+        let state = SchedulerState::default();
         assert!(!state.is_running());
         assert!(!state.should_shutdown());
     }

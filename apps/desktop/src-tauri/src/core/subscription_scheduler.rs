@@ -21,7 +21,8 @@ pub struct SchedulerState {
 }
 
 impl SchedulerState {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             running: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
@@ -29,6 +30,7 @@ impl SchedulerState {
     }
 
     /// Check if scheduler is currently running.
+    #[must_use]
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
@@ -39,6 +41,7 @@ impl SchedulerState {
     }
 
     /// Check if shutdown was requested.
+    #[must_use]
     pub fn should_shutdown(&self) -> bool {
         self.shutdown.load(Ordering::Relaxed)
     }
@@ -52,20 +55,23 @@ impl Default for SchedulerState {
 
 /// Start the subscription auto-update scheduler.
 /// Each subscription has its own interval stored in metadata.
+#[must_use]
 pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
     let state = Arc::new(SchedulerState::new());
 
     // Spawn the scheduler task
-    let state_clone = state.clone();
-    let app_clone = app.clone();
+    let state_clone = Arc::clone(&state);
 
     let spawn_result = tokio::runtime::Handle::try_current().map(|handle| {
         handle.spawn(async move {
-            run_scheduler_loop(app_clone, state_clone).await;
+            run_scheduler_loop(app, state_clone).await;
         });
     });
 
-    if let Err(e) = spawn_result {}
+    if let Err(e) = spawn_result {
+        state.running.store(false, Ordering::Relaxed);
+        eprintln!("[Scheduler] CRITICAL: Failed to spawn scheduler task: {e}");
+    }
 
     state
 }
@@ -85,8 +91,12 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
 
         // Check all subscriptions for updates
         match check_and_update_subscriptions(&app).await {
-            Ok(updated_count) => if updated_count > 0 {},
-            Err(e) => {}
+            Ok(updated_count) => {
+                if updated_count > 0 {
+                    println!("[Scheduler] Updated {updated_count} subscription(s)");
+                }
+            }
+            Err(e) => eprintln!("[Scheduler] Error checking subscriptions: {e}"),
         }
 
         // Wait for next check
@@ -107,15 +117,15 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
     let mut updated = 0;
     let mut needs_save = false;
 
-    for (name, meta) in metadata.configs.iter_mut() {
+    #[allow(clippy::iter_over_hash_type)]
+    for (name, meta) in &mut metadata.configs {
         // Skip if no URL or no interval set
-        let Some(url) = &meta.url else { continue };
-        let Some(interval_secs) = meta.auto_update_interval else {
+        let Some(url) = &meta.url else {
             continue;
         };
-        if interval_secs == 0 {
+        let Some(interval_secs) = meta.auto_update_interval.filter(|&s| s > 0) else {
             continue;
-        }
+        };
 
         // Calculate time since last update
         let last_updated = meta.last_updated.unwrap_or(0);
@@ -123,13 +133,13 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
 
         // Only update if interval has passed
         if elapsed >= interval_secs {
-            match download_sub_inner(app, url.clone(), name.clone(), None, false).await {
+            match download_sub_inner(app, url.clone(), name.clone(), None, true).await {
                 Ok(_) => {
                     meta.last_updated = Some(now);
                     updated += 1;
                     needs_save = true;
                 }
-                Err(e) => {}
+                Err(e) => eprintln!("[Scheduler] Failed to auto-update subscription `{name}`: {e}"),
             }
         }
     }
@@ -144,6 +154,8 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
 
 /// Command to get scheduler status.
 #[tauri::command]
+#[must_use]
+#[allow(clippy::needless_pass_by_value)]
 pub fn get_scheduler_status(state: tauri::State<Arc<SchedulerState>>) -> serde_json::Value {
     serde_json::json!({
         "running": state.is_running(),

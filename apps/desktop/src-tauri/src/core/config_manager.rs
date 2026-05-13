@@ -171,7 +171,7 @@ pub async fn update_subscription_interval(
         .configs
         .get_mut(&safe_name)
         .ok_or_else(|| format!("No metadata found for config: {safe_name}"))?;
-    entry.auto_update_interval = if interval > 0 { Some(interval) } else { None };
+    entry.auto_update_interval = (interval > 0).then_some(interval);
     save_metadata(&paths, &metadata)?;
 
     Ok(())

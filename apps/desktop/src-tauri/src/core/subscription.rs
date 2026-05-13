@@ -424,35 +424,15 @@ fn resolve_url_from_metadata(
     provided_url: Option<String>,
 ) -> Result<String, String> {
     if let Some(url) = provided_url {
-        if url.is_empty() {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
             return Err("URL must not be empty".to_owned());
         }
-        return Ok(url);
+        return Ok(trimmed.to_owned());
     }
 
-    // Resolve from metadata
-    let paths = ensure_app_storage(app)?;
-    let metadata = load_metadata(&paths);
-
-    if let Some(meta) = metadata.configs.get(name) {
-        if let Some(url) = &meta.url {
-            return Ok(url.clone());
-        }
-    }
-
-    // Fallback: read from file comments (legacy format)
-    let path = paths.profiles_dir.join(name);
-    if let Ok(file) = std::fs::File::open(&path) {
-        use std::io::{BufRead as _, BufReader};
-        let reader = BufReader::new(file);
-        for line in reader.lines().map_while(Result::ok) {
-            if line.starts_with("# URL: ") {
-                return Ok(line.replace("# URL: ", "").trim().to_owned());
-            }
-        }
-    }
-
-    Err(format!("No subscription URL found for config: {name}"))
+    // Reuse the existing, sanitized logic from config_manager
+    super::config_manager::get_config_url(app, name)
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -700,6 +680,11 @@ pub(crate) async fn download_sub_inner(
     super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 
     let mut metadata = load_metadata(&paths);
+    // Preserve existing auto_update_interval to avoid silently disabling scheduled updates
+    let preserved_interval = metadata
+        .configs
+        .get(&clean_name)
+        .and_then(|m| m.auto_update_interval);
     metadata.configs.insert(
         clean_name.clone(),
         super::crypto::ConfigMetadata {
@@ -715,7 +700,7 @@ pub(crate) async fn download_sub_inner(
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
             ),
-            auto_update_interval: None,
+            auto_update_interval: preserved_interval,
         },
     );
     let final_content = content;

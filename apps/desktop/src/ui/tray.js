@@ -243,8 +243,7 @@ export async function initTrayEventListeners() {
                 const { fetchProxyGroups } = await import('./proxy-groups.js');
                 const currentProxyGroups = await fetchProxyGroups();
                 if (currentProxyGroups && currentProxyGroups.current) {
-                    const settings = await invoke(COMMANDS.GET_SETTINGS);
-                    const currentProfile = settings.last_config || 'config.yaml';
+                    const currentProfile = appStore.get('currentProfile') || 'config.yaml';
                     const { saveProxySelection } = await import('./proxy-memory.js');
                     await saveProxySelection(currentProfile, currentProxyGroups.current);
                 }
