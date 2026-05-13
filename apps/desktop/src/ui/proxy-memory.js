@@ -8,7 +8,7 @@
 import { invoke, switchProxy } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups } from './proxy-groups.js';
-import { getSettingsCached } from './cache.js';
+import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
@@ -19,12 +19,15 @@ const READY_RETRY_DELAY = 100;
 /**
  * Save current proxy selection for a profile.
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
+ * Invalidates settings cache to ensure subsequent reads get fresh data.
  * @param {string} profileName - Profile filename (e.g., "my-sub.yaml")
  * @param {string} nodeName - Selected proxy node name
  */
 export async function saveProxySelection(profileName, nodeName) {
     try {
         await invoke(COMMANDS.UPDATE_PROXY_SELECTION, { profileName, nodeName });
+        // Invalidate cache so subsequent restoreProxySelection reads fresh data
+        invalidateSettingsCache();
     } catch (e) {
         proxyMemoryLogger.warn('Failed to save proxy selection:', e);
     }
@@ -52,12 +55,14 @@ async function waitForMihomoReady() {
 /**
  * Restore proxy selection for a profile after core restart.
  * Uses polling to wait for mihomo to be ready instead of hardcoded delay.
+ * Reads directly from backend (bypasses cache) to ensure fresh data.
  * @param {string} profileName - Profile filename
  * @returns {Promise<boolean>} Whether restoration succeeded
  */
 export async function restoreProxySelection(profileName) {
     try {
-        const settings = await getSettingsCached();
+        // Read directly from backend to avoid stale cache
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
         const savedNode = settings.last_proxy_selection?.[profileName];
         if (!savedNode) return false;
 
@@ -84,12 +89,13 @@ export async function restoreProxySelection(profileName) {
 
 /**
  * Get the saved proxy selection for a profile.
+ * Reads directly from backend to avoid stale cache.
  * @param {string} profileName
  * @returns {Promise<string|null>}
  */
 export async function getProxySelection(profileName) {
     try {
-        const settings = await getSettingsCached();
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
         return settings.last_proxy_selection?.[profileName] || null;
     } catch {
         return null;

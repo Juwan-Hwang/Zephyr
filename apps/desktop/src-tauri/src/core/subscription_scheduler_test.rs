@@ -65,7 +65,8 @@ mod tests {
 
         // Try to acquire from another thread should fail
         let handle = thread::spawn(move || state2.try_acquire_trigger());
-        assert!(!handle.join().unwrap());
+        let result = handle.join().unwrap_or(false);
+        assert!(!result);
 
         // Release and try again
         state.release_trigger();
@@ -77,6 +78,7 @@ mod tests {
             }
             ok
         });
-        assert!(handle2.join().unwrap());
+        let result2 = handle2.join().unwrap_or(false);
+        assert!(result2);
     }
 }

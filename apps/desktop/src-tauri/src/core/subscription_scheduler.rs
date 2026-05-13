@@ -6,15 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::AppHandle;
-use tokio::sync::Semaphore;
 use tokio::time::{interval, timeout, MissedTickBehavior};
 
 use super::core_process::ensure_app_storage;
 use super::crypto::load_metadata;
 use super::subscription::download_sub_inner;
-
-/// Maximum concurrent downloads during auto-update.
-const MAX_CONCURRENT_UPDATES: usize = 3;
 
 /// Download timeout per subscription (15 seconds).
 const DOWNLOAD_TIMEOUT_SECS: u64 = 15;
@@ -96,6 +92,10 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
     let mut check_interval = interval(Duration::from_secs(60)); // Check every minute
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    // Wait for first tick to avoid immediate execution on startup
+    // (interval's first tick completes immediately)
+    check_interval.tick().await;
+
     loop {
         // Check shutdown before starting work
         if state.should_shutdown() {
@@ -127,13 +127,25 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
 }
 
 /// Check each subscription and update if its interval has passed.
-/// Uses concurrent downloads with semaphore limiting.
+/// Downloads are serialized to avoid metadata.json write races.
 async fn check_and_update_subscriptions(
     app: &AppHandle,
     state: &Arc<SchedulerState>,
 ) -> Result<usize, String> {
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
+
+    // Read subscription_user_agent from settings.json (set by frontend)
+    let settings_path = paths.app_data_dir.join("settings.json");
+    let user_agent: Option<String> = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&content)
+            .ok()
+            .and_then(|v| v.get("subscription_user_agent")?.as_str().map(String::from))
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -167,56 +179,33 @@ async fn check_and_update_subscriptions(
         return Ok(0);
     }
 
-    // Use semaphore to limit concurrent downloads
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UPDATES));
-    let mut tasks = Vec::with_capacity(to_update.len());
-
-    for (name, url) in to_update {
-        // Check shutdown before spawning each task
-        if state.should_shutdown() {
-            break;
-        }
-
-        let permit = Arc::clone(&semaphore);
-        let app_clone = app.clone();
-
-        let task = tauri::async_runtime::spawn(async move {
-            let _permit = permit.acquire().await.ok()?;
-            // Use timeout to prevent hanging on slow servers
-            let result = timeout(
-                Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
-                download_sub_inner(&app_clone, url, name.clone(), None, true),
-            )
-            .await;
-
-            match result {
-                Ok(Ok(_)) => {
-                    println!("[Scheduler] Updated {name}");
-                    Some(())
-                }
-                Ok(Err(e)) => {
-                    eprintln!("[Scheduler] Failed to update {name}: {e}");
-                    None
-                }
-                Err(_) => {
-                    eprintln!("[Scheduler] Timeout updating {name}");
-                    None
-                }
-            }
-        });
-
-        tasks.push(task);
-    }
-
-    // Wait for all tasks to complete
+    // Serialize downloads to avoid metadata.json write races
+    // (each download_sub_inner does load_metadata + save_metadata)
     let mut updated = 0;
-    for task in tasks {
-        if task.await.ok().flatten().is_some() {
-            updated += 1;
-        }
-        // Check shutdown between waiting for tasks
+    for (name, url) in to_update {
+        // Check shutdown before each download
         if state.should_shutdown() {
             break;
+        }
+
+        // Use timeout to prevent hanging on slow servers
+        let result = timeout(
+            Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
+            download_sub_inner(app, url, name.clone(), user_agent.clone(), true),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(_)) => {
+                println!("[Scheduler] Updated {name}");
+                updated += 1;
+            }
+            Ok(Err(e)) => {
+                eprintln!("[Scheduler] Failed to update {name}: {e}");
+            }
+            Err(_) => {
+                eprintln!("[Scheduler] Timeout updating {name}");
+            }
         }
     }
 

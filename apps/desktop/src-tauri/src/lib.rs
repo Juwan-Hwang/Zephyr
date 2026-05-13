@@ -129,6 +129,10 @@ struct Settings {
     /// Value: proxy node name (e.g., "香港01")
     #[serde(default)]
     last_proxy_selection: std::collections::HashMap<String, String>,
+    /// Custom User-Agent for subscription downloads (used by scheduler).
+    /// Set by frontend when user configures a fake client UA.
+    #[serde(default)]
+    subscription_user_agent: Option<String>,
 }
 
 struct SettingsState(Arc<Mutex<Settings>>);
@@ -391,6 +395,7 @@ pub fn run() {
                     ui_scale: 1.0,
                     config_order: Vec::new(),
                     last_proxy_selection: std::collections::HashMap::new(),
+                    subscription_user_agent: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

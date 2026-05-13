@@ -113,6 +113,19 @@ function getSubscriptionUserAgent() {
     return getFakeClientUA();
 }
 
+/**
+ * Sync the current fake client UA to backend settings
+ * so the subscription scheduler can use it for auto-updates.
+ */
+async function syncUserAgentToBackend() {
+    try {
+        const ua = getSubscriptionUserAgent();
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        settings.subscription_user_agent = ua;
+        await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+    } catch { /* ignore */ }
+}
+
 // ---------------------------------------------------------------------------
 //  initUwpExemption
 // ---------------------------------------------------------------------------
@@ -207,6 +220,7 @@ function initFakeClient() {
         onChange: (val) => {
             localStorage.setItem('fakeClientType', val);
             updateVisibility();
+            syncUserAgentToBackend();
         },
     });
 
@@ -284,6 +298,7 @@ function initFakeClient() {
     toggle.addEventListener('change', () => {
         localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
         updateVisibility();
+        syncUserAgentToBackend();
         if (!toggle.checked) {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
@@ -293,6 +308,7 @@ function initFakeClient() {
 
     customInput.addEventListener('input', () => {
         localStorage.setItem('fakeClientCustom', customInput.value);
+        syncUserAgentToBackend();
     });
 
     if (savedEnabled) {
