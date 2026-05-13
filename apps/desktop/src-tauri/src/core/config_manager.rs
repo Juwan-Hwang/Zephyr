@@ -419,34 +419,50 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     save_metadata(&paths, &metadata)?;
 
     // Update last_config setting if it references the old name
-    let needs_update = {
+    // Also migrate last_proxy_selection key from old name to new name
+    let mut last_config_updated = false;
+    {
         let state = app.state::<crate::SettingsState>();
-        let inner = &state.0;
-        inner.lock().ok().is_some_and(|s| {
-            s.last_config.as_deref() == Some(&clean_old)
-                || s.last_config.as_deref() == Some(&old_name)
-        })
-    };
-    if needs_update {
-        // Persist settings.json and update in-memory state
-        {
-            let state = app.state::<crate::SettingsState>();
-            if let Ok(mut guard) = state.0.lock() {
+        if let Ok(mut guard) = state.0.lock() {
+            let mut dirty = false;
+
+            // Update last_config if it references the old name
+            if guard.last_config.as_deref() == Some(&clean_old)
+                || guard.last_config.as_deref() == Some(&old_name)
+            {
                 guard.last_config = Some(clean_new.clone());
+                dirty = true;
+                last_config_updated = true;
+            }
+
+            // Migrate proxy selection key
+            if let Some(node) = guard.last_proxy_selection.remove(&clean_old) {
+                guard.last_proxy_selection.insert(clean_new.clone(), node);
+                dirty = true;
+            }
+            if old_name != clean_old {
+                if let Some(node) = guard.last_proxy_selection.remove(&old_name) {
+                    guard.last_proxy_selection.insert(clean_new.clone(), node);
+                    dirty = true;
+                }
+            }
+
+            if dirty {
                 let settings = guard.clone();
                 drop(guard);
                 if let Err(e) = crate::persist_settings(&app, &settings) {
                     eprintln!("[rename_config] Failed to persist settings: {e}");
                 }
-            };
-        }
-        // Sync runtime MihomoState.last_config_path
-        {
-            let mihomo = app.state::<MihomoState>();
-            if let Ok(mut guard) = mihomo.0.lock() {
-                guard.set_last_config_path(Some(clean_new.clone()));
-            };
-        }
+            }
+        };
+    }
+
+    // Sync runtime MihomoState.last_config_path
+    if last_config_updated {
+        let mihomo = app.state::<MihomoState>();
+        if let Ok(mut guard) = mihomo.0.lock() {
+            guard.set_last_config_path(Some(clean_new.clone()));
+        };
     }
 
     Ok(format!("Config renamed to {clean_new}"))
