@@ -124,9 +124,6 @@ struct Settings {
     ui_scale: f64,
     #[serde(default)]
     config_order: Vec<String>,
-    /// Auto-update interval for subscriptions in seconds. 0 = disabled.
-    #[serde(default)]
-    auto_update_subs_interval: u64,
     /// Per-profile last selected proxy node.
     /// Key: profile filename (e.g., "my-sub.yaml")
     /// Value: proxy node name (e.g., "香港01")
@@ -371,7 +368,6 @@ pub fn run() {
                     auto_apply: false,
                     ui_scale: 1.0,
                     config_order: Vec::new(),
-                    auto_update_subs_interval: 0,
                     last_proxy_selection: std::collections::HashMap::new(),
                 }
             };

@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager as _};
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::core_process::ensure_app_storage;
-use super::crypto::{cleanup_metadata_cache, load_metadata, save_metadata};
+use super::crypto::{cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata};
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
 
@@ -148,8 +148,17 @@ pub async fn update_config_url(
     let mut metadata = load_metadata(&paths);
     let entry = metadata
         .configs
-        .get_mut(&safe_name)
-        .ok_or_else(|| format!("No metadata found for config: {safe_name}"))?;
+        .entry(safe_name.clone())
+        .or_insert_with(|| {
+            // Legacy config without metadata — seed from file comments if possible
+            let url = get_config_url(&app, &safe_name).ok();
+            ConfigMetadata {
+                url,
+                sub_info: None,
+                last_updated: None,
+                auto_update_interval: None,
+            }
+        });
     entry.url = Some(new_url);
     save_metadata(&paths, &metadata)?;
 
@@ -169,8 +178,17 @@ pub async fn update_subscription_interval(
     let mut metadata = load_metadata(&paths);
     let entry = metadata
         .configs
-        .get_mut(&safe_name)
-        .ok_or_else(|| format!("No metadata found for config: {safe_name}"))?;
+        .entry(safe_name.clone())
+        .or_insert_with(|| {
+            // Legacy config without metadata — seed from file comments if possible
+            let url = get_config_url(&app, &safe_name).ok();
+            ConfigMetadata {
+                url,
+                sub_info: None,
+                last_updated: None,
+                auto_update_interval: None,
+            }
+        });
     entry.auto_update_interval = (interval > 0).then_some(interval);
     save_metadata(&paths, &metadata)?;
 

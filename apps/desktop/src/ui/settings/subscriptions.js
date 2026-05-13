@@ -93,11 +93,9 @@ async function showEditPanel(configInfo) {
 // Auto-update options
 const autoUpdateOptions = [
     { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
-    { value: '21600', label: t.autoUpdate6h || 'Every 6 hours' },
     { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
     { value: '86400', label: t.autoUpdate1d || 'Every day' },
     { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
-    { value: '604800', label: t.autoUpdate7d || 'Every week' },
 ];
     const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
 
@@ -121,7 +119,7 @@ const autoUpdateOptions = [
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.rename || 'Name'}</label>
-                    <input id="edit-name" type="text" value="${currentStem}" class="input-common text-xs">
+                    <input id="edit-name" type="text" value="" class="input-common text-xs">
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.subscriptionUrl || 'Subscription URL'}</label>
@@ -154,6 +152,10 @@ const autoUpdateOptions = [
     `;
 
     document.body.appendChild(modal);
+
+    // Set input value via DOM property (safe from XSS — no innerHTML interpolation)
+    const editNameInput = /** @type {HTMLInputElement} */ (modal.querySelector('#edit-name'));
+    if (editNameInput) editNameInput.value = currentStem;
 
     // Initialize custom dropdown
     const autoUpdateDropdown = initCustomDropdown({
@@ -221,8 +223,10 @@ const autoUpdateOptions = [
                 await invoke(COMMANDS.UPDATE_CONFIG_URL, { name: targetName, newUrl });
             }
 
-            // Save auto-update interval for this subscription
-            await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: targetName, interval: newInterval });
+            // Save auto-update interval only if it actually changed
+            if (newInterval !== currentInterval) {
+                await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: targetName, interval: newInterval });
+            }
             invalidateConfigsCache();
 
             closeModal();

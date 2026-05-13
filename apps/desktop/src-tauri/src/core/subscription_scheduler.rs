@@ -107,7 +107,7 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
 /// Check each subscription and update if its interval has passed.
 async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String> {
     let paths = ensure_app_storage(app)?;
-    let mut metadata = load_metadata(&paths);
+    let metadata = load_metadata(&paths);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -115,10 +115,10 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         .unwrap_or(0);
 
     let mut updated = 0;
-    let mut needs_save = false;
+    let mut names_to_update: Vec<String> = Vec::new();
 
     #[allow(clippy::iter_over_hash_type)]
-    for (name, meta) in &mut metadata.configs {
+    for (name, meta) in &metadata.configs {
         // Skip if no URL or no interval set
         let Some(url) = &meta.url else {
             continue;
@@ -135,18 +135,23 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         if elapsed >= interval_secs {
             match download_sub_inner(app, url.clone(), name.clone(), None, true).await {
                 Ok(_) => {
-                    meta.last_updated = Some(now);
+                    names_to_update.push(name.clone());
                     updated += 1;
-                    needs_save = true;
                 }
                 Err(e) => eprintln!("[Scheduler] Failed to auto-update subscription `{name}`: {e}"),
             }
         }
     }
 
-    // Save updated metadata
-    if needs_save {
-        save_metadata(&paths, &metadata)?;
+    // Reload fresh metadata (download_sub_inner writes its own metadata) and only patch last_updated
+    if !names_to_update.is_empty() {
+        let mut fresh_metadata = load_metadata(&paths);
+        for name in &names_to_update {
+            if let Some(entry) = fresh_metadata.configs.get_mut(name) {
+                entry.last_updated = Some(now);
+            }
+        }
+        save_metadata(&paths, &fresh_metadata)?;
     }
 
     Ok(updated)
