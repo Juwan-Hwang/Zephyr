@@ -224,26 +224,22 @@ async function showEditPanel(configInfo) {
         }
 
         try {
-            // Rename if name changed
-            let targetName = configInfo.name;
+            // Update URL and interval on the current name first.
+            // This ensures that if an update fails, the state remains consistent
+            // under the original name (more recoverable than a failed rename).
+            if (newUrl) {
+                await invoke(COMMANDS.UPDATE_CONFIG_URL, { name: configInfo.name, newUrl });
+            }
+            if (newInterval !== currentInterval) {
+                await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: configInfo.name, interval: newInterval });
+            }
+
+            // Rename last — if this fails, updates are still applied under the old name
             if (newName !== currentStem) {
-                const renameResult = await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
-                // Backend returns "Config renamed to <actual_filename>" — extract the real filename
-                const match = renameResult.match(/renamed to\s+(.+)$/);
-                targetName = match ? match[1].trim() : configInfo.name;
-                invalidateConfigsCache();
+                await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
                 invalidateSettingsCache();
             }
 
-            // Update URL if user entered a new one
-            if (newUrl) {
-                await invoke(COMMANDS.UPDATE_CONFIG_URL, { name: targetName, newUrl });
-            }
-
-            // Save auto-update interval only if it actually changed
-            if (newInterval !== currentInterval) {
-                await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: targetName, interval: newInterval });
-            }
             invalidateConfigsCache();
 
             closeModal();

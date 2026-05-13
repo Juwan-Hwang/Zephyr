@@ -264,7 +264,6 @@ export async function initTrayEventListeners() {
                 await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 invalidateSettingsCache();
 
-                await new Promise((r) => setTimeout(r, 500));
                 await closeAllConnections();
 
                 // Restore proxy selection BEFORE updating tray menu
