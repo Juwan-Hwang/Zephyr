@@ -22,10 +22,11 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
 import { formatFileSize } from '../../utils/format.js';
-import { escapeHtml } from '../../utils/sanitize.js';
+import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
 import { SVG_ICONS } from '../icons.js';
 import { syncCoreConfig } from '../proxies.js';
+import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
 
 /**
@@ -55,6 +56,208 @@ function extractNameFromUrl(url) {
     } catch {
         return null;
     }
+}
+
+/**
+ * Format a Unix timestamp as a relative time string.
+ * @param {number | null | undefined} timestamp - Unix timestamp in seconds
+ * @param {Record<string, string>} t - Translation object
+ * @returns {string}
+ */
+function formatLastUpdated(timestamp, t) {
+    if (!timestamp) return t.lastUpdatedNever || 'Never';
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+    if (diff < 60) return t.lastUpdatedJustNow || 'Just now';
+    if (diff < 3600) return (t.lastUpdatedMinutesAgo || '{m} min ago').replace('{m}', String(Math.floor(diff / 60)));
+    if (diff < 86400) return (t.lastUpdatedHoursAgo || '{h}h ago').replace('{h}', String(Math.floor(diff / 3600)));
+    return (t.lastUpdatedDaysAgo || '{d}d ago').replace('{d}', String(Math.floor(diff / 86400)));
+}
+
+// ---- Module-level renderConfigs for use before init ----
+// This is set by initSubscriptionSettings and used by showEditPanel
+let moduleRenderConfigs = null;
+
+/** Track active edit modal dropdown for proper cleanup. */
+let activeEditDropdown = null;
+
+/**
+ * Show the edit panel for a subscription.
+ * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null}} configInfo
+ */
+async function showEditPanel(configInfo) {
+    const t = translations[appStore.get('currentLang')] || {};
+
+    const currentStem = configInfo.name.replace(/\.(yaml|yml)$/i, '');
+
+    // Get current auto-update interval for this subscription (stored in metadata)
+    const currentInterval = configInfo.auto_update_interval || 0;
+
+    // Auto-update options
+    const autoUpdateOptions = [
+        { value: '0', label: t.autoUpdateDisabled || 'Disabled' },
+        { value: '43200', label: t.autoUpdate12h || 'Every 12 hours' },
+        { value: '86400', label: t.autoUpdate1d || 'Every day' },
+        { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
+    ];
+    const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
+
+    // Build dropdown menu items (escape labels for XSS safety)
+    const dropdownMenuItems = autoUpdateOptions.map(opt => 
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">${escapeHtml(opt.label)}</button>`
+    ).join('');
+
+    // Remove any existing modal to prevent duplicate IDs
+    const existingModal = document.getElementById('edit-subscription-modal');
+    if (existingModal) {
+        activeEditDropdown?.dispose();
+        activeEditDropdown = null;
+        existingModal.remove();
+    }
+
+    // Create modal overlay (matching smart proxy config style)
+    const modal = document.createElement('div');
+    modal.id = 'edit-subscription-modal';
+    modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+    // Escape all translation strings for XSS safety
+    modal.innerHTML = `
+        <div class="glass-card w-[440px] p-6 space-y-5">
+            <div class="flex items-center justify-between">
+                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
+                <button id="edit-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
+                    <input id="edit-name" type="text" value="" class="input-common text-xs">
+                </div>
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-zinc-600">
+                </div>
+            </div>
+            <!-- Auto-update dropdown in bottom right -->
+            <div class="flex items-center justify-between pt-2">
+                <div class="flex items-center gap-2">
+                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
+                    <div id="edit-auto-update-wrap" class="relative">
+                        <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
+                            <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
+                            <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                        </button>
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30 w-40">
+                            ${dropdownMenuItems}
+                        </div>
+                        <select id="edit-auto-update" class="hidden">
+                            ${autoUpdateOptions.map(opt => `<option value="${opt.value}" ${opt.value === String(currentInterval) ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button id="edit-modal-cancel" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.cancel || 'Cancel')}</button>
+                    <button id="edit-modal-save" class="btn-accent text-xs px-4 py-2">${escapeHtml(t.save || 'Save')}</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Set input value via DOM property (safe from XSS — no innerHTML interpolation)
+    const editNameInput = /** @type {HTMLInputElement} */ (modal.querySelector('#edit-name'));
+    if (editNameInput) editNameInput.value = currentStem;
+
+    // Initialize custom dropdown
+    const autoUpdateDropdown = initCustomDropdown({
+        wrapId: 'edit-auto-update-wrap',
+        triggerId: 'edit-auto-update-trigger',
+        menuId: 'edit-auto-update-menu',
+        labelId: 'edit-auto-update-label',
+        selectId: 'edit-auto-update',
+    });
+    activeEditDropdown = autoUpdateDropdown;
+
+    // Animate in (matching smart proxy config)
+    requestAnimationFrame(() => {
+        const panel = modal.querySelector('.glass-card');
+        if (panel) {
+            panel.style.transform = 'scale(0.96)';
+            panel.style.opacity = '0';
+            requestAnimationFrame(() => {
+                panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                panel.style.transform = 'scale(1)';
+                panel.style.opacity = '1';
+            });
+        }
+    });
+
+    const closeModal = () => {
+        autoUpdateDropdown?.dispose();
+        activeEditDropdown = null;
+        const panel = modal.querySelector('.glass-card');
+        if (panel) {
+            panel.style.transition = 'all 0.15s ease-in';
+            panel.style.transform = 'scale(0.96)';
+            panel.style.opacity = '0';
+            setTimeout(() => modal.remove(), 150);
+        } else {
+            modal.remove();
+        }
+    };
+
+    // Close handlers
+    document.getElementById('edit-modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('edit-modal-cancel')?.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    // Save handler
+    document.getElementById('edit-modal-save')?.addEventListener('click', async () => {
+        const newName = document.getElementById('edit-name')?.value.trim() || '';
+        const newUrl = document.getElementById('edit-url')?.value.trim() || '';
+        const newInterval = parseInt(document.getElementById('edit-auto-update')?.value || '0', 10);
+
+        if (!newName) {
+            showNotification(t.subscriptionNameRequired || 'Subscription name is required', 'error');
+            return;
+        }
+
+        try {
+            // Update URL and interval on the current name first.
+            // This ensures that if an update fails, the state remains consistent
+            // under the original name (more recoverable than a failed rename).
+            if (newUrl) {
+                await invoke(COMMANDS.UPDATE_CONFIG_URL, { name: configInfo.name, newUrl });
+            }
+            if (newInterval !== currentInterval) {
+                await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: configInfo.name, interval: newInterval });
+            }
+
+            // Rename last — if this fails, updates are still applied under the old name
+            if (newName !== currentStem) {
+                await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
+                invalidateSettingsCache();
+            }
+
+            invalidateConfigsCache();
+
+            closeModal();
+            // Show notification based on what was changed
+            if (newUrl) {
+                showNotification(t.notifUrlUpdated || 'Subscription URL updated', 'success');
+            } else {
+                showNotification(t.notifSettingsSaved || 'Settings saved', 'success');
+            }
+            // Force fresh render to get updated metadata
+            moduleRenderConfigs?.(true);
+        } catch (err) {
+            showNotification(String(err), 'error');
+        }
+    });
+
+    // Focus name input
+    setTimeout(() => document.getElementById('edit-name')?.focus(), 100);
 }
 
 /**
@@ -156,13 +359,9 @@ export function initSubscriptionSettings({
             let failCount = 0;
             showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
 
-            // Build batch items: resolve URL for each subscription
+            // Build batch items: only names needed, URLs resolved internally by backend
             const userAgent = getSubscriptionUserAgent();
-            const batchItems = [];
-            for (const config of subConfigs) {
-                const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: config.name });
-                batchItems.push({ url: fullUrl, name: config.name });
-            }
+            const batchItems = subConfigs.map(c => ({ name: c.name }));
 
             // Single batch call — no per-item rate limiting
             /** @type {Array<{name: string, success: boolean, error?: string}>} */
@@ -380,7 +579,7 @@ export function initSubscriptionSettings({
      * Show a context menu anchored at (x, y) for the given subscription card.
      *
      * @param {MouseEvent} e
-     * @param {{ name: string, url_display?: string }} configInfo
+     * @param {{ name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null }} configInfo
      */
     const showSubscriptionContextMenu = async (e, configInfo) => {
         e.preventDefault();
@@ -393,30 +592,16 @@ export function initSubscriptionSettings({
 
         const menu = createContextMenuContainer(e);
 
-        // --- "Rename" item ---
-        const renameItem = document.createElement('div');
-        renameItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
-        renameItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.rename || 'Rename')}</span>`;
-        renameItem.addEventListener('click', async (ev) => {
+        // --- "Edit" item ---
+        const editItem = document.createElement('div');
+        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
+        editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             removeContextMenu();
-            const currentStem = name.replace(/\.(yaml|yml)$/i, '');
-            // @ts-expect-error showModal signature mismatch
-            const newName = /** @type {string} */ (await showModal(t.rename || 'Rename', '', currentStem));
-            if (!newName || !newName.trim()) return;
-            const trimmed = newName.trim();
-            if (trimmed === currentStem) return;
-            try {
-                await invoke(COMMANDS.RENAME_CONFIG, { oldName: name, newName: trimmed });
-                invalidateConfigsCache();
-                invalidateSettingsCache();
-                showNotification(`${t.notifRenameSuccess || 'Renamed'}: ${trimmed}`, 'success');
-                renderConfigs();
-            } catch (err) {
-                showNotification(String(err), 'error');
-            }
+            showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval });
         });
-        menu.appendChild(renameItem);
+        menu.appendChild(editItem);
 
         // --- Separator ---
         const renameSep = document.createElement('div');
@@ -667,7 +852,9 @@ export function initSubscriptionSettings({
         const cfgSettings = forceFresh
             ? await invoke(COMMANDS.GET_SETTINGS)
             : await getSettingsCached();
-        const configs = await getConfigsCached();
+        const configs = forceFresh
+            ? await invoke(COMMANDS.LIST_CONFIGS)
+            : await getConfigsCached();
 
         const currentConfig = cfgSettings.last_config || 'config.yaml';
         const customArgs = cfgSettings.custom_args || [];
@@ -940,9 +1127,8 @@ export function initSubscriptionSettings({
                     updateBtn.classList.add('animate-spin');
                     try {
                         const userAgent = getSubscriptionUserAgent();
-                        const fullUrl = await invoke(COMMANDS.GET_CONFIG_URL, { name: configInfo.name });
                         /** @type {any} */
-                        const invokeArgs = { url: fullUrl, name: configInfo.name, overwrite: true };
+                        const invokeArgs = { name: configInfo.name, overwrite: true };
                         if (userAgent) {
                             invokeArgs.userAgent = userAgent;
                         }
@@ -969,6 +1155,19 @@ export function initSubscriptionSettings({
             const switchConfig = async () => {
                 if (isCurrent || appStore.get('isNetworkUpdating')) return;
 
+                // Save current proxy selection before switching
+                // Read last_config live to avoid stale closure if profile changed via tray
+                try {
+                    const { fetchProxyGroups } = await import('../proxy-groups.js');
+                    const currentProxyGroups = await fetchProxyGroups();
+                    if (currentProxyGroups && currentProxyGroups.current) {
+                        const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
+                        const activeConfig = liveSettings.last_config || 'config.yaml';
+                        const { saveProxySelection } = await import('../proxy-memory.js');
+                        await saveProxySelection(activeConfig, currentProxyGroups.current);
+                    }
+                } catch (_e) { /* ignore */ }
+
                 appStore.set('isNetworkUpdating', true);
                 item.classList.add('opacity-50', 'pointer-events-none');
 
@@ -984,14 +1183,23 @@ export function initSubscriptionSettings({
                         await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
                         invalidateSettingsCache();
 
-                        await new Promise(r => setTimeout(r, 1000));
-                        await renderConfigs();
-                        Bus.emit(Events.CONFIG_UPDATED);
-                        await syncCoreConfig();
                         await closeAllConnections();
                         // Re-apply prism patches against the new profile so that
                         // __when__.profile conditions are evaluated correctly.
                         try { await prism.rebuild(); } catch { /* non-fatal */ }
+
+                        // Restore proxy selection BEFORE rendering configs
+                        // renderConfigs triggers updateTrayMenu which reads the current node.
+                        // If we render before restore, tray menu sees DIRECT and shows wrong node.
+                        try {
+                            const { restoreProxySelection } = await import('../proxy-memory.js');
+                            await restoreProxySelection(name);
+                        } catch (_e) { /* ignore */ }
+
+                        // NOW render configs — updateTrayMenu will see the correct node
+                        await renderConfigs();
+                        Bus.emit(Events.CONFIG_UPDATED);
+                        await syncCoreConfig();
                     }
                 } catch (err) {
                     const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
@@ -1048,11 +1256,31 @@ export function initSubscriptionSettings({
                 }
             }
 
-            if (configInfo.url_display) {
-                const urlLabel = document.createElement('div');
-                urlLabel.className = 'text-2xs text-zinc-600 truncate mt-1 w-full';
-                urlLabel.textContent = configInfo.url_display;
-                item.appendChild(urlLabel);
+            // URL and last updated time in same row
+            const t3 = translations[appStore.get('currentLang')] || {};
+            const lastUpdatedText = formatLastUpdated(configInfo.last_updated, t3);
+            const hasUrl = !!configInfo.url_display;
+            const hasTime = lastUpdatedText !== (t3.lastUpdatedNever || 'Never');
+            
+            if (hasUrl || hasTime) {
+                const infoRow = document.createElement('div');
+                infoRow.className = 'flex items-center justify-between mt-1 gap-2';
+                
+                if (hasUrl) {
+                    const urlLabel = document.createElement('div');
+                    urlLabel.className = 'text-2xs text-zinc-600 truncate flex-1';
+                    urlLabel.textContent = configInfo.url_display;
+                    infoRow.appendChild(urlLabel);
+                }
+                
+                if (hasTime) {
+                    const timeEl = document.createElement('div');
+                    timeEl.className = 'text-2xs text-zinc-600 shrink-0';
+                    timeEl.textContent = lastUpdatedText;
+                    infoRow.appendChild(timeEl);
+                }
+                
+                item.appendChild(infoRow);
             }
 
             configsList.appendChild(item);
@@ -1067,6 +1295,9 @@ export function initSubscriptionSettings({
 
     // Initial render
     renderConfigs();
+
+    // Set module-level reference for use by showEditPanel
+    moduleRenderConfigs = renderConfigs;
 
     return {
         renderConfigs,

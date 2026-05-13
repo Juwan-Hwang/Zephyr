@@ -15,7 +15,6 @@ pub use core::{
     ensure_app_storage,
     ensure_executable,
     fetch_text,
-    get_config_url,
     get_core_exe_path,
     get_core_version,
     init_tun_mode_from_config,
@@ -41,6 +40,8 @@ pub use core::{
     stop_core,
     stop_core_inner,
     try_acquire_tun_toggle,
+    update_config_url,
+    update_subscription_interval,
     write_config_file,
     // secure_io
     write_file_secure,

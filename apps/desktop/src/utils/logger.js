@@ -230,6 +230,9 @@ export const sysproxyLogger   = createLogger('SysProxy',     'info');
 /** Node wheel / selector */
 export const nodeWheelLogger  = createLogger('NodeWheel',    'info');
 
+/** Proxy memory */
+export const proxyMemoryLogger = createLogger('ProxyMemory', 'info');
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------

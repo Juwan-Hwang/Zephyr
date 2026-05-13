@@ -17,6 +17,10 @@ pub(super) struct ProfilesMetadata {
 pub(super) struct ConfigMetadata {
     pub url: Option<String>,
     pub sub_info: Option<String>,
+    #[serde(default)]
+    pub last_updated: Option<u64>, // Unix timestamp (seconds) of last successful update
+    #[serde(default)]
+    pub auto_update_interval: Option<u64>, // Auto-update interval in seconds for this subscription (0 = disabled)
 }
 
 /// Machine key file name for persistent storage
@@ -380,6 +384,8 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
             ConfigMetadata {
                 url: v.url.as_ref().and_then(|s| obfuscate_string(s).ok()),
                 sub_info: v.sub_info.as_ref().and_then(|s| obfuscate_string(s).ok()),
+                last_updated: v.last_updated,
+                auto_update_interval: v.auto_update_interval,
             },
         );
     }

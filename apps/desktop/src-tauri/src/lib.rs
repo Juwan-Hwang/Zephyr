@@ -10,12 +10,14 @@ pub mod updater;
 pub mod uwp_loopback;
 
 use config_manager::{read_config, update_config};
+use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     delete_config, disable_tun_cmd, download_sub, download_sub_batch, ensure_app_storage,
-    fetch_text, get_config_url, get_core_version, init_tun_mode_from_config,
-    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
-    rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
-    start_core, stop_core, write_config_file, CoreData, MihomoState,
+    fetch_text, get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd,
+    kill_mihomo, list_configs, open_config_folder, read_config_file, rename_config,
+    restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root, start_core,
+    stop_core, update_config_url, update_subscription_interval, write_config_file, CoreData,
+    MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -122,9 +124,18 @@ struct Settings {
     ui_scale: f64,
     #[serde(default)]
     config_order: Vec<String>,
+    /// Per-profile last selected proxy node.
+    /// Key: profile filename (e.g., "my-sub.yaml")
+    /// Value: proxy node name (e.g., "香港01")
+    #[serde(default)]
+    last_proxy_selection: std::collections::HashMap<String, String>,
+    /// Custom User-Agent for subscription downloads (used by scheduler).
+    /// Set by frontend when user configures a fake client UA.
+    #[serde(default)]
+    subscription_user_agent: Option<String>,
 }
 
-struct SettingsState(Arc<Mutex<Settings>>);
+pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -150,6 +161,53 @@ fn save_settings(
             .map_err(|e| format!("Settings lock failed: {e}"))?;
         *guard = settings.clone();
     }
+    persist_settings(&app, &settings)
+}
+
+/// Atomically update a single proxy selection entry in settings.
+/// Avoids the Read-Modify-Write race condition of fetching all settings,
+/// mutating, and saving back.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_proxy_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    profile_name: String,
+    node_name: String,
+) -> Result<(), String> {
+    // Validate inputs to prevent settings bloat from webview
+    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
+    if safe_name.len() > 256 || node_name.len() > 256 {
+        return Err("Profile name or node name too long".to_owned());
+    }
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.last_proxy_selection.insert(safe_name, node_name);
+        guard.clone()
+    };
+    persist_settings(&app, &settings)
+}
+
+/// Atomically update the subscription User-Agent in settings.
+/// Avoids Read-Modify-Write race condition.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_subscription_user_agent(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    user_agent: Option<String>,
+) -> Result<(), String> {
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.subscription_user_agent = user_agent.filter(|s| !s.is_empty());
+        guard.clone()
+    };
     persist_settings(&app, &settings)
 }
 
@@ -361,12 +419,18 @@ pub fn run() {
                     auto_apply: false,
                     ui_scale: 1.0,
                     config_order: Vec::new(),
+                    last_proxy_selection: std::collections::HashMap::new(),
+                    subscription_user_agent: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
 
             // Initialize Prism Engine extension
             app.manage(prism::PrismState::new(app.handle()));
+
+            // Start subscription auto-update scheduler (each sub has its own interval in metadata)
+            let scheduler_state = start_scheduler(app.handle().clone());
+            app.manage(scheduler_state);
 
             // Init Tray using the new tray module
             init_tray(app.handle())?;
@@ -456,7 +520,8 @@ pub fn run() {
             start_core,
             stop_core,
             list_configs,
-            get_config_url,
+            update_config_url,
+            update_subscription_interval,
             download_sub,
             download_sub_batch,
             delete_config,
@@ -468,6 +533,8 @@ pub fn run() {
             get_sys_proxy,
             get_settings,
             save_settings,
+            update_proxy_selection,
+            update_subscription_user_agent,
             get_core_version,
             exempt_uwp_apps,
             read_config_file,
@@ -565,6 +632,8 @@ pub fn run() {
             prism::smart_score_at,
             prism::smart_validate_config,
             prism::smart_scheduler_config,
+            core_manager::core::subscription_scheduler::get_scheduler_status,
+            core_manager::core::subscription_scheduler::trigger_auto_update,
             prism::smart_trim_history,
             // Failover
             prism::failover_report,
@@ -602,8 +671,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_handle, event| {
+    app.run(|handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            // Signal scheduler to shutdown gracefully
+            if let Some(scheduler_state) = handle
+                .try_state::<Arc<core_manager::core::subscription_scheduler::SchedulerState>>()
+            {
+                scheduler_state.shutdown();
+            }
             kill_mihomo();
             // Smart kill: only prompts for password if there's actually a root mihomo running
             let _ = smart_kill_all_mihomo_as_root();

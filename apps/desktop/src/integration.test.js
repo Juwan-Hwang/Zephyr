@@ -34,7 +34,7 @@ describe('Backend ↔ Frontend IPC command contract', () => {
     // This keeps the test in sync automatically as new commands are added.
     const NAMESPACE_REFS = new Set([
         'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
-        'SHORTCUTS', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
+        'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
         'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED',
     ]);
     const backendCommands = Object.values(COMMANDS).filter(
@@ -135,7 +135,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         'COMMANDS.SET_UI_SCALE', 'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
         'COMMANDS.UPDATE_CONFIG', 'COMMANDS.UPDATE_GEO_DATA', 'COMMANDS.READ_CONFIG',
         'COMMANDS.UPDATE_CORE', 'COMMANDS.UPDATE_CLIENT',
-        'COMMANDS.DELETE_CONFIG', 'COMMANDS.GET_CONFIG_URL',
+        'COMMANDS.DELETE_CONFIG',
         // Rule Library (settings.js)
         'COMMANDS.RULE_EXTRACT_FROM_PROFILE', 'COMMANDS.RULE_LIST',
         'COMMANDS.RULE_GROUP_LIST', 'COMMANDS.RULE_READ', 'COMMANDS.RULE_UPDATE',
@@ -143,6 +143,18 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         // Rule Library (rule-library.js)
         'COMMANDS.RULE_GROUP_CREATE', 'COMMANDS.RULE_GROUP_RENAME',
         'COMMANDS.RULE_GROUP_DELETE',
+        // subscriptions.js
+        'COMMANDS.RENAME_CONFIG', 'COMMANDS.UPDATE_CONFIG_URL',
+        'COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL', 'COMMANDS.DOWNLOAD_SUB',
+        'COMMANDS.DOWNLOAD_SUB_BATCH', 'COMMANDS.UPDATE_PROXY_SELECTION',
+        // proxy-memory.js
+        'COMMANDS.UPDATE_PROXY_SELECTION', 'COMMANDS.GET_SETTINGS',
+        // proxies.js (proxy memory)
+        'COMMANDS.UPDATE_PROXY_SELECTION', 'COMMANDS.GET_SETTINGS',
+        // tray.js (proxy memory)
+        'COMMANDS.UPDATE_PROXY_SELECTION', 'COMMANDS.GET_SETTINGS',
+        // settings.js (UA sync)
+        'COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT',
     ];
 
     it('every COMMANDS.* access in UI code resolves to a defined value', () => {
@@ -176,7 +188,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
     it('all COMMANDS values are non-empty strings (excluding namespace refs)', () => {
         const NAMESPACE_REFS = new Set([
             'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
-            'SHORTCUTS', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
+            'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
             'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED',
         ]);
         for (const [key, value] of Object.entries(COMMANDS)) {
@@ -334,16 +346,17 @@ describe('COMMANDS namespace collision check', () => {
         const allEntries = [
             ...Object.entries({
                 CORE: { START_CORE: 'start_core', STOP_CORE: 'stop_core', GET_CORE_VERSION: 'get_core_version', READ_CONFIG: 'read_config', UPDATE_CONFIG: 'update_config', READ_LOG: 'read_core_log' },
-                CONFIG_FILES: { LIST_CONFIGS: 'list_configs', GET_CONFIG_URL: 'get_config_url', DELETE_CONFIG: 'delete_config', READ_CONFIG_FILE: 'read_config_file', WRITE_CONFIG_FILE: 'write_config_file', OPEN_FOLDER: 'open_config_folder' },
+                CONFIG_FILES: { LIST_CONFIGS: 'list_configs', UPDATE_CONFIG_URL: 'update_config_url', UPDATE_SUBSCRIPTION_INTERVAL: 'update_subscription_interval', UPDATE_PROXY_SELECTION: 'update_proxy_selection', DELETE_CONFIG: 'delete_config', RENAME_CONFIG: 'rename_config', READ_CONFIG_FILE: 'read_config_file', WRITE_CONFIG_FILE: 'write_config_file', OPEN_FOLDER: 'open_config_folder' },
                 SYS_PROXY: { ENABLE_SYSPROXY: 'enable_sysproxy', DISABLE_SYSPROXY: 'disable_sysproxy', GET_SYS_PROXY: 'get_sys_proxy' },
                 TUN: { SET_TUN_ENABLED: 'set_tun_enabled', RELEASE_TUN_TOGGLE: 'release_tun_toggle', RESTART_AS_ROOT: 'restart_core_as_root_cmd', DISABLE_CMD: 'disable_tun_cmd' },
                 TRAY: { CHANGE_TRAY_ICON: 'change_tray_icon', GET_TRAY_MENU_STATE: 'get_tray_menu_state', SET_TRAY_MENU_STATE: 'set_tray_menu_state', UPDATE_TRAY_FULL_MENU: 'update_tray_full_menu', UPDATE_TRAY_TOGGLE_STATES: 'update_tray_toggle_states', GET_TRAY_STATUS: 'get_tray_status', GET_TRAY_PROXY_STATUS: 'get_tray_proxy_status' },
                 UPDATER: { GET_LATEST_VERSION: 'get_latest_version', UPDATE_CORE: 'update_core', UPDATE_GEO_DATA: 'update_geo_data', GET_LATEST_CLIENT_VERSION: 'get_latest_client_version', UPDATE_CLIENT: 'update_client', GET_LATEST_CLIENT_VERSIONS: 'get_latest_client_versions' },
                 SHORTCUTS: { REGISTER_SHORTCUT: 'rate_limited_register_shortcut', UNREGISTER_SHORTCUT: 'rate_limited_unregister_shortcut' },
+                SCHEDULER: { GET_STATUS: 'get_scheduler_status', TRIGGER_UPDATE: 'trigger_auto_update' },
                 SETTINGS: { GET_SETTINGS: 'get_settings', SAVE_SETTINGS: 'save_settings', SET_UI_SCALE: 'set_ui_scale' },
                 MISC: { GET_APP_VERSION: 'get_app_version', SHOW_MAIN_WINDOW: 'show_main_window', SEND_NOTIFICATION: 'rate_limited_send_notification', EXEMPT_UWP_APPS: 'exempt_uwp_apps' },
                 CRYPTO: { IS_MACHINE_KEY_PERSISTED: 'is_machine_key_persisted' },
-                SUBSCRIPTION: { DOWNLOAD_SUB: 'download_sub', FETCH_TEXT: 'fetch_text' },
+                SUBSCRIPTION: { DOWNLOAD_SUB: 'download_sub', DOWNLOAD_SUB_BATCH: 'download_sub_batch', FETCH_TEXT: 'fetch_text' },
             }).map(([ns, obj]) => Object.entries(obj).map(([k, v]) => [k, v, ns])).flat(),
             ...Object.entries(PRISM).map(([k, v]) => [k, v, 'PRISM']),
             ...Object.entries(RULE).map(([k, v]) => [k, v, 'RULE']),

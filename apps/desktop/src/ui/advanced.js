@@ -466,14 +466,14 @@ function renderConfigItem(key, value, fullKey) {
         const input = document.createElement('input');
         input.type = "number";
         input.value = String(value);
-        input.className = "w-full max-w-[100px] bg-black/40 border border-white/5 rounded-lg px-3 py-1 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
+        input.className = "input-mono w-full max-w-[100px] text-right";
         input.onchange = () => handleConfigUpdate(fullKey, Number(input.value));
         valueContainer.appendChild(input);
     } else if (typeof value === 'string') {
         const input = document.createElement('input');
         input.type = "text";
         input.value = value;
-        input.className = "w-full bg-black/40 border border-white/5 rounded-lg px-3 py-1 text-xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all text-right font-mono";
+        input.className = "input-mono w-full text-right";
         input.onchange = () => handleConfigUpdate(fullKey, input.value);
         valueContainer.appendChild(input);
     } else if (Array.isArray(value)) {
@@ -481,7 +481,7 @@ function renderConfigItem(key, value, fullKey) {
         wrapper.className = "flex items-center gap-1.5";
 
         const badge = document.createElement('span');
-        badge.className = "text-2xs text-zinc-400 px-2 py-0.5 bg-black/30 rounded-md";
+        badge.className = "type-badge";
         badge.textContent = value.length === 1 ? `1 item` : `${value.length} items`;
         wrapper.appendChild(badge);
 
@@ -495,7 +495,7 @@ function renderConfigItem(key, value, fullKey) {
         valueContainer.appendChild(wrapper);
     } else if (typeof value === 'object' && value !== null) {
         const badge = document.createElement('span');
-        badge.className = "text-2xs text-zinc-400 px-2 py-0.5 bg-black/30 rounded-md";
+        badge.className = "type-badge";
         const keyCount = Object.keys(value).length;
         badge.textContent = keyCount === 1 ? `1 field` : `${keyCount} fields`;
         valueContainer.appendChild(badge);
@@ -504,7 +504,7 @@ function renderConfigItem(key, value, fullKey) {
         wrapper.className = "flex items-center gap-1";
 
         const badge = document.createElement('span');
-        badge.className = "text-2xs text-zinc-600 italic px-2 py-0.5 bg-black/30 rounded";
+        badge.className = "type-badge italic";
         badge.textContent = value === null ? "null" : "undefined";
         wrapper.appendChild(badge);
 

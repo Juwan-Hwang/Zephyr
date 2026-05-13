@@ -5,9 +5,53 @@ use tauri::{AppHandle, Manager as _};
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::core_process::ensure_app_storage;
-use super::crypto::{cleanup_metadata_cache, load_metadata, save_metadata};
+use super::crypto::{
+    cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata, ProfilesMetadata,
+};
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
+
+/// Update a field on an existing metadata entry (or create the entry first).
+fn update_metadata_entry<F>(
+    metadata: &mut ProfilesMetadata,
+    safe_name: &str,
+    app: &AppHandle,
+    update: F,
+) where
+    F: FnOnce(&mut ConfigMetadata),
+{
+    let entry = metadata
+        .configs
+        .entry(safe_name.to_owned())
+        .or_insert_with(|| {
+            let url = get_config_url(app, safe_name).ok();
+            ConfigMetadata {
+                url,
+                sub_info: None,
+                last_updated: None,
+                auto_update_interval: None,
+            }
+        });
+    update(entry);
+}
+
+/// Common validation for config update commands.
+/// Returns sanitized name and app paths if valid.
+fn validate_config_for_update(
+    app: &AppHandle,
+    name: &str,
+) -> Result<(super::AppPaths, String), String> {
+    let safe_name = sanitize_config_file_name(name)?;
+    if safe_name == "run_config.yaml" {
+        return Err("Cannot modify the active temp config".to_owned());
+    }
+    let paths = ensure_app_storage(app)?;
+    let config_path = paths.profiles_dir.join(&safe_name);
+    if !config_path.exists() {
+        return Err(format!("Config not found: {safe_name}"));
+    }
+    Ok((paths, safe_name))
+}
 
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
 pub(super) fn mask_url(url: &str) -> String {
@@ -44,27 +88,34 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
-                        let (url, sub_info) = if let Some(meta) = metadata.configs.get(name) {
-                            (meta.url.clone(), meta.sub_info.clone())
-                        } else {
-                            // Fallback to reading old comments
-                            let mut url = None;
-                            let mut sub_info = None;
-                            if let Ok(file) = std::fs::File::open(&path) {
-                                use std::io::{BufRead as _, BufReader};
-                                let reader = BufReader::new(file);
-                                for line in reader.lines().take(50).map_while(Result::ok) {
-                                    if line.starts_with("# URL: ") {
-                                        url = Some(line.replace("# URL: ", "").trim().to_owned());
-                                    } else if line.starts_with("# SUB_INFO: ") {
-                                        sub_info = Some(
-                                            line.replace("# SUB_INFO: ", "").trim().to_owned(),
-                                        );
+                        let (url, sub_info, last_updated, auto_update_interval) =
+                            if let Some(meta) = metadata.configs.get(name) {
+                                (
+                                    meta.url.clone(),
+                                    meta.sub_info.clone(),
+                                    meta.last_updated,
+                                    meta.auto_update_interval,
+                                )
+                            } else {
+                                // Fallback to reading old comments
+                                let mut url = None;
+                                let mut sub_info = None;
+                                if let Ok(file) = std::fs::File::open(&path) {
+                                    use std::io::{BufRead as _, BufReader};
+                                    let reader = BufReader::new(file);
+                                    for line in reader.lines().take(50).map_while(Result::ok) {
+                                        if line.starts_with("# URL: ") {
+                                            url =
+                                                Some(line.replace("# URL: ", "").trim().to_owned());
+                                        } else if line.starts_with("# SUB_INFO: ") {
+                                            sub_info = Some(
+                                                line.replace("# SUB_INFO: ", "").trim().to_owned(),
+                                            );
+                                        }
                                     }
                                 }
-                            }
-                            (url, sub_info)
-                        };
+                                (url, sub_info, None, None)
+                            };
 
                         let url_display = url.as_ref().map(|u| mask_url(u));
 
@@ -73,6 +124,8 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                             url,
                             url_display,
                             sub_info,
+                            last_updated,
+                            auto_update_interval,
                         });
                     }
                 }
@@ -84,13 +137,12 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
 }
 
 /// Get the full (unmasked) subscription URL for a given config name.
-/// This is the only endpoint that exposes the raw URL, used exclusively for subscription updates.
-#[tauri::command]
-pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, String> {
+/// Internal use only — NOT exposed as a Tauri command to prevent URL leakage to the frontend.
+pub fn get_config_url(app: &AppHandle, name: &str) -> Result<String, String> {
     // Reuse comprehensive sanitization (URL decode, path traversal check, etc.)
-    let safe_name = sanitize_config_file_name(&name)?;
+    let safe_name = sanitize_config_file_name(name)?;
 
-    let paths = ensure_app_storage(&app)?;
+    let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
     // Look up URL from metadata first
@@ -113,6 +165,51 @@ pub async fn get_config_url(app: AppHandle, name: String) -> Result<String, Stri
     }
 
     Err(format!("No subscription URL found for config: {name}"))
+}
+
+/// Update the subscription URL for an existing config in metadata.
+#[tauri::command]
+pub async fn update_config_url(
+    app: AppHandle,
+    name: String,
+    new_url: String,
+) -> Result<(), String> {
+    let (paths, safe_name) = validate_config_for_update(&app, &name)?;
+
+    // Trim whitespace before validation and storage
+    let trimmed_url = new_url.trim();
+
+    // Structural URL validation
+    let parsed = url::Url::parse(trimmed_url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("URL must use http:// or https://".to_owned());
+    }
+
+    let mut metadata = load_metadata(&paths);
+    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
+        entry.url = Some(trimmed_url.to_owned());
+    });
+    save_metadata(&paths, &metadata)?;
+
+    Ok(())
+}
+
+/// Update the auto-update interval for a subscription.
+#[tauri::command]
+pub async fn update_subscription_interval(
+    app: AppHandle,
+    name: String,
+    interval: u64,
+) -> Result<(), String> {
+    let (paths, safe_name) = validate_config_for_update(&app, &name)?;
+
+    let mut metadata = load_metadata(&paths);
+    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
+        entry.auto_update_interval = (interval > 0).then_some(interval);
+    });
+    save_metadata(&paths, &metadata)?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -324,34 +421,53 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     save_metadata(&paths, &metadata)?;
 
     // Update last_config setting if it references the old name
-    let needs_update = {
+    // Also migrate last_proxy_selection key from old name to new name
+    let mut last_config_updated = false;
+    {
         let state = app.state::<crate::SettingsState>();
-        let inner = &state.0;
-        inner.lock().ok().is_some_and(|s| {
-            s.last_config.as_deref() == Some(&clean_old)
-                || s.last_config.as_deref() == Some(&old_name)
-        })
-    };
-    if needs_update {
-        // Persist settings.json and update in-memory state
+        let mut guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut dirty = false;
+
+        // Update last_config if it references the old name
+        if guard.last_config.as_deref() == Some(&clean_old)
+            || guard.last_config.as_deref() == Some(&old_name)
         {
-            let state = app.state::<crate::SettingsState>();
-            if let Ok(mut guard) = state.0.lock() {
-                guard.last_config = Some(clean_new.clone());
-                let settings = guard.clone();
-                drop(guard);
-                if let Err(e) = crate::persist_settings(&app, &settings) {
-                    eprintln!("[rename_config] Failed to persist settings: {e}");
-                }
-            };
+            guard.last_config = Some(clean_new.clone());
+            dirty = true;
+            last_config_updated = true;
         }
-        // Sync runtime MihomoState.last_config_path
-        {
-            let mihomo = app.state::<MihomoState>();
-            if let Ok(mut guard) = mihomo.0.lock() {
-                guard.set_last_config_path(Some(clean_new.clone()));
-            };
+
+        // Migrate proxy selection key
+        let node_to_migrate = guard.last_proxy_selection.remove(&clean_old).or_else(|| {
+            if old_name != clean_old {
+                guard.last_proxy_selection.remove(&old_name)
+            } else {
+                None
+            }
+        });
+        if let Some(node) = node_to_migrate {
+            guard.last_proxy_selection.insert(clean_new.clone(), node);
+            dirty = true;
         }
+
+        if dirty {
+            let settings = guard.clone();
+            drop(guard);
+            if let Err(e) = crate::persist_settings(&app, &settings) {
+                eprintln!("[rename_config] Failed to persist settings: {e}");
+            }
+        }
+    }
+
+    // Sync runtime MihomoState.last_config_path
+    if last_config_updated {
+        let mihomo = app.state::<MihomoState>();
+        if let Ok(mut guard) = mihomo.0.lock() {
+            guard.set_last_config_path(Some(clean_new.clone()));
+        };
     }
 
     Ok(format!("Config renamed to {clean_new}"))

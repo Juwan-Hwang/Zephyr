@@ -417,8 +417,26 @@ async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> 
     Ok(bytes)
 }
 
+/// Resolve the subscription URL: use the provided URL if given, otherwise look up from metadata.
+fn resolve_url_from_metadata(
+    app: &AppHandle,
+    name: &str,
+    provided_url: Option<String>,
+) -> Result<String, String> {
+    if let Some(url) = provided_url {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Err("URL must not be empty".to_owned());
+        }
+        return Ok(trimmed.to_owned());
+    }
+
+    // Reuse the existing, sanitized logic from config_manager
+    super::config_manager::get_config_url(app, name)
+}
+
 #[allow(clippy::cognitive_complexity)]
-async fn download_sub_inner(
+pub(crate) async fn download_sub_inner(
     app: &AppHandle,
     url: String,
     name: String,
@@ -662,6 +680,11 @@ async fn download_sub_inner(
     super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
 
     let mut metadata = load_metadata(&paths);
+    // Preserve existing auto_update_interval to avoid silently disabling scheduled updates
+    let preserved_interval = metadata
+        .configs
+        .get(&clean_name)
+        .and_then(|m| m.auto_update_interval);
     metadata.configs.insert(
         clean_name.clone(),
         super::crypto::ConfigMetadata {
@@ -671,6 +694,13 @@ async fn download_sub_inner(
             } else {
                 Some(sub_info_header)
             },
+            last_updated: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            ),
+            auto_update_interval: preserved_interval,
         },
     );
     let final_content = content;
@@ -730,17 +760,26 @@ async fn download_sub_inner(
 }
 
 /// Tauri command wrapper: single subscription download with rate limiting.
+/// If `url` is None, the URL is resolved internally from metadata.
 #[tauri::command]
 pub async fn download_sub(
     app: AppHandle,
-    url: String,
     name: String,
+    url: Option<String>,
     user_agent: Option<String>,
     overwrite: Option<bool>,
     rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<String, String> {
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
-    download_sub_inner(&app, url, name, user_agent, overwrite.unwrap_or(false)).await
+    let resolved_url = resolve_url_from_metadata(&app, &name, url)?;
+    download_sub_inner(
+        &app,
+        resolved_url,
+        name,
+        user_agent,
+        overwrite.unwrap_or(false),
+    )
+    .await
 }
 
 /// Batch update result for a single subscription.
@@ -762,8 +801,19 @@ pub async fn download_sub_batch(
     let mut results = Vec::with_capacity(items.len());
     for item in items {
         let name = item.name.clone();
+        let resolved_url = match resolve_url_from_metadata(&app, &name, item.url) {
+            Ok(u) => u,
+            Err(e) => {
+                results.push(BatchUpdateResult {
+                    name,
+                    success: false,
+                    error: Some(e),
+                });
+                continue;
+            }
+        };
         let result =
-            download_sub_inner(&app, item.url, name.clone(), user_agent.clone(), true).await;
+            download_sub_inner(&app, resolved_url, name.clone(), user_agent.clone(), true).await;
         match result {
             Ok(_) => results.push(BatchUpdateResult {
                 name,
@@ -783,7 +833,8 @@ pub async fn download_sub_batch(
 /// Input item for batch subscription update.
 #[derive(serde::Deserialize)]
 pub struct BatchUpdateItem {
-    pub url: String,
+    /// If None, the URL is resolved internally from metadata.
+    pub url: Option<String>,
     pub name: String,
 }
 

@@ -28,7 +28,10 @@ export const CORE = Object.freeze({
 
 export const CONFIG_FILES = Object.freeze({
     LIST_CONFIGS: "list_configs",
-    GET_CONFIG_URL: "get_config_url",
+    UPDATE_CONFIG_URL: "update_config_url",
+    UPDATE_SUBSCRIPTION_INTERVAL: "update_subscription_interval",
+    UPDATE_PROXY_SELECTION: "update_proxy_selection",
+    UPDATE_SUBSCRIPTION_USER_AGENT: "update_subscription_user_agent",
     DELETE_CONFIG: "delete_config",
     RENAME_CONFIG: "rename_config",
     READ_CONFIG_FILE: "read_config_file",
@@ -100,6 +103,15 @@ export const UPDATER = Object.freeze({
 export const SHORTCUTS = Object.freeze({
     REGISTER_SHORTCUT: "rate_limited_register_shortcut",
     UNREGISTER_SHORTCUT: "rate_limited_unregister_shortcut",
+});
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
+
+export const SCHEDULER = Object.freeze({
+    GET_STATUS: "get_scheduler_status",
+    TRIGGER_UPDATE: "trigger_auto_update",
 });
 
 // ---------------------------------------------------------------------------
@@ -287,6 +299,7 @@ export const COMMANDS = Object.freeze({
     ...TRAY,
     ...UPDATER,
     ...SHORTCUTS,
+    ...SCHEDULER,
     ...SETTINGS,
     ...MISC,
     ...CRYPTO,
@@ -301,7 +314,7 @@ export const COMMANDS = Object.freeze({
     ...TRACE_ADVANCED,
     // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
     CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
-    UPDATER, SHORTCUTS, SETTINGS, MISC, CRYPTO,
+    UPDATER, SHORTCUTS, SCHEDULER, SETTINGS, MISC, CRYPTO,
     SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
     FAILOVER, KV, TRACE_ADVANCED,
 });

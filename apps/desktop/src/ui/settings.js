@@ -113,6 +113,21 @@ function getSubscriptionUserAgent() {
     return getFakeClientUA();
 }
 
+/**
+ * Sync the current fake client UA to backend settings
+ * so the subscription scheduler can use it for auto-updates.
+ * Uses atomic field-level update to avoid Read-Modify-Write race.
+ */
+async function syncUserAgentToBackend() {
+    try {
+        const ua = getSubscriptionUserAgent();
+        await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
+    } catch { /* ignore */ }
+}
+
+/** Debounced version for input events (avoids IPC on every keystroke). */
+const debouncedSyncUA = debounce(() => syncUserAgentToBackend(), 500);
+
 // ---------------------------------------------------------------------------
 //  initUwpExemption
 // ---------------------------------------------------------------------------
@@ -197,6 +212,9 @@ function initFakeClient() {
     if (!select.value) select.value = 'custom';
     customInput.value = savedCustom;
 
+    // Sync UA to backend on init so scheduler uses it from the start
+    syncUserAgentToBackend();
+
     const fakeClientDropdown = initCustomDropdown({
         wrapId: 'fake-client-select-wrap',
         triggerId: 'fake-client-trigger',
@@ -207,6 +225,7 @@ function initFakeClient() {
         onChange: (val) => {
             localStorage.setItem('fakeClientType', val);
             updateVisibility();
+            syncUserAgentToBackend();
         },
     });
 
@@ -284,6 +303,7 @@ function initFakeClient() {
     toggle.addEventListener('change', () => {
         localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
         updateVisibility();
+        syncUserAgentToBackend();
         if (!toggle.checked) {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
@@ -293,6 +313,7 @@ function initFakeClient() {
 
     customInput.addEventListener('input', () => {
         localStorage.setItem('fakeClientCustom', customInput.value);
+        debouncedSyncUA();
     });
 
     if (savedEnabled) {

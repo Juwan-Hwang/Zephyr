@@ -18,11 +18,12 @@ import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
 import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
-import { getConfigCached, getProxiesCached, invalidateProxiesCache } from './cache.js';
+import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
 import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig } from './prism.js';
 import { fetchProxyGroups as fetchProxyGroupsShared } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
+import { saveProxySelection } from './proxy-memory.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -353,11 +354,13 @@ export async function syncCoreConfig() {
     // Sync TUN
     const tunToggle = document.getElementById('tun-proxy-toggle');
     if (tunToggle && (/** @type {any} */ (config)).tun) {
-        (/** @type {HTMLInputElement} */ (tunToggle)).checked = (/** @type {any} */ (config)).tun.enable;
+        const tunEnable = (/** @type {any} */ (config)).tun.enable;
+        appStore.set('isTunEnabled', tunEnable);
+        tunToggle.checked = tunEnable;
         const statusText = document.getElementById('tun-status-text');
         if (statusText) {
             const t = /** @type {any} */ (translations)[currentLang];
-            statusText.textContent = (/** @type {any} */ (config)).tun.enable ? t.proxyActive : (t.proxyInactive || 'Virtual Adapter');
+            statusText.textContent = tunEnable ? t.proxyActive : (t.proxyInactive || 'Virtual Adapter');
         }
         // updateTrayStatus is handled by the main ui.js module
         try {
@@ -785,6 +788,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const card = document.createElement('div');
         card.dataset.baseOrder = `${index}`;
         card.dataset.selected = isSelected ? '1' : '0';
+        // Use h-full to maintain 96px height, use absolute positioning for badge
         card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-all duration-300 group h-full w-full
             ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-white/5'}`;
 
@@ -867,8 +871,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         card.appendChild(top);
 
         // Smart score badge (between title and UDP rows, only visible when smart mode is enabled)
+        // Use absolute positioning with fixed pixel value for consistent cross-system placement
         const scoreBadge = document.createElement('div');
-        scoreBadge.className = 'score-badge absolute left-4 top-[55%] -translate-y-1/2 text-center text-2xs tabular-nums font-bold';
+        scoreBadge.className = 'score-badge absolute left-4 top-[40px] text-center text-2xs tabular-nums font-bold';
         scoreBadge.setAttribute('data-score-badge', 'true');
         scoreBadge.textContent = '--';
         card.appendChild(scoreBadge);
@@ -896,6 +901,13 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
                 if (success) {
                     setActiveNode(card, container);
+
+                    // Save proxy selection for current profile (use cached settings)
+                    try {
+                        const settings = await getSettingsCached();
+                        const currentProfile = settings.last_config || 'config.yaml';
+                        await saveProxySelection(currentProfile, name);
+                    } catch (_e) { /* ignore */ }
 
                     if (appStore.get('currentSortMode') === 'smart') {
                         await applySmartSortToDom();
@@ -939,8 +951,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
-        wrapper.style.height = '96px';
+        wrapper.style.height = 'auto';
         wrapper.className = 'w-full proxy-wrapper';
+        wrapper.style.minHeight = '96px';
 
         const card = createCard(wrapper);
         setProxyPendingState(card, appStore.get('isTestingLatency'));

@@ -238,6 +238,18 @@ export async function initTrayEventListeners() {
         const t = /** @type {Record<string, string>} */(translations[langKey]);
 
         try {
+            // Save current proxy selection before switching
+            try {
+                const { fetchProxyGroups } = await import('./proxy-groups.js');
+                const currentProxyGroups = await fetchProxyGroups();
+                if (currentProxyGroups && currentProxyGroups.current) {
+                    const settings = await invoke(COMMANDS.GET_SETTINGS);
+                    const currentProfile = settings.last_config || 'config.yaml';
+                    const { saveProxySelection } = await import('./proxy-memory.js');
+                    await saveProxySelection(currentProfile, currentProxyGroups.current);
+                }
+            } catch { /* non-fatal */ }
+
             showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
 
             /** @type {any} */
@@ -252,9 +264,18 @@ export async function initTrayEventListeners() {
                 await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 invalidateSettingsCache();
 
-                await new Promise((r) => setTimeout(r, 500));
-                import('./proxies.js').then(m => m.syncCoreConfig());
                 await closeAllConnections();
+
+                // Restore proxy selection BEFORE updating tray menu
+                // so the tray shows the correct selected node instead of DIRECT
+                try {
+                    const { restoreProxySelection } = await import('./proxy-memory.js');
+                    await restoreProxySelection(subName);
+                } catch { /* non-fatal */ }
+
+                // Sync core config first (updates appStore including TUN state), then update tray
+                const { syncCoreConfig } = await import('./proxies.js');
+                await syncCoreConfig();
                 await updateTrayMenu();
             }
         } catch (err) {

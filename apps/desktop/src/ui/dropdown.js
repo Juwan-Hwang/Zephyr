@@ -14,7 +14,7 @@
  * @param {string} opts.selectId - Hidden native select id
  * @param {Function} [opts.onChange] - Callback when selection changes
  * @param {string} [opts.optionAttr='data-value'] - Attribute to match options
- * @returns {{ setValue: Function, getValue: Function, syncUI: Function }|undefined}
+ * @returns {{ setValue: Function, getValue: Function, syncUI: Function, dispose: Function }|undefined}
  */
 export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectId, onChange, optionAttr = 'data-value' }) {
     const wrap = document.getElementById(wrapId);
@@ -27,6 +27,10 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     // Prevent duplicate initialization
     if (wrap.dataset.dropdownInit) return;
     wrap.dataset.dropdownInit = '1';
+
+    // AbortController for clean removal of all event listeners
+    const ac = new AbortController();
+    const { signal } = ac;
 
     const arrow = trigger.querySelector('.dropdown-arrow');
     let isPortalActive = false;
@@ -50,7 +54,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
                 el.scrollBy({ top: delta, behavior: 'smooth' });
             }
         });
-    }, { passive: false });
+    }, { passive: false, signal });
 
     const closeMenu = () => {
         menu.classList.add('hidden');
@@ -98,15 +102,15 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         item.addEventListener('mouseenter', () => {
             menu.querySelectorAll(`[${optionAttr}]`).forEach(i => i.classList.remove('active'));
             item.classList.add('active');
-        });
+        }, { signal });
     });
-    menu.addEventListener('mouseleave', syncUI);
+    menu.addEventListener('mouseleave', syncUI, { signal });
 
     // Toggle
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
         menu.classList.contains('hidden') ? openMenu() : closeMenu();
-    });
+    }, { signal });
 
     // Option click
     menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
@@ -118,21 +122,26 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             syncUI();
             closeMenu();
             if (onChange) onChange(val, select);
-        });
+        }, { signal });
     });
 
     // Close on outside click / Escape
-    document.addEventListener('click', (e) => {
+    const onDocClick = (e) => {
         if (!(e.target instanceof Element)) return;
         if (!e.target.closest(`#${wrapId}`) && !e.target.closest(`#${menuId}`)) closeMenu();
-    });
-    document.addEventListener('keydown', (e) => {
+    };
+    const onDocKeydown = (e) => {
         if (e.key === 'Escape') closeMenu();
-    });
+    };
 
     // Reposition on window resize/scroll while open
-    window.addEventListener('resize', () => { if (!menu.classList.contains('hidden')) positionMenu(); });
-    window.addEventListener('scroll', () => { if (!menu.classList.contains('hidden')) positionMenu(); }, { capture: true, passive: true });
+    const onWinResize = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
+    const onWinScroll = () => { if (!menu.classList.contains('hidden')) positionMenu(); };
+
+    document.addEventListener('click', onDocClick, { signal });
+    document.addEventListener('keydown', onDocKeydown, { signal });
+    window.addEventListener('resize', onWinResize, { signal });
+    window.addEventListener('scroll', onWinScroll, { capture: true, passive: true, signal });
 
     // Initial sync
     syncUI();
@@ -141,5 +150,11 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         setValue: (/** @type {string} */ val) => { select.value = val; syncUI(); },
         getValue: () => select.value,
         syncUI,
+        dispose: () => {
+            // Abort all listeners (document, window, trigger, menu, options)
+            ac.abort();
+            closeMenu();
+            delete wrap.dataset.dropdownInit;
+        },
     };
 }
