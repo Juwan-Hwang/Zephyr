@@ -208,15 +208,15 @@ const autoUpdateOptions = [
 
         try {
             // Rename if name changed
+            let targetName = configInfo.name;
             if (newName !== currentStem) {
-                await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
+                const renameResult = await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
+                // Backend returns "Config renamed to <actual_filename>" — extract the real filename
+                const match = renameResult.match(/renamed to\s+(.+)$/);
+                targetName = match ? match[1].trim() : configInfo.name;
                 invalidateConfigsCache();
                 invalidateSettingsCache();
             }
-
-            // Resolve target filename after potential rename (preserve original extension)
-            const originalExt = configInfo.name.match(/\.(yaml|yml)$/i)?.[0] || '.yaml';
-            const targetName = newName !== currentStem ? (newName.endsWith('.yaml') || newName.endsWith('.yml') ? newName : `${newName}${originalExt}`) : configInfo.name;
 
             // Update URL if user entered a new one
             if (newUrl) {

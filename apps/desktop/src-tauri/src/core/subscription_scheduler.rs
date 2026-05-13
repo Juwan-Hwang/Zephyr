@@ -59,19 +59,12 @@ impl Default for SchedulerState {
 pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
     let state = Arc::new(SchedulerState::new());
 
-    // Spawn the scheduler task
+    // Spawn the scheduler task using Tauri's async runtime (always available)
     let state_clone = Arc::clone(&state);
 
-    let spawn_result = tokio::runtime::Handle::try_current().map(|handle| {
-        handle.spawn(async move {
-            run_scheduler_loop(app, state_clone).await;
-        });
+    tauri::async_runtime::spawn(async move {
+        run_scheduler_loop(app, state_clone).await;
     });
-
-    if let Err(e) = spawn_result {
-        state.running.store(false, Ordering::Relaxed);
-        eprintln!("[Scheduler] CRITICAL: Failed to spawn scheduler task: {e}");
-    }
 
     state
 }

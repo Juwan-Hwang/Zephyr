@@ -105,6 +105,15 @@ export const SHORTCUTS = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
+
+export const SCHEDULER = Object.freeze({
+    GET_STATUS: "get_scheduler_status",
+    TRIGGER_UPDATE: "trigger_auto_update",
+});
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -289,6 +298,7 @@ export const COMMANDS = Object.freeze({
     ...TRAY,
     ...UPDATER,
     ...SHORTCUTS,
+    ...SCHEDULER,
     ...SETTINGS,
     ...MISC,
     ...CRYPTO,
@@ -303,7 +313,7 @@ export const COMMANDS = Object.freeze({
     ...TRACE_ADVANCED,
     // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
     CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
-    UPDATER, SHORTCUTS, SETTINGS, MISC, CRYPTO,
+    UPDATER, SHORTCUTS, SCHEDULER, SETTINGS, MISC, CRYPTO,
     SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
     FAILOVER, KV, TRACE_ADVANCED,
 });

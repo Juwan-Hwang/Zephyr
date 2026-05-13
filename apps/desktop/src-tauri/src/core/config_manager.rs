@@ -139,8 +139,11 @@ pub async fn update_config_url(
         return Err(format!("Config not found: {safe_name}"));
     }
 
+    // Trim whitespace before validation and storage
+    let trimmed_url = new_url.trim();
+
     // Structural URL validation
-    let parsed = url::Url::parse(&new_url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let parsed = url::Url::parse(trimmed_url).map_err(|e| format!("Invalid URL: {e}"))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("URL must use http:// or https://".to_owned());
     }
@@ -159,7 +162,7 @@ pub async fn update_config_url(
                 auto_update_interval: None,
             }
         });
-    entry.url = Some(new_url);
+    entry.url = Some(trimmed_url.to_owned());
     save_metadata(&paths, &metadata)?;
 
     Ok(())
