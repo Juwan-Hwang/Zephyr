@@ -11,15 +11,13 @@ import { fetchProxyGroups } from './proxy-groups.js';
 
 /**
  * Save current proxy selection for a profile.
+ * Uses atomic backend command to avoid Read-Modify-Write race conditions.
  * @param {string} profileName - Profile filename (e.g., "my-sub.yaml")
  * @param {string} nodeName - Selected proxy node name
  */
 export async function saveProxySelection(profileName, nodeName) {
     try {
-        const settings = await invoke(COMMANDS.GET_SETTINGS);
-        settings.last_proxy_selection = settings.last_proxy_selection || {};
-        settings.last_proxy_selection[profileName] = nodeName;
-        await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+        await invoke(COMMANDS.UPDATE_PROXY_SELECTION, { profileName, nodeName });
     } catch { /* ignore */ }
 }
 

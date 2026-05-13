@@ -160,6 +160,28 @@ fn save_settings(
     persist_settings(&app, &settings)
 }
 
+/// Atomically update a single proxy selection entry in settings.
+/// Avoids the Read-Modify-Write race condition of fetching all settings,
+/// mutating, and saving back.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_proxy_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    profile_name: String,
+    node_name: String,
+) -> Result<(), String> {
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.last_proxy_selection.insert(profile_name, node_name);
+        guard.clone()
+    };
+    persist_settings(&app, &settings)
+}
+
 /// Persist settings to settings.json (without touching in-memory state).
 /// Used by `rename_config` to persist `last_config` changes.
 ///
@@ -481,6 +503,7 @@ pub fn run() {
             get_sys_proxy,
             get_settings,
             save_settings,
+            update_proxy_selection,
             get_core_version,
             exempt_uwp_apps,
             read_config_file,

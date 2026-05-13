@@ -903,7 +903,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
                     // Save proxy selection for current profile
                     try {
-                        const currentProfile = appStore.get('currentProfile') || 'config.yaml';
+                        const settings = await invoke(COMMANDS.GET_SETTINGS);
+                        const currentProfile = settings.last_config || 'config.yaml';
                         const { saveProxySelection } = await import('./proxy-memory.js');
                         await saveProxySelection(currentProfile, name);
                     } catch (_e) { /* ignore */ }

@@ -9,7 +9,7 @@ use tauri::AppHandle;
 use tokio::time::{interval, MissedTickBehavior};
 
 use super::core_process::ensure_app_storage;
-use super::crypto::{load_metadata, save_metadata};
+use super::crypto::load_metadata;
 use super::subscription::download_sub_inner;
 
 /// Scheduler state shared between the task and external control.
@@ -115,7 +115,6 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         .unwrap_or(0);
 
     let mut updated = 0;
-    let mut names_to_update: Vec<String> = Vec::new();
 
     #[allow(clippy::iter_over_hash_type)]
     for (name, meta) in &metadata.configs {
@@ -135,7 +134,6 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         if elapsed >= interval_secs {
             match download_sub_inner(app, url.clone(), name.clone(), None, true).await {
                 Ok(_) => {
-                    names_to_update.push(name.clone());
                     updated += 1;
                 }
                 Err(e) => eprintln!("[Scheduler] Failed to auto-update subscription `{name}`: {e}"),
@@ -143,16 +141,8 @@ async fn check_and_update_subscriptions(app: &AppHandle) -> Result<usize, String
         }
     }
 
-    // Reload fresh metadata (download_sub_inner writes its own metadata) and only patch last_updated
-    if !names_to_update.is_empty() {
-        let mut fresh_metadata = load_metadata(&paths);
-        for name in &names_to_update {
-            if let Some(entry) = fresh_metadata.configs.get_mut(name) {
-                entry.last_updated = Some(now);
-            }
-        }
-        save_metadata(&paths, &fresh_metadata)?;
-    }
+    // download_sub_inner already persists last_updated with completion-time timestamp,
+    // so no additional metadata save is needed here.
 
     Ok(updated)
 }
