@@ -1061,9 +1061,9 @@
     </div>
 
     <!-- Port Configuration Modal -->
-    <div id="port-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-black/40 backdrop-blur-md">
+    <div id="port-config-modal" role="dialog" aria-modal="true" aria-labelledby="port-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-black/40 backdrop-blur-md">
         <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="text-xl font-light text-zinc-100 mb-2" data-i18n="portConfigTitle">Port Configuration</h3>
+            <h3 id="port-config-title" class="text-xl font-light text-zinc-100 mb-2" data-i18n="portConfigTitle">Port Configuration</h3>
             <p class="text-xs text-zinc-400 mb-6" data-i18n="portConfigDesc">Set ports for proxy protocols</p>
 
             <div class="space-y-4">
