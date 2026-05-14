@@ -551,6 +551,7 @@ export function initProxyControls() {
                                 const currentNode = proxyGroupsResult?.current;
                                 // Don't hide if this is the currently active node
                                 if (name !== currentNode) {
+                                    const container = document.getElementById('proxies-list');
                                     const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
                                     if (wrapper) {
                                         wrapper.remove();
