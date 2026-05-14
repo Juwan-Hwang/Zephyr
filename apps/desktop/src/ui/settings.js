@@ -750,10 +750,10 @@ export async function initSettings() {
                 showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
             }
             return true;
-            } catch (err) {
-                settingsLogger.error('Failed to save config to core', err);
-                /** @type {any} */
-                const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        } catch (err) {
+            settingsLogger.error('Failed to save config to core', err);
+            /** @type {any} */
+            const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const error = toError(err);
             showNotification(error.toString() || t2.failedSaveSettings || 'Failed to save settings to core', 'error');
             return false;
@@ -805,7 +805,7 @@ export async function initSettings() {
     function parsePortValue(raw) {
         const trimmed = raw.trim();
         if (trimmed === '') return 0; // empty = disable (0)
-        const num = Number(trimmed);
+        const num = parseInt(trimmed, 10);
         return num;
     }
 
@@ -892,14 +892,12 @@ export async function initSettings() {
             }
 
             // Build patch — 0 disables the port, non-zero sets it
-            // Disable legacy 'port' only when mixed-port is active to prevent conflict
+            // Always disable legacy 'port' key: when mixed-port > 0 it prevents
+            // conflict, and when mixed-port = 0 the user intends to fully disable
             /** @type {Record<string, number>} */
-            const patch = {};
+            const patch = { port: 0 };
             for (const { val, key } of ports) {
                 patch[key] = val;
-            }
-            if (patch['mixed-port'] > 0) {
-                patch['port'] = 0;
             }
 
             const ok = await saveConfigToCore(patch);
