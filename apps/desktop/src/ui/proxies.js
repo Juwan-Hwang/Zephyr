@@ -492,6 +492,8 @@ export function initProxyControls() {
                     throw new Error('No valid proxy group found for testing');
                 }
                 const { data, mainGroup: _mainGroup, proxies, current: currentNode } = /** @type {any} */ (proxyGroupsResult);
+                const settings = await getSettingsCached();
+                const hideTimeoutEnabled = settings?.hide_timeout_nodes;
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
