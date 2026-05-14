@@ -1063,8 +1063,8 @@ export async function renderProxies() {
                 return true;
             }
             const lastDelay = proxy.history[proxy.history.length - 1].delay;
-            // delay === 0 means timeout/unavailable
-            return lastDelay !== 0;
+            // Use helper to catch all timeout/invalid states (0, 999999, etc.)
+            return !isInvalidDelay(lastDelay);
         });
     }
 
