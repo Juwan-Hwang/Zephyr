@@ -33,8 +33,8 @@ export { switchPage } from './navigation.js';
 /** Represents "infinite" or "timeout" latency */
 export const DELAY_INFINITE = 1000000;
 
-/** Returns true if the given delay value means "not tested" or "timeout". */
-function isInvalidDelay(d) { return d == null || d === 0 || d >= 999999; }
+/** Returns true if the given delay value means "not tested" or "timeout". Catches -1 (API failure), 0, and >= 999999. */
+function isInvalidDelay(d) { return d == null || d <= 0 || d >= 999999; }
 
 const latencyLoadingIcon = SVG_ICONS.loading;
 
@@ -483,6 +483,8 @@ export function initProxyControls() {
             icon?.classList.add('animate-spin', 'text-accent');
             testBtn.classList.add('opacity-50', 'cursor-not-allowed');
 
+            let hideTimeoutEnabled = false;
+
             try {
                 showLatencyLoadingForAllCards();
                 await renderProxies();
@@ -491,7 +493,9 @@ export function initProxyControls() {
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
-                const { data, mainGroup: _mainGroup, proxies } = /** @type {any} */ (proxyGroupsResult);
+                const { data, mainGroup: _mainGroup, proxies, current: _currentNode } = /** @type {any} */ (proxyGroupsResult);
+                const settings = await getSettingsCached();
+                hideTimeoutEnabled = !!settings?.hide_timeout_nodes;
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -539,6 +543,20 @@ export function initProxyControls() {
                             }
                         }
                     }
+
+                    // Hide timeout nodes immediately if setting is enabled
+                    if (hideTimeoutEnabled && isInvalidDelay(delay)) {
+                        // Don't hide if this is the currently active node
+                        // Use _activeCard to get real-time active node (prevents mis-hiding during node switch)
+                        const activeName = _activeCard?.closest('[data-name]')?.dataset.name;
+                        if (name !== activeName) {
+                            const container = document.getElementById('proxies-list');
+                            const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
+                            if (wrapper) {
+                                wrapper.remove();
+                            }
+                        }
+                    }
                     queueLatencySort();
 
                     // Update smart score if enabled
@@ -574,6 +592,11 @@ export function initProxyControls() {
                     await applySmartSortToDom();
                 } else {
                     applyLatencySortToDom(true);
+                }
+                // Re-render to restore nodes that may need to be visible again after testing
+                invalidateProxiesCache();
+                if (hideTimeoutEnabled) {
+                    await renderProxies();
                 }
                 icon?.classList.remove('animate-spin', 'text-accent');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -724,7 +747,7 @@ async function updateProxiesInPlace(container, proxies, data, current) {
             const latVal = card.querySelector('[id^="latency-"]');
             if (latVal && wrapper.dataset.pending !== '1') {
                 latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-                latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : 'Timeout';
+                latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
             }
 
             if (isSelected) {
@@ -778,6 +801,13 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const index = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.index || '0', 10);
         const name = virtProxies[index];
         const proxy = (/** @type {any} */ (virtData)).proxies[name];
+        // Defensive: if proxy data is missing, show placeholder
+        if (!proxy) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'p-4 glass-card text-zinc-500 text-sm';
+            placeholder.textContent = 'Loading...';
+            return placeholder;
+        }
         const isSelected = name === virtCurrent;
 
         let latFromWrapper = null;
@@ -793,8 +823,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-white/5'}`;
 
         let lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
-        if (latFromWrapper !== null) {
-            lastDelay = latFromWrapper === DELAY_INFINITE ? 0 : latFromWrapper;
+        // Only use latFromWrapper if proxy has no history AND latFromWrapper is valid (not DELAY_INFINITE)
+        if (lastDelay === null && latFromWrapper !== null && latFromWrapper !== DELAY_INFINITE) {
+            lastDelay = latFromWrapper;
         }
 
         const delayColor = getDelayColorClass(lastDelay);
@@ -854,7 +885,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
         } else {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-            latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout');
+            latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
         }
         right.appendChild(latLabel);
         right.appendChild(latVal);
@@ -943,11 +974,13 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         wrapper.dataset.name = name;
 
         const proxy = (/** @type {any} */ (data)).proxies[name];
+        // Defensive: skip if proxy data is missing
+        if (!proxy) return;
         const isSelected = name === current;
         wrapper.dataset.selected = isSelected ? '1' : '0';
         wrapper.setAttribute('role', 'option');
         wrapper.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-        const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
+        const lastDelay = (proxy?.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
@@ -1019,7 +1052,24 @@ export async function renderProxies() {
     }
 
     const { mainGroup, current } = /** @type {any} */ (proxyGroupsResult);
-    const proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+    let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+
+    // Filter out unavailable (timeout) proxies if setting is enabled
+    const settings = await getSettingsCached();
+    if (settings?.hide_timeout_nodes) {
+        proxies = proxies.filter((/** @type {string} */ name) => {
+            // Always keep the currently active node, even if it's timed out
+            if (name === current) return true;
+            const proxy = (/** @type {any} */ (data)).proxies[name];
+            // Keep proxy if no history (not tested yet) or last delay is valid
+            if (!proxy?.history || proxy.history.length === 0) {
+                return true;
+            }
+            const lastDelay = proxy.history[proxy.history.length - 1].delay;
+            // Use helper to catch all timeout/invalid states (0, 999999, etc.)
+            return !isInvalidDelay(lastDelay);
+        });
+    }
 
     if (appStore.get('currentSortMode') === 'name') {
         proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));

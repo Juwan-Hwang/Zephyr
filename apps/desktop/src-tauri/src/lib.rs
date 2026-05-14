@@ -133,6 +133,9 @@ struct Settings {
     /// Set by frontend when user configures a fake client UA.
     #[serde(default)]
     subscription_user_agent: Option<String>,
+    /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
+    #[serde(default)]
+    hide_timeout_nodes: bool,
 }
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
@@ -421,6 +424,7 @@ pub fn run() {
                     config_order: Vec::new(),
                     last_proxy_selection: std::collections::HashMap::new(),
                     subscription_user_agent: None,
+                    hide_timeout_nodes: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
