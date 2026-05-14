@@ -883,29 +883,12 @@ export async function initSettings() {
                 }
             }
 
-            // Check for duplicates against full resulting config state
-            // When a port input is 0 (disabled), it does not conflict
-            try {
-                /** @type {any} */
-                const currentConfig = (await invoke(COMMANDS.READ_CONFIG)) || {};
-                const resolvedPorts = ports.map(({ val, key }) => {
-                    let v = val > 0 ? val : (currentConfig[key] || 0);
-                    if (key === 'mixed-port' && v === 0) v = currentConfig['port'] || 0;
-                    return { val: v, key };
-                }).filter(p => p.val > 0);
-                const resolvedValues = resolvedPorts.map(p => p.val);
-                if (new Set(resolvedValues).size !== resolvedValues.length) {
-                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
-                    return;
-                }
-            } catch {
-                // Fallback: only check modal inputs if config read fails
-                const activePorts = ports.filter(p => p.val > 0);
-                const portValues = activePorts.map(p => p.val);
-                if (new Set(portValues).size !== portValues.length) {
-                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
-                    return;
-                }
+            // Check for duplicates among the new port values.
+            // Ports set to 0 (disabled) are ignored.
+            const activePorts = ports.filter(p => p.val > 0).map(p => p.val);
+            if (new Set(activePorts).size !== activePorts.length) {
+                showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                return;
             }
 
             // Build patch — 0 disables the port, non-zero sets it
