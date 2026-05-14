@@ -541,7 +541,8 @@ export function initProxyControls() {
                     }
 
                     // Hide timeout nodes immediately if setting is enabled
-                    if (delay === 0) {
+                    // Hide timeout nodes immediately if setting is enabled
+                    if (isInvalidDelay(delay)) {
                         try {
                             const settings = await getSettingsCached();
                             if (settings?.hide_timeout_nodes) {
