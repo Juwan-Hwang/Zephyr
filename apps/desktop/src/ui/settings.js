@@ -798,13 +798,15 @@ export async function initSettings() {
     const portSaveBtn = document.getElementById('port-config-save');
 
     /**
-     * Validate a port value: must be an integer in [0, 65535] or empty (0 = disabled).
+     * Validate a port value: must be a decimal integer in [0, 65535] or empty (0 = disabled).
+     * Rejects hex (0x10), octal, scientific notation, and decimals.
      * @param {string} raw
      * @returns {number} Parsed port (0 for empty = disable), or NaN if invalid.
      */
     function parsePortValue(raw) {
         const trimmed = raw.trim();
         if (trimmed === '') return 0; // empty = disable (0)
+        if (!/^\d+$/.test(trimmed)) return NaN; // reject non-decimal-integer strings
         return Number(trimmed);
     }
 
@@ -861,49 +863,61 @@ export async function initSettings() {
 
     if (portSaveBtn) {
         portSaveBtn.addEventListener('click', async () => {
-            /** @type {any} */
-            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+            if (portSaveBtn.classList.contains('pointer-events-none')) return;
+            portSaveBtn.classList.add('opacity-50', 'pointer-events-none');
+            try {
+                /** @type {any} */
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
 
-            const mixedVal = parsePortValue(portMixedInput?.value || '');
-            const socksVal = parsePortValue(portSocksInput?.value || '');
-            const redirVal = parsePortValue(portRedirInput?.value || '');
-            const tproxyVal = parsePortValue(portTproxyInput?.value || '');
+                const mixedVal = parsePortValue(portMixedInput?.value || '');
+                const socksVal = parsePortValue(portSocksInput?.value || '');
+                const redirVal = parsePortValue(portRedirInput?.value || '');
+                const tproxyVal = parsePortValue(portTproxyInput?.value || '');
 
-            // Validate range (0 = disabled, 1-65535 = valid port)
-            const ports = [
-                { val: mixedVal, key: 'mixed-port' },
-                { val: socksVal, key: 'socks-port' },
-                { val: redirVal, key: 'redir-port' },
-                { val: tproxyVal, key: 'tproxy-port' },
-            ];
-            for (const { val } of ports) {
-                if (!Number.isInteger(val) || val < 0 || val > 65535) {
-                    showNotification(t.portRangeError || 'Port must be between 0 and 65535', 'error');
+                // Validate range (0 = disabled, 1-65535 = valid port)
+                const ports = [
+                    { val: mixedVal, key: 'mixed-port' },
+                    { val: socksVal, key: 'socks-port' },
+                    { val: redirVal, key: 'redir-port' },
+                    { val: tproxyVal, key: 'tproxy-port' },
+                ];
+                for (const { val } of ports) {
+                    if (!Number.isInteger(val) || val < 0 || val > 65535) {
+                        showNotification(t.portRangeError || 'Port must be between 0 and 65535', 'error');
+                        return;
+                    }
+                }
+
+                // Require at least one active proxy port (mixed or socks)
+                if (mixedVal === 0 && socksVal === 0) {
+                    showNotification(t.portAllDisabledError || 'At least one proxy port (Mixed or SOCKS5) must be enabled', 'error');
                     return;
                 }
-            }
 
-            // Check for duplicates among the new port values.
-            // Ports set to 0 (disabled) are ignored.
-            const activePorts = ports.filter(p => p.val > 0).map(p => p.val);
-            if (new Set(activePorts).size !== activePorts.length) {
-                showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
-                return;
-            }
+                // Check for duplicates among the new port values.
+                // Ports set to 0 (disabled) are ignored.
+                const activePorts = ports.filter(p => p.val > 0).map(p => p.val);
+                if (new Set(activePorts).size !== activePorts.length) {
+                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                    return;
+                }
 
-            // Build patch — 0 disables the port, non-zero sets it
-            // Always disable legacy 'port' key: when mixed-port > 0 it prevents
-            // conflict, and when mixed-port = 0 the user intends to fully disable
-            /** @type {Record<string, number>} */
-            const patch = { port: 0 };
-            for (const { val, key } of ports) {
-                patch[key] = val;
-            }
+                // Build patch — 0 disables the port, non-zero sets it
+                // Always disable legacy 'port' key: when mixed-port > 0 it prevents
+                // conflict, and when mixed-port = 0 the user intends to fully disable
+                /** @type {Record<string, number>} */
+                const patch = { port: 0 };
+                for (const { val, key } of ports) {
+                    patch[key] = val;
+                }
 
-            const ok = await saveConfigToCore(patch);
-            if (ok) {
-                await loadSettingsFromCore();
-                closePortModal();
+                const ok = await saveConfigToCore(patch);
+                if (ok) {
+                    await loadSettingsFromCore();
+                    closePortModal();
+                }
+            } finally {
+                portSaveBtn.classList.remove('opacity-50', 'pointer-events-none');
             }
         });
     }
