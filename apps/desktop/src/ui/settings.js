@@ -985,8 +985,8 @@ export async function initSettings() {
 
             // Update port display
             if (portDisplay) {
-                const mixedPort = config['mixed-port'] ?? config.port ?? 7890;
-                portDisplay.textContent = String(mixedPort);
+                const mixedPort = config['mixed-port'] ?? config.port ?? config['socks-port'] ?? 7890;
+                portDisplay.textContent = mixedPort > 0 ? String(mixedPort) : '--';
             }
 
             if (config.tunnels && Array.isArray(config.tunnels)) {
