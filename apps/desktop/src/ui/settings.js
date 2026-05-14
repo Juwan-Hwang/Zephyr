@@ -745,11 +745,11 @@ export async function initSettings() {
             await syncCoreConfig();
 
             if (result && !result.hot_reload_success) {
-                    /** @type {any} */
-                    const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                    showNotification(t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
-                }
-                return true;
+                /** @type {any} */
+                const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+                showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+            }
+            return true;
             } catch (err) {
                 settingsLogger.error('Failed to save config to core', err);
                 /** @type {any} */
@@ -809,6 +809,9 @@ export async function initSettings() {
         return num;
     }
 
+    /** @type {ReturnType<typeof createFocusTrap> | null} */
+    let portFocusTrap = null;
+
     /**
      * Open the port config modal and populate with current values.
      */
@@ -816,7 +819,7 @@ export async function initSettings() {
         try {
             /** @type {any} */
             const config = await invoke(COMMANDS.READ_CONFIG);
-            if (portMixedInput) portMixedInput.value = config['mixed-port'] != null ? String(config['mixed-port']) : '';
+            if (portMixedInput) portMixedInput.value = (config['mixed-port'] ?? config.port) != null ? String(config['mixed-port'] ?? config.port) : '';
             if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
             if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
             if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
@@ -826,7 +829,9 @@ export async function initSettings() {
         if (portModal) {
             portModal.classList.remove('hidden');
             portModal.classList.add('flex');
-            createFocusTrap(portModal, { onEscape: closePortModal });
+            if (portFocusTrap) portFocusTrap.destroy();
+            portFocusTrap = createFocusTrap(portModal, { onEscape: closePortModal });
+            portFocusTrap.activate();
         }
     }
 
@@ -835,6 +840,9 @@ export async function initSettings() {
      */
     function closePortModal() {
         if (!portModal) return;
+        if (portFocusTrap) {
+            portFocusTrap.deactivate();
+        }
         portModal.classList.add('hidden');
         portModal.classList.remove('flex');
     }
@@ -875,12 +883,28 @@ export async function initSettings() {
                 }
             }
 
-            // Check for duplicates (only among non-null values)
-            const nonNullPorts = ports.filter(/** @param {{val: number|null}} p */ p => p.val !== null);
-            const portValues = nonNullPorts.map(/** @param {{val: number}} p */ p => p.val);
-            if (new Set(portValues).size !== portValues.length) {
-                showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
-                return;
+            // Check for duplicates against full resulting config state
+            // When a port input is empty (null), the existing config value is preserved
+            try {
+                /** @type {any} */
+                const currentConfig = await invoke(COMMANDS.READ_CONFIG);
+                const resolvedPorts = ports.map(({ val, key }) => ({
+                    val: val !== null ? val : currentConfig[key],
+                    key,
+                })).filter(/** @param {{val: number|null}} p */ p => p.val != null);
+                const resolvedValues = resolvedPorts.map(/** @param {{val: number}} p */ p => p.val);
+                if (new Set(resolvedValues).size !== resolvedValues.length) {
+                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                    return;
+                }
+            } catch {
+                // Fallback: only check modal inputs if config read fails
+                const nonNullPorts = ports.filter(/** @param {{val: number|null}} p */ p => p.val !== null);
+                const portValues = nonNullPorts.map(/** @param {{val: number}} p */ p => p.val);
+                if (new Set(portValues).size !== portValues.length) {
+                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                    return;
+                }
             }
 
             // Build patch
