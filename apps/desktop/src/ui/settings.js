@@ -44,6 +44,7 @@ import {
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
+import { createFocusTrap } from '../utils/focus-trap.js';
 import * as prism from './prism.js';
 
 // The following modules have not yet been extracted from ui.js.
@@ -352,6 +353,8 @@ export async function initSettings() {
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
+    const portConfigBtn = document.getElementById('port-config-btn');
+    const portDisplay = document.getElementById('current-port-display');
     const versionText = document.getElementById('core-version-text');
     const configsList = document.getElementById('configs-list');
     const customArgsInput = /** @type {HTMLInputElement} */ (document.getElementById('custom-args-input'));
@@ -744,7 +747,7 @@ export async function initSettings() {
             if (result && !result.hot_reload_success) {
                     /** @type {any} */
                     const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                    showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+                    showNotification(t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
                 }
                 return true;
             } catch (err) {
@@ -784,6 +787,124 @@ export async function initSettings() {
         if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
         else { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
+
+    // ---- Port configuration modal ----
+    const portModal = document.getElementById('port-config-modal');
+    const portMixedInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-mixed-input'));
+    const portSocksInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-socks-input'));
+    const portRedirInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-redir-input'));
+    const portTproxyInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-tproxy-input'));
+    const portCancelBtn = document.getElementById('port-config-cancel');
+    const portSaveBtn = document.getElementById('port-config-save');
+
+    /**
+     * Validate a port value: must be an integer in [1, 65535] or empty (no change).
+     * @param {string} raw
+     * @returns {number|null} Parsed port, or null if empty (skip), or NaN if invalid.
+     */
+    function parsePortValue(raw) {
+        const trimmed = raw.trim();
+        if (trimmed === '') return null; // skip — keep current value
+        const num = Number(trimmed);
+        return num;
+    }
+
+    /**
+     * Open the port config modal and populate with current values.
+     */
+    async function openPortModal() {
+        try {
+            /** @type {any} */
+            const config = await invoke(COMMANDS.READ_CONFIG);
+            if (portMixedInput) portMixedInput.value = config['mixed-port'] != null ? String(config['mixed-port']) : '';
+            if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
+            if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
+            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
+        } catch (err) {
+            settingsLogger.warn('Failed to load port config for modal', err);
+        }
+        if (portModal) {
+            portModal.classList.remove('hidden');
+            portModal.classList.add('flex');
+            createFocusTrap(portModal, { onEscape: closePortModal });
+        }
+    }
+
+    /**
+     * Close the port config modal.
+     */
+    function closePortModal() {
+        if (!portModal) return;
+        portModal.classList.add('hidden');
+        portModal.classList.remove('flex');
+    }
+
+    if (portConfigBtn) {
+        portConfigBtn.addEventListener('click', openPortModal);
+    }
+    if (portCancelBtn) {
+        portCancelBtn.addEventListener('click', closePortModal);
+    }
+    if (portModal) {
+        portModal.addEventListener('click', (e) => {
+            if (e.target === portModal) closePortModal();
+        });
+    }
+
+    if (portSaveBtn) {
+        portSaveBtn.addEventListener('click', async () => {
+            /** @type {any} */
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+
+            const mixedVal = parsePortValue(portMixedInput?.value || '');
+            const socksVal = parsePortValue(portSocksInput?.value || '');
+            const redirVal = parsePortValue(portRedirInput?.value || '');
+            const tproxyVal = parsePortValue(portTproxyInput?.value || '');
+
+            // Validate range
+            const ports = [
+                { val: mixedVal, key: 'mixed-port' },
+                { val: socksVal, key: 'socks-port' },
+                { val: redirVal, key: 'redir-port' },
+                { val: tproxyVal, key: 'tproxy-port' },
+            ];
+            for (const { val } of ports) {
+                if (val !== null && (!Number.isInteger(val) || val < 1 || val > 65535)) {
+                    showNotification(t.portRangeError || 'Port must be between 1 and 65535', 'error');
+                    return;
+                }
+            }
+
+            // Check for duplicates (only among non-null values)
+            const nonNullPorts = ports.filter(/** @param {{val: number|null}} p */ p => p.val !== null);
+            const portValues = nonNullPorts.map(/** @param {{val: number}} p */ p => p.val);
+            if (new Set(portValues).size !== portValues.length) {
+                showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                return;
+            }
+
+            // Build patch
+            /** @type {Record<string, number>} */
+            const patch = {};
+            for (const { val, key } of ports) {
+                if (val !== null) patch[key] = val;
+            }
+
+            if (Object.keys(patch).length === 0) {
+                closePortModal();
+                return;
+            }
+
+            const ok = await saveConfigToCore(patch);
+            if (ok) {
+                // Update port display
+                if (portDisplay && mixedVal !== null) {
+                    portDisplay.textContent = String(mixedVal);
+                }
+                closePortModal();
+            }
+        });
+    }
 
     // ---- Geo data update ----
     updateGeoBtn?.addEventListener('click', async () => {
@@ -836,6 +957,12 @@ export async function initSettings() {
             if (unifiedDelayToggle) unifiedDelayToggle.checked = config['unified-delay'] !== false;
             if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
             if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
+
+            // Update port display
+            if (portDisplay) {
+                const mixedPort = config['mixed-port'] || config.port || 7890;
+                portDisplay.textContent = String(mixedPort);
+            }
 
             if (config.tunnels && Array.isArray(config.tunnels)) {
                 currentTunnels = config.tunnels;
