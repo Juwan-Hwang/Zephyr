@@ -40,10 +40,15 @@ export function createContextMenuContainer(e) {
     e.preventDefault();
     removeContextMenu();
 
+    // body has transform: scale(var(--ui-scale)), which makes fixed positioning
+    // relative to the body instead of the viewport. clientX/clientY are visual
+    // (scaled) coordinates — divide by ui-scale to get body-space coordinates.
+    const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+
     const menu = document.createElement('div');
     menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-y-auto custom-scrollbar py-1 shadow-xl border border-white/10 rounded-xl glass-card`;
-    menu.style.left = `${e.clientX}px`;
-    menu.style.top = `${e.clientY}px`;
+    menu.style.left = `${e.clientX / uiScale}px`;
+    menu.style.top = `${e.clientY / uiScale}px`;
     return menu;
 }
 
@@ -56,12 +61,13 @@ export function createContextMenuContainer(e) {
 export function attachContextMenuCloseHandlers(menu) {
     // Viewport overflow correction
     requestAnimationFrame(() => {
+        const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
         const rect = menu.getBoundingClientRect();
         if (rect.right > window.innerWidth) {
-            menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+            menu.style.left = `${(window.innerWidth - rect.width - 8) / uiScale}px`;
         }
         if (rect.bottom > window.innerHeight) {
-            menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+            menu.style.top = `${(window.innerHeight - rect.height - 8) / uiScale}px`;
         }
     });
 

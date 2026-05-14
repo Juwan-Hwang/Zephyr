@@ -38,10 +38,15 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     // Position the menu relative to the trigger (used when portaled to body)
     const positionMenu = () => {
         const rect = trigger.getBoundingClientRect();
+        // body has transform: scale(var(--ui-scale)), which makes fixed positioning
+        // relative to the body instead of the viewport. getBoundingClientRect returns
+        // visual (scaled) coordinates, but fixed left/top inside a transformed container
+        // are in the container's coordinate space. Divide by ui-scale to compensate.
+        const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
         menu.style.position = 'fixed';
-        menu.style.left = `${rect.left}px`;
-        menu.style.top = `${rect.bottom + 6}px`;
-        menu.style.width = `${rect.width}px`;
+        menu.style.left = `${rect.left / uiScale}px`;
+        menu.style.top = `${rect.bottom / uiScale + 6 / uiScale}px`;
+        menu.style.width = `${rect.width / uiScale}px`;
         menu.style.zIndex = '99999';
     };
 
