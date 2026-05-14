@@ -985,7 +985,7 @@ export async function initSettings() {
 
             // Update port display
             if (portDisplay) {
-                const mixedPort = config['mixed-port'] || config.port || 7890;
+                const mixedPort = config['mixed-port'] ?? config.port ?? 7890;
                 portDisplay.textContent = String(mixedPort);
             }
 
