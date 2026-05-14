@@ -922,10 +922,7 @@ export async function initSettings() {
 
             const ok = await saveConfigToCore(patch);
             if (ok) {
-                // Update port display
-                if (portDisplay && mixedVal !== null) {
-                    portDisplay.textContent = String(mixedVal);
-                }
+                await loadSettingsFromCore();
                 closePortModal();
             }
         });
