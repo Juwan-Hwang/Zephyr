@@ -1069,26 +1069,26 @@
             <div class="space-y-4">
                 <div>
                     <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
-                    <input id="port-mixed-input" type="number" min="1" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7890">
-                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port</p>
+                    <input id="port-mixed-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7890">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
                 </div>
 
                 <div>
                     <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
-                    <input id="port-socks-input" type="number" min="1" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7891">
-                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port</p>
+                    <input id="port-socks-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7891">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
 
                 <div>
                     <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
-                    <input id="port-redir-input" type="number" min="1" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="--">
-                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="redirPortHint">Transparent proxy port (Linux)</p>
+                    <input id="port-redir-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="0">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
                 </div>
 
                 <div>
                     <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
-                    <input id="port-tproxy-input" type="number" min="1" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="--">
-                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="tproxyPortHint">TProxy port (Linux)</p>
+                    <input id="port-tproxy-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="0">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
                 </div>
             </div>
 

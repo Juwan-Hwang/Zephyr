@@ -798,13 +798,13 @@ export async function initSettings() {
     const portSaveBtn = document.getElementById('port-config-save');
 
     /**
-     * Validate a port value: must be an integer in [1, 65535] or empty (no change).
+     * Validate a port value: must be an integer in [0, 65535] or empty (0 = disabled).
      * @param {string} raw
-     * @returns {number|null} Parsed port, or null if empty (skip), or NaN if invalid.
+     * @returns {number} Parsed port (0 for empty = disable), or NaN if invalid.
      */
     function parsePortValue(raw) {
         const trimmed = raw.trim();
-        if (trimmed === '') return null; // skip — keep current value
+        if (trimmed === '') return 0; // empty = disable (0)
         const num = Number(trimmed);
         return num;
     }
@@ -869,7 +869,7 @@ export async function initSettings() {
             const redirVal = parsePortValue(portRedirInput?.value || '');
             const tproxyVal = parsePortValue(portTproxyInput?.value || '');
 
-            // Validate range
+            // Validate range (0 = disabled, 1-65535 = valid port)
             const ports = [
                 { val: mixedVal, key: 'mixed-port' },
                 { val: socksVal, key: 'socks-port' },
@@ -877,47 +877,42 @@ export async function initSettings() {
                 { val: tproxyVal, key: 'tproxy-port' },
             ];
             for (const { val } of ports) {
-                if (val !== null && (!Number.isInteger(val) || val < 1 || val > 65535)) {
-                    showNotification(t.portRangeError || 'Port must be between 1 and 65535', 'error');
+                if (!Number.isInteger(val) || val < 0 || val > 65535) {
+                    showNotification(t.portRangeError || 'Port must be between 0 and 65535', 'error');
                     return;
                 }
             }
 
             // Check for duplicates against full resulting config state
-            // When a port input is empty (null), the existing config value is preserved
+            // When a port input is 0 (disabled), it does not conflict
             try {
                 /** @type {any} */
                 const currentConfig = (await invoke(COMMANDS.READ_CONFIG)) || {};
                 const resolvedPorts = ports.map(({ val, key }) => {
-                    let v = val !== null ? val : currentConfig[key];
-                    if (key === 'mixed-port' && v == null) v = currentConfig['port'];
+                    let v = val > 0 ? val : (currentConfig[key] || 0);
+                    if (key === 'mixed-port' && v === 0) v = currentConfig['port'] || 0;
                     return { val: v, key };
-                }).filter(p => p.val != null);
-                const resolvedValues = resolvedPorts.map(p => p.val).filter(v => typeof v === 'number' && v > 0);
+                }).filter(p => p.val > 0);
+                const resolvedValues = resolvedPorts.map(p => p.val);
                 if (new Set(resolvedValues).size !== resolvedValues.length) {
                     showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
                     return;
                 }
             } catch {
                 // Fallback: only check modal inputs if config read fails
-                const nonNullPorts = ports.filter(/** @param {{val: number|null}} p */ p => p.val !== null);
-                const portValues = nonNullPorts.map(/** @param {{val: number}} p */ p => p.val);
+                const activePorts = ports.filter(p => p.val > 0);
+                const portValues = activePorts.map(p => p.val);
                 if (new Set(portValues).size !== portValues.length) {
                     showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
                     return;
                 }
             }
 
-            // Build patch
+            // Build patch — 0 disables the port, non-zero sets it
             /** @type {Record<string, number>} */
             const patch = {};
             for (const { val, key } of ports) {
-                if (val !== null) patch[key] = val;
-            }
-
-            if (Object.keys(patch).length === 0) {
-                closePortModal();
-                return;
+                patch[key] = val;
             }
 
             const ok = await saveConfigToCore(patch);
