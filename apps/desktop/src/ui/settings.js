@@ -893,7 +893,7 @@ export async function initSettings() {
                     if (key === 'mixed-port' && v == null) v = currentConfig['port'];
                     return { val: v, key };
                 }).filter(p => p.val != null);
-                const resolvedValues = resolvedPorts.map(/** @param {{val: number}} p */ p => p.val);
+                const resolvedValues = resolvedPorts.map(p => p.val).filter(v => typeof v === 'number' && v > 0);
                 if (new Set(resolvedValues).size !== resolvedValues.length) {
                     showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
                     return;
