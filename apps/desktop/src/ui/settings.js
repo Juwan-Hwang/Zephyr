@@ -887,11 +887,12 @@ export async function initSettings() {
             // When a port input is empty (null), the existing config value is preserved
             try {
                 /** @type {any} */
-                const currentConfig = await invoke(COMMANDS.READ_CONFIG);
-                const resolvedPorts = ports.map(({ val, key }) => ({
-                    val: val !== null ? val : currentConfig[key],
-                    key,
-                })).filter(/** @param {{val: number|null}} p */ p => p.val != null);
+                const currentConfig = (await invoke(COMMANDS.READ_CONFIG)) || {};
+                const resolvedPorts = ports.map(({ val, key }) => {
+                    let v = val !== null ? val : currentConfig[key];
+                    if (key === 'mixed-port' && v == null) v = currentConfig['port'];
+                    return { val: v, key };
+                }).filter(p => p.val != null);
                 const resolvedValues = resolvedPorts.map(/** @param {{val: number}} p */ p => p.val);
                 if (new Set(resolvedValues).size !== resolvedValues.length) {
                     showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
