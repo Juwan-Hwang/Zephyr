@@ -805,8 +805,7 @@ export async function initSettings() {
     function parsePortValue(raw) {
         const trimmed = raw.trim();
         if (trimmed === '') return 0; // empty = disable (0)
-        const num = parseInt(trimmed, 10);
-        return num;
+        return Number(trimmed);
     }
 
     /** @type {ReturnType<typeof createFocusTrap> | null} */
@@ -819,12 +818,13 @@ export async function initSettings() {
         try {
             /** @type {any} */
             const config = (await invoke(COMMANDS.READ_CONFIG)) || {};
-            if (portMixedInput) portMixedInput.value = (config['mixed-port'] ?? config.port) != null ? String(config['mixed-port'] ?? config.port) : '';
-            if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
-            if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
-            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
+            if (portMixedInput) portMixedInput.value = (config['mixed-port'] || config.port) ? String(config['mixed-port'] || config.port) : '';
+            if (portSocksInput) portSocksInput.value = config['socks-port'] ? String(config['socks-port']) : '';
+            if (portRedirInput) portRedirInput.value = config['redir-port'] ? String(config['redir-port']) : '';
+            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] ? String(config['tproxy-port']) : '';
         } catch (err) {
             settingsLogger.warn('Failed to load port config for modal', err);
+            return;
         }
         if (portModal) {
             portModal.classList.remove('hidden');
