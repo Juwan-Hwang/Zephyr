@@ -353,8 +353,8 @@ export async function initSettings() {
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
-    const portConfigBtn = document.getElementById('port-config-btn');
-    const portDisplay = document.getElementById('current-port-display');
+    const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
+    const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
     const versionText = document.getElementById('core-version-text');
     const configsList = document.getElementById('configs-list');
     const customArgsInput = /** @type {HTMLInputElement} */ (document.getElementById('custom-args-input'));
@@ -794,8 +794,8 @@ export async function initSettings() {
     const portSocksInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-socks-input'));
     const portRedirInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-redir-input'));
     const portTproxyInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-tproxy-input'));
-    const portCancelBtn = document.getElementById('port-config-cancel');
-    const portSaveBtn = document.getElementById('port-config-save');
+    const portCancelBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-cancel'));
+    const portSaveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-save'));
 
     /**
      * Validate a port value: must be a decimal integer in [0, 65535] or empty (0 = disabled).
@@ -820,10 +820,11 @@ export async function initSettings() {
         try {
             /** @type {any} */
             const config = (await invoke(COMMANDS.READ_CONFIG)) || {};
-            if (portMixedInput) portMixedInput.value = (config['mixed-port'] || config.port) ? String(config['mixed-port'] || config.port) : '';
-            if (portSocksInput) portSocksInput.value = config['socks-port'] ? String(config['socks-port']) : '';
-            if (portRedirInput) portRedirInput.value = config['redir-port'] ? String(config['redir-port']) : '';
-            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] ? String(config['tproxy-port']) : '';
+            // Show actual port values in modal (0 = disabled, shown as-is)
+            if (portMixedInput) portMixedInput.value = config['mixed-port'] != null ? String(config['mixed-port']) : (config.port != null ? String(config.port) : '');
+            if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
+            if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
+            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
         } catch (err) {
             settingsLogger.warn('Failed to load port config for modal', err);
             return;
@@ -974,7 +975,7 @@ export async function initSettings() {
             if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
             if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
 
-            // Update port display
+            // Update port display — use || to skip disabled (0) ports and show first active port
             if (portDisplay) {
                 const mixedPort = config['mixed-port'] || config.port || config['socks-port'] || 0;
                 portDisplay.textContent = mixedPort > 0 ? String(mixedPort) : '--';
