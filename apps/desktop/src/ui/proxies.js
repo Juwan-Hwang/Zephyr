@@ -33,8 +33,8 @@ export { switchPage } from './navigation.js';
 /** Represents "infinite" or "timeout" latency */
 export const DELAY_INFINITE = 1000000;
 
-/** Returns true if the given delay value means "not tested" or "timeout". */
-function isInvalidDelay(d) { return d == null || d === 0 || d >= 999999; }
+/** Returns true if the given delay value means "not tested" or "timeout". Catches -1 (API failure), 0, and >= 999999. */
+function isInvalidDelay(d) { return d == null || d <= 0 || d >= 999999; }
 
 const latencyLoadingIcon = SVG_ICONS.loading;
 
@@ -483,6 +483,8 @@ export function initProxyControls() {
             icon?.classList.add('animate-spin', 'text-accent');
             testBtn.classList.add('opacity-50', 'cursor-not-allowed');
 
+            let hideTimeoutEnabled = false;
+
             try {
                 showLatencyLoadingForAllCards();
                 await renderProxies();
@@ -491,9 +493,9 @@ export function initProxyControls() {
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
-                const { data, mainGroup: _mainGroup, proxies, current: currentNode } = /** @type {any} */ (proxyGroupsResult);
+                const { data, mainGroup: _mainGroup, proxies, current: _currentNode } = /** @type {any} */ (proxyGroupsResult);
                 const settings = await getSettingsCached();
-                const hideTimeoutEnabled = settings?.hide_timeout_nodes;
+                hideTimeoutEnabled = !!settings?.hide_timeout_nodes;
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -543,20 +545,17 @@ export function initProxyControls() {
                     }
 
                     // Hide timeout nodes immediately if setting is enabled
-                    if (isInvalidDelay(delay)) {
-                        try {
-                            const settings = await getSettingsCached();
-                            if (settings?.hide_timeout_nodes) {
-                                // Don't hide if this is the currently active node
-                                if (name !== currentNode) {
-                                    const container = document.getElementById('proxies-list');
-                                    const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
-                                    if (wrapper) {
-                                        wrapper.remove();
-                                    }
-                                }
+                    if (hideTimeoutEnabled && isInvalidDelay(delay)) {
+                        // Don't hide if this is the currently active node
+                        // Use _activeCard to get real-time active node (prevents mis-hiding during node switch)
+                        const activeName = _activeCard?.closest('[data-name]')?.dataset.name;
+                        if (name !== activeName) {
+                            const container = document.getElementById('proxies-list');
+                            const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
+                            if (wrapper) {
+                                wrapper.remove();
                             }
-                        } catch { /* ignore errors */ }
+                        }
                     }
                     queueLatencySort();
 
@@ -593,6 +592,10 @@ export function initProxyControls() {
                     await applySmartSortToDom();
                 } else {
                     applyLatencySortToDom(true);
+                }
+                // Re-render to restore nodes that may need to be visible again after testing
+                if (hideTimeoutEnabled) {
+                    await renderProxies();
                 }
                 icon?.classList.remove('animate-spin', 'text-accent');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
