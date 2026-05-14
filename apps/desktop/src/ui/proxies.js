@@ -491,7 +491,7 @@ export function initProxyControls() {
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
-                const { data, mainGroup: _mainGroup, proxies } = /** @type {any} */ (proxyGroupsResult);
+                const { data, mainGroup: _mainGroup, proxies, current: currentNode } = /** @type {any} */ (proxyGroupsResult);
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -545,8 +545,6 @@ export function initProxyControls() {
                         try {
                             const settings = await getSettingsCached();
                             if (settings?.hide_timeout_nodes) {
-                                // Get current active node to protect it
-                                const currentNode = proxyGroupsResult?.current;
                                 // Don't hide if this is the currently active node
                                 if (name !== currentNode) {
                                     const container = document.getElementById('proxies-list');
