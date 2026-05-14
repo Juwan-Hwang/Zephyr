@@ -594,6 +594,7 @@ export function initProxyControls() {
                     applyLatencySortToDom(true);
                 }
                 // Re-render to restore nodes that may need to be visible again after testing
+                invalidateProxiesCache();
                 if (hideTimeoutEnabled) {
                     await renderProxies();
                 }
