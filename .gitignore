@@ -51,6 +51,14 @@ apps/desktop/src-tauri/target/
 # Generated: @zephyr/shared copied for import maps
 apps/desktop/src/_shared/
 
+# Frontend build artifacts
+apps/desktop/src/cm6.bundle.js
+apps/desktop/src/tailwind.css
+
+# Prebuilt third-party libraries
+apps/desktop/src/js-yaml.min.js
+apps/desktop/src/js-yaml.d.ts
+
 # Installer files (should not be in repo)
 rustup-init.exe
 
