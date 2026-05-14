@@ -436,33 +436,6 @@
                             
                             <div class="h-px bg-white/5"></div>
 
-                            <!-- DNS Rewrite -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-4">
-                                        <div class="text-zinc-400">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="dnsRewrite">DNS Rewrite</p>
-                                            <button id="dns-config-btn" class="text-zinc-500 hover:text-accent transition-colors" title="Configure DNS Servers">
-                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <circle cx="12" cy="12" r="3"/>
-                                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="dnsRewriteDesc">Force standard DNS settings to prevent leaks</p>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="dns-rewrite-toggle">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-
-                            <div class="h-px bg-white/5"></div>
-
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-zinc-400">
@@ -638,6 +611,51 @@
                                     <input type="checkbox" id="setting-hide-timeout">
                                     <span class="switch-slider"></span>
                                 </label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- DNS Rewrite -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-zinc-400">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <p class="text-sm font-semibold text-zinc-200" data-i18n="dnsRewrite">DNS Rewrite</p>
+                                            <button id="dns-config-btn" class="text-zinc-500 hover:text-accent transition-colors" title="Configure DNS Servers">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <circle cx="12" cy="12" r="3"/>
+                                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p class="text-2xs text-zinc-500 ml-9" data-i18n="dnsRewriteDesc">Force standard DNS settings to prevent leaks</p>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="dns-rewrite-toggle">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
+                            <!-- Port Settings -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="portSettings">Port Settings</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="portSettingsDesc">Configure proxy and DNS ports</p>
+                                    </div>
+                                </div>
+                                <button id="port-config-btn" class="btn-ghost">
+                                    <span id="current-port-display">7890</span>
+                                </button>
                             </div>
 
                             <div class="h-px bg-white/5"></div>
@@ -1038,6 +1056,45 @@
             <div class="flex gap-3 justify-end mt-6">
                 <button id="dns-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
                 <button id="dns-config-save" class="btn-primary" data-i18n="confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Port Configuration Modal -->
+    <div id="port-config-modal" role="dialog" aria-modal="true" aria-labelledby="port-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-black/40 backdrop-blur-md">
+        <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 id="port-config-title" class="text-xl font-light text-zinc-100 mb-2" data-i18n="portConfigTitle">Port Configuration</h3>
+            <p class="text-xs text-zinc-400 mb-6" data-i18n="portConfigDesc">Set ports for proxy protocols</p>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
+                    <input id="port-mixed-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7890">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
+                </div>
+
+                <div>
+                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
+                    <input id="port-socks-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="7891">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
+                </div>
+
+                <div>
+                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
+                    <input id="port-redir-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="0">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
+                </div>
+
+                <div>
+                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
+                    <input id="port-tproxy-input" type="number" min="0" max="65535" class="input-common placeholder:text-zinc-700 w-full" placeholder="0">
+                    <p class="text-2xs text-zinc-500 mt-1.5 ml-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
+                </div>
+            </div>
+
+            <div class="flex gap-3 justify-end mt-6">
+                <button id="port-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
+                <button id="port-config-save" class="btn-primary" data-i18n="confirm">Confirm</button>
             </div>
         </div>
     </div>

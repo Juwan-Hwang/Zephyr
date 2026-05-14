@@ -44,6 +44,7 @@ import {
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
+import { createFocusTrap } from '../utils/focus-trap.js';
 import * as prism from './prism.js';
 
 // The following modules have not yet been extracted from ui.js.
@@ -352,6 +353,8 @@ export async function initSettings() {
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
+    const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
+    const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
     const versionText = document.getElementById('core-version-text');
     const configsList = document.getElementById('configs-list');
     const customArgsInput = /** @type {HTMLInputElement} */ (document.getElementById('custom-args-input'));
@@ -742,15 +745,15 @@ export async function initSettings() {
             await syncCoreConfig();
 
             if (result && !result.hot_reload_success) {
-                    /** @type {any} */
-                    const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                    showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
-                }
-                return true;
-            } catch (err) {
-                settingsLogger.error('Failed to save config to core', err);
                 /** @type {any} */
                 const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+                showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+            }
+            return true;
+        } catch (err) {
+            settingsLogger.error('Failed to save config to core', err);
+            /** @type {any} */
+            const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const error = toError(err);
             showNotification(error.toString() || t2.failedSaveSettings || 'Failed to save settings to core', 'error');
             return false;
@@ -784,6 +787,141 @@ export async function initSettings() {
         if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
         else { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
+
+    // ---- Port configuration modal ----
+    const portModal = document.getElementById('port-config-modal');
+    const portMixedInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-mixed-input'));
+    const portSocksInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-socks-input'));
+    const portRedirInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-redir-input'));
+    const portTproxyInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-tproxy-input'));
+    const portCancelBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-cancel'));
+    const portSaveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-save'));
+
+    /**
+     * Validate a port value: must be a decimal integer in [0, 65535] or empty (0 = disabled).
+     * Rejects hex (0x10), octal, scientific notation, and decimals.
+     * @param {string} raw
+     * @returns {number} Parsed port (0 for empty = disable), or NaN if invalid.
+     */
+    function parsePortValue(raw) {
+        const trimmed = raw.trim();
+        if (trimmed === '') return 0; // empty = disable (0)
+        if (!/^\d+$/.test(trimmed)) return NaN; // reject non-decimal-integer strings
+        return Number(trimmed);
+    }
+
+    /** @type {ReturnType<typeof createFocusTrap> | null} */
+    let portFocusTrap = null;
+
+    /**
+     * Open the port config modal and populate with current values.
+     */
+    async function openPortModal() {
+        try {
+            /** @type {any} */
+            const config = (await invoke(COMMANDS.READ_CONFIG)) || {};
+            // Show actual port values in modal (0 = disabled, shown as-is)
+            if (portMixedInput) portMixedInput.value = config['mixed-port'] != null ? String(config['mixed-port']) : (config.port != null ? String(config.port) : '');
+            if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
+            if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
+            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
+        } catch (err) {
+            settingsLogger.warn('Failed to load port config for modal', err);
+            return;
+        }
+        if (portModal) {
+            portModal.classList.remove('hidden');
+            portModal.classList.add('flex');
+            if (portFocusTrap) portFocusTrap.destroy();
+            portFocusTrap = createFocusTrap(portModal, { onEscape: closePortModal });
+            portFocusTrap.activate();
+        }
+    }
+
+    /**
+     * Close the port config modal.
+     */
+    function closePortModal() {
+        if (!portModal) return;
+        if (portFocusTrap) {
+            portFocusTrap.deactivate();
+        }
+        portModal.classList.add('hidden');
+        portModal.classList.remove('flex');
+    }
+
+    if (portConfigBtn) {
+        portConfigBtn.addEventListener('click', openPortModal);
+    }
+    if (portCancelBtn) {
+        portCancelBtn.addEventListener('click', closePortModal);
+    }
+    if (portModal) {
+        portModal.addEventListener('click', (e) => {
+            if (e.target === portModal) closePortModal();
+        });
+    }
+
+    if (portSaveBtn) {
+        portSaveBtn.addEventListener('click', async () => {
+            if (portSaveBtn.classList.contains('pointer-events-none')) return;
+            portSaveBtn.classList.add('opacity-50', 'pointer-events-none');
+            try {
+                /** @type {any} */
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+
+                const mixedVal = parsePortValue(portMixedInput?.value || '');
+                const socksVal = parsePortValue(portSocksInput?.value || '');
+                const redirVal = parsePortValue(portRedirInput?.value || '');
+                const tproxyVal = parsePortValue(portTproxyInput?.value || '');
+
+                // Validate range (0 = disabled, 1-65535 = valid port)
+                const ports = [
+                    { val: mixedVal, key: 'mixed-port' },
+                    { val: socksVal, key: 'socks-port' },
+                    { val: redirVal, key: 'redir-port' },
+                    { val: tproxyVal, key: 'tproxy-port' },
+                ];
+                for (const { val } of ports) {
+                    if (!Number.isInteger(val) || val < 0 || val > 65535) {
+                        showNotification(t.portRangeError || 'Port must be between 0 and 65535', 'error');
+                        return;
+                    }
+                }
+
+                // Require at least one active proxy port (mixed or socks)
+                if (mixedVal === 0 && socksVal === 0) {
+                    showNotification(t.portAllDisabledError || 'At least one proxy port (Mixed or SOCKS5) must be enabled', 'error');
+                    return;
+                }
+
+                // Check for duplicates among the new port values.
+                // Ports set to 0 (disabled) are ignored.
+                const activePorts = ports.filter(p => p.val > 0).map(p => p.val);
+                if (new Set(activePorts).size !== activePorts.length) {
+                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                    return;
+                }
+
+                // Build patch — 0 disables the port, non-zero sets it
+                // Always disable legacy 'port' key: when mixed-port > 0 it prevents
+                // conflict, and when mixed-port = 0 the user intends to fully disable
+                /** @type {Record<string, number>} */
+                const patch = { port: 0 };
+                for (const { val, key } of ports) {
+                    patch[key] = val;
+                }
+
+                const ok = await saveConfigToCore(patch);
+                if (ok) {
+                    await loadSettingsFromCore();
+                    closePortModal();
+                }
+            } finally {
+                portSaveBtn.classList.remove('opacity-50', 'pointer-events-none');
+            }
+        });
+    }
 
     // ---- Geo data update ----
     updateGeoBtn?.addEventListener('click', async () => {
@@ -836,6 +974,12 @@ export async function initSettings() {
             if (unifiedDelayToggle) unifiedDelayToggle.checked = config['unified-delay'] !== false;
             if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
             if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
+
+            // Update port display — use || to skip disabled (0) ports and show first active port
+            if (portDisplay) {
+                const mixedPort = config['mixed-port'] || config.port || config['socks-port'] || 0;
+                portDisplay.textContent = mixedPort > 0 ? String(mixedPort) : '--';
+            }
 
             if (config.tunnels && Array.isArray(config.tunnels)) {
                 currentTunnels = config.tunnels;
