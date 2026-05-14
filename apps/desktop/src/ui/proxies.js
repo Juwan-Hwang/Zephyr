@@ -743,7 +743,7 @@ async function updateProxiesInPlace(container, proxies, data, current) {
             const latVal = card.querySelector('[id^="latency-"]');
             if (latVal && wrapper.dataset.pending !== '1') {
                 latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-                latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
+                latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
             }
 
             if (isSelected) {
