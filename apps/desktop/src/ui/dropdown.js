@@ -45,7 +45,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
         menu.style.position = 'fixed';
         menu.style.left = `${rect.left / uiScale}px`;
-        menu.style.top = `${rect.bottom / uiScale + 6 / uiScale}px`;
+        menu.style.top = `${(rect.bottom + 6) / uiScale}px`;
         menu.style.width = `${rect.width / uiScale}px`;
         menu.style.zIndex = '99999';
     };
