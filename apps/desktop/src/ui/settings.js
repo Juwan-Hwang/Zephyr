@@ -892,8 +892,9 @@ export async function initSettings() {
             }
 
             // Build patch — 0 disables the port, non-zero sets it
+            // Always disable legacy 'port' key to avoid conflict with 'mixed-port'
             /** @type {Record<string, number>} */
-            const patch = {};
+            const patch = { port: 0 };
             for (const { val, key } of ports) {
                 patch[key] = val;
             }
@@ -960,7 +961,7 @@ export async function initSettings() {
 
             // Update port display
             if (portDisplay) {
-                const mixedPort = config['mixed-port'] ?? config.port ?? config['socks-port'] ?? 7890;
+                const mixedPort = config['mixed-port'] || config.port || config['socks-port'] || 0;
                 portDisplay.textContent = mixedPort > 0 ? String(mixedPort) : '--';
             }
 
