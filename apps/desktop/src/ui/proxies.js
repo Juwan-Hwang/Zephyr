@@ -541,13 +541,11 @@ export function initProxyControls() {
                     }
 
                     // Hide timeout nodes immediately if setting is enabled
-                    // Hide timeout nodes immediately if setting is enabled
                     if (isInvalidDelay(delay)) {
                         try {
                             const settings = await getSettingsCached();
                             if (settings?.hide_timeout_nodes) {
                                 // Get current active node to protect it
-                                const proxyGroupsResult = await fetchProxyGroupsShared();
                                 const currentNode = proxyGroupsResult?.current;
                                 // Don't hide if this is the currently active node
                                 if (name !== currentNode) {
