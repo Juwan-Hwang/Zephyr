@@ -697,7 +697,10 @@ export async function initSettings() {
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
     });
-    hideTimeoutToggle?.addEventListener('change', save);
+    hideTimeoutToggle?.addEventListener('change', async () => {
+        await save();
+        Bus.emit(Events.CONFIG_UPDATED);
+    });
     autoUpdateClientToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
