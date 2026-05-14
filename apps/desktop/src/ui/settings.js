@@ -564,8 +564,12 @@ export async function initSettings() {
                     settings.auto_update_client = false;
                 }
                 if (hideTimeoutToggle) {
+                    const wasHideTimeoutEnabled = hideTimeoutToggle.checked;
                     hideTimeoutToggle.checked = false;
                     settings.hide_timeout_nodes = false;
+                    if (wasHideTimeoutEnabled) {
+                        hideTimeoutToggle.dispatchEvent(new Event('change'));
+                    }
                 }
                 if (nodeScrollToggle) {
                     nodeScrollToggle.checked = false;
