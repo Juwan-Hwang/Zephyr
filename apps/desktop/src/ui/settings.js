@@ -892,11 +892,14 @@ export async function initSettings() {
             }
 
             // Build patch — 0 disables the port, non-zero sets it
-            // Always disable legacy 'port' key to avoid conflict with 'mixed-port'
+            // Disable legacy 'port' only when mixed-port is active to prevent conflict
             /** @type {Record<string, number>} */
-            const patch = { port: 0 };
+            const patch = {};
             for (const { val, key } of ports) {
                 patch[key] = val;
+            }
+            if (patch['mixed-port'] > 0) {
+                patch['port'] = 0;
             }
 
             const ok = await saveConfigToCore(patch);
