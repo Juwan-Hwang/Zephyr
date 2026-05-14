@@ -881,7 +881,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
         } else {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-            latVal.textContent = (lastDelay && lastDelay > 0 && lastDelay < 999999) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
+            latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
         }
         right.appendChild(latLabel);
         right.appendChild(latVal);
