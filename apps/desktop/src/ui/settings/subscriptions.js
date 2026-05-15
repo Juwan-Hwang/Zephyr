@@ -1165,7 +1165,7 @@ export function initSubscriptionSettings({
                         const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
                         const activeConfig = liveSettings.last_config || 'config.yaml';
                         const { saveProxySelection } = await import('../proxy-memory.js');
-                        await saveProxySelection(activeConfig, currentProxyGroups.current);
+                        await saveProxySelection(activeConfig, { node: currentProxyGroups.current, group: appStore.get('uiGroupName') });
                     }
                 } catch (_e) { /* ignore */ }
 

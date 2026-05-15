@@ -41,6 +41,7 @@ export function switchPage(pageId) {
  * @param {Function} [callbacks.onRuleLibrary] - Called when navigating to rule-library page
  * @param {Function} [callbacks.onLogs] - Called when navigating to logs page
  * @param {Function} [callbacks.onLeaveLogs] - Called when navigating away from logs page
+ * @param {Function} [callbacks.onLeaveProxies] - Called when navigating away from proxies page
  */
 export function initNavigation(callbacks = {}) {
     const navItems = document.querySelectorAll('[data-nav]');
@@ -58,6 +59,9 @@ export function initNavigation(callbacks = {}) {
             // Fire leave callback for the previous page
             if (currentPage === 'logs' && targetPage !== 'logs' && callbacks.onLeaveLogs) {
                 callbacks.onLeaveLogs();
+            }
+            if (currentPage === 'proxies' && targetPage !== 'proxies' && callbacks.onLeaveProxies) {
+                callbacks.onLeaveProxies();
             }
 
             // Update nav item active styling
