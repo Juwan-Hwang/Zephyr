@@ -364,10 +364,11 @@ export const appStore = createStore('zephyr.app', {
 
     // Proxy group resolver state
     // All resolver state is transient — re-resolved each session.
-    // User's explicit group choice is tracked via saveProxySelection (profile+node).
+    // User's explicit group choice is tracked via saveProxySelection (profile+group+node).
     uiGroupName: null,
     uiPrimaryGroupName: null,
     effectiveGroupName: null,
+    observedGroupName: null,
 
     // System state
     isSysProxyEnabled: false,
@@ -382,7 +383,7 @@ export const appStore = createStore('zephyr.app', {
     currentConfigName: null,
     currentCoreVersion: '',
 }, {
-    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName'],
+    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName'],
 });
 
 /** Tray state (replaces the old sealed TrayState) */

@@ -558,6 +558,9 @@ export const translations = {
         groupMismatchExplanation: "Current group: {uiGroup} — Rules default to: {effectiveGroup}. Connections may use \"{effectiveGroup}\" instead of your selected node.",
         switchToEffectiveGroup: "Switch to rules default",
         effectiveGroupNotSwitchable: "Rules default is auto-select (not switchable)",
+        observedGroupMismatch: "Actual traffic uses: {observedGroup} — differs from current group {uiGroup}.",
+        switchToObservedGroup: "Switch to traffic group",
+        observedGroupNotSwitchable: "Traffic group is auto-select (not switchable)",
         dismiss: "Dismiss",
     },
 
@@ -1089,6 +1092,9 @@ export const translations = {
         groupMismatchExplanation: "当前组: {uiGroup} — 规则默认组: {effectiveGroup}。连接可能使用「{effectiveGroup}」而非您选择的节点。",
         switchToEffectiveGroup: "切换到规则默认组",
         effectiveGroupNotSwitchable: "规则默认为自动选择（不可切换）",
+        observedGroupMismatch: "实际流量走: {observedGroup} — 与当前组 {uiGroup} 不一致。",
+        switchToObservedGroup: "切换到流量组",
+        observedGroupNotSwitchable: "流量组为自动选择（不可切换）",
         dismiss: "关闭",
     },
 
