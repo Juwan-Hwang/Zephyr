@@ -12,6 +12,7 @@ import { trayMenuCache, TRAY_CACHE_TTL, invalidateSettingsCache, invalidateProxi
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
+import { invalidateRunConfigCache } from './run-config-cache.js';
 
 // --- Tray event listener cleanup ---
 
@@ -99,13 +100,20 @@ export async function updateTrayMenu(forceRefresh = false) {
             /** @type {any} */
             const pd = proxyData;
             if (pd && pd.proxies) {
-                const groupNames = Object.keys(pd.proxies).filter(/** @param {string} name */ (name) => {
-                    const type = pd.proxies[name].type?.toLowerCase() || '';
-                    return type === 'selector' || type === 'select';
-                });
-
-                // Only use the first selector group to avoid duplicate nodes in tray
-                const mainGroup = groupNames[0];
+                // Use the resolver's active UI group if available, otherwise fall back
+                // to finding the first selector group.
+                // Prefer uiGroupName over uiPrimaryGroupName: in global mode,
+                // uiGroupName is 'GLOBAL' (the actually routing group), while
+                // uiPrimaryGroupName may point to a selector that doesn't affect routing.
+                let mainGroup = appStore.get('uiGroupName')
+                    || appStore.get('uiPrimaryGroupName');
+                if (!mainGroup || !pd.proxies[mainGroup]) {
+                    const groupNames = Object.keys(pd.proxies).filter(/** @param {string} name */ (name) => {
+                        const type = pd.proxies[name].type?.toLowerCase() || '';
+                        return type === 'selector' || type === 'select';
+                    });
+                    mainGroup = groupNames[0];
+                }
                 if (mainGroup) {
                     const group = pd.proxies[mainGroup];
                     proxyGroups = [{
@@ -263,6 +271,7 @@ export async function initTrayEventListeners() {
                 settings.last_config = subName;
                 await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 invalidateSettingsCache();
+                invalidateRunConfigCache();
 
                 await closeAllConnections();
 
@@ -296,6 +305,12 @@ export async function initTrayEventListeners() {
             const success = await switchProxy(group, proxy);
             if (success) {
                 invalidateProxiesCache();
+                invalidateRunConfigCache();
+
+                // Sync uiGroupName when tray explicitly specifies a group
+                if (group) {
+                    appStore.set('uiGroupName', group);
+                }
 
                 await closeAllConnections();
                 import('./proxies.js').then(m => m.syncCoreConfig());

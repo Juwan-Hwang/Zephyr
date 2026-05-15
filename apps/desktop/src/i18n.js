@@ -555,6 +555,10 @@ export const translations = {
         pluginScriptPlaceholder: "Plugin script content will be loaded here",
         pluginUnloadConfirmTitle: "Unload Plugin",
         pluginUnloadConfirmMsg: "This will stop the plugin and release its resources.",
+        groupMismatchExplanation: "Current group: {uiGroup} — Rules default to: {effectiveGroup}. Connections may use \"{effectiveGroup}\" instead of your selected node.",
+        switchToEffectiveGroup: "Switch to rules default",
+        effectiveGroupNotSwitchable: "Rules default is auto-select (not switchable)",
+        dismiss: "Dismiss",
     },
 
     zh: {
@@ -1082,6 +1086,10 @@ export const translations = {
         pluginScriptPlaceholder: "插件脚本内容将在此处加载",
         pluginUnloadConfirmTitle: "卸载插件",
         pluginUnloadConfirmMsg: "这将停止插件并释放其资源。",
+        groupMismatchExplanation: "当前组: {uiGroup} — 规则默认组: {effectiveGroup}。连接可能使用「{effectiveGroup}」而非您选择的节点。",
+        switchToEffectiveGroup: "切换到规则默认组",
+        effectiveGroupNotSwitchable: "规则默认为自动选择（不可切换）",
+        dismiss: "关闭",
     },
 
     ja: {
