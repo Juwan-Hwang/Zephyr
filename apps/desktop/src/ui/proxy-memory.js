@@ -84,10 +84,11 @@ function parseSelection(raw) {
     if (raw.startsWith('{')) {
         try {
             const parsed = JSON.parse(raw);
-            return { group: parsed.group || null, node: parsed.node || null };
+            if (parsed && typeof parsed === 'object' && 'node' in parsed) {
+                return { group: parsed.group || null, node: parsed.node || null };
+            }
         } catch {
-            // Malformed JSON, treat as legacy node name
-            return { group: null, node: raw };
+            // Malformed JSON, fall through to legacy treatment
         }
     }
     // Legacy: plain node name string
