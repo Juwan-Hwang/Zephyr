@@ -1130,7 +1130,7 @@ async function syncSmartUiVisibility() {
         // Backend only returns `enabled` if smart.toml has the key.
         // Fallback to localStorage for migration scenarios.
         enabled = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
-    } catch (e) {
+    } catch {
         // Fallback to localStorage on error
         enabled = localStorage.getItem('smartEnabled') === 'true';
     }
