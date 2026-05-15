@@ -1,0 +1,407 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+            target: "aarch64-apple-darwin"
+            arch: "arm64"
+          - platform: "macos-latest"
+            args: "--target x86_64-apple-darwin"
+            target: "x86_64-apple-darwin"
+            arch: "x64"
+          - platform: "ubuntu-22.04"
+            args: ""
+            target: ""
+            arch: "x64"
+          - platform: "windows-latest"
+            args: ""
+            target: ""
+            arch: "x64"
+
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # ── Unified bundled resources download script ──
+      - name: Setup bundled download script
+        run: |
+          cat > /tmp/download-bundled.sh << 'SCRIPT_EOF'
+          #!/bin/bash
+          # Unified script to download mihomo core and geo data with SHA256 verification
+          # Usage: download-bundled.sh <platform> <mihomo_version> <github_token>
+          set -e
+          PLATFORM="$1"
+          MIHOMO_VERSION="$2"
+          GITHUB_TOKEN="$3"
+          
+          mkdir -p apps/desktop/src-tauri/bundled
+          
+          # Determine mihomo asset name based on platform
+          case "$PLATFORM" in
+            windows-latest)
+              MIHOMO_ASSET="mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
+              MIHOMO_EXT="zip"
+              ;;
+            macos-latest)
+              if [ "${{ matrix.arch }}" = "arm64" ]; then
+                MIHOMO_ASSET="mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
+              else
+                MIHOMO_ASSET="mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
+              fi
+              MIHOMO_EXT="gz"
+              ;;
+            ubuntu-22.04)
+              MIHOMO_ASSET="mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
+              MIHOMO_EXT="gz"
+              ;;
+            *)
+              echo "ERROR: Unknown platform $PLATFORM"
+              exit 1
+              ;;
+          esac
+          
+          # Download mihomo with SHA256 verification
+          echo "Downloading mihomo: $MIHOMO_ASSET"
+          curl -sL -o "mihomo.${MIHOMO_EXT}" "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/${MIHOMO_ASSET}"
+          
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r ".assets[] | select(.name == \"${MIHOMO_ASSET}\") | .digest // empty")
+          
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum "mihomo.${MIHOMO_EXT}" | awk '{print $1}')
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: SHA256 mismatch for mihomo!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual: $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for mihomo"
+          else
+            echo "ERROR: SHA256 digest not available from GitHub API"
+            exit 1
+          fi
+          
+          # Extract mihomo
+          case "$MIHOMO_EXT" in
+            zip)
+              unzip -q "mihomo.zip"
+              mv mihomo-windows-amd64-compatible.exe apps/desktop/src-tauri/bundled/mihomo.exe
+              rm mihomo.zip
+              ;;
+            gz)
+              gunzip -f "mihomo.gz"
+              chmod +x mihomo
+              mv mihomo apps/desktop/src-tauri/bundled/mihomo
+              ;;
+          esac
+          
+          # Download geo data with SHA256 verification
+          echo "Downloading geo data..."
+          for file in geoip.dat geosite.dat Country.mmdb; do
+            curl -sL -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
+            curl -sL -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
+          done
+          
+          for file in geoip.dat geosite.dat Country.mmdb; do
+            EXPECTED=$(cat "apps/desktop/src-tauri/bundled/${file}.sha256sum" | cut -d' ' -f1)
+            ACTUAL=$(sha256sum "apps/desktop/src-tauri/bundled/${file}" | cut -d' ' -f1)
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "ERROR: SHA256 mismatch for $file!"
+              exit 1
+            fi
+            echo "✓ SHA256 verified for $file"
+            rm "apps/desktop/src-tauri/bundled/${file}.sha256sum"
+          done
+          
+          echo "Bundled resources ready."
+          SCRIPT_EOF
+          chmod +x /tmp/download-bundled.sh
+        shell: bash
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Update version in config files
+        run: |
+          set -e
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          echo "Before update:"
+          nl -ba apps/desktop/src-tauri/tauri.conf.json | sed -n '1,80p'
+
+          tmp=$(mktemp)
+          jq --arg v "$VERSION" '.version = $v' apps/desktop/src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" apps/desktop/src-tauri/tauri.conf.json
+
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" apps/desktop/src-tauri/Cargo.toml
+          rm -f apps/desktop/src-tauri/Cargo.toml.bak
+
+          tmp=$(mktemp)
+          jq --arg v "$VERSION" '.version = $v' apps/desktop/package.json > "$tmp"
+          mv "$tmp" apps/desktop/package.json
+
+          echo "After update:"
+          nl -ba apps/desktop/src-tauri/tauri.conf.json | sed -n '1,80p'
+
+          echo "Validate JSON:"
+          jq empty apps/desktop/src-tauri/tauri.conf.json
+          jq empty apps/desktop/package.json
+
+          echo "Updated version to $VERSION"
+        shell: bash
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies (macOS only)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          brew install pkg-config glib
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          if [ "${{ matrix.target }}" == "aarch64-apple-darwin" ]; then
+            SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+            echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      # Get latest mihomo release version
+      - name: Get latest mihomo version
+        id: mihomo_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MIHOMO_VERSION=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "VERSION=$MIHOMO_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest mihomo version: $MIHOMO_VERSION"
+        shell: bash
+
+      # ── Download bundled resources using unified script ──
+      - name: Download bundled resources (Full)
+        if: matrix.platform != 'macos-latest' || matrix.arch == 'arm64'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN"
+        shell: bash
+
+      # macOS x64 uses different arch naming in mihomo releases
+      - name: Download bundled resources (macOS x64)
+        if: matrix.platform == 'macos-latest' && matrix.arch == 'x64'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Override arch for script
+          mkdir -p apps/desktop/src-tauri/bundled
+          MIHOMO_VERSION="${{ steps.mihomo_version.outputs.VERSION }}"
+          curl -sL -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
+          ASSET_DIGEST=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            | jq -r '.assets[] | select(.name == "mihomo-darwin-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
+          if [ -n "$ASSET_DIGEST" ]; then
+            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
+            ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then exit 1; fi
+          else
+            exit 1
+          fi
+          gunzip -f mihomo.gz && chmod +x mihomo && mv mihomo apps/desktop/src-tauri/bundled/mihomo
+          # Geo data (same as script)
+          for file in geoip.dat geosite.dat Country.mmdb; do
+            curl -sL -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
+            curl -sL -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
+            EXPECTED=$(cat "apps/desktop/src-tauri/bundled/${file}.sha256sum" | cut -d' ' -f1)
+            ACTUAL=$(sha256sum "apps/desktop/src-tauri/bundled/${file}" | cut -d' ' -f1)
+            if [ "$EXPECTED" != "$ACTUAL" ]; then exit 1; fi
+            rm "apps/desktop/src-tauri/bundled/${file}.sha256sum"
+          done
+        shell: bash
+
+      - name: Create artifacts directory
+        run: mkdir -p dist-artifacts
+        shell: bash
+
+      - name: Build Tauri app (Full)
+        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+
+      - name: Collect Windows Full artifacts
+        if: matrix.platform == 'windows-latest'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
+            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
+          done
+        shell: bash
+
+      - name: Collect macOS Full artifacts
+        if: matrix.platform == 'macos-latest'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-full.dmg}")"
+          done
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-full.tar.gz}")"
+          done
+        shell: bash
+
+      - name: Collect Linux Full artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist-artifacts/$(basename "${f/.deb/-full.deb}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-full.AppImage}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
+            cp "$f" "dist-artifacts/$(basename "${f/.rpm/-full.rpm}")"
+          done
+        shell: bash
+
+      - name: Remove bundled files for lite version
+        run: |
+          rm -rf apps/desktop/src-tauri/bundled/*
+        shell: bash
+
+      - name: Build Tauri app (Lite)
+        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+
+      - name: Collect Windows Lite artifacts
+        if: matrix.platform == 'windows-latest'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
+            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
+          done
+        shell: bash
+
+      - name: Collect macOS Lite artifacts
+        if: matrix.platform == 'macos-latest'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-lite.dmg}")"
+          done
+          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-lite.tar.gz}")"
+          done
+        shell: bash
+
+      - name: Collect Linux Lite artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          shopt -s nullglob
+          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist-artifacts/$(basename "${f/.deb/-lite.deb}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-lite.AppImage}")"
+          done
+          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
+            cp "$f" "dist-artifacts/$(basename "${f/.rpm/-lite.rpm}")"
+          done
+        shell: bash
+
+      # ── Portable builds (Windows ZIP + Linux AppImage) ──
+      # Portable uses the same bundled resources as Full, with SHA256 verification
+
+      # ── Restore bundled for portable (reuses unified script) ──
+      - name: Restore bundled for portable
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN"
+        shell: bash
+
+      - name: Clean bundle directory before portable build
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        run: |
+          # Clean previous builds to ensure we get the correct portable artifact
+          rm -rf apps/desktop/src-tauri/target/release/bundle
+        shell: bash
+
+      - name: Build Tauri app (Portable)
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+
+      - name: Package Portable ZIP (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          mkdir -p portable/core portable/profiles portable/prism/plugins
+          cp apps/desktop/src-tauri/target/release/Zephyr.exe portable/
+          cp apps/desktop/src-tauri/bundled/* portable/core/
+          touch portable/.portable
+          cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr-windows-portable.zip . && cd ..
+        shell: bash
+
+      - name: Package Portable AppImage (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          # Get the freshly built AppImage (should be the only one after clean)
+          APPIMAGE=$(ls -t apps/desktop/src-tauri/target/release/bundle/appimage/Zephyr*.AppImage | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "ERROR: No AppImage found!"
+            exit 1
+          fi
+          echo "Using AppImage: $APPIMAGE"
+          mkdir -p portable/core portable/profiles portable/prism/plugins
+          cp "$APPIMAGE" portable/
+          cp apps/desktop/src-tauri/bundled/* portable/core/
+          touch portable/.portable
+          cd portable && tar czf ../dist-artifacts/Zephyr-linux-portable.tar.gz . && cd ..
+        shell: bash
+
+      - name: Upload All Release Assets
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Zephyr ${{ github.ref_name }}"
+          body: "See the assets to download and install this version."
+          draft: true
+          prerelease: false
+          files: dist-artifacts/*

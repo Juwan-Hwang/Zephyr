@@ -1,0 +1,102 @@
+name: Deploy Demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop/src/**'
+      - 'packages/shared/**'
+      - 'tailwind.config.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout main (Zephyr frontend source)
+        uses: actions/checkout@v4
+        with:
+          path: main
+
+      - name: Checkout demo branch (demo-specific files)
+        uses: actions/checkout@v4
+        with:
+          ref: demo
+          path: demo-branch
+
+      - name: Assemble demo site
+        run: |
+          mkdir -p dist
+
+          # 1. Copy Zephyr frontend source to dist/app/
+          mkdir -p dist/app
+          cp -r main/apps/desktop/src/* dist/app/
+
+          # 2. Copy @zephyr/shared (import map target) to dist/app/_shared/
+          mkdir -p dist/app/_shared
+          cp main/packages/shared/src/index.js dist/app/_shared/index.js
+
+          # 3. Inject demo bootstrap and mock-api loader using Python
+          python3 demo-branch/inject-demo.py dist/app/index.html dist/app/main.js
+
+          # 4. Copy demo-specific files to dist/
+          cp demo-branch/landing.html dist/index.html
+          cp demo-branch/site.js dist/site.js
+          cp demo-branch/site.css dist/site.css
+          cp demo-branch/os.css dist/os.css
+
+          # Mock layer
+          mkdir -p dist/app/demo
+          cp demo-branch/mock-api.js dist/app/demo/mock-api.js
+          cp demo-branch/mock-data.js dist/app/demo/mock-data.js
+
+          # Fonts
+          mkdir -p dist/fonts
+          cp demo-branch/fonts/* dist/fonts/
+
+          # Icons
+          cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
+          cp demo-branch/app-icon.png dist/app-icon.png 2>/dev/null || true
+          cp demo-branch/dark-icon.png dist/dark-icon.png 2>/dev/null || true
+
+          # JS-YAML library
+          cp main/apps/desktop/src/js-yaml.min.js dist/app/ 2>/dev/null || true
+
+          # 4. Verify
+          echo "=== Verifying ==="
+          echo "1. Demo bootstrap in app/index.html:"
+          grep -c "__AETHER_DEMO__" dist/app/index.html
+          echo "2. Mock API loader in app/main.js:"
+          grep -c "mock-api" dist/app/main.js
+          echo "3. iframe src in site.js:"
+          grep -c "app/index.html" dist/site.js
+          echo "4. app-icon path in landing page:"
+          grep -c "app-icon.png" dist/index.html
+
+          echo "=== Dist structure ==="
+          find dist -maxdepth 2 -type f | sort | head -40
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

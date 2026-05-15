@@ -1,0 +1,388 @@
+# ============================================================
+# Zephyr Security Scan Pipeline
+# Note: Some Actions use version tags (e.g. @v4) for convenience.
+# Pinning all Actions to immutable commit SHA is a future goal.
+# ============================================================
+
+name: Security Scan
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # Job 1: Rust 依赖漏洞扫描
+  # ============================================================
+  rust-dependency-audit:
+    name: "\U0001F50D Rust Dependency Audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - name: Run cargo audit
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+  # ============================================================
+  # Job 2: cargo-deny 许可证/重复crate/来源检查
+  # ============================================================
+  cargo-deny:
+    name: "\U0001F6E1\uFE0F Cargo Deny Check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: apps/desktop/src-tauri/Cargo.toml
+          command: check
+          command-arguments: --config deny.toml
+          log-level: warn
+
+  # ============================================================
+  # Job 3: Rust 代码质量与安全检查 (clippy)
+  # ============================================================
+  rust-clippy:
+    name: "\U0001F980 Rust Clippy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Run clippy with security lints
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo clippy --all-targets -- -D warnings \
+            -W clippy::indexing_slicing \
+            -W clippy::cast_possible_truncation \
+            -W clippy::cast_possible_wrap \
+            -W clippy::cast_sign_loss \
+            -W clippy::default_trait_access \
+            -W clippy::filetype_is_file \
+            -W clippy::large_include_file \
+            -W clippy::shadow_reuse \
+            -W clippy::implicit_clone \
+            -W clippy::unnecessary_safety_comment \
+            -W clippy::unused_async \
+            -W clippy::todo
+
+  # ============================================================
+  # Job 4: Rust 格式化检查
+  # ============================================================
+  rust-fmt:
+    name: "\U0001F4DD Rust Format Check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Check formatting
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --all -- --check
+
+  # ============================================================
+  # Job 5: 前端依赖漏洞扫描
+  # ============================================================
+  frontend-audit:
+    name: "\U0001F4E6 Frontend Dependency Audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: pnpm install
+        run: pnpm install
+      - name: pnpm audit (production only, fail on moderate+)
+        run: pnpm audit --audit-level=moderate
+
+  # ============================================================
+  # Job 6: PR 依赖审查（仅 PR 触发）
+  # ============================================================
+  dependency-review:
+    name: "\U0001F4E5 Dependency Review"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  # ============================================================
+  # Job 7: Semgrep SAST（开源模式，无需 token）
+  # ============================================================
+  semgrep:
+    name: "\U0001F50E Semgrep SAST Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep
+
+      - name: Semgrep scan (open source + custom rules)
+        run: |
+          semgrep scan \
+            --config auto \
+            --config .semgrep.yml \
+            --sarif \
+            --output semgrep.sarif \
+            --severity WARNING \
+            --error
+        continue-on-error: true
+
+  # ============================================================
+  # Job 8: 密钥与敏感信息泄露检测
+  # ============================================================
+  secret-scan:
+    name: "\U0001F511 Secret Detection"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: trufflesecurity/trufflehog@v3.95.2
+        with:
+          extra_args: --only-verified
+          path: .
+
+      - name: Check for hardcoded secrets in source
+        run: |
+          echo "=== Checking for hardcoded secrets ==="
+          FAILED=0
+
+          # Rust: 硬编码密码/凭证
+          if grep -rnE '(password|passwd|pwd|secret)\s*[:=]\s*["\x27][^"\x27]{8,}' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target \
+             | grep -v 'test\|example\|placeholder\|TODO\|FIXME'; then
+            echo "::error::Found hardcoded password or secret in Rust code"
+            FAILED=1
+          fi
+
+          # Rust: 硬编码 API key / token
+          if grep -rnE '(api_key|apikey|secret_key|private_key|access_token)\s*=\s*"[^"]{20,}"' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target \
+             | grep -v 'test\|example'; then
+            echo "::error::Found hardcoded API key in Rust code"
+            FAILED=1
+          fi
+
+          # Rust: 从环境变量读取密码（警告级别）
+          if grep -rn 'env::var("PASSWORD")' apps/desktop/src-tauri/src/ --include="*.rs" --exclude-dir=target; then
+            echo "::warning::Password read from environment variable (ensure not logged)"
+          fi
+
+          # JS: 硬编码 token / auth
+          if grep -rnE '(token|auth|bearer|api_key)\s*[:=]\s*["\x27][^"\x27 ]{20,}' apps/desktop/src/ --include="*.js" \
+             | grep -v 'test\|example\|placeholder\|localhost\|127\.0\.0\.1'; then
+            echo "::error::Found hardcoded token in JS code"
+            FAILED=1
+          fi
+
+          for pattern in "*.env" "*.env.*" "*.pem" "*.key" "*.p12" "*.pfx" "id_rsa*" "id_ed25519*" "*.keystore"; do
+            if ! grep -qF "$pattern" .gitignore 2>/dev/null; then
+              echo "::warning::.gitignore missing pattern: $pattern"
+            fi
+          done
+
+          if [ $FAILED -eq 0 ]; then
+            echo "\u2705 No hardcoded secrets detected"
+          else
+            exit 1
+          fi
+
+  # ============================================================
+  # Job 9: Tauri 安全配置审计
+  # ============================================================
+  tauri-security:
+    name: "\U0001F6E1\uFE0F Tauri Security Audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check Tauri security configuration
+        run: |
+          echo "=== Tauri Security Configuration Audit ==="
+          WARNINGS=0
+
+          if grep -q '"devtools": true' apps/desktop/src-tauri/tauri.conf.json; then
+            echo "::warning::devtools is enabled in production build. Set to false or use cfg!"
+            WARNINGS=$((WARNINGS + 1))
+          else
+            echo "\u2705 devtools is disabled in production"
+          fi
+
+          if grep -q 'ws://127.0.0.1:\*' apps/desktop/src-tauri/tauri.conf.json; then
+            echo "::warning::CSP allows wildcard WebSocket ports. Restrict to specific ports."
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          if grep -q '"withGlobalTauri": true' apps/desktop/src-tauri/tauri.conf.json; then
+            echo "::warning::withGlobalTauri is enabled. Consider disabling."
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          # 检查 capabilities 权限（Tauri v2 风格）
+          if [ -d "apps/desktop/src-tauri/capabilities" ]; then
+            echo "=== Checking capabilities ==="
+            for cap_file in apps/desktop/src-tauri/capabilities/*.json; do
+              if [ -f "$cap_file" ]; then
+                if grep -q '"windows"' "$cap_file" 2>/dev/null && ! grep -q '"label"' "$cap_file" 2>/dev/null; then
+                  echo "::warning::$cap_file: window permission without label filter"
+                  WARNINGS=$((WARNINGS + 1))
+                fi
+                if grep -q 'allow-emit' "$cap_file" 2>/dev/null; then
+                  echo "::warning::$cap_file: core:event:allow-emit is granted. Evaluate if needed."
+                  WARNINGS=$((WARNINGS + 1))
+                fi
+              fi
+            done
+            echo "\u2705 Capabilities checked"
+          fi
+
+          if [ ! -f "apps/desktop/src-tauri/Cargo.lock" ]; then
+            echo "::warning::Cargo.lock not found. Commit it for reproducible builds."
+            WARNINGS=$((WARNINGS + 1))
+          else
+            echo "\u2705 Cargo.lock exists"
+          fi
+
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "::error::pnpm-lock.yaml not found. Run pnpm install and commit it."
+            exit 1
+          else
+            echo "\u2705 pnpm-lock.yaml exists"
+          fi
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo "::notice::$WARNINGS warning(s) found. Review above."
+          fi
+          echo "\u2705 Tauri security audit completed"
+
+  # ============================================================
+  # Job 10: 构建验证 + 测试
+  # ============================================================
+  build-verification:
+    name: "\U0001F528 Build Verification"
+    runs-on: ubuntu-latest
+    needs: [rust-clippy, rust-fmt]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Check i18n completeness
+        run: pnpm check:i18n
+
+      - name: Lint JavaScript (ESLint)
+        run: pnpm --filter @zephyr/desktop lint
+
+      - name: Build CSS
+        run: pnpm --filter @zephyr/desktop build:css
+
+      - name: Build Rust (release)
+        working-directory: apps/desktop/src-tauri
+        run: cargo build --release
+
+      - name: Run Rust tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --release
+
+      - name: Run frontend tests
+        run: pnpm --filter @zephyr/desktop test
+
+  # ============================================================
+  # Job 11: macOS 编译检查（原生 macOS runner，支持 ObjC 交叉编译）
+  # ============================================================
+  macos-build-check:
+    name: "\U0001F34E macOS Build Check"
+    runs-on: macos-latest
+    needs: [rust-clippy, rust-fmt]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install macOS dependencies
+        run: brew install pkg-config glib
+      - name: Configure pkg-config for cross-compilation
+        run: |
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+          echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
+      - name: Check x86_64-apple-darwin
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --target x86_64-apple-darwin
+      - name: Check aarch64-apple-darwin
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --target aarch64-apple-darwin

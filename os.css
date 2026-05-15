@@ -1,0 +1,982 @@
+/*
+ * AETHER OS — Desktop Styles
+ * 基于 AETHER 设计系统 (aether-design-system/assets/base.css)
+ */
+
+/* ═══════════════════════════════════════
+   1. Design Tokens (inline for self-contained demo)
+═══════════════════════════════════════ */
+:root {
+  /* Depth layers */
+  --depth-0-void:     #0F0E0D;
+  --depth-1-abyss:    #151413;
+  --depth-2-deep:     #1C1B19;
+  --depth-3-surface:  #242320;
+  --depth-4-raised:   #2D2B28;
+  --depth-5-float:    #363430;
+  --depth-6-peak:     #3A3836;
+
+  /* Text */
+  --text-primary:     #E8E5DE;
+  --text-secondary:   #9D9A91;
+  --text-tertiary:    #6B6860;
+  --text-ghost:       #3E3C38;
+  --text-inverse:     #1C1B19;
+
+  /* Accent (the ONLY accent color) */
+  --accent:           #7C8BA0;
+  --accent-hover:     #8D9BB0;
+  --accent-active:    #6A7A90;
+  --accent-dim:       rgba(124, 139, 160, 0.12);
+  --accent-glow:      rgba(124, 139, 160, 0.20);
+  --accent-subtle:    rgba(124, 139, 160, 0.06);
+
+  /* Semantic (used sparingly) */
+  --color-success:    #6B9F5E;
+  --color-warning:    #B8943A;
+  --color-error:      #B85450;
+  --color-info:       #5A89B8;
+  --color-success-dim: rgba(107, 159, 94, 0.12);
+  --color-warning-dim: rgba(184, 148, 58, 0.12);
+  --color-error-dim:   rgba(184, 84, 80, 0.12);
+  --color-info-dim:    rgba(90, 137, 184, 0.12);
+
+  /* Borders (0.5px precision) */
+  --border-subtle:    rgba(255, 255, 255, 0.04);
+  --border-default:   rgba(255, 255, 255, 0.08);
+  --border-medium:    rgba(255, 255, 255, 0.12);
+  --border-strong:    rgba(255, 255, 255, 0.18);
+  --border-accent:    rgba(124, 139, 160, 0.30);
+
+  /* Shadows */
+  --shadow-depth-2:  0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-depth-3:  0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-depth-4:  0 12px 48px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-depth-5:  0 16px 64px rgba(0, 0, 0, 0.6), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-depth-6:  0 24px 80px rgba(0, 0, 0, 0.7), 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  /* Spring easing */
+  --spring-gentle:    cubic-bezier(0.22, 1.2, 0.36, 1);
+  --spring-standard:  cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bouncy:    cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-settle:    cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Duration */
+  --duration-instant: 80ms;
+  --duration-fast:    150ms;
+  --duration-normal:  250ms;
+  --duration-slow:    400ms;
+  --duration-grand:   600ms;
+
+  /* Spacing */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px; --space-10: 40px; --space-12: 48px;
+  --space-16: 64px; --space-20: 80px; --space-24: 96px;
+
+  /* Radius */
+  --radius-xs: 4px;  --radius-sm: 6px;  --radius-md: 8px;
+  --radius-lg: 12px; --radius-xl: 16px; --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* Z-Index */
+  --z-void: -1;  --z-desktop: 0;  --z-window: 10;
+  --z-dock: 50;  --z-dropdown: 100;  --z-tooltip: 200;
+  --z-notification: 300; --z-modal: 400; --z-context: 600;
+  --z-command: 500; --z-toast: 700; --z-lockscreen: 900;
+
+  /* Typography — 三阶字体系统 */
+  --font-display: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-ui:      'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-data:    'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+
+  /* Font size */
+  --text-2xs: 0.625rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.875rem;
+  --text-base: 1rem;
+  --text-md:  1.125rem;
+  --text-lg:  1.25rem;
+  --text-xl:  1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.5rem;
+  --text-4xl: 3rem;
+
+  /* Font weight */
+  --weight-light:    300;
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Line height */
+  --leading-none:    1;
+  --leading-tight:   1.15;
+  --leading-snug:    1.35;
+  --leading-normal:  1.6;
+  --leading-loose:   1.8;
+
+  /* Letter spacing */
+  --tracking-tight:   -0.02em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.02em;
+  --tracking-wider:   0.05em;
+
+  /* Chinese typography */
+  --text-cn-sm:        0.9375rem;
+  --leading-cn-tight:  1.4;
+  --leading-cn-snug:   1.6;
+  --leading-cn-normal: 1.75;
+  --leading-cn-loose:  1.9;
+
+  /* Depth field blur */
+  --blur-depth-2: 0px;
+  --blur-depth-3: 0px;
+  --blur-depth-4: 20px;
+  --blur-depth-5: 40px;
+  --blur-depth-6: 60px;
+
+  /* Global structure */
+  --dock-icon-size: 48px;
+  --dock-radius:    18px;
+
+  /* Responsive breakpoints */
+  --bp-sm:  640px;
+  --bp-md:  768px;
+  --bp-lg:  1024px;
+  --bp-xl:  1280px;
+  --bp-2xl: 1440px;
+
+  /* Window */
+  --window-radius: 12px;
+  --titlebar-height: 40px;
+}
+
+/* ═══════════════════════════════════════
+   Light mode
+═══════════════════════════════════════ */
+[data-theme="light"] {
+  --depth-0-void:     #E8E5DE;
+  --depth-1-abyss:    #DDD9D0;
+  --depth-2-deep:     #D0CCC3;
+  --depth-3-surface:  #F5F3EC;
+  --depth-4-raised:   #FDFCF8;
+  --depth-5-float:    #FFFFFF;
+  --depth-6-peak:     #E8E5DE;
+  --text-primary:     #1C1B19;
+  --text-secondary:   #6B6860;
+  --text-tertiary:    #9D9A91;
+  --text-ghost:       #C8C5BC;
+  --text-inverse:     #F5F3EC;
+  --accent:           #5A6A80;
+  --accent-hover:     #4A5A70;
+  --accent-active:    #3A4A60;
+  --accent-dim:       rgba(90, 106, 128, 0.10);
+  --accent-glow:      rgba(90, 106, 128, 0.15);
+  --accent-subtle:    rgba(90, 106, 128, 0.05);
+  --border-subtle:    rgba(0, 0, 0, 0.04);
+  --border-default:   rgba(0, 0, 0, 0.08);
+  --border-medium:    rgba(0, 0, 0, 0.12);
+  --border-strong:    rgba(0, 0, 0, 0.18);
+  --border-accent:    rgba(90, 106, 128, 0.30);
+  --shadow-depth-2:  0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-depth-3:  0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-depth-4:  0 12px 48px rgba(0, 0, 0, 0.10), 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-depth-5:  0 16px 64px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-depth-6:  0 24px 80px rgba(0, 0, 0, 0.15), 0 12px 32px rgba(0, 0, 0, 0.10);
+}
+
+/* ═══════════════════════════════════════
+   2. Reset
+═══════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark light;
+}
+html, body { width: 100%; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-user-select: none;
+  user-select: none;
+}
+::selection {
+  background: var(--accent-dim);
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+svg { display: block; }
+
+/* ═══════════════════════════════════════
+   3. Desktop
+═══════════════════════════════════════ */
+.os-desktop {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--depth-0-void);
+}
+
+/* L-05: Wallpaper gradient — depth-based layers with visible accent glow */
+.desktop-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-void);
+  background:
+    radial-gradient(ellipse 120% 100% at 50% 50%, #1A1825 0%, #14131A 40%, #0F0E0D 100%),
+    radial-gradient(ellipse 100% 80% at 70% 35%, rgba(124, 139, 160, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(140, 120, 100, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 50% 50%, rgba(107, 159, 94, 0.04) 0%, transparent 45%);
+  background-size: 100% 100%;
+  animation: wallpaper-drift 60s linear infinite;
+}
+
+/* D-08: Dot grid overlay removed */
+
+/* D-04/D-05/D-06: Drift animation — +/-3% offset, 60s cycle */
+@keyframes wallpaper-drift {
+  0%   { background-position: 0% 0%; }
+  25%  { background-position: 3% 2%; }
+  50%  { background-position: 0% 0%; }
+  75%  { background-position: -3% -2%; }
+  100% { background-position: 0% 0%; }
+}
+
+/* Wallpaper zoom response — maximize / minimize */
+.os-desktop.wallpaper-zoom-in .desktop-wallpaper {
+  transform: scale(1.02);
+  transition: transform 600ms var(--spring-settle);
+}
+.os-desktop.wallpaper-zoom-out .desktop-wallpaper {
+  transform: scale(0.98);
+  transition: transform 400ms var(--spring-settle);
+}
+
+/* ═══════════════════════════════════════
+   3.5 Desktop Icons
+═══════════════════════════════════════ */
+
+/* D-10/D-11/D-12: CSS Grid layout instead of flex column */
+.desktop-icons {
+  position: absolute;
+  top: 40px;
+  left: 24px;
+  right: 24px;
+  bottom: 100px;
+  z-index: calc(var(--z-desktop) + 1);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 80px);
+  grid-auto-rows: 96px;
+  gap: 20px;
+  align-content: start;
+}
+
+/* D-12/D-13: 80px icon area, 48px icon image, 12px radius */
+.desktop-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 80px;
+  padding: 8px;
+  border-radius: 12px;
+  cursor: default;
+  transition: background-color 100ms ease;
+}
+
+.desktop-icon:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.desktop-icon.selected {
+  background: var(--accent-dim);
+}
+
+.desktop-icon-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+}
+
+.desktop-icon-img svg {
+  width: 100%;
+  height: 100%;
+}
+
+.desktop-icon-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  max-width: calc(80px + 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════
+   4. Menu Bar
+═══════════════════════════════════════ */
+
+/* M-01: position: absolute (inside container; design spec says fixed for full-page) */
+.os-menubar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  /* M-04: Unified background with design tokens */
+  background: rgba(15, 14, 13, 0.75);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  /* M-06: border-subtle instead of hardcoded rgba */
+  border-bottom: 0.5px solid var(--border-subtle);
+  z-index: calc(var(--z-dock) + 1);
+  color-scheme: dark;
+}
+
+[data-theme="light"] .os-menubar {
+  background: rgba(232, 229, 222, 0.72);
+}
+
+.menubar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.menubar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* M-11: Logo size 14px -> 16px */
+.menubar-logo {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+/* M-14: App name color text-secondary -> text-primary */
+.menubar-app-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.menubar-menus {
+  display: flex;
+  gap: 0;
+}
+
+.menubar-item {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  transition: color var(--duration-fast), background var(--duration-fast);
+}
+
+.menubar-item:hover {
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+}
+
+/* ── Menu Dropdown ── */
+.menubar-item-wrap {
+  position: relative;
+}
+
+.menubar-dropdown {
+  display: none;
+  position: absolute;
+  top: 28px;
+  left: 0;
+  min-width: 180px;
+  padding: 4px 0;
+  background: var(--depth-5-float);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border: 0.5px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-depth-4);
+  z-index: calc(var(--z-dock) + 2);
+  animation: menu-popup 150ms var(--spring-gentle) both;
+}
+
+.menubar-item-wrap.open .menubar-dropdown {
+  display: block;
+}
+
+@keyframes menu-popup {
+  from { opacity: 0; transform: scale(0.98) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.menubar-dropdown-item {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+
+.menubar-dropdown-item:hover {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.menubar-dropdown-separator {
+  height: 0;
+  margin: 4px 8px;
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+
+/* ── System Tray ── */
+.menubar-tray {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tray-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+
+/* ── Right side ── */
+.menubar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* OS Switcher */
+.os-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--depth-4-raised);
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-subtle);
+}
+
+.os-switch-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  transition: all var(--duration-fast) var(--spring-gentle);
+}
+
+.os-switch-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.os-switch-btn:hover {
+  color: var(--text-secondary);
+  background: var(--accent-dim);
+}
+
+.os-switch-btn.active {
+  color: var(--text-inverse);
+  background: var(--accent);
+}
+
+/* Clock */
+.menubar-clock {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+}
+
+/* ═══════════════════════════════════════
+   5. Window
+═══════════════════════════════════════ */
+.aether-window {
+  position: absolute;
+  min-width: 400px;
+  min-height: 300px;
+  background: var(--depth-3-surface);
+  border: 0.5px solid var(--border-default);
+  border-radius: var(--window-radius);
+  box-shadow: var(--shadow-depth-3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: window-open var(--duration-slow) var(--spring-standard) both;
+  contain: content;
+}
+
+.aether-window.active {
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-depth-4);
+}
+
+/* W-10: Inactive window opacity */
+.aether-window.inactive {
+  border-color: var(--border-subtle);
+  opacity: 0.98;
+}
+
+.aether-window.closing {
+  animation: window-close 200ms ease-in both;
+}
+
+.aether-window.minimizing {
+  animation: window-minimize 400ms var(--spring-settle) both;
+  pointer-events: none;
+}
+
+.aether-window.maximized {
+  border-radius: 0 !important;
+  transition: all var(--duration-slow) var(--spring-standard);
+}
+
+@keyframes window-open {
+  0%   { opacity: 0; transform: scale(0.94) translateY(8px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes window-close {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.96) translateY(6px); }
+}
+
+@keyframes window-minimize {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.4) translateY(60vh); }
+}
+
+/* Titlebar */
+.window-titlebar {
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  background: var(--depth-2-deep);
+  border-bottom: 0.5px solid var(--border-subtle);
+  cursor: default;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  z-index: 1;
+}
+
+.window-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transition: filter var(--duration-fast);
+  position: relative;
+}
+
+.window-btn:hover { filter: brightness(1.3); }
+.window-btn:active { filter: brightness(0.9); }
+
+.window-btn-close    { background: var(--color-error); }
+.window-btn-minimize { background: var(--color-warning); }
+.window-btn-maximize { background: var(--color-success); }
+
+/* W-24: macOS-style hover icons (x/-/+) on window buttons */
+.window-btn-close::after {
+  content: '\00D7';
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0);
+  transition: color var(--duration-fast);
+  line-height: 1;
+}
+.window-btn-minimize::after {
+  content: '\2212';
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0);
+  transition: color var(--duration-fast);
+  line-height: 1;
+}
+.window-btn-maximize::after {
+  content: '+';
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0);
+  transition: color var(--duration-fast);
+  line-height: 1;
+}
+.window-controls:hover .window-btn-close::after,
+.window-controls:hover .window-btn-minimize::after,
+.window-controls:hover .window-btn-maximize::after {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* Inactive window: gray buttons */
+.aether-window.inactive .window-btn {
+  background: var(--border-medium);
+}
+
+/* W-26: Window title font size 14px, weight-medium 500 */
+.window-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+  text-align: center;
+}
+
+.window-actions {
+  margin-left: auto;
+  z-index: 1;
+}
+
+/* Window Content (iframe) */
+.window-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.window-content iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  background: var(--depth-3-surface);
+}
+
+/* No-titlebar window — iframe fills entire window */
+.aether-window.no-titlebar .window-content {
+  flex: 1;
+}
+
+/* Floating controls for no-titlebar windows */
+.window-float-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+.aether-window.active .window-float-controls,
+.aether-window:hover .window-float-controls {
+  opacity: 1;
+}
+
+/* Floating drag region for no-titlebar windows */
+.window-float-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 5;
+  cursor: grab;
+}
+.window-float-drag:active {
+  cursor: grabbing;
+}
+.window-float-controls .window-btn-close {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-error, #B85450);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter var(--duration-fast);
+}
+.window-float-controls .window-btn-close:hover {
+  filter: brightness(1.2);
+}
+.window-float-controls .window-btn-close::after {
+  content: '\00D7';
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1;
+}
+
+/* Invisible drag area at top of no-titlebar windows */
+.window-float-drag {
+  position: absolute;
+  top: 0;
+  left: 28px;
+  right: 0;
+  height: 28px;
+  z-index: 5;
+  cursor: grab;
+}
+.window-float-drag:active {
+  cursor: grabbing;
+}
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  z-index: 2;
+}
+.resize-handle.n  { top: -3px; left: 10px; right: 10px; height: 6px; cursor: n-resize; }
+.resize-handle.s  { bottom: -3px; left: 10px; right: 10px; height: 6px; cursor: s-resize; }
+.resize-handle.e  { right: -3px; top: 10px; bottom: 10px; width: 6px; cursor: e-resize; }
+.resize-handle.w  { left: -3px; top: 10px; bottom: 10px; width: 6px; cursor: w-resize; }
+.resize-handle.ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
+.resize-handle.nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
+.resize-handle.se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
+.resize-handle.sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+
+/* ═══════════════════════════════════════
+   6. Dock
+═══════════════════════════════════════ */
+.os-dock {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(28, 27, 25, 0.75);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border: 0.5px solid var(--border-medium);
+  border-radius: var(--dock-radius);
+  box-shadow: var(--shadow-depth-4);
+  z-index: var(--z-dock);
+}
+
+[data-theme="light"] .os-dock {
+  background: rgba(232, 229, 222, 0.75);
+}
+
+/* ── Dock Icon ── */
+.dock-icon {
+  position: relative;
+  width: var(--dock-icon-size);
+  height: var(--dock-icon-size);
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 200ms var(--spring-bouncy);
+}
+
+.dock-icon svg {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ── Hover: macOS-style magnification ── */
+.dock-icon:hover {
+  transform: scale(1.3) translateY(-8px);
+  z-index: 1;
+}
+
+/* Direct neighbor magnification */
+.dock-icon:hover + .dock-icon,
+.dock-icon:has(+ .dock-icon:hover) {
+  transform: scale(1.1) translateY(-4px);
+}
+
+/* Second neighbor (weaker) */
+.dock-icon:hover + .dock-icon + .dock-icon,
+.dock-icon:has(+ .dock-icon + .dock-icon:hover) {
+  transform: scale(1.05) translateY(-2px);
+}
+
+/* ── Active (click) ── */
+.dock-icon:active {
+  transform: scale(0.95);
+  transition: transform 100ms ease-out;
+}
+
+/* ── Running indicator dot ── */
+.dock-icon::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.dock-icon.running::after {
+  opacity: 1;
+}
+
+/* Multi-window indicator */
+.dock-icon.running[data-windows="2"]::after {
+  width: 10px;
+  border-radius: 2px;
+}
+.dock-icon.running[data-windows="3"]::after {
+  width: 14px;
+  border-radius: 2px;
+}
+
+/* ── Tooltip ── */
+.dock-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.95);
+  background: var(--depth-6-peak);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 150ms var(--spring-gentle),
+    transform 150ms var(--spring-gentle);
+  border: 0.5px solid var(--border-default);
+}
+
+.dock-icon:hover .dock-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+/* ── Separator ── */
+.dock-separator {
+  width: 1px;
+  height: 32px;
+  background: var(--border-medium);
+  margin: 0 4px;
+  flex-shrink: 0;
+  pointer-events: none;
+  align-self: center;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .os-dock .dock-icon {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* ═══════════════════════════════════════
+   7. Context Menu
+═══════════════════════════════════════ */
+
+/* CM-01: position: absolute (inside container) */
+.context-menu {
+  position: absolute;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--depth-5-float);
+  /* CM-03: Added saturate(1.5) to backdrop-filter */
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border: 0.5px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-depth-4);
+  z-index: var(--z-context);
+  animation: menu-popup 150ms var(--spring-gentle) both;
+}
+
+@keyframes menu-popup {
+  0%   { opacity: 0; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* CM-13: Context menu item — text-xs (12px), weight-regular (400) */
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  transition: background var(--duration-fast);
+}
+
+.context-menu-item:hover {
+  background: var(--accent-dim);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-subtle);
+}
+
+/* ═══════════════════════════════════════
+   8. Scrollbar
+═══════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ═══════════════════════════════════════
+   9. Reduced motion
+═══════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
