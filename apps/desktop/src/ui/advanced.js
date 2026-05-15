@@ -133,7 +133,7 @@ export async function persistConfigChanges(payload) {
             if (!isValid) {
                 advancedLogger.warn('Config validation failed, writing anyway');
             }
-        } catch (validationErr) {
+        } catch {
             // Validation unavailable (e.g. mihomo not in PATH) — proceed with write.
         }
 
