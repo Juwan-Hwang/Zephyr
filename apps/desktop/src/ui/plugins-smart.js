@@ -491,7 +491,7 @@ async function loadSmartConfig() {
 
 async function saveSmartConfig() {
     try {
-        await prism.smartConfigSave(JSON.stringify({
+        await prism.smartConfigSave({
             score: {
                 type: 'ema',
                 weights: {
@@ -507,7 +507,7 @@ async function saveSmartConfig() {
                 max_interval_secs: 3600,
                 min_interval_secs: 10,
             },
-        }));
+        });
         showNotification('Smart config saved', 'success');
     } catch (e) { showNotification(String(e), 'error'); }
 }

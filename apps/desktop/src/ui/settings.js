@@ -1228,7 +1228,6 @@ export async function initSettings() {
             }
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
         };
-        initSmartEnabled();
 
         smartToggle.onchange = async () => {
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
@@ -1237,12 +1236,15 @@ export async function initSettings() {
             try {
                 const config = await prism.smartConfig();
                 config.enabled = smartToggle.checked;
-                await prism.smartConfigSave(JSON.stringify(config));
+                await prism.smartConfigSave(config);
             } catch (err) {
                 settingsLogger.error('[smart] Failed to persist enabled state:', err);
             }
             Bus.emit(Events.CONFIG_UPDATED);
         };
+
+        // Await init before setting up auto-test state (critical for correct disabled/checked)
+        await initSmartEnabled();
     }
 
     // Smart Auto-Test toggle
@@ -1262,6 +1264,7 @@ export async function initSettings() {
         syncAutoTestState();
 
         autoTestToggle.onchange = () => {
+            if (autoTestToggle.disabled) return;
             localStorage.setItem('smartAutoTest', String(autoTestToggle.checked));
             if (autoTestToggle.checked) {
                 startSmartAutoTest();
