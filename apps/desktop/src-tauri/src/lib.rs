@@ -124,11 +124,16 @@ struct Settings {
     ui_scale: f64,
     #[serde(default)]
     config_order: Vec<String>,
-    /// Per-profile last selected proxy node.
+    /// Per-profile last selected proxy (v2: group + node).
     /// Key: profile filename (e.g., "my-sub.yaml")
-    /// Value: proxy node name (e.g., "香港01")
+    /// Value: JSON string { "group": "...", "node": "..." }
+    /// Legacy format: plain node name string (auto-migrated on read)
     #[serde(default)]
     last_proxy_selection: std::collections::HashMap<String, String>,
+    /// Per-profile preferred primary group name.
+    /// Key: profile filename, Value: group name
+    #[serde(default)]
+    primary_group_preference: std::collections::HashMap<String, String>,
     /// Custom User-Agent for subscription downloads (used by scheduler).
     /// Set by frontend when user configures a fake client UA.
     #[serde(default)]
@@ -170,6 +175,7 @@ fn save_settings(
 /// Atomically update a single proxy selection entry in settings.
 /// Avoids the Read-Modify-Write race condition of fetching all settings,
 /// mutating, and saving back.
+/// v2: stores { group, node } as JSON; `group_name` is optional for backward compat.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn update_proxy_selection(
@@ -177,18 +183,48 @@ fn update_proxy_selection(
     state: tauri::State<SettingsState>,
     profile_name: String,
     node_name: String,
+    group_name: Option<String>,
 ) -> Result<(), String> {
     // Validate inputs to prevent settings bloat from webview
     let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
-    if safe_name.len() > 256 || node_name.len() > 256 {
-        return Err("Profile name or node name too long".to_owned());
+    if safe_name.len() > 256 || node_name.len() > 256 || group_name.as_ref().is_some_and(|g| g.len() > 256) {
+        return Err("Profile name, node name or group name too long".to_owned());
+    }
+    let value = serde_json::json!({
+        "node": node_name,
+        "group": group_name,
+    })
+    .to_string();
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.last_proxy_selection.insert(safe_name, value);
+        guard.clone()
+    };
+    persist_settings(&app, &settings)
+}
+
+/// Atomically update the primary group preference for a profile.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_primary_group_preference(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    profile_name: String,
+    group_name: String,
+) -> Result<(), String> {
+    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
+    if safe_name.len() > 256 || group_name.len() > 256 {
+        return Err("Profile name or group name too long".to_owned());
     }
     let settings = {
         let mut guard = state
             .0
             .lock()
             .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.last_proxy_selection.insert(safe_name, node_name);
+        guard.primary_group_preference.insert(safe_name, group_name);
         guard.clone()
     };
     persist_settings(&app, &settings)
@@ -423,6 +459,7 @@ pub fn run() {
                     ui_scale: 1.0,
                     config_order: Vec::new(),
                     last_proxy_selection: std::collections::HashMap::new(),
+                    primary_group_preference: std::collections::HashMap::new(),
                     subscription_user_agent: None,
                     hide_timeout_nodes: false,
                 }
@@ -538,6 +575,7 @@ pub fn run() {
             get_settings,
             save_settings,
             update_proxy_selection,
+            update_primary_group_preference,
             update_subscription_user_agent,
             get_core_version,
             exempt_uwp_apps,
