@@ -12,7 +12,7 @@ import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
 import { debounce } from '../utils/debounce.js';
-import { translations, currentLang } from '../i18n.js';
+import { translations, currentLang, t } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
@@ -25,6 +25,7 @@ import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType } from 
 import { Bus, Events } from './events.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
+import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -722,23 +723,26 @@ export function initProxyControls() {
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
 
-function renderGroupExplanationBar(uiGroupName, effectiveGroupName, proxyMap) {
+function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, proxyMap) {
     const bar = document.getElementById('group-explanation-bar');
     if (!bar) return;
 
-    // No mismatch or no effective group → hide the bar
-    if (!effectiveGroupName || uiGroupName === effectiveGroupName) {
+    // Determine what to show: observedGroup mismatch takes priority over effectiveGroup mismatch
+    const showObserved = observedGroupName && observedGroupName !== uiGroupName;
+    const showEffective = !showObserved && effectiveGroupName && uiGroupName !== effectiveGroupName;
+
+    if (!showObserved && !showEffective) {
         bar.classList.add('hidden');
         bar.classList.remove('flex');
-        // Reset dismiss state since mismatch no longer exists
         _dismissedMismatchKey = null;
         return;
     }
 
-    // Build a key for this specific group-pair mismatch
-    const mismatchKey = `${uiGroupName}|${effectiveGroupName}`;
+    // Build a key for this specific mismatch
+    const mismatchKey = showObserved
+        ? `observed:${uiGroupName}|${observedGroupName}`
+        : `${uiGroupName}|${effectiveGroupName}`;
 
-    // If user already dismissed this exact mismatch, keep it hidden
     if (_dismissedMismatchKey === mismatchKey) {
         return;
     }
@@ -747,45 +751,54 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, proxyMap) {
     bar.classList.add('flex');
     bar.replaceChildren();
 
-    const t = /** @type {any} */ (translations)[currentLang];
-
     // Info icon
     const icon = document.createElement('span');
     icon.className = 'text-amber-400 text-sm flex-shrink-0';
     icon.innerHTML = '&#9888;';
 
-    // Explanation text
+    // Explanation text — use t() for fallback chain support
     const text = document.createElement('span');
     text.className = 'text-2xs text-zinc-400 flex-1';
-    // Explanation text — use template with placeholders so translators can reorder
-    const mismatchTemplate = t.groupMismatchExplanation
-        || 'Current group: {uiGroup} — Rules default to: {effectiveGroup}. Connections may use "{effectiveGroup}" instead of your selected node.';
-    text.textContent = mismatchTemplate
-        .replace(/{uiGroup}/g, () => uiGroupName)
-        .replace(/{effectiveGroup}/g, () => effectiveGroupName);
 
-    // Quick-switch button — only enabled if effective group is writable (selector/select)
-    // Non-writable groups (url-test, fallback, etc.) cannot be switched via PUT /proxies/{group}
+    if (showObserved) {
+        text.textContent = t('observedGroupMismatch', { observedGroup: observedGroupName, uiGroup: uiGroupName });
+    } else {
+        text.textContent = t('groupMismatchExplanation', { uiGroup: uiGroupName, effectiveGroup: effectiveGroupName });
+    }
+
+    // Quick-switch button
     const btn = document.createElement('button');
-    const effectiveType = proxyMap?.[effectiveGroupName]?.type || '';
-    const effectiveIsWritable = isWritableGroupType(effectiveType);
+    const targetGroup = showObserved ? observedGroupName : effectiveGroupName;
+    const targetType = proxyMap?.[targetGroup]?.type || '';
+    const targetIsWritable = isWritableGroupType(targetType);
 
-    if (effectiveIsWritable) {
+    if (targetIsWritable) {
         btn.className = 'text-2xs text-accent hover:text-accent/80 underline whitespace-nowrap flex-shrink-0';
-        btn.textContent = t.switchToEffectiveGroup || 'Switch to rules default';
+        btn.textContent = showObserved
+            ? t('switchToObservedGroup')
+            : t('switchToEffectiveGroup');
         btn.onclick = async () => {
             try {
-                appStore.set('uiGroupName', effectiveGroupName);
+                appStore.set('uiGroupName', targetGroup);
                 invalidateProxiesCache();
                 invalidateRunConfigCache();
+                // Persist group preference for restore after restart
+                const { savePrimaryGroupPreference } = await import('./proxy-memory.js');
+                const settings = await getSettingsCached();
+                const profileName = settings?.last_config;
+                if (profileName) {
+                    savePrimaryGroupPreference(profileName, targetGroup).catch(() => {});
+                }
                 await renderProxies();
             } catch (e) {
-                proxyLogger.warn('Failed to switch to effective group', e);
+                proxyLogger.warn('Failed to switch group', e);
             }
         };
     } else {
         btn.className = 'text-2xs text-zinc-600 cursor-not-allowed whitespace-nowrap flex-shrink-0';
-        btn.textContent = t.effectiveGroupNotSwitchable || 'Rules default is auto-select (not switchable)';
+        btn.textContent = showObserved
+            ? t('observedGroupNotSwitchable')
+            : t('effectiveGroupNotSwitchable');
         btn.disabled = true;
     }
 
@@ -793,7 +806,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, proxyMap) {
     const dismiss = document.createElement('button');
     dismiss.className = 'text-zinc-600 hover:text-zinc-400 ml-2 flex-shrink-0';
     dismiss.innerHTML = '&times;';
-    dismiss.title = t.dismiss || 'Dismiss';
+    dismiss.title = t('dismiss');
     dismiss.onclick = () => {
         _dismissedMismatchKey = mismatchKey;
         bar.classList.add('hidden');
@@ -1061,7 +1074,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     try {
                         const settings = await getSettingsCached();
                         const currentProfile = settings.last_config || 'config.yaml';
-                        await saveProxySelection(currentProfile, name);
+                        await saveProxySelection(currentProfile, { node: name, group: mainGroup });
                     } catch (_e) { /* ignore */ }
 
                     if (appStore.get('currentSortMode') === 'smart') {
@@ -1130,6 +1143,14 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 export async function renderProxies() {
     const container = document.getElementById('proxies-list');
     if (!container) return;
+
+    // Start observed-group watcher only when proxies page is visible and app is foregrounded
+    if (!document.hidden) {
+        const proxiesPage = document.querySelector('[data-page="proxies"]');
+        if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+            startObservedGroupWatcher();
+        }
+    }
 
     const t = /** @type {any} */ (translations)[currentLang];
 
@@ -1205,8 +1226,9 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
-    // Render the group explanation bar (effective vs ui group mismatch indicator)
-    renderGroupExplanationBar(uiGroupName, effectiveGroupName, data?.proxies);
+    // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
+    const observedGroupName = appStore.get('observedGroupName');
+    renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, data?.proxies);
 
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
@@ -1317,6 +1339,38 @@ Bus.on(Events.CORE_RESTARTED, () => {
     // to restore the correct group after core restart. The resolver will
     // re-validate uiGroupName against the new proxyMap on next render.
     renderProxies();
+});
+
+// --- Observed Group Watcher: start/stop with page visibility ---
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopObservedGroupWatcher();
+    } else {
+        // Only start if proxies page is visible
+        const proxiesPage = document.querySelector('[data-page="proxies"]');
+        if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+            startObservedGroupWatcher();
+        }
+    }
+});
+
+// Also reset on config/core changes
+Bus.on(Events.CONFIG_UPDATED, () => { resetObservedGroup(); });
+Bus.on(Events.CORE_RESTARTED, () => { resetObservedGroup(); });
+
+// Re-render explanation bar when observedGroupName changes (avoid full renderProxies)
+appStore.subscribe('observedGroupName', async () => {
+    const proxiesPage = document.querySelector('[data-page="proxies"]');
+    if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+        try {
+            const data = await getProxiesCached();
+            const uiGroupName = appStore.get('uiGroupName');
+            const effectiveGroupName = appStore.get('effectiveGroupName');
+            const observedGroupName = appStore.get('observedGroupName');
+            renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, data?.proxies);
+        } catch { /* ignore */ }
+    }
 });
 
 // ═══════════════════════════════════════════════════════════════════════

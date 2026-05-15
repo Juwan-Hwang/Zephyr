@@ -82,7 +82,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
             const settings = await getSettingsCached();
             const profileName = settings?.last_config;
             if (profileName) {
-                await saveProxySelection(profileName, name);
+                await saveProxySelection(profileName, { node: name, group: targetGroup });
             }
         } catch (e) {
             nodeWheelLogger.warn('Failed to save proxy selection', e);
