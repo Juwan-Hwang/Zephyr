@@ -28,6 +28,7 @@ import { SVG_ICONS } from '../icons.js';
 import { syncCoreConfig } from '../proxies.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
+import { invalidateRunConfigCache } from '../run-config-cache.js';
 
 /**
  * Extract a human-readable name from a subscription URL.
@@ -1182,6 +1183,7 @@ export function initSubscriptionSettings({
                         s.last_config = name;
                         await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
                         invalidateSettingsCache();
+                        invalidateRunConfigCache();
 
                         await closeAllConnections();
                         // Re-apply prism patches against the new profile so that
