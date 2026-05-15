@@ -1228,7 +1228,6 @@ export async function initSettings() {
             }
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
         };
-        initSmartEnabled();
 
         smartToggle.onchange = async () => {
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
@@ -1243,6 +1242,10 @@ export async function initSettings() {
             }
             Bus.emit(Events.CONFIG_UPDATED);
         };
+
+        // Important: initialize smartToggle.checked BEFORE wiring auto-test toggle state.
+        // Otherwise auto-test may be disabled/cleared on startup due to a race.
+        await initSmartEnabled();
     }
 
     // Smart Auto-Test toggle
