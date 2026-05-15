@@ -5,11 +5,21 @@
 - **Mihomo Proxy Engine** — Start/stop/restart the Mihomo core process
 - **Multi-profile Management** — Create, read, edit, delete, and switch between YAML configurations
 - **Subscription Management** — Download and update subscriptions (URL/file/QR/drag-and-drop), base64 auto-decode
+- **Subscription Auto-Update** — Per-subscription configurable interval (30 min – 24 h), background tokio scheduler, manual trigger-all
+- **Subscription Edit** — Inline edit subscription URL and update interval, URL validation (http/https only), preserve user-defined names
+- **Subscription Drag-and-Drop Sort** — Reorder subscription list via drag-and-drop, auto-persist
+- **Batch Subscription Update** — One-click update all subscriptions (bypasses per-command rate limit)
+- **Proxy Node Memory (v2)** — Remember group + node selection per profile, auto-restore on switch, v1→v2 migration
+- **Primary Group Resolver** — Deterministic 7-level priority chain (UI selection → saved preference → FINAL/MATCH rule → YAML order → GLOBAL.all → keyword scoring → fallback)
+- **observedGroup Watcher** — Background polling (5 s interval) to detect actual proxy group usage from connections (30-sample, K=3 consecutive confirmation)
+- **Hide Timeout Nodes** — Toggle to hide unavailable proxy nodes (delay ≤ 0 or ≥ 999999), always keep active node
+- **Port Configuration Modal** — Visual editor for mixed-port, socks-port, redir-port, tproxy-port (range 0–65535, duplicate check, all-disabled prevention)
 - **Proxy Modes** — Rule-based routing, Global proxy, Direct connection
 - **System Proxy** — Cross-platform (Windows/macOS/Linux with GNOME/KDE/XFCE support), automatic bypass for private networks
-- **TUN Mode** — Virtual network interface (Windows/macOS/Linux), atomic lock, auto-recovery on failure
+- **TUN Mode** — Virtual network interface (Windows/macOS/Linux), atomic lock, auto-recovery on failure, auto-inject dns-hijack
 - **Connection Management** — Real-time connection list with details and close capability
 - **Traffic Statistics** — Real-time upload/download speed and historical trends
+- **Portable Mode** — Extract-and-run, data stored in program directory, `.portable` marker file
 
 ## Prism Engine (`clash-prism-*`)
 
@@ -23,18 +33,21 @@
 
 ## Security
 
-- **AES-GCM + PBKDF2** — Configuration encryption with hardware-fingerprint-derived machine key
-- **SSRF Protection** — DNS validation + private IP interception for subscription/rule URLs
-- **Script Sandbox** — 9 resource limits + 4 permission controls + per-plugin grant/revoke
-- **Config Sanitizer** — Recursive removal of dangerous YAML keys (`script`, `script-path`), provider path traversal prevention
+- **AES-GCM + PBKDF2** — Configuration encryption with hardware-fingerprint-derived machine key (hex-encoded, strict UTF-8 on decrypt)
+- **SSRF Protection** — DNS validation for subscription/rule URLs; user-initiated private address input allowed, but redirects to private IPs are blocked
+- **DNS Leak Prevention** — TUN mode auto-injects `dns-hijack` to route all DNS traffic through Mihomo
+- **Config Sanitizer** — Recursive removal of dangerous YAML keys (`script`, `script-path`, 6 CFW legacy keys), provider path traversal prevention
+- **REALITY short-id Protection** — Quote hex values before YAML parsing to prevent scientific notation misinterpretation
 - **Input Validation** — Length limits, format checks, UTF-8 safe truncation across all IPC commands
+- **XSS Prevention** — `escapeHtml` (NFKC normalization + browser round-trip) and `escapeAttr` (additional `"`/`'` escaping) for all user input rendering
 - **Rate Limiting** — Sliding-window rate limiter for sensitive commands (`script_execute`, `rule_import_url`, notifications, shortcuts)
-- **File Security** — Unix 0600 permissions / Windows ACL, UUID temp files, ZIP/TAR path traversal protection
-- **Update Integrity** — SHA256 verification, trusted host allowlist (github.com only), asset name validation
+- **File Security** — Unix 0600 permissions / Windows ACL, UUID temp files, ZIP/TAR path traversal protection, symlink rejection, compression bomb detection
+- **Update Integrity** — SHA256 verification, trusted host allowlist (github.com only), asset name validation, atomic update with auto-rollback
 - **Deep Link Safety** — Protocol restriction (`clash://`), URL scheme allowlist, path traversal prevention
 - **CSP** — Strict Content Security Policy with `frame-ancestors 'none'` (clickjacking prevention)
 - **Clippy** — 165+ deny rules including `unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`
 - **Release Hardening** — LTO, single codegen unit, strip symbols, panic=abort
+- **URL Leakage Prevention** — `get_config_url` demoted to internal function (not exposed to frontend)
 
 ## System Integration
 
@@ -50,6 +63,7 @@
 ## UI/UX
 
 - **Custom Window** — Frameless transparent window with custom title bar
+- **UI Scaling** — 0.5x – 2.0x interface scaling with CSS `transform: scale()`, dropdown/context-menu position correction under transform
 - **Virtual Scroll Log Viewer** — O(log n) binary search, incremental polling, 5-level filtering, regex search
 - **CodeMirror 6 Editor** — Prism DSL syntax highlighting and auto-completion
 - **3D Card Effect** — Perspective transform on proxy node cards
@@ -57,7 +71,7 @@
 - **i18n** — 4 languages (en, zh, ja, ko)
 - **Event Bus** — Inter-module communication (`Bus`/`Events`)
 - **Centralized State** — `appStore` for reactive state management
-- **Cache Layer** — Config and proxy data caching with invalidation
+- **Cache Layer** — Config and proxy data caching with invalidation, run-config TTL cache (5 s) with request coalescing
 
 ## Architecture
 
@@ -67,6 +81,12 @@ apps/desktop/src-tauri/src/
   config_manager.rs         — Settings read/write
   os_notification.rs        — OS-level notification dispatch
   core/                     — Mihomo process, TUN, config, crypto, subscription
+    config_manager.rs       — Profile CRUD, subscription edit, proxy selection memory
+    subscription.rs         — Subscription download, batch update, base64 decode
+    subscription_scheduler.rs — Background auto-update scheduler (per-subscription interval)
+    core_log.rs             — Mihomo core log reader with line truncation (64 KB)
+    crypto.rs               — AES-256-GCM encryption/decryption, machine key management
+    config_sanitizer.rs     — Dangerous YAML key removal, CFW legacy cleanup
   prism/                    — Prism engine (81 IPC commands)
     commands_core.rs        — Core Prism commands (apply, validate, watch, trace, rebuild, preview, insert, toggle, stats)
     rule_library.rs         — Rule CRUD, import, extract, groups
@@ -84,4 +104,4 @@ apps/desktop/src-tauri/src/
   uwp_loopback.rs           — Windows UWP loopback exemption
 ```
 
-127 IPC commands · 300 Rust tests · Tauri 2 · Rust 1.92
+128 IPC commands · 341 Rust tests · Tauri 2.11 · Rust 1.92
