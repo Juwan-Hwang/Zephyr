@@ -208,6 +208,7 @@ async function initApp() {
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
     onLeaveLogs: () => { import('./ui/logs.js').then(m => m.destroyLogsPage()).catch(() => {}); },
+    onLeaveProxies: () => { import('./ui/observed-group.js').then(m => m.stopObservedGroupWatcher()).catch(() => {}); },
   });
   initChart();
   initTrayEventListeners();
