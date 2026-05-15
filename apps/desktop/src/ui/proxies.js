@@ -1130,15 +1130,12 @@ async function syncSmartUiVisibility() {
         // Backend only returns `enabled` if smart.toml has the key.
         // Fallback to localStorage for migration scenarios.
         enabled = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
-        proxyLogger.debug('syncSmartUiVisibility: config.enabled=' + config.enabled + ', localStorage=' + localStorage.getItem('smartEnabled') + ', result=' + enabled);
     } catch (e) {
         // Fallback to localStorage on error
         enabled = localStorage.getItem('smartEnabled') === 'true';
-        proxyLogger.debug('syncSmartUiVisibility: fallback to localStorage=' + enabled + ', error=' + e);
     }
 
     document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
-    proxyLogger.debug('syncSmartUiVisibility: --smart-enabled set to ' + (enabled ? '1' : '0'));
     selectBestBtn.style.display = enabled ? '' : 'none';
 
     // Reset sort mode to default if smart is disabled but current mode is smart
@@ -1155,9 +1152,7 @@ async function syncSmartUiVisibility() {
 // --- Event Bus: react to config updates from other modules (e.g. settings.js) ---
 
 Bus.on(Events.CONFIG_UPDATED, async () => {
-    proxyLogger.debug('CONFIG_UPDATED event received');
     await syncSmartUiVisibility();
-    proxyLogger.debug('CONFIG_UPDATED: syncSmartUiVisibility done');
     renderProxies();
 });
 
@@ -1175,7 +1170,6 @@ const _autoTest = {
         const autoTest = localStorage.getItem('smartAutoTest');
         const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
         const enabled = autoTest === 'true' && cssEnabled === '1';
-        proxyLogger.debug('_isEnabled: autoTest=' + autoTest + ', cssEnabled=' + cssEnabled + ', result=' + enabled);
         return enabled;
     },
 
@@ -1233,14 +1227,11 @@ const _autoTest = {
 
     /** Schedule the next auto-test. */
     _scheduleNext(ms) {
-        proxyLogger.debug('_scheduleNext: scheduling in ' + ms + 'ms');
         this._stop();
         if (!this._isEnabled()) {
-            proxyLogger.debug('_scheduleNext: aborted because not enabled');
             return;
         }
         this._timer = setTimeout(() => this._runOnce(), ms);
-        proxyLogger.debug('_scheduleNext: timer set, _timer=' + this._timer);
     },
 
     /** Stop any pending auto-test. */
@@ -1253,13 +1244,10 @@ const _autoTest = {
 
     /** Start the auto-test scheduler (called on app init or setting change). */
     start() {
-        proxyLogger.debug('_autoTest.start() called');
         this._stop();
         if (!this._isEnabled()) {
-            proxyLogger.debug('_autoTest.start() aborted: not enabled');
             return;
         }
-        proxyLogger.debug('_autoTest.start() scheduling first test');
         // Delay first auto-test by 30s to let the app settle
         this._scheduleNext(30_000);
     },
@@ -1273,14 +1261,10 @@ const _autoTest = {
 
 /** Start the smart auto-test scheduler. */
 export function startSmartAutoTest() {
-    proxyLogger.debug('startSmartAutoTest() called');
     _autoTest.start();
-    proxyLogger.debug('startSmartAutoTest() done');
 }
 
 /** Stop the smart auto-test scheduler. */
 export function stopSmartAutoTest() {
-    proxyLogger.debug('stopSmartAutoTest() called');
     _autoTest.stop();
-    proxyLogger.debug('stopSmartAutoTest() done');
 }
