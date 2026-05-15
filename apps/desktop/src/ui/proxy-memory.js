@@ -7,9 +7,10 @@
 
 import { invoke, switchProxy } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
-import { fetchProxyGroups } from './proxy-groups.js';
+import { fetchProxyGroups, isWritableGroupType } from './proxy-groups.js';
 import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
+import { appStore } from './state.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
 const MAX_READY_RETRIES = 50;
@@ -43,8 +44,10 @@ async function waitForMihomoReady() {
     for (let i = 0; i < MAX_READY_RETRIES; i++) {
         try {
             const result = await fetchProxyGroups();
-            // API is ready if we get a valid response with groups data
-            if (result && (result.proxies || result.mainGroup)) {
+            // API is ready if we get a valid response with groups data.
+            // mainGroup may be null if no writable groups exist, so check
+            // the groups array (populated from proxyMap, not the resolver).
+            if (result && (result.groups?.length > 0 || result.mainGroup)) {
                 return true;
             }
         } catch {
@@ -79,13 +82,45 @@ export async function restoreProxySelection(profileName) {
 
         if (!savedNode) return false;
 
-        const proxyGroupsResult = await fetchProxyGroups();
+        const proxyGroupsResult = await fetchProxyGroups({
+            preferredGroupName: appStore.get('uiGroupName') || null,
+        });
         if (!proxyGroupsResult) return false;
 
+        // Use the resolved uiGroupName (from resolver) instead of the old
+        // keyword-guessed mainGroup.  This fixes the core bug where the
+        // restored selection was applied to the wrong group.
+        const uiGroupName = proxyGroupsResult.uiGroupName
+            || proxyGroupsResult.mainGroup;
+
+        // Try the resolved uiGroupName first
         if (proxyGroupsResult.proxies && proxyGroupsResult.proxies.includes(savedNode)) {
-            const mainGroup = proxyGroupsResult.mainGroup || 'Proxy';
-            return await switchProxy(mainGroup, savedNode);
+            const success = await switchProxy(uiGroupName, savedNode);
+            if (success) {
+                appStore.set('uiGroupName', uiGroupName);
+            }
+            return success;
         }
+
+        // Fallback: search all writable groups for the saved node.
+        // After profile/core switches, the saved node may belong to a different
+        // selector group than the resolved primary.
+        const proxyMap = proxyGroupsResult.data?.proxies;
+        if (proxyMap) {
+            for (const groupName of Object.keys(proxyMap)) {
+                const group = proxyMap[groupName];
+                if (!isWritableGroupType(group?.type)) continue;
+                if (group.hidden) continue;
+                if (group.all && group.all.includes(savedNode)) {
+                    const success = await switchProxy(groupName, savedNode);
+                    if (success) {
+                        appStore.set('uiGroupName', groupName);
+                        return true;
+                    }
+                }
+            }
+        }
+
         return false;
     } catch (e) {
         proxyMemoryLogger.warn('Failed to restore proxy selection:', e);
