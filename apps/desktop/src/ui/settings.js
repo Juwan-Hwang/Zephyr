@@ -1256,7 +1256,6 @@ export async function initSettings() {
         // Disable auto-test toggle when smart is off
         const syncAutoTestState = () => {
             const smartOn = smartToggle?.checked ?? false;
-            const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
             autoTestToggle.disabled = !smartOn;
             if (!smartOn && autoTestToggle.checked) {
                 autoTestToggle.checked = false;
