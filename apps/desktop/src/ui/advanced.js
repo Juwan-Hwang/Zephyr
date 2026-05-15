@@ -133,8 +133,8 @@ export async function persistConfigChanges(payload) {
             if (!isValid) {
                 advancedLogger.warn('Config validation failed, writing anyway');
             }
-        } catch (validationErr) {
-            advancedLogger.debug('Config validation skipped:', validationErr);
+        } catch {
+            // Validation unavailable (e.g. mihomo not in PATH) — proceed with write.
         }
 
         await invoke(COMMANDS.WRITE_CONFIG_FILE, { configPath: configName, content: newYaml });

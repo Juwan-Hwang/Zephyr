@@ -1167,8 +1167,10 @@ const _autoTest = {
 
     /** Check whether auto-test is enabled (setting + smart enabled). */
     _isEnabled() {
-        return localStorage.getItem('smartAutoTest') === 'true'
-            && document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+        const autoTest = localStorage.getItem('smartAutoTest');
+        const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
+        const enabled = autoTest === 'true' && cssEnabled === '1';
+        return enabled;
     },
 
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
@@ -1226,7 +1228,9 @@ const _autoTest = {
     /** Schedule the next auto-test. */
     _scheduleNext(ms) {
         this._stop();
-        if (!this._isEnabled()) return;
+        if (!this._isEnabled()) {
+            return;
+        }
         this._timer = setTimeout(() => this._runOnce(), ms);
     },
 
@@ -1241,7 +1245,9 @@ const _autoTest = {
     /** Start the auto-test scheduler (called on app init or setting change). */
     start() {
         this._stop();
-        if (!this._isEnabled()) return;
+        if (!this._isEnabled()) {
+            return;
+        }
         // Delay first auto-test by 30s to let the app settle
         this._scheduleNext(30_000);
     },
