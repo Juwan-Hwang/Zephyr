@@ -453,6 +453,24 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
             dirty = true;
         }
 
+        // Migrate primary group preference key
+        let group_to_migrate = guard
+            .primary_group_preference
+            .remove(&clean_old)
+            .or_else(|| {
+                if old_name != clean_old {
+                    guard.primary_group_preference.remove(&old_name)
+                } else {
+                    None
+                }
+            });
+        if let Some(group) = group_to_migrate {
+            guard
+                .primary_group_preference
+                .insert(clean_new.clone(), group);
+            dirty = true;
+        }
+
         if dirty {
             let settings = guard.clone();
             drop(guard);
