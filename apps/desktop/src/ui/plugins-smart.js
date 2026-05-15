@@ -491,7 +491,10 @@ async function loadSmartConfig() {
 
 async function saveSmartConfig() {
     try {
+        // Fetch current config to preserve the enabled state
+        const currentConfig = await prism.smartConfig().catch(() => ({}));
         await prism.smartConfigSave({
+            enabled: currentConfig.enabled ?? false,
             score: {
                 type: 'ema',
                 weights: {
