@@ -56,7 +56,7 @@ clash-prism-plugin = "0.1.1"
 clash-prism-script = "0.1.1"
 clash-prism-smart = "0.1.1"
 chrono = { version = "0.4", features = ["serde"] }
-toml = "0.8"
+toml = "1.1"
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
