@@ -232,6 +232,7 @@ export const nodeWheelLogger  = createLogger('NodeWheel',    'info');
 
 /** Proxy memory */
 export const proxyMemoryLogger = createLogger('ProxyMemory', 'info');
+export const observedGroupLogger = createLogger('ObservedGroup', 'info');
 
 // ---------------------------------------------------------------------------
 // Public API
