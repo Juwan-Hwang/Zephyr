@@ -1227,33 +1227,45 @@ export async function initSettings() {
                 smartToggle.checked = localStorage.getItem('smartEnabled') === 'true';
             }
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+            settingsLogger.debug('initSmartEnabled: smartToggle.checked=' + smartToggle.checked + ', --smart-enabled=' + (smartToggle.checked ? '1' : '0'));
         };
-        initSmartEnabled();
 
         smartToggle.onchange = async () => {
+            settingsLogger.debug('smartToggle.onchange: checked=' + smartToggle.checked);
             document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+            settingsLogger.debug('smartToggle.onchange: --smart-enabled set to ' + (smartToggle.checked ? '1' : '0'));
             // Always sync to localStorage as fallback for migration scenarios
             localStorage.setItem('smartEnabled', String(smartToggle.checked));
             try {
                 const config = await prism.smartConfig();
                 config.enabled = smartToggle.checked;
-                await prism.smartConfigSave(JSON.stringify(config));
+                await prism.smartConfigSave(config);
+                settingsLogger.debug('smartToggle.onchange: config saved successfully');
             } catch (err) {
                 settingsLogger.error('[smart] Failed to persist enabled state:', err);
             }
             Bus.emit(Events.CONFIG_UPDATED);
+            settingsLogger.debug('smartToggle.onchange: CONFIG_UPDATED emitted');
         };
+
+        // Await init before setting up auto-test state (critical for correct disabled/checked)
+        await initSmartEnabled();
     }
 
     // Smart Auto-Test toggle
     const autoTestToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-auto-test-toggle'));
     if (autoTestToggle) {
-        autoTestToggle.checked = localStorage.getItem('smartAutoTest') === 'true';
+        const savedAutoTest = localStorage.getItem('smartAutoTest');
+        autoTestToggle.checked = savedAutoTest === 'true';
+        settingsLogger.debug('Auto-test init: saved=' + savedAutoTest + ', checked=' + autoTestToggle.checked);
         // Disable auto-test toggle when smart is off
         const syncAutoTestState = () => {
             const smartOn = smartToggle?.checked ?? false;
+            const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
+            settingsLogger.debug('syncAutoTestState: smartOn=' + smartOn + ', cssEnabled=' + cssEnabled + ', autoTestChecked=' + autoTestToggle.checked);
             autoTestToggle.disabled = !smartOn;
             if (!smartOn && autoTestToggle.checked) {
+                settingsLogger.debug('Disabling auto-test because smart is off');
                 autoTestToggle.checked = false;
                 localStorage.setItem('smartAutoTest', 'false');
                 stopSmartAutoTest();
@@ -1262,10 +1274,18 @@ export async function initSettings() {
         syncAutoTestState();
 
         autoTestToggle.onchange = () => {
+            settingsLogger.debug('autoTestToggle.onchange: checked=' + autoTestToggle.checked + ', disabled=' + autoTestToggle.disabled);
+            if (autoTestToggle.disabled) {
+                settingsLogger.debug('autoTestToggle.onchange: blocked because toggle is disabled');
+                return;
+            }
             localStorage.setItem('smartAutoTest', String(autoTestToggle.checked));
+            settingsLogger.debug('autoTestToggle.onchange: saved to localStorage=' + autoTestToggle.checked);
             if (autoTestToggle.checked) {
+                settingsLogger.debug('autoTestToggle.onchange: calling startSmartAutoTest');
                 startSmartAutoTest();
             } else {
+                settingsLogger.debug('autoTestToggle.onchange: calling stopSmartAutoTest');
                 stopSmartAutoTest();
             }
         };
@@ -1274,8 +1294,11 @@ export async function initSettings() {
         if (smartToggle) {
             const origSmartOnChange = smartToggle.onchange;
             smartToggle.onchange = async () => {
+                settingsLogger.debug('smartToggle.onchange (wrapped): calling original handler');
                 await origSmartOnChange?.call(smartToggle);
+                settingsLogger.debug('smartToggle.onchange (wrapped): calling syncAutoTestState');
                 syncAutoTestState();
+                settingsLogger.debug('smartToggle.onchange (wrapped): syncAutoTestState done, autoTestToggle.disabled=' + autoTestToggle.disabled + ', autoTestToggle.checked=' + autoTestToggle.checked);
             };
         }
     }
@@ -1395,9 +1418,14 @@ export async function initSettings() {
     initFakeClient();
 
     // Start smart auto-test scheduler if enabled
-    if (localStorage.getItem('smartAutoTest') === 'true') {
+    const shouldStartAutoTest = localStorage.getItem('smartAutoTest') === 'true';
+    settingsLogger.debug('initSmartSettings: shouldStartAutoTest=' + shouldStartAutoTest);
+    if (shouldStartAutoTest) {
         // Delay to ensure smart toggle state is initialized first
-        setTimeout(() => startSmartAutoTest(), 2000);
+        setTimeout(() => {
+            settingsLogger.debug('initSmartSettings: calling startSmartAutoTest after delay');
+            startSmartAutoTest();
+        }, 2000);
     }
 }
 
