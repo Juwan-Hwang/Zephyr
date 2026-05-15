@@ -24,6 +24,7 @@ import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig 
 import { fetchProxyGroups as fetchProxyGroupsShared } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection } from './proxy-memory.js';
+import { invalidateRunConfigCache } from './run-config-cache.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -374,7 +375,27 @@ export async function syncCoreConfig() {
         const proxyGroupsResult = await fetchProxyGroupsShared({ existingConfig: config });
         let currentNode = 'Direct';
         if (proxyGroupsResult) {
-            currentNode = (/** @type {any} */ (proxyGroupsResult)).current || 'Direct';
+            // Use the resolved uiGroupName for accurate current node display
+            const uiGroupName = (/** @type {any} */ (proxyGroupsResult)).uiGroupName
+                || (/** @type {any} */ (proxyGroupsResult)).mainGroup;
+            const proxyMap = (/** @type {any} */ (proxyGroupsResult)).data?.proxies;
+            if (proxyMap && uiGroupName && proxyMap[uiGroupName]) {
+                currentNode = proxyMap[uiGroupName].now || 'Direct';
+            } else {
+                currentNode = (/** @type {any} */ (proxyGroupsResult)).current || 'Direct';
+            }
+
+            // Sync resolver state to appStore
+            appStore.set('uiPrimaryGroupName', (/** @type {any} */ (proxyGroupsResult)).uiPrimaryGroupName || null);
+            appStore.set('effectiveGroupName', (/** @type {any} */ (proxyGroupsResult)).effectiveGroupName || null);
+
+            // Validate uiGroupName: if the stored group no longer exists in proxyMap
+            // (e.g. config changed), reset it so the resolver's primary takes over.
+            // Actual initialization is handled by renderProxies to avoid redundant writes.
+            const currentUiGroup = appStore.get('uiGroupName');
+            if (currentUiGroup && proxyMap && !proxyMap[currentUiGroup]) {
+                appStore.set('uiGroupName', null);
+            }
         }
         const currentNodeEl = document.getElementById('current-node-name');
         if (currentNodeEl) {
@@ -654,7 +675,8 @@ export function initProxyControls() {
                 const proxyGroupsResult = await fetchProxyGroupsShared();
                 if (!proxyGroupsResult) return;
                 const { mainGroup } = /** @type {any} */ (proxyGroupsResult);
-                const success = await switchProxy(mainGroup, best.name);
+                const targetGroup = appStore.get('uiGroupName') || mainGroup;
+                const success = await switchProxy(targetGroup, best.name);
                 if (success) {
                     showNotification(`Switched to best node: ${best.name} (score: ${displayScore})`, 'success');
                     await syncCoreConfig();
@@ -681,6 +703,76 @@ export function initProxyControls() {
 }
 
 // --- Render Proxies ---
+
+// --- Group Explanation Bar ---
+
+/**
+ * Render the group explanation bar that shows when the uiGroup differs from
+ * the effectiveGroup (the group that rules actually route traffic to).
+ * This helps users understand why their selected node may not match the
+ * connection page display.
+ *
+ * @param {string} uiGroupName - The group the user is currently operating on
+ * @param {string|null} effectiveGroupName - The group inferred from rules
+ */
+function renderGroupExplanationBar(uiGroupName, effectiveGroupName) {
+    const bar = document.getElementById('group-explanation-bar');
+    if (!bar) return;
+
+    // No mismatch or no effective group → hide the bar
+    if (!effectiveGroupName || uiGroupName === effectiveGroupName) {
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
+        return;
+    }
+
+    bar.classList.remove('hidden');
+    bar.classList.add('flex');
+    bar.innerHTML = '';
+
+    const t = /** @type {any} */ (translations)[currentLang];
+
+    // Info icon
+    const icon = document.createElement('span');
+    icon.className = 'text-amber-400 text-sm flex-shrink-0';
+    icon.innerHTML = '&#9888;';
+
+    // Explanation text
+    const text = document.createElement('span');
+    text.className = 'text-2xs text-zinc-400 flex-1';
+    text.textContent = t.groupMismatchExplanation
+        || `Current group: ${uiGroupName} — Rules default to: ${effectiveGroupName}. Connections may use "${effectiveGroupName}" instead of your selected node.`;
+
+    // Quick-switch button
+    const btn = document.createElement('button');
+    btn.className = 'text-2xs text-accent hover:text-accent/80 underline whitespace-nowrap flex-shrink-0';
+    btn.textContent = t.switchToEffectiveGroup || 'Switch to rules default';
+    btn.onclick = async () => {
+        try {
+            appStore.set('uiGroupName', effectiveGroupName);
+            invalidateProxiesCache();
+            invalidateRunConfigCache();
+            await renderProxies();
+        } catch (e) {
+            proxyLogger.warn('Failed to switch to effective group', e);
+        }
+    };
+
+    // Dismiss button
+    const dismiss = document.createElement('button');
+    dismiss.className = 'text-zinc-600 hover:text-zinc-400 ml-2 flex-shrink-0';
+    dismiss.innerHTML = '&times;';
+    dismiss.title = t.dismiss || 'Dismiss';
+    dismiss.onclick = () => {
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
+    };
+
+    bar.appendChild(icon);
+    bar.appendChild(text);
+    bar.appendChild(btn);
+    bar.appendChild(dismiss);
+}
 
 /**
  * Show loading state in the proxy container.
@@ -1041,7 +1133,14 @@ export async function renderProxies() {
         return;
     }
 
-    const proxyGroupsResult = await fetchProxyGroupsShared({ existingData: data, existingConfig: config });
+    // Use the user's explicit group selection or fall back to the resolver
+    const preferredGroupName = appStore.get('uiGroupName') || null;
+
+    const proxyGroupsResult = await fetchProxyGroupsShared({
+        existingData: data,
+        existingConfig: config,
+        preferredGroupName,
+    });
     if (!proxyGroupsResult) {
         container.innerHTML = '';
         const empty = document.createElement('div');
@@ -1051,8 +1150,19 @@ export async function renderProxies() {
         return;
     }
 
+    // Sync resolver state to appStore
+    appStore.set('uiPrimaryGroupName', (/** @type {any} */ (proxyGroupsResult)).uiPrimaryGroupName || null);
+    appStore.set('effectiveGroupName', (/** @type {any} */ (proxyGroupsResult)).effectiveGroupName || null);
+    appStore.set('uiGroupName', (/** @type {any} */ (proxyGroupsResult)).uiGroupName || null);
+
     const { mainGroup, current } = /** @type {any} */ (proxyGroupsResult);
+    // Use the resolved uiGroupName for node list rendering
+    const uiGroupName = (/** @type {any} */ (proxyGroupsResult)).uiGroupName || mainGroup;
+    const effectiveGroupName = (/** @type {any} */ (proxyGroupsResult)).effectiveGroupName;
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+
+    // Render the group explanation bar (effective vs ui group mismatch indicator)
+    renderGroupExplanationBar(uiGroupName, effectiveGroupName);
 
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
@@ -1085,7 +1195,7 @@ export async function renderProxies() {
     }
 
     // Store virtual data for lazy card creation
-    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup });
+    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup: uiGroupName });
 
     // --- In-place update path ---
     if (await updateProxiesInPlace(container, proxies, data, current)) {
@@ -1100,7 +1210,7 @@ export async function renderProxies() {
         existingObserver.disconnect();
     }
 
-    const fragment = buildProxyWrappers(container, proxies, data, current, mainGroup);
+    const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName);
     container.innerHTML = '';
     container.appendChild(fragment);
 
@@ -1152,8 +1262,15 @@ async function syncSmartUiVisibility() {
 // --- Event Bus: react to config updates from other modules (e.g. settings.js) ---
 
 Bus.on(Events.CONFIG_UPDATED, async () => {
+    invalidateRunConfigCache();
     await syncSmartUiVisibility();
     renderProxies();
+});
+
+Bus.on(Events.CORE_RESTARTED, () => {
+    invalidateRunConfigCache();
+    // Reset uiGroupName so the resolver re-evaluates on next render
+    appStore.set('uiGroupName', null);
 });
 
 // ═══════════════════════════════════════════════════════════════════════

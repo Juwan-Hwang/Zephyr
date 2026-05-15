@@ -33,7 +33,8 @@ export function initModeSelector() {
                 // 1. Capture current node for inheritance
                 let nodeToInherit = null;
                 try {
-                    const resultBefore = await fetchProxyGroups();
+                    const preferredGroupName = appStore.get('uiGroupName') || null;
+                    const resultBefore = await fetchProxyGroups({ preferredGroupName });
                     if (resultBefore) {
                         nodeToInherit = resultBefore.current;
                     }
@@ -54,9 +55,14 @@ export function initModeSelector() {
 
                 // 4. Inherit node in target mode
                 if (nodeToInherit && mode !== 'direct') {
-                    const resultAfter = await fetchProxyGroups();
+                    const preferredGroupName = appStore.get('uiGroupName') || null;
+                    const resultAfter = await fetchProxyGroups({ preferredGroupName });
                     if (resultAfter && resultAfter.proxies.includes(nodeToInherit)) {
-                        await switchProxy(resultAfter.mainGroup, nodeToInherit);
+                        // Use uiGroupName from resolver for accurate group targeting
+                        const targetGroup = /** @type {any} */ (resultAfter).uiGroupName
+                            || resultAfter.mainGroup;
+                        await switchProxy(targetGroup, nodeToInherit);
+                        appStore.set('uiGroupName', targetGroup);
                     }
                 }
 

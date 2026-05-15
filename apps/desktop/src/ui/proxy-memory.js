@@ -10,6 +10,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
+import { appStore } from './state.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
 const MAX_READY_RETRIES = 50;
@@ -79,12 +80,25 @@ export async function restoreProxySelection(profileName) {
 
         if (!savedNode) return false;
 
-        const proxyGroupsResult = await fetchProxyGroups();
+        const proxyGroupsResult = await fetchProxyGroups({
+            preferredGroupName: appStore.get('uiGroupName') || null,
+        });
         if (!proxyGroupsResult) return false;
 
+        // Use the resolved uiGroupName (from resolver) instead of the old
+        // keyword-guessed mainGroup.  This fixes the core bug where the
+        // restored selection was applied to the wrong group.
+        const uiGroupName = /** @type {any} */ (proxyGroupsResult).uiGroupName
+            || proxyGroupsResult.mainGroup;
+
         if (proxyGroupsResult.proxies && proxyGroupsResult.proxies.includes(savedNode)) {
-            const mainGroup = proxyGroupsResult.mainGroup || 'Proxy';
-            return await switchProxy(mainGroup, savedNode);
+            const success = await switchProxy(uiGroupName, savedNode);
+            if (success) {
+                // Sync the restored group to appStore so the UI knows
+                // which group was restored
+                appStore.set('uiGroupName', uiGroupName);
+            }
+            return success;
         }
         return false;
     } catch (e) {
