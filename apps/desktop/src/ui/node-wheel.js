@@ -9,6 +9,9 @@ import { nodeWheelLogger } from '../utils/logger.js';
 import { translations, currentLang } from '../i18n.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { sortProxiesByLatency } from './proxies.js';
+import { appStore } from './state.js';
+import { invalidateProxiesCache, getSettingsCached } from './cache.js';
+import { saveProxySelection } from './proxy-memory.js';
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let wheelHoverTimer = null;
@@ -66,10 +69,26 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     }
     closeWheel();
     abortLatencyTests();
-    const success = await switchProxy(mainGroup, name);
+
+    // Use uiGroupName from appStore for accurate group targeting
+    const targetGroup = appStore.get('uiGroupName') || mainGroup;
+    const success = await switchProxy(targetGroup, name);
     if (success) {
+        invalidateProxiesCache();
         await closeAllConnections();
-        const updatedNode = await waitForCurrentNode(mainGroup, name);
+
+        // Save proxy selection for restore after core restart
+        try {
+            const settings = await getSettingsCached();
+            const profileName = settings?.last_config;
+            if (profileName) {
+                await saveProxySelection(profileName, name);
+            }
+        } catch (e) {
+            nodeWheelLogger.warn('Failed to save proxy selection', e);
+        }
+
+        const updatedNode = await waitForCurrentNode(targetGroup, name);
         import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
         const currentNodeEl = document.getElementById('current-node-name');
         if (currentNodeEl) currentNodeEl.textContent = updatedNode || name;
@@ -79,7 +98,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
         }
     } else {
         import('./proxies.js').then(m => m.syncCoreConfig());
-        const revertedNode = await waitForCurrentNode(mainGroup, null);
+        const revertedNode = await waitForCurrentNode(targetGroup, null);
         const currentNodeEl = document.getElementById('current-node-name');
         if (currentNodeEl && revertedNode) currentNodeEl.textContent = revertedNode;
     }
@@ -103,10 +122,14 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
     }
 
     try {
-        const proxyGroupsResult = await fetchProxyGroups();
+        const preferredGroupName = appStore.get('uiGroupName') || null;
+        const proxyGroupsResult = await fetchProxyGroups({ preferredGroupName });
         if (!proxyGroupsResult) return;
 
-        const { data, mainGroup, current } = proxyGroupsResult;
+        // Use the resolver's uiGroupName for wheel display
+        const uiGroupName = proxyGroupsResult.uiGroupName
+            || proxyGroupsResult.mainGroup;
+        const { data, current } = proxyGroupsResult;
         /** @type {string[]} */
         const proxies = [...proxyGroupsResult.proxies];
 
@@ -156,7 +179,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
                 resetToCenterFocus();
             });
 
-            item.onclick = () => handleWheelProxySwitch(trigger, mainGroup, name, isSelected);
+            item.onclick = () => handleWheelProxySwitch(trigger, uiGroupName, name, isSelected);
             return item;
         };
 

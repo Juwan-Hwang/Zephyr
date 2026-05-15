@@ -36,9 +36,12 @@ const PERSIST_DEBOUNCE_MS = 100;
  * @param {boolean}  [options.persist=true]  - Auto-persist to localStorage
  * @returns {Store}
  */
-export function createStore(storeName, initialState, { persist = true } = {}) {
+export function createStore(storeName, initialState, { persist = true, transientKeys = [] } = {}) {
+    /** @type {Set<string>} Keys that are never persisted to localStorage */
+    const _transient = new Set(transientKeys);
+
     // Hydrate from localStorage
-    const state = hydrate(storeName, initialState);
+    const state = hydrate(storeName, initialState, _transient);
 
     /** @type {Map<string, Set<Function>>} key -> callbacks */
     const keySubs = new Map();
@@ -66,7 +69,12 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
         if (persistTimer) clearTimeout(persistTimer);
         persistTimer = setTimeout(() => {
             try {
-                localStorage.setItem(storeName, JSON.stringify(state));
+                // Strip transient keys before persisting
+                const toSave = { ...state };
+                for (const key of _transient) {
+                    delete toSave[key];
+                }
+                localStorage.setItem(storeName, JSON.stringify(toSave));
             } catch { /* quota exceeded — silently ignore */ }
             persistTimer = null;
         }, PERSIST_DEBOUNCE_MS);
@@ -291,14 +299,16 @@ export function createStore(storeName, initialState, { persist = true } = {}) {
  * @param {Record<string, any>} defaults
  * @returns {Record<string, any>}
  */
-function hydrate(storeName, defaults) {
+function hydrate(storeName, defaults, transientKeys) {
     try {
         const raw = localStorage.getItem(storeName);
         if (raw) {
             const saved = JSON.parse(raw);
             // Merge saved values over defaults (don't add new keys)
+            // Skip transient keys — they must always be computed fresh
             const state = { ...defaults };
             for (const key of Object.keys(defaults)) {
+                if (transientKeys?.has(key)) continue;
                 if (key in saved) {
                     state[key] = saved[key];
                 }
@@ -352,6 +362,13 @@ export const appStore = createStore('zephyr.app', {
     currentSortMode: localStorage.getItem('sortMode') || 'default',
     currentOutboundMode: 'rule',
 
+    // Proxy group resolver state
+    // All resolver state is transient — re-resolved each session.
+    // User's explicit group choice is tracked via saveProxySelection (profile+node).
+    uiGroupName: null,
+    uiPrimaryGroupName: null,
+    effectiveGroupName: null,
+
     // System state
     isSysProxyEnabled: false,
     isTunEnabled: false,
@@ -364,6 +381,8 @@ export const appStore = createStore('zephyr.app', {
     // Config
     currentConfigName: null,
     currentCoreVersion: '',
+}, {
+    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName'],
 });
 
 /** Tray state (replaces the old sealed TrayState) */
