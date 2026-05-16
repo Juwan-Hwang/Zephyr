@@ -49,7 +49,7 @@ jobs:
           cp main/packages/shared/src/index.js dist/app/_shared/index.js
 
           # 3. Inject demo bootstrap and mock-api loader using Python
-          python3 demo-branch/inject-demo.py dist/app/index.html dist/app/main.js
+          python3 demo-branch/inject-demo.py dist/app demo-branch
 
           # 4. Copy demo-specific files to dist/
           cp demo-branch/landing.html dist/index.html
