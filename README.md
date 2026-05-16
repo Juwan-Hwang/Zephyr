@@ -2,7 +2,7 @@
 
 <img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - Modern Mihomo GUI Client Logo" width="128" height="128">
 
-# Zephyr
+# Zephyr - 现代轻量级 Mihomo GUI 客户端
 
 **安全至上 · 极简美学 · 轻量高效**
 
@@ -28,7 +28,7 @@
 
 ## 项目状态
 
-Zephyr 的开发起因很简单：目前我还没有找到符合自己审美的 Mihomo/Clash GUI，所以就自己 vibe coding 了一个。
+Zephyr 的开发起因很简单：目前我还没有找到符合自己审美的 Mihomo GUI，所以就自己 vibe coding 了一个。
 
 这个项目首先服务于个人使用场景。它追求两件事：一个更顺眼的桌面代理管理界面，以及更清楚的安全边界，包括订阅下载、配置处理、文件写入、脚本执行、深链导入和更新校验。
 
@@ -89,7 +89,7 @@ Zephyr 内置基于 `clash-prism-*` crate 的规则引擎，用来增强 Mihomo 
 
 ### 安全特性
 
-- **机器绑定加密**：配置加密使用硬件指纹派生密钥
+- **机器绑定加密**：订阅元数据（URL、流量信息）加密使用硬件指纹派生密钥；代理配置文件（YAML）明文存储
 - **SSRF 防护**：订阅和规则 URL 下载前进行 DNS 验证；重定向到内网地址会被拦截（用户主动输入内网地址允许）
 - **DNS 防泄漏**：TUN 模式自动注入 `dns-hijack`，劫持所有 DNS 流量到 Mihomo
 - **配置清洗**：递归移除危险 YAML 字段，限制 provider 路径遍历
