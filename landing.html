@@ -7,7 +7,7 @@
   <!-- ═══ SEO Core ═══ -->
   <title>Zephyr — 安全与颜值并重的 Mihomo 客户端</title>
   <meta name="google-site-verification" content="ZHyo5fci-VcZibRTPy9JYopjYsc3Ga1D4ZdM0F65Q94" />
-  <meta name="description" content="Zephyr 是基于 Tauri v2 和 Rust 构建的 Mihomo 代理客户端。13 层纵深防御、AES-256-GCM 加密、零前端框架、Lite 版仅 8MB。开源、免费、跨平台。" />
+  <meta name="description" content="Zephyr 是基于 Tauri v2 和 Rust 构建的 Mihomo 代理客户端。13 层纵深防御、订阅元数据加密、零前端框架、Lite 版仅 8MB。开源、免费、跨平台。" />
   <meta name="keywords" content="Zephyr, Mihomo, Clash Meta, Tauri, Rust, 代理客户端, 桌面客户端, 开源, 安全代理, 跨平台, macOS, Windows, Linux, 代理工具, 隐私保护, mihomo gui, clash 替代品" />
   <meta name="author" content="Juwan" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
@@ -23,7 +23,7 @@
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Zephyr — 安全至上的 Mihomo 桌面客户端" />
-  <meta property="og:description" content="13 层纵深防御 · AES-256-GCM 加密 · 零前端框架 · Lite 版仅 8MB。基于 Tauri v2 + Rust 构建，开源免费。" />
+  <meta property="og:description" content="13 层纵深防御 · 订阅元数据加密 · 零前端框架 · Lite 版仅 8MB。基于 Tauri v2 + Rust 构建，开源免费。" />
   <meta property="og:url" content="https://juwan-hwang.github.io/Zephyr/" />
   <meta property="og:image" content="https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/assets/screenshot-home.png" />
   <meta property="og:image:width" content="1200" />
@@ -37,7 +37,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Zephyr — 安全至上的 Mihomo 桌面客户端" />
-  <meta name="twitter:description" content="13 层纵深防御 · AES-256-GCM 加密 · 零前端框架 · Lite 版仅 8MB。" />
+  <meta name="twitter:description" content="13 层纵深防御 · 订阅元数据加密 · 零前端框架 · Lite 版仅 8MB。" />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/assets/screenshot-home.png" />
 
   <!-- Structured Data: SoftwareApplication -->
@@ -64,7 +64,7 @@
       "priceCurrency": "USD"
     },
     "screenshot": "https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/assets/screenshot-home.png",
-    "featureList": "SSRF防护, AES-256-GCM加密, TUN虚拟网卡, 实时流量监控, 订阅管理, 规则引擎, 跨平台"
+    "featureList": "SSRF防护, 订阅元数据加密, TUN虚拟网卡, 实时流量监控, 订阅管理, 规则引擎, 跨平台"
   }
   </script>
 
@@ -121,7 +121,7 @@
         "name": "Zephyr 如何保护我的订阅链接安全？",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "订阅 URL 使用 AES-256-GCM 加密存储，密钥与你的设备指纹绑定。即使配置文件被复制到其他设备，攻击者也无法解密。此外，SSRF 防护确保订阅服务器无法通过重定向攻击你的内网。"
+          "text": "订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备，攻击者也无法解密。注意：代理配置文件（.yaml）以明文存储，仅依赖文件系统权限保护。此外，SSRF 防护确保订阅服务器无法通过重定向攻击你的内网。"
         }
       },
       {
@@ -314,7 +314,7 @@
                 </svg>
               </div>
               <h4>安全优先</h4>
-              <p>13 层纵深防御，从 CSP 到供应链，覆盖全攻击面。AES-256-GCM 加密，机器指纹绑定。</p>
+              <p>13 层纵深防御，从 CSP 到供应链，覆盖全攻击面。订阅元数据 AES-256-GCM 加密，机器指纹绑定。</p>
             </div>
             <div class="philosophy-card reveal" data-delay="3">
               <div class="feature-icon">
@@ -382,8 +382,8 @@
                 <path d="M7 10h6M10 7v6"/>
               </svg>
             </div>
-            <h3>配置加密存储</h3>
-            <p>你的订阅 URL 和代理配置使用 AES-256-GCM 加密存储，密钥与你的设备指纹绑定。即使配置文件被复制到其他设备或泄露，攻击者也无法解密获取你的订阅信息。</p>
+            <h3>元数据加密存储</h3>
+            <p>你的订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备或泄露，攻击者也无法解密获取你的订阅信息。代理配置文件（.yaml）以明文存储，依赖文件系统权限保护。</p>
           </div>
 
           <div class="security-card reveal" data-delay="2">
@@ -563,7 +563,7 @@
           <span class="arch-tag">Canvas 2D</span>
           <span class="arch-tag">Tauri v2</span>
           <span class="arch-tag">Mihomo</span>
-          <span class="arch-tag">AES-256-GCM</span>
+          <span class="arch-tag">元数据加密</span>
           <span class="arch-tag">PBKDF2</span>
         </div>
       </div>
