@@ -3,6 +3,9 @@ import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from './utils/logger.js';
 import { Bus, Events } from './ui/events.js';
+import { appStore } from './ui/state.js';
+import { invalidateSettingsCache } from './ui/cache.js';
+import { invalidateRunConfigCache } from './ui/run-config-cache.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Internal state (declared early — used by apiFetch below)
@@ -498,6 +501,101 @@ export async function restartCore(configPath, customArgs = []) {
   setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
   setWsSecret(coreResult.secret);
   Bus.emit(Events.CORE_RESTARTED);
+  return coreResult;
+}
+
+/**
+ * Switch to a different subscription config with full lifecycle management.
+ * Shared by UI subscription switch and tray subscription switch.
+ *
+ * Steps:
+ *   1. Abort any ongoing latency tests (user-invisible)
+ *   2. Save current proxy selection
+ *   3. Restart core with new config
+ *   4. Update settings, close connections, rebuild prism, restore proxy selection
+ *
+ * @param {string} configName - Target config file name
+ * @param {string[]} [customArgs=[]] - Custom core arguments
+ * @returns {Promise<Object>} coreResult from restartCore
+ */
+export async function switchToConfig(configName, customArgs = []) {
+  const t0 = performance.now();
+
+  // Abort ongoing latency tests so mihomo is idle for faster kill
+  abortLatencyTests();
+  // Also close all connections to unblock mihomo's request queue
+  // (delay tests may still be processing server-side even after frontend abort)
+  try { await closeAllConnections(); } catch { /* non-fatal */ }
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] abortLatencyTests took ${Math.round(performance.now() - t0)}ms`);
+
+  // Save current proxy selection before switching
+  const t1 = performance.now();
+  try {
+    const { fetchProxyGroups } = await import('./ui/proxy-groups.js');
+    const groupName = appStore.get('uiGroupName');
+    // Use a short timeout — if mihomo is busy (e.g. delay tests still queued),
+    // fall back to appStore state instead of blocking for seconds
+    const fetchPromise = fetchProxyGroups();
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 500));
+    const currentProxyGroups = await Promise.race([fetchPromise, timeoutPromise]);
+    if (currentProxyGroups && currentProxyGroups.current) {
+      const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
+      const activeConfig = liveSettings.last_config || 'config.yaml';
+      const { saveProxySelection } = await import('./ui/proxy-memory.js');
+      await saveProxySelection(activeConfig, {
+        node: currentProxyGroups.current,
+        group: groupName,
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[switchToConfig] saveProxySelection took ${Math.round(performance.now() - t1)}ms (fetchProxyGroups ${currentProxyGroups ? 'resolved' : 'timed out'})`);
+  } catch { /* non-fatal */ }
+
+  // Restart core
+  const t2 = performance.now();
+  const coreResult = await restartCore(configName, customArgs);
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] restartCore took ${Math.round(performance.now() - t2)}ms`);
+  if (!coreResult?.secret) throw new Error('Core start failed: no secret returned');
+
+  // Persist new active config
+  const t3 = performance.now();
+  /** @type {any} */
+  const s = await invoke(COMMANDS.GET_SETTINGS);
+  s.last_config = configName;
+  await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+  invalidateSettingsCache();
+  invalidateRunConfigCache();
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] saveSettings took ${Math.round(performance.now() - t3)}ms`);
+
+  // Close stale connections
+  const t4 = performance.now();
+  await closeAllConnections();
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] closeAllConnections took ${Math.round(performance.now() - t4)}ms`);
+
+  // Rebuild prism patches (__when__.profile conditions need re-evaluation)
+  const t5 = performance.now();
+  try {
+    const { default: prism } = await import('./ui/prism.js');
+    await prism.rebuild();
+  } catch { /* non-fatal */ }
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] prism.rebuild took ${Math.round(performance.now() - t5)}ms`);
+
+  // Restore proxy selection
+  const t6 = performance.now();
+  try {
+    const { restoreProxySelection } = await import('./ui/proxy-memory.js');
+    await restoreProxySelection(configName);
+  } catch { /* non-fatal */ }
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] restoreProxySelection took ${Math.round(performance.now() - t6)}ms`);
+
+  // eslint-disable-next-line no-console
+  console.log(`[switchToConfig] TOTAL: ${Math.round(performance.now() - t0)}ms`);
   return coreResult;
 }
 

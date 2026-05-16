@@ -4,11 +4,11 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen, restartCore } from '../api.js';
+import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen, switchToConfig } from '../api.js';
 import { translations, currentLang } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
-import { trayMenuCache, TRAY_CACHE_TTL, invalidateSettingsCache, invalidateProxiesCache } from './cache.js';
+import { trayMenuCache, TRAY_CACHE_TTL, invalidateProxiesCache } from './cache.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -246,47 +246,18 @@ export async function initTrayEventListeners() {
         const t = /** @type {Record<string, string>} */(translations[langKey]);
 
         try {
-            // Save current proxy selection before switching
-            try {
-                const { fetchProxyGroups } = await import('./proxy-groups.js');
-                const currentProxyGroups = await fetchProxyGroups();
-                if (currentProxyGroups && currentProxyGroups.current) {
-                    const settings = await invoke(COMMANDS.GET_SETTINGS);
-                    const currentProfile = settings.last_config || 'config.yaml';
-                    const { saveProxySelection } = await import('./proxy-memory.js');
-                    await saveProxySelection(currentProfile, { node: currentProxyGroups.current, group: appStore.get('uiGroupName') });
-                }
-            } catch { /* non-fatal */ }
-
             showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
 
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
             const customArgs = settings.custom_args || [];
 
-            const coreResult = await restartCore(subName, customArgs);
-            /** @type {any} */
-            const result = coreResult;
-            if (result && result.secret) {
-                settings.last_config = subName;
-                await invoke(COMMANDS.SAVE_SETTINGS, { settings });
-                invalidateSettingsCache();
-                invalidateRunConfigCache();
+            await switchToConfig(subName, customArgs);
 
-                await closeAllConnections();
-
-                // Restore proxy selection BEFORE updating tray menu
-                // so the tray shows the correct selected node instead of DIRECT
-                try {
-                    const { restoreProxySelection } = await import('./proxy-memory.js');
-                    await restoreProxySelection(subName);
-                } catch { /* non-fatal */ }
-
-                // Sync core config first (updates appStore including TUN state), then update tray
-                const { syncCoreConfig } = await import('./proxies.js');
-                await syncCoreConfig();
-                await updateTrayMenu();
-            }
+            // Sync core config first (updates appStore including TUN state), then update tray
+            const { syncCoreConfig } = await import('./proxies.js');
+            await syncCoreConfig();
+            await updateTrayMenu();
         } catch (err) {
             trayLogger.error('Failed to switch subscription from tray', err);
             showNotification(toError(err).toString(), 'error');

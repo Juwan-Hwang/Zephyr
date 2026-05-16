@@ -19,7 +19,8 @@ const PORT_WAIT_MAX_RETRIES: u64 = 50;
 #[cfg(target_os = "macos")]
 const PORT_WAIT_INTERVAL_MS: u64 = 100;
 const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
-const HEALTH_CHECK_INTERVAL_MS: u64 = 1000;
+const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
+const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
 use super::tun_manager::{is_tun_mode, restart_core_as_root};
 use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
@@ -97,6 +98,54 @@ pub const fn core_binary_name() -> &'static str {
 }
 
 /// Kill all mihomo processes (cleanup function)
+/// Drain existing mihomo connections via REST API before killing the process.
+/// This helps mihomo exit faster when it has many active connections.
+/// Failure is non-fatal — we fall back to force kill.
+async fn drain_connections_if_alive(port: u16, secret_val: &str) {
+    let secret = secret_val.to_owned();
+    let _ = tokio::task::spawn_blocking(move || {
+        let url = format!("http://127.0.0.1:{port}/connections");
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        // Close all connections via mihomo API
+        let _ = client
+            .delete(&url)
+            .header("Authorization", format!("Bearer {secret}"))
+            .send();
+
+        // Wait for connections to drain (max 2s)
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            match client
+                .get(&url)
+                .header("Authorization", format!("Bearer {secret}"))
+                .send()
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(body) = resp.json::<serde_json::Value>() {
+                        let count = body
+                            .get("connections")
+                            .and_then(|v| v.as_array())
+                            .map_or(0, Vec::len);
+                        if count == 0 {
+                            return;
+                        }
+                    }
+                }
+                _ => return, // Core already unreachable
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    })
+    .await;
+}
+
 pub fn kill_mihomo() {
     #[cfg(unix)]
     {
@@ -797,6 +846,9 @@ async fn spawn_with_cache_retry(
 /// Returns `Ok(())` if the core responds within the retry limit.
 async fn health_check(port: u16) -> Result<(), String> {
     let mut is_healthy = false;
+    let mut interval = std::time::Duration::from_millis(HEALTH_CHECK_INITIAL_INTERVAL_MS);
+    let max_interval = std::time::Duration::from_millis(HEALTH_CHECK_MAX_INTERVAL_MS);
+
     for _ in 0..HEALTH_CHECK_MAX_RETRIES {
         if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
             let request =
@@ -816,8 +868,10 @@ async fn health_check(port: u16) -> Result<(), String> {
                 }
             }
         }
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(HEALTH_CHECK_INTERVAL_MS));
+        let sleep_dur = interval;
+        interval = (interval * 2).min(max_interval);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(sleep_dur);
         })
         .await;
     }
@@ -870,7 +924,8 @@ pub async fn start_core(
 
     // Check if core is already running with the SAME config (under CORE_STARTING protection).
     // If the requested config differs from the current one, we must restart to apply it.
-    {
+    // Also extract port/secret for drain before killing.
+    let drain_info: Option<(u16, String)> = {
         let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
         if lock.process().is_some() {
             let same_config = lock
@@ -884,7 +939,17 @@ pub async fn start_core(
                     });
                 }
             }
+            // Core is running with a different config — prepare drain info
+            lock.last_port()
+                .map(|port| (port, lock.last_secret().to_owned()))
+        } else {
+            None
         }
+    };
+
+    // Drain existing connections before killing to help mihomo exit faster
+    if let Some((port, secret)) = drain_info {
+        drain_connections_if_alive(port, &secret).await;
     }
 
     // Check if TUN mode is active via flag (memory-based, not from config file)
