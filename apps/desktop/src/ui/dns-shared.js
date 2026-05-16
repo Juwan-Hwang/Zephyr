@@ -11,7 +11,6 @@
 import { patchConfig, closeAllConnections, getConfig, invoke } from '../api.js';
 import { dnsLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
-import { persistConfigChanges } from './advanced.js';
 import { invalidateSettingsCache } from './cache.js';
 import { translations, currentLang } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -183,7 +182,9 @@ export async function buildDnsRewritePayload() {
 }
 
 /**
- * Apply the DNS rewrite payload to the core and persist changes.
+ * Apply the DNS rewrite payload to the core via API only.
+ * Does NOT persist to the original profile file — DNS rewrite is a runtime
+ * overlay that must not corrupt subscription-specific DNS configurations.
  *
  * @returns {Promise<boolean>}
  */
@@ -191,7 +192,6 @@ export async function applyDnsRewrite() {
     try {
         const dnsRewritePayload = await buildDnsRewritePayload();
         await patchConfig(dnsRewritePayload);
-        await persistConfigChanges(dnsRewritePayload);
         return true;
     } catch (err) {
         dnsLogger.error('Failed to apply DNS rewrite', err);
@@ -344,7 +344,6 @@ export async function initDnsRewriteToggle() {
             try {
                 const payload = { dns: { enable: false }, sniffing: false };
                 await patchConfig(payload);
-                await persistConfigChanges(payload);
                 await closeAllConnections();
                 localStorage.setItem('dnsRewrite', 'false');
                 showNotification(t.notifDnsDisabled, 'info');

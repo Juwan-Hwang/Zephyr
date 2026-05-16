@@ -251,15 +251,12 @@ pub async fn prism_rebuild(
             .ok_or_else(|| "No active profile".to_owned())?
             .to_owned();
         let secret = lock.last_secret().to_owned();
-        eprintln!("[prism_rebuild] config_path = {config_path}");
         drop(lock);
 
         let paths = crate::core_manager::ensure_app_storage(&app)?;
         let profile_file = paths.profiles_dir.join(&config_path);
-        eprintln!("[prism_rebuild] reading profile from {profile_file:?}");
         let content = std::fs::read_to_string(&profile_file)
             .map_err(|e| format!("Failed to read profile '{config_path}': {e}"))?;
-        eprintln!("[prism_rebuild] profile size = {} bytes", content.len());
         (content, secret)
     };
 
@@ -269,7 +266,6 @@ pub async fn prism_rebuild(
         {
             let paths = crate::core_manager::ensure_app_storage(&app)?;
             let run_config_path = paths.core_dir.join("run_config.yaml");
-            eprintln!("[prism_rebuild] resetting run_config.yaml at {run_config_path:?}");
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
@@ -286,19 +282,8 @@ pub async fn prism_rebuild(
             .as_ref()
             .ok_or_else(|| "Prism not initialized".to_owned())?;
         let result = ext.apply(opts)?;
-        for t in &result.trace {
-            eprintln!(
-                "[prism_rebuild]   patch='{}' file={:?} op='{}' matched={}",
-                t.patch_id, t.source_file, t.op_name, t.condition_matched,
-            );
-        }
-        eprintln!(
-            "[prism_rebuild] ext.apply() OK — trace: {} patches, {} matched, {} skipped",
-            result.trace.len(),
-            result.trace.iter().filter(|t| t.condition_matched).count(),
-            result.trace.iter().filter(|t| !t.condition_matched).count(),
-        );
         drop(lock);
+
         serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))
     })
     .await
