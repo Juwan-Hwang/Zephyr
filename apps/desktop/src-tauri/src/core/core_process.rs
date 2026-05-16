@@ -547,9 +547,9 @@ pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u1
         }
     }
 
-    serde_yaml::to_string(&yaml_val)
-        .ok()
-        .map(|final_config| (final_config, config_port))
+    let result = serde_yaml::to_string(&yaml_val).ok()?;
+
+    Some((result, config_port))
 }
 
 fn build_minimal_runtime_config(secret: &str) -> (String, u16) {

@@ -209,9 +209,9 @@ pub async fn update_config(
         )
     };
 
-    if let Some(profile_name) = last_config_path {
+    if let Some(profile_name) = &last_config_path {
         if profile_name != "run_config.yaml" {
-            let profile_path = paths.profiles_dir.join(&profile_name);
+            let profile_path = paths.profiles_dir.join(profile_name);
             if profile_path.exists() {
                 if let Ok(profile_content) = fs::read_to_string(&profile_path) {
                     let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
