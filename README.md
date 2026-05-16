@@ -2,7 +2,7 @@
 
 <img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - Modern Mihomo GUI Client Logo" width="128" height="128">
 
-# Zephyr - 现代轻量级 Mihomo GUI 客户端
+# Zephyr
 
 **安全至上 · 极简美学 · 轻量高效**
 
