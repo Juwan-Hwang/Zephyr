@@ -472,7 +472,12 @@
     }
 
     function drawGrid() {
-      ctx.strokeStyle = isHero ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.06)';
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      if (isLight) {
+        ctx.strokeStyle = isHero ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.06)';
+      } else {
+        ctx.strokeStyle = isHero ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.06)';
+      }
       ctx.lineWidth = 0.5;
       for (let y = 30; y < h; y += 30) {
         ctx.beginPath();
