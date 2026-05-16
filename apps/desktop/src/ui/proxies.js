@@ -127,6 +127,40 @@ const queueLatencySort = debounce(() => {
     applyLatencySortToDom(false);
 }, 220);
 
+/** Concurrency-limited smart score updater: max N concurrent IPC calls. */
+class SmartScoreBatcher {
+    constructor(maxConcurrency) {
+        this._queue = [];
+        this._running = 0;
+        this._max = maxConcurrency;
+        this._idleResolver = null;
+    }
+    push(name, latencyMs, success) {
+        this._queue.push({ name, latencyMs, success });
+        this._flush();
+    }
+    _flush() {
+        while (this._running < this._max && this._queue.length > 0) {
+            const item = this._queue.shift();
+            this._running++;
+            updateSmartScore(item.name, item.latencyMs, item.success).finally(() => {
+                this._running--;
+                this._flush();
+                if (this._running === 0 && this._queue.length === 0) {
+                    this._idleResolver?.();
+                    this._idleResolver = null;
+                }
+            });
+        }
+    }
+    /** Wait until all queued tasks have completed. */
+    async wait() {
+        if (this._running === 0 && this._queue.length === 0) return;
+        return new Promise(resolve => { this._idleResolver = resolve; });
+    }
+}
+const _smartBatcher = new SmartScoreBatcher(2);
+
 /** Update a node's smart score badge in the DOM.
  *  @param {string} nodeName
  *  @param {number} latencyMs
@@ -137,12 +171,6 @@ async function updateSmartScore(nodeName, latencyMs, success) {
         const score = await smartScore(nodeName, latencyMs, success);
         const rounded = Math.round(score);
         if (rounded === 0) return; // No meaningful score yet
-
-        // Adaptive scheduling: calculate next test interval based on score
-        const quality = rounded / 100;
-        try {
-            await smartNextInterval(quality, 10, 3600);
-        } catch { /* ignore scheduling errors */ }
 
         // Update the badge in the DOM
         const card = document.querySelector(`[data-name="${CSS.escape(nodeName)}"]`);
@@ -581,10 +609,10 @@ export function initProxyControls() {
                     }
                     queueLatencySort();
 
-                    // Update smart score if enabled
+                    // Update smart score via concurrency-limited batcher (max 2 IPC calls)
                     if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
                         const success = delay > 0 && delay < 999999;
-                        updateSmartScore(name, success ? delay : 999999, success);
+                        _smartBatcher.push(name, success ? delay : 999999, success);
                     }
                 };
 
@@ -611,6 +639,8 @@ export function initProxyControls() {
                 appStore.set('latencyTestStartTime', null);
                 if (latencySortTimer) clearTimeout(latencySortTimer);
                 if (appStore.get('currentSortMode') === 'smart') {
+                    // Wait for all pending smart score updates before sorting
+                    await _smartBatcher.wait();
                     await applySmartSortToDom();
                 } else {
                     applyLatencySortToDom(true);
@@ -1102,12 +1132,14 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
     };
 
     // Build all wrappers and cards
+    const testingLatency = appStore.get('isTestingLatency');
     proxies.forEach((/** @type {string} */ name, /** @type {number} */ index) => {
         const wrapper = document.createElement('div');
         (/** @type {HTMLElement} */ (wrapper)).style.order = String(index);
         (/** @type {HTMLElement} */ (wrapper)).dataset.baseOrder = `${index}`;
         (/** @type {HTMLElement} */ (wrapper)).dataset.index = String(index);
         wrapper.dataset.name = name;
+        if (testingLatency) wrapper.dataset.pending = '1';
 
         const proxy = (/** @type {any} */ (data)).proxies[name];
         // Defensive: skip if proxy data is missing
