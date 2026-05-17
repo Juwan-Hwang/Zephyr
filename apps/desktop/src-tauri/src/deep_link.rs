@@ -77,8 +77,17 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     };
 
     // Security: only allow http:// or https:// via proper URL parsing
-    if !safe_url.starts_with("http://") && !safe_url.starts_with("https://") {
-        return None;
+    // Use url::Url to parse and validate the scheme, preventing @-bypass attacks
+    // like http://attacker.com@legitimate.com
+    match url::Url::parse(safe_url) {
+        Ok(parsed) => {
+            if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                return None;
+            }
+            // Additional validation: ensure the URL has a valid host
+            parsed.host()?;
+        }
+        Err(_) => return None,
     }
 
     // S3: Sanitize name parameter

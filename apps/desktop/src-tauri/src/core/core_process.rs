@@ -64,9 +64,36 @@ fn detect_cache_lock_issue(log: &str) -> bool {
 }
 
 /// Redact sensitive directory paths from an error message.
+/// Handles both with-separator and without-separator occurrences, and supports
+/// both forward-slash and backslash path styles (Windows).
 fn redact_error_message(msg: &str, core_dir: &str, profiles_dir: &str) -> String {
-    msg.replace(core_dir, "[CORE_DIR]")
-        .replace(profiles_dir, "[PROFILES_DIR]")
+    let mut result = msg.to_owned();
+
+    // Redact a single directory path in both slash styles.
+    // Replaces path followed by separator first, then bare path.
+    let redact_dir = |s: &mut String, dir: &str, label: &str| {
+        if dir.is_empty() {
+            return;
+        }
+        // Normalize to both slash styles regardless of input format,
+        // because error messages may use either style on any platform.
+        let dir_f = dir.replace('\\', "/");
+        let dir_b = dir.replace('/', "\\");
+
+        // Forward-slash style: handle trailing separator first, then bare path
+        let dir_f_sep = format!("{dir_f}/");
+        *s = s.replace(&dir_f_sep, &format!("{label}/"));
+        *s = s.replace(&dir_f, label);
+
+        // Backslash style (Windows): handle trailing separator first, then bare path
+        let dir_b_sep = format!("{dir_b}\\");
+        *s = s.replace(&dir_b_sep, &format!("{label}\\"));
+        *s = s.replace(&dir_b, label);
+    };
+
+    redact_dir(&mut result, core_dir, "[CORE_DIR]");
+    redact_dir(&mut result, profiles_dir, "[PROFILES_DIR]");
+    result
 }
 
 /// Parse the version string from `mihomo -v` stdout.
