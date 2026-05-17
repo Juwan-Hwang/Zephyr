@@ -349,14 +349,7 @@ export const appStore = createStore('zephyr.app', {
     currentTheme: localStorage.getItem('appTheme') || 'purple',
     currentLang: localStorage.getItem('lang') || detectSystemLanguage(),
     currentPage: 'home',
-    currentThemeMode: (() => {
-        const saved = localStorage.getItem('themeMode');
-        if (saved && ['light', 'auto', 'dark'].includes(saved)) return saved;
-        const legacy = localStorage.getItem('darkMode');
-        if (legacy === 'true') return 'dark';
-        if (legacy === 'false') return 'light';
-        return 'auto';
-    })(),
+    currentThemeMode: 'auto', // Actual value synced from settings.json in initSettings()
 
     // Proxy state
     currentSortMode: localStorage.getItem('sortMode') || 'default',
@@ -374,10 +367,7 @@ export const appStore = createStore('zephyr.app', {
     isSysProxyEnabled: false,
     isTunEnabled: false,
     isCoreRunning: false,
-    isDnsRewriteEnabled: (() => {
-        const saved = localStorage.getItem('dnsRewrite');
-        return saved === null ? true : saved === 'true';
-    })(),
+    isDnsRewriteEnabled: true, // Actual value synced from settings.json in initDnsRewriteToggle()
 
     // Config
     currentConfigName: null,

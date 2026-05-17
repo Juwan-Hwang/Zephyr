@@ -34,6 +34,7 @@ import { applyTheme } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
 import { invalidateSettingsCache } from './cache.js';
+import { saveSetting, saveSettings } from './settings-helpers.js';
 import {
     DEFAULT_DNS_CONFIG,
     isValidIPv6,
@@ -493,11 +494,25 @@ export async function initSettings() {
     // ---- Load current settings ----
     /** @type {any} */
     const settings = await invoke(COMMANDS.GET_SETTINGS);
+
+    // Sync global preferences to appStore immediately to prevent UI flicker
+    // (these are loaded from settings.json before any async operations)
+    if (settings.theme_mode && ['light', 'dark', 'auto'].includes(settings.theme_mode)) {
+        appStore.set('currentThemeMode', settings.theme_mode);
+    }
+    if (settings.app_opacity != null) {
+        const opacity = Number(settings.app_opacity);
+        if (Number.isFinite(opacity)) {
+            const clamped = Math.min(100, Math.max(0, opacity)) / 100;
+            document.documentElement.style.setProperty('--app-opacity', String(clamped));
+        }
+    }
+
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
-    if (nodeScrollToggle) nodeScrollToggle.checked = localStorage.getItem('nodeScroll') === 'true';
+    if (nodeScrollToggle) nodeScrollToggle.checked = !!settings.node_scroll;
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
@@ -509,6 +524,8 @@ export async function initSettings() {
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
         savedTheme: settings.theme,
+        savedThemeMode: settings.theme_mode || null,
+        savedOpacity: settings.app_opacity != null ? settings.app_opacity : null,
         appMainContainer,
         appTitleIcon,
         themeCircles,
@@ -578,7 +595,7 @@ export async function initSettings() {
                 }
                 if (nodeScrollToggle) {
                     nodeScrollToggle.checked = false;
-                    localStorage.setItem('nodeScroll', 'false');
+                    settings.node_scroll = false;
                     successItems.push('nodeScroll');
                 }
                 if (customArgsInput) {
@@ -601,7 +618,7 @@ export async function initSettings() {
                 const dnsToggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
                 if (dnsToggle) {
                     dnsToggle.checked = true;
-                    localStorage.setItem('dnsRewrite', 'true');
+                    settings.dns_rewrite_enabled = true;
                     await trackResult('dnsRewrite', async () => {
                         await applyDnsRewrite();
                     });
@@ -609,7 +626,7 @@ export async function initSettings() {
 
                 if (opacitySlider) {
                     opacitySlider.value = '100';
-                    localStorage.setItem('appOpacity', '100');
+                    settings.app_opacity = 100;
                     if (opacityValText) opacityValText.textContent = '100%';
                     document.documentElement.style.setProperty('--app-opacity', '1');
                     if (appMainContainer) appMainContainer.style.backgroundColor = '';
@@ -647,17 +664,26 @@ export async function initSettings() {
                     successItems.push('fakeClient');
                 }
 
-                await trackResult('appSettings', async () => {
-                    await invoke(COMMANDS.SAVE_SETTINGS, { settings });
-                });
-                invalidateSettingsCache();
-
-                localStorage.setItem('themeMode', 'auto');
+                // Reset theme mode
+                settings.theme_mode = 'auto';
                 _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
+                // Reset global preference overrides (injected into runtime YAML)
+                settings.mode = null;
+                settings.tun_enabled = null;
+                settings.mixed_port = null;
+                settings.socks_port = null;
+                settings.http_port = null;
+                settings.ipv6 = null;
+                settings.allow_lan = null;
+                settings.unified_delay = null;
+                settings.dns_nameservers = null;
+                settings.dns_fallbacks = null;
+
                 localStorage.removeItem('appTheme');
                 appStore.set('currentTheme', 'zinc');
+                settings.theme = 'zinc';
                 applyTheme('zinc');
                 document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-zinc-900'));
                 const defaultThemeBtn = document.querySelector('.theme-btn[data-theme="zinc"]');
@@ -665,6 +691,16 @@ export async function initSettings() {
                     defaultThemeBtn.classList.add('ring-2', 'ring-offset-2', 'ring-offset-zinc-900', 'ring-zinc-500');
                 }
                 successItems.push('themeColor');
+
+                await trackResult('appSettings', async () => {
+                    await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                });
+                invalidateSettingsCache();
+
+                // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
+                const proxyContainer = document.getElementById('proxies-list');
+                if (proxyContainer) proxyContainer.innerHTML = '';
+                Bus.emit(Events.CONFIG_UPDATED);
 
                 if (errors.length === 0) {
                     showNotification(t.settingsRestored || t.restoreDefaultsDesc || "Settings restored to default", "success");
@@ -765,7 +801,9 @@ export async function initSettings() {
     // ---- Core settings toggles ----
     unifiedDelayToggle?.addEventListener('change', async () => {
         if (!unifiedDelayToggle) return;
+        // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ 'unified-delay': unifiedDelayToggle.checked });
+        if (ok) await saveSetting('unified_delay', unifiedDelayToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
@@ -774,7 +812,9 @@ export async function initSettings() {
 
     ipv6Toggle?.addEventListener('change', async () => {
         if (!ipv6Toggle) return;
+        // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ ipv6: ipv6Toggle.checked });
+        if (ok) await saveSetting('ipv6', ipv6Toggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
@@ -783,7 +823,9 @@ export async function initSettings() {
 
     allowLanToggle?.addEventListener('change', async () => {
         if (!allowLanToggle) return;
+        // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ 'allow-lan': allowLanToggle.checked });
+        if (ok) await saveSetting('allow_lan', allowLanToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
@@ -817,16 +859,22 @@ export async function initSettings() {
 
     /**
      * Open the port config modal and populate with current values.
+     * Reads from settings.json first; falls back to core config for
+     * any field that is null (meaning "use YAML default").
      */
     async function openPortModal() {
         try {
+            const [userSettings, coreConfig] = await Promise.all([
+                invoke(COMMANDS.GET_SETTINGS),
+                invoke(COMMANDS.READ_CONFIG).catch(() => ({})),
+            ]);
             /** @type {any} */
-            const config = (await invoke(COMMANDS.READ_CONFIG)) || {};
-            // Show actual port values in modal (0 = disabled, shown as-is)
-            if (portMixedInput) portMixedInput.value = config['mixed-port'] != null ? String(config['mixed-port']) : (config.port != null ? String(config.port) : '');
-            if (portSocksInput) portSocksInput.value = config['socks-port'] != null ? String(config['socks-port']) : '';
-            if (portRedirInput) portRedirInput.value = config['redir-port'] != null ? String(config['redir-port']) : '';
-            if (portTproxyInput) portTproxyInput.value = config['tproxy-port'] != null ? String(config['tproxy-port']) : '';
+            const core = coreConfig || {};
+            // Use settings.json values when set, otherwise fall back to core config
+            if (portMixedInput) portMixedInput.value = String(userSettings.mixed_port ?? core['mixed-port'] ?? core.port ?? '');
+            if (portSocksInput) portSocksInput.value = String(userSettings.socks_port ?? core['socks-port'] ?? '');
+            if (portRedirInput) portRedirInput.value = String(core['redir-port'] ?? '');
+            if (portTproxyInput) portTproxyInput.value = String(core['tproxy-port'] ?? '');
         } catch (err) {
             settingsLogger.warn('Failed to load port config for modal', err);
             return;
@@ -879,10 +927,10 @@ export async function initSettings() {
 
                 // Validate range (0 = disabled, 1-65535 = valid port)
                 const ports = [
-                    { val: mixedVal, key: 'mixed-port' },
-                    { val: socksVal, key: 'socks-port' },
-                    { val: redirVal, key: 'redir-port' },
-                    { val: tproxyVal, key: 'tproxy-port' },
+                    { val: mixedVal, key: 'mixed-port', settingsKey: 'mixed_port' },
+                    { val: socksVal, key: 'socks-port', settingsKey: 'socks_port' },
+                    { val: redirVal, key: 'redir-port', settingsKey: null },
+                    { val: tproxyVal, key: 'tproxy-port', settingsKey: null },
                 ];
                 for (const { val } of ports) {
                     if (!Number.isInteger(val) || val < 0 || val > 65535) {
@@ -910,12 +958,17 @@ export async function initSettings() {
                 // conflict, and when mixed-port = 0 the user intends to fully disable
                 /** @type {Record<string, number>} */
                 const patch = { port: 0 };
-                for (const { val, key } of ports) {
+                /** @type {Record<string, number>} */
+                const settingsPatch = {};
+                for (const { val, key, settingsKey } of ports) {
                     patch[key] = val;
+                    if (settingsKey) settingsPatch[settingsKey] = val;
                 }
 
                 const ok = await saveConfigToCore(patch);
                 if (ok) {
+                    // Persist port values to settings.json
+                    await saveSettings(settingsPatch);
                     await loadSettingsFromCore();
                     closePortModal();
                 }
@@ -970,18 +1023,29 @@ export async function initSettings() {
     });
 
     // ---- Load settings from core ----
+    // Reads user preferences from settings.json; falls back to core config
+    // for any field that is null (meaning "use YAML default").
     const loadSettingsFromCore = async () => {
         try {
+            const [userSettings, coreConfig] = await Promise.all([
+                invoke(COMMANDS.GET_SETTINGS),
+                invoke(COMMANDS.READ_CONFIG).catch(() => ({})),
+            ]);
             /** @type {any} */
-            const config = await invoke(COMMANDS.READ_CONFIG);
-            if (unifiedDelayToggle) unifiedDelayToggle.checked = config['unified-delay'] !== false;
-            if (ipv6Toggle) ipv6Toggle.checked = !!config.ipv6;
-            if (allowLanToggle) allowLanToggle.checked = !!config['allow-lan'];
+            const config = coreConfig || {};
+            // Prefer settings.json values; fall back to core config
+            if (unifiedDelayToggle) unifiedDelayToggle.checked = userSettings.unified_delay != null ? !!userSettings.unified_delay : config['unified-delay'] !== false;
+            if (ipv6Toggle) ipv6Toggle.checked = userSettings.ipv6 != null ? !!userSettings.ipv6 : !!config.ipv6;
+            if (allowLanToggle) allowLanToggle.checked = userSettings.allow_lan != null ? !!userSettings.allow_lan : !!config['allow-lan'];
 
-            // Update port display — use || to skip disabled (0) ports and show first active port
+            // Update port display — use settings.json values when set, fallback to core config
             if (portDisplay) {
-                const mixedPort = config['mixed-port'] || config.port || config['socks-port'] || 0;
-                portDisplay.textContent = mixedPort > 0 ? String(mixedPort) : '--';
+                // Check all ports in priority order: mixed > socks
+                const settingsPort = [userSettings.mixed_port, userSettings.socks_port]
+                    .find((port) => port != null && port > 0);
+                const displayPort = settingsPort
+                    || config['mixed-port'] || config.port || config['socks-port'] || 0;
+                portDisplay.textContent = displayPort > 0 ? String(displayPort) : '--';
             }
 
             if (config.tunnels && Array.isArray(config.tunnels)) {
@@ -1031,7 +1095,9 @@ export async function initSettings() {
     // ---- Node scroll toggle ----
     nodeScrollToggle?.addEventListener('change', () => {
         if (!nodeScrollToggle) return;
-        localStorage.setItem('nodeScroll', String(nodeScrollToggle.checked));
+        saveSetting('node_scroll', nodeScrollToggle.checked).catch((e) =>
+            settingsLogger.warn("Failed to persist nodeScroll change", e)
+        );
         // Clear the container to force full re-render (in-place update won't update CSS classes)
         const container = document.getElementById('proxies-list');
         if (container) container.innerHTML = '';
