@@ -1,10 +1,11 @@
 use rand::RngExt as _;
 use std::fs;
-use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::TcpStream;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt as _;
@@ -19,7 +20,8 @@ const PORT_WAIT_MAX_RETRIES: u64 = 50;
 #[cfg(target_os = "macos")]
 const PORT_WAIT_INTERVAL_MS: u64 = 100;
 const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
-const HEALTH_CHECK_INTERVAL_MS: u64 = 1000;
+const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
+const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
 use super::tun_manager::{is_tun_mode, restart_core_as_root};
 use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
@@ -97,10 +99,103 @@ pub const fn core_binary_name() -> &'static str {
 }
 
 /// Kill all mihomo processes (cleanup function)
+/// Drain existing mihomo connections via REST API before killing the process.
+/// This helps mihomo exit faster when it has many active connections.
+/// Failure is non-fatal — we fall back to force kill.
+async fn drain_connections_if_alive(port: u16, secret_val: &str) {
+    let url = format!("http://127.0.0.1:{port}/connections");
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[drain_connections] Failed to build HTTP client: {e}");
+            return;
+        }
+    };
+
+    // Close all connections via mihomo API
+    if let Err(e) = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {secret_val}"))
+        .send()
+        .await
+    {
+        eprintln!("[drain_connections] DELETE request failed: {e}");
+    }
+
+    // Wait for connections to drain (max 2s)
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {secret_val}"))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(body) => {
+                        let count = body
+                            .get("connections")
+                            .and_then(|v| v.as_array())
+                            .map_or(0, Vec::len);
+                        if count == 0 {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[drain_connections] Failed to parse JSON: {e}");
+                        return;
+                    }
+                }
+            }
+            Ok(resp) => {
+                eprintln!(
+                    "[drain_connections] GET request failed with status: {}",
+                    resp.status()
+                );
+                return; // Core already unreachable
+            }
+            Err(e) => {
+                eprintln!("[drain_connections] GET request error: {e}");
+                return; // Core already unreachable
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    eprintln!("[drain_connections] Timeout waiting for connections to drain");
+}
+
+/// Kill all mihomo processes gracefully (SIGTERM first, SIGKILL after timeout).
+///
+/// On Unix: sends SIGTERM, waits up to 2s for exit, then SIGKILL.
+/// On Windows: uses taskkill /F (no graceful option).
 pub fn kill_mihomo() {
     #[cfg(unix)]
     {
-        // Try to kill multiple times to ensure all processes are terminated
+        // Step 1: SIGTERM — allow mihomo to close connections gracefully
+        let _ = std::process::Command::new("killall")
+            .arg("-15") // SIGTERM
+            .arg("mihomo")
+            .output();
+
+        // Step 2: Wait up to 2s for graceful exit
+        for _ in 0..20 {
+            let output = std::process::Command::new("pgrep")
+                .arg("-x")
+                .arg("mihomo")
+                .output();
+            if let Ok(out) = output {
+                if out.stdout.is_empty() {
+                    return; // Process has exited gracefully
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Step 3: Force kill if still alive
         for _ in 0..3 {
             let _ = std::process::Command::new("killall")
                 .arg("-9")
@@ -797,13 +892,16 @@ async fn spawn_with_cache_retry(
 /// Returns `Ok(())` if the core responds within the retry limit.
 async fn health_check(port: u16) -> Result<(), String> {
     let mut is_healthy = false;
+    let mut interval = std::time::Duration::from_millis(HEALTH_CHECK_INITIAL_INTERVAL_MS);
+    let max_interval = std::time::Duration::from_millis(HEALTH_CHECK_MAX_INTERVAL_MS);
+
     for _ in 0..HEALTH_CHECK_MAX_RETRIES {
-        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
+        if let Ok(mut stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
             let request =
                 format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(request.as_bytes()).is_ok() {
+            if stream.write_all(request.as_bytes()).await.is_ok() {
                 let mut response = [0u8; 256];
-                if let Ok(n) = stream.read(&mut response) {
+                if let Ok(n) = stream.read(&mut response).await {
                     let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
                     if resp_str.starts_with("HTTP/1.1 200")
                         || resp_str.starts_with("HTTP/1.1 401")
@@ -816,10 +914,9 @@ async fn health_check(port: u16) -> Result<(), String> {
                 }
             }
         }
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(HEALTH_CHECK_INTERVAL_MS));
-        })
-        .await;
+        let sleep_dur = interval;
+        interval = (interval * 2).min(max_interval);
+        tokio::time::sleep(sleep_dur).await;
     }
 
     if is_healthy {
@@ -870,7 +967,8 @@ pub async fn start_core(
 
     // Check if core is already running with the SAME config (under CORE_STARTING protection).
     // If the requested config differs from the current one, we must restart to apply it.
-    {
+    // Also extract port/secret for drain before killing.
+    let drain_info: Option<(u16, String)> = {
         let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
         if lock.process().is_some() {
             let same_config = lock
@@ -884,7 +982,17 @@ pub async fn start_core(
                     });
                 }
             }
+            // Core is running with a different config — prepare drain info
+            lock.last_port()
+                .map(|port| (port, lock.last_secret().to_owned()))
+        } else {
+            None
         }
+    };
+
+    // Drain existing connections before killing to help mihomo exit faster
+    if let Some((port, secret)) = drain_info {
+        drain_connections_if_alive(port, &secret).await;
     }
 
     // Check if TUN mode is active via flag (memory-based, not from config file)

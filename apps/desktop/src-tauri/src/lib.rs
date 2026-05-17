@@ -253,6 +253,30 @@ fn update_subscription_user_agent(
     persist_settings(&app, &settings)
 }
 
+/// Atomically update the last active config name in settings.
+/// Avoids the Read-Modify-Write race condition of `GET_SETTINGS` → modify → `SAVE_SETTINGS`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_last_config(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    config_name: String,
+) -> Result<(), String> {
+    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&config_name)?;
+    if safe_name.len() > 256 {
+        return Err("Config name too long".to_owned());
+    }
+    let settings = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        guard.last_config = Some(safe_name);
+        guard.clone()
+    };
+    persist_settings(&app, &settings)
+}
+
 /// Persist settings to settings.json (without touching in-memory state).
 /// Used by `rename_config` to persist `last_config` changes.
 ///
@@ -580,6 +604,7 @@ pub fn run() {
             update_proxy_selection,
             update_primary_group_preference,
             update_subscription_user_agent,
+            update_last_config,
             get_core_version,
             exempt_uwp_apps,
             read_config_file,

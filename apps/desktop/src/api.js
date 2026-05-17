@@ -357,11 +357,29 @@ export async function closeConnection(id) {
 let latencyTestController = new AbortController();
 
 /**
- * 中止所有正在进行的延迟测试，并重置控制器以供后续使用。
+ * 获取当前延迟测试的 AbortSignal（供 worker 循环检查是否被中止）。
+ */
+export function getLatencyTestSignal() {
+  return latencyTestController.signal;
+}
+
+/**
+ * 重置延迟测试控制器（在每次测速开始前调用）。
+ * 必须在 api.js 内部调用，确保每次测速都有新的未中止的 controller。
+ */
+export function resetLatencyTestController() {
+  latencyTestController = new AbortController();
+}
+
+/**
+ * 中止所有正在进行的延迟测试。
+ *
+ * 不再创建新 controller —— 新 controller 在下次测速开始时通过 resetLatencyTestController() 创建。
+ * 旧实现中 abort 后立即 new 会导致后续 testProxy() 绑定到新的未中止 signal，
+ * 使 abort 形同虚设。
  */
 export function abortLatencyTests() {
   latencyTestController.abort();
-  latencyTestController = new AbortController();
 }
 
 /**
@@ -500,6 +518,23 @@ export async function restartCore(configPath, customArgs = []) {
   Bus.emit(Events.CORE_RESTARTED);
   return coreResult;
 }
+
+/**
+ * Switch to a different subscription config with full lifecycle management.
+ * Shared by UI subscription switch and tray subscription switch.
+ *
+ * Steps:
+ *   1. Abort any ongoing latency tests (user-invisible)
+ *   2. Save current proxy selection
+ *   3. Restart core with new config
+ *   4. Update settings, close connections, rebuild prism, restore proxy selection
+ *
+ * @param {string} configName - Target config file name
+ * @param {string[]} [customArgs=[]] - Custom core arguments
+ * @returns {Promise<Object>} coreResult from restartCore
+ */
+// Note: switchToConfig has been moved to ui/lifecycle.js to avoid layering violations.
+// Import it from there instead of from api.js.
 
 /**
  * Read mihomo core log (incremental)

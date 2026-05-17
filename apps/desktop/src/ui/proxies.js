@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -525,6 +525,7 @@ export function initProxyControls() {
 
         testBtn.onclick = async () => {
             if (appStore.get('isTestingLatency')) return;
+            resetLatencyTestController();  // Reset controller before starting
             appStore.set('isTestingLatency', true);
             appStore.set('latencyTestStartTime', Date.now());
 
@@ -562,6 +563,7 @@ export function initProxyControls() {
 
                 // Test a single proxy and update UI immediately
                 const testProxyAndUpdate = async (/** @type {string} */ name) => {
+                    // testProxy already handles abort internally and returns -1 on cancellation
                     const delay = await testProxy(name);
 
                     // Update wrapper dataset
@@ -622,6 +624,7 @@ export function initProxyControls() {
                 const concurrency = Math.min(12, priorityQueue.length);
                 const workers = Array.from({ length: concurrency }, async () => {
                     while (queueIndex < priorityQueue.length) {
+                        if (getLatencyTestSignal().aborted) break;
                         const currentIndex = queueIndex;
                         queueIndex += 1;
                         await testProxyAndUpdate(priorityQueue[currentIndex]);
@@ -1425,6 +1428,7 @@ const _autoTest = {
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
     async _runOnce() {
         if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
+        resetLatencyTestController();  // Reset controller before starting
         this._running = true;
         try {
             const proxyGroupsResult = await fetchProxyGroupsShared();
@@ -1443,8 +1447,10 @@ const _autoTest = {
             let idx = 0;
             const workers = Array.from({ length: concurrency }, async () => {
                 while (idx < validProxies.length) {
+                    if (getLatencyTestSignal().aborted) break;
                     const name = validProxies[idx++];
                     try {
+                        // testProxy already handles abort internally and returns -1 on cancellation
                         const delay = await testProxy(name);
                         const success = delay > 0 && delay < 999999;
                         if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {

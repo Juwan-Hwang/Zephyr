@@ -12,8 +12,9 @@ import {
     invoke,
     restartCore,
     reloadConfig,
-    closeAllConnections,
+    abortLatencyTests,
 } from '../../api.js';
+import { switchToConfig } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -28,7 +29,6 @@ import { SVG_ICONS } from '../icons.js';
 import { syncCoreConfig } from '../proxies.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
-import { invalidateRunConfigCache } from '../run-config-cache.js';
 
 /**
  * Extract a human-readable name from a subscription URL.
@@ -389,6 +389,7 @@ export function initSubscriptionSettings({
             const wasCurrentUpdated = subConfigs.some(/** @param {any} c */ (c) => c.name === currentConfig);
 
             if (wasCurrentUpdated && successCount > 0) {
+                abortLatencyTests();
                 await restartCore(currentConfig, customArgs);
             }
 
@@ -1136,6 +1137,7 @@ export function initSubscriptionSettings({
                         await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
                         invalidateConfigsCache();
                         if (isCurrent) {
+                            abortLatencyTests();
                             const cfgCustomArgs = cfgSettings.custom_args || [];
                             await restartCore(configInfo.name, cfgCustomArgs);
                         }
@@ -1156,53 +1158,15 @@ export function initSubscriptionSettings({
             const switchConfig = async () => {
                 if (isCurrent || appStore.get('isNetworkUpdating')) return;
 
-                // Save current proxy selection before switching
-                // Read last_config live to avoid stale closure if profile changed via tray
-                try {
-                    const { fetchProxyGroups } = await import('../proxy-groups.js');
-                    const currentProxyGroups = await fetchProxyGroups();
-                    if (currentProxyGroups && currentProxyGroups.current) {
-                        const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
-                        const activeConfig = liveSettings.last_config || 'config.yaml';
-                        const { saveProxySelection } = await import('../proxy-memory.js');
-                        await saveProxySelection(activeConfig, { node: currentProxyGroups.current, group: appStore.get('uiGroupName') });
-                    }
-                } catch (_e) { /* ignore */ }
-
                 appStore.set('isNetworkUpdating', true);
                 item.classList.add('opacity-50', 'pointer-events-none');
 
                 try {
-                    /** @type {any} */
-                    const coreResult = await restartCore(name, customArgs);
-                    if (coreResult && coreResult.secret) {
-                        showNotification(t.configSuccess, 'success');
-
-                        /** @type {any} */
-                        const s = await invoke(COMMANDS.GET_SETTINGS);
-                        s.last_config = name;
-                        await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
-                        invalidateSettingsCache();
-                        invalidateRunConfigCache();
-
-                        await closeAllConnections();
-                        // Re-apply prism patches against the new profile so that
-                        // __when__.profile conditions are evaluated correctly.
-                        try { await prism.rebuild(); } catch { /* non-fatal */ }
-
-                        // Restore proxy selection BEFORE rendering configs
-                        // renderConfigs triggers updateTrayMenu which reads the current node.
-                        // If we render before restore, tray menu sees DIRECT and shows wrong node.
-                        try {
-                            const { restoreProxySelection } = await import('../proxy-memory.js');
-                            await restoreProxySelection(name);
-                        } catch (_e) { /* ignore */ }
-
-                        // NOW render configs — updateTrayMenu will see the correct node
-                        await renderConfigs();
-                        Bus.emit(Events.CONFIG_UPDATED);
-                        await syncCoreConfig();
-                    }
+                    await switchToConfig(name, customArgs);
+                    showNotification(t.configSuccess, 'success');
+                    await renderConfigs();
+                    Bus.emit(Events.CONFIG_UPDATED);
+                    await syncCoreConfig();
                 } catch (err) {
                     const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                     showNotification(error.toString(), 'error');

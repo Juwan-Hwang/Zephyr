@@ -15,6 +15,7 @@ import {
     listen,
     openUrl,
     restartCore,
+    abortLatencyTests,
     isAutoStartEnabled,
     enableAutoStart,
     disableAutoStart,
@@ -423,6 +424,7 @@ export async function initSettings() {
             showNotification(t.notifSavingAndRestarting || "Saving and restarting core...");
             try {
                 await save();
+                abortLatencyTests();
                 await restartCore(configPath, customArgs);
                 showNotification(t.notifRestartSuccess || "Core restarted successfully", 'success');
                 syncCoreConfig();
@@ -946,6 +948,7 @@ export async function initSettings() {
             const geoSettings = await invoke(COMMANDS.GET_SETTINGS);
             const configPath = geoSettings.last_config || 'config.yaml';
             const customArgs = geoSettings.custom_args || [];
+            abortLatencyTests();
             await restartCore(configPath, customArgs);
         } catch (err) {
             const error = toError(err);
