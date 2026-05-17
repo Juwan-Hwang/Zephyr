@@ -20,10 +20,16 @@
   <meta name="google" content="notranslate" />
   <meta name="format-detection" content="telephone=no" />
 
+  <!-- English SEO (for search engines) -->
+  <meta name="description-en" content="Zephyr is a Mihomo proxy client built with Tauri v2 and Rust. 13-layer defense in depth, encrypted subscription metadata, zero frontend framework, Lite version only 8MB. Open source, free, cross-platform." />
+  <meta name="keywords-en" content="Zephyr, Mihomo, Clash Meta, Tauri, Rust, proxy client, desktop client, open source, secure proxy, cross-platform, macOS, Windows, Linux, proxy tool, privacy protection, mihomo gui, clash alternative" />
+
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Zephyr — 安全至上的 Mihomo 桌面客户端" />
+  <meta property="og:title:en" content="Zephyr — A Secure Mihomo Desktop Client" />
   <meta property="og:description" content="13 层纵深防御 · 订阅元数据加密 · 零前端框架 · Lite 版仅 8MB。基于 Tauri v2 + Rust 构建，开源免费。" />
+  <meta property="og:description:en" content="13-layer defense in depth · Encrypted subscription metadata · Zero frontend framework · Lite version only 8MB. Built with Tauri v2 + Rust, open source and free." />
   <meta property="og:url" content="https://juwan-hwang.github.io/Zephyr/" />
   <meta property="og:image" content="https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/assets/screenshot-home.png" />
   <meta property="og:image:width" content="1200" />
@@ -37,7 +43,9 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Zephyr — 安全至上的 Mihomo 桌面客户端" />
+  <meta name="twitter:title:en" content="Zephyr — A Secure Mihomo Desktop Client" />
   <meta name="twitter:description" content="13 层纵深防御 · 订阅元数据加密 · 零前端框架 · Lite 版仅 8MB。" />
+  <meta name="twitter:description:en" content="13-layer defense in depth · Encrypted subscription metadata · Zero frontend framework · Lite version only 8MB." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/assets/screenshot-home.png" />
 
   <!-- Structured Data: SoftwareApplication -->
@@ -110,7 +118,7 @@
     "mainEntity": [
       {
         "@type": "Question",
-        "name": "Zephyr 和 Clash Verge / Clash Nyanpasu 有什么区别？",
+        "name": "Zephyr 和其他客户端有什么区别？",
         "acceptedAnswer": {
           "@type": "Answer",
           "text": "Zephyr 基于 Tauri v2 + Rust 构建，Lite 版安装包仅约 8MB，不依赖 React/Vue 等前端框架，零虚拟 DOM 开销。相比 Electron 方案，Zephyr 使用系统原生 WebView，内存占用更低，启动更快。"
@@ -226,18 +234,30 @@
     <div class="nav-left">
       <a href="#" class="nav-logo" aria-label="Zephyr Home">Zephyr</a>
       <div class="nav-links">
-        <a href="#security">安全</a>
-        <a href="#features">特性</a>
-        <a href="#architecture">架构</a>
-        <a href="#performance">性能</a>
-        <a href="#demo">在线体验</a>
+        <a href="#security" data-i18n="nav.security">安全</a>
+        <a href="#features" data-i18n="nav.features">特性</a>
+        <a href="#architecture" data-i18n="nav.architecture">架构</a>
+        <a href="#performance" data-i18n="nav.performance">性能</a>
+        <a href="#demo" data-i18n="nav.demo">在线体验</a>
       </div>
     </div>
     <div class="nav-right">
-      <a href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="nav-github" aria-label="View source on GitHub">
+      <a href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="nav-github" aria-label="View source on GitHub" data-i18n-aria="nav.github">
         <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
         <span>GitHub</span>
       </a>
+      <button class="nav-hamburger" id="navHamburger" aria-label="Toggle navigation menu" aria-expanded="false">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="18" height="18" aria-hidden="true">
+          <path d="M2 4h12M2 8h12M2 12h12"/>
+        </svg>
+      </button>
+      <button class="nav-lang-toggle" id="langToggle" aria-label="Switch language" title="切换语言 / Switch language">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.5"/>
+          <path d="M1.5 8h13"/>
+          <path d="M8 1.5c2 2 3.25 4.25 3.25 6.5S10 12.5 8 14.5c-2-2-3.25-4.25-3.25-6.5S6 3.5 8 1.5z"/>
+        </svg>
+      </button>
       <button class="theme-toggle" aria-label="Toggle dark/light theme"></button>
     </div>
   </nav>
@@ -248,16 +268,24 @@
     <section class="hero" data-section="hero" id="hero" aria-labelledby="hero-heading">
       <div class="hero-content">
         <h1 class="hero-title" id="hero-heading">Zephyr</h1>
-        <p class="hero-subtitle">安全与颜值并重的 Mihomo 客户端</p>
-        <p class="hero-philosophy reveal">13 层纵深防御 · 零前端框架 · Lite 版仅 8MB</p>
+        <p class="hero-subtitle" data-i18n="hero.subtitle">安全与颜值并重的 Mihomo 客户端</p>
+        <p class="hero-philosophy reveal" data-i18n="hero.philosophy">13 层纵深防御 · 零前端框架 · Lite 版仅 8MB</p>
         <div class="hero-cta">
-          <a href="#demo" class="btn-primary">
+          <a href="#demo" class="btn-primary hero-cta-desktop">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M5.5 14h5M8 12v2"/></svg>
-            在线体验
+            <span data-i18n="hero.cta.demo">在线体验</span>
           </a>
-          <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" class="btn-secondary">
+          <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" class="btn-ghost hero-cta-desktop">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 13h12"/></svg>
-            下载
+            <span data-i18n="hero.cta.download">下载</span>
+          </a>
+          <a href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="btn-ghost hero-cta-mobile">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span data-i18n="hero.cta.github">GitHub</span>
+          </a>
+          <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" class="btn-primary hero-cta-mobile">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 13h12"/></svg>
+            <span data-i18n="hero.cta.downloadFull">下载 Zephyr</span>
           </a>
         </div>
 
@@ -287,11 +315,11 @@
       <div class="philosophy-inner">
         <div class="philosophy-grid">
           <div class="reveal">
-            <p class="philosophy-quote">
+            <p class="philosophy-quote" data-i18n="philosophy.quote">
               "安全不是功能，是底线。<br/>颜值不是加分，是标准。"
             </p>
-            <p class="philosophy-author">— Zephyr 设计哲学</p>
-            <p class="philosophy-body">
+            <p class="philosophy-author" data-i18n="philosophy.author">— Zephyr 设计哲学</p>
+            <p class="philosophy-body" data-i18n="philosophy.body">
               Zephyr 诞生于对现有 Mihomo GUI 的不满：要么臃肿如 Electron 套壳，要么简陋如功能原型。我们选择了第三条路——用 Rust 的安全基因和原生 JavaScript 的极致性能，构建一个既安全又好看的代理客户端。
             </p>
           </div>
@@ -303,8 +331,8 @@
                   <path d="M3 7l7 5 7-5"/>
                 </svg>
               </div>
-              <h4>零前端框架</h4>
-              <p>不依赖 React、Vue 或任何前端框架。原生 JavaScript，零虚拟 DOM 开销，零供应链攻击面。</p>
+              <h4 data-i18n="philosophy.zeroframework.title">零前端框架</h4>
+              <p data-i18n="philosophy.zeroframework.desc">不依赖 React、Vue 或任何前端框架。原生 JavaScript，零虚拟 DOM 开销，零供应链攻击面。</p>
             </div>
             <div class="philosophy-card reveal" data-delay="2">
               <div class="feature-icon">
@@ -313,8 +341,8 @@
                   <path d="M7 10l2 2 4-4"/>
                 </svg>
               </div>
-              <h4>安全优先</h4>
-              <p>13 层纵深防御，从 CSP 到供应链，覆盖全攻击面。订阅元数据 AES-256-GCM 加密，机器指纹绑定。</p>
+              <h4 data-i18n="philosophy.security.title">安全优先</h4>
+              <p data-i18n="philosophy.security.desc">13 层纵深防御，从 CSP 到供应链，覆盖全攻击面。订阅元数据 AES-256-GCM 加密，机器指纹绑定。</p>
             </div>
             <div class="philosophy-card reveal" data-delay="3">
               <div class="feature-icon">
@@ -324,8 +352,8 @@
                   <path d="M3 7h4M13 7h4M3 13h4M13 13h4"/>
                 </svg>
               </div>
-              <h4>轻量高效</h4>
-              <p>Lite 版仅约 8MB。使用系统原生 WebView，无 Chromium 开销，内存占用极低。</p>
+              <h4 data-i18n="philosophy.lightweight.title">轻量高效</h4>
+              <p data-i18n="philosophy.lightweight.desc">Lite 版仅约 8MB。使用系统原生 WebView，无 Chromium 开销，内存占用极低。</p>
             </div>
           </div>
         </div>
@@ -336,9 +364,9 @@
     <section class="section" id="security" data-section="security" aria-labelledby="security-heading">
       <div class="section-inner">
         <div class="section-header">
-          <span class="section-label">安全体系</span>
-          <h2 class="section-title reveal" id="security-heading">13 层纵深防御，覆盖全攻击面</h2>
-          <p class="section-desc reveal" data-delay="1">每一层独立运作，单层失效不导致整体突破。所有外部输入均视为不可信。</p>
+          <span class="section-label" data-i18n="security.label">安全体系</span>
+          <h2 class="section-title reveal" id="security-heading" data-i18n="security.title">13 层纵深防御，覆盖全攻击面</h2>
+          <p class="section-desc reveal" data-delay="1" data-i18n="architecture.desc">每一层独立运作，单层失效不导致整体突破。所有外部输入均视为不可信。</p>
         </div>
 
         <div class="security-grid reveal-stagger">
@@ -349,8 +377,8 @@
                 <path d="M7 10l2 2 4-4"/>
               </svg>
             </div>
-            <h3>浏览器会话保护</h3>
-            <p>CSP 策略禁止外部脚本和 eval，即使恶意网页试图通过 XSS 攻击，也无法在 Zephyr 的浏览器环境中执行任意代码。你的代理配置和订阅信息始终隔离。</p>
+            <h3 data-i18n="security.browser.title">浏览器会话保护</h3>
+            <p data-i18n="security.browser.desc">CSP 策略禁止外部脚本和 eval，即使恶意网页试图通过 XSS 攻击，也无法在 Zephyr 的浏览器环境中执行任意代码。你的代理配置和订阅信息始终隔离。</p>
           </div>
 
           <div class="security-card reveal" data-delay="2">
@@ -360,8 +388,8 @@
                 <path d="M8 8V5a2 2 0 0 1 4 0v3"/>
               </svg>
             </div>
-            <h3>应用沙盒隔离</h3>
-            <p>前端代码无法直接访问你的文件系统、执行系统命令或发起外部网络请求。即使前端被攻破，攻击者也无法突破沙盒读取你的敏感文件或植入恶意程序。</p>
+            <h3 data-i18n="security.sandbox.title">应用沙盒隔离</h3>
+            <p data-i18n="security.sandbox.desc">前端代码无法直接访问你的文件系统、执行系统命令或发起外部网络请求。即使前端被攻破，攻击者也无法突破沙盒读取你的敏感文件或植入恶意程序。</p>
           </div>
 
           <div class="security-card reveal" data-delay="3">
@@ -371,30 +399,8 @@
                 <path d="M10 6v4l3 3"/>
               </svg>
             </div>
-            <h3>订阅链接安全</h3>
-            <p>你添加的订阅链接不会成为攻击你内网的跳板。SSRF 防护自动拦截指向私有 IP 的重定向，防止恶意订阅服务器通过 DNS Rebinding 攻击你的路由器或内网服务。</p>
-          </div>
-
-          <div class="security-card reveal" data-delay="1">
-            <div class="security-icon">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="3" y="3" width="14" height="14" rx="3"/>
-                <path d="M7 10h6M10 7v6"/>
-              </svg>
-            </div>
-            <h3>元数据加密存储</h3>
-            <p>你的订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备或泄露，攻击者也无法解密获取你的订阅信息。代理配置文件（.yaml）以明文存储，依赖文件系统权限保护。</p>
-          </div>
-
-          <div class="security-card reveal" data-delay="2">
-            <div class="security-icon">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M4 7h12M4 12h12"/>
-                <path d="M7 4v12M13 4v12"/>
-              </svg>
-            </div>
-            <h3>文件名安全处理</h3>
-            <p>下载订阅时，文件名经过多层净化处理，拦截路径遍历攻击（如 ../etc/passwd）。恶意服务器无法通过构造特殊文件名来覆盖你的系统文件。</p>
+            <h3 data-i18n="security.subscription.title">订阅链接安全</h3>
+            <p data-i18n="security.subscription.desc">你添加的订阅链接不会成为攻击你内网的跳板。SSRF 防护自动拦截指向私有 IP 的重定向，防止恶意订阅服务器通过 DNS Rebinding 攻击你的路由器或内网服务。</p>
           </div>
 
           <div class="security-card reveal" data-delay="3">
@@ -404,14 +410,36 @@
                 <path d="M4 4h12v8H4z"/>
               </svg>
             </div>
-            <h3>更新包可信验证</h3>
-            <p>自动更新时，每个安装包都经过 SHA256 完整性校验和可信域名验证。即使更新服务器被入侵，篡改的安装包也会被拒绝，防止供应链攻击植入后门。</p>
+            <h3 data-i18n="security.update.title">更新包可信验证</h3>
+            <p data-i18n="security.update.desc">自动更新时，每个安装包都经过 SHA256 完整性校验和可信域名验证。即使更新服务器被入侵，篡改的安装包也会被拒绝，防止供应链攻击植入后门。</p>
+          </div>
+
+          <div class="security-card reveal" data-delay="1">
+            <div class="security-icon">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="14" height="14" rx="3"/>
+                <path d="M7 10h6M10 7v6"/>
+              </svg>
+            </div>
+            <h3 data-i18n="security.encryption.title">元数据加密存储</h3>
+            <p data-i18n="security.encryption.desc">你的订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备或泄露，攻击者也无法解密获取你的订阅信息。代理配置文件（.yaml）以明文存储，依赖文件系统权限保护。</p>
+          </div>
+
+          <div class="security-card reveal" data-delay="2">
+            <div class="security-icon">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 7h12M4 12h12"/>
+                <path d="M7 4v12M13 4v12"/>
+              </svg>
+            </div>
+            <h3 data-i18n="security.filename.title">文件名安全处理</h3>
+            <p data-i18n="security.filename.desc">下载订阅时，文件名经过多层净化处理，拦截路径遍历攻击（如 ../etc/passwd）。恶意服务器无法通过构造特殊文件名来覆盖你的系统文件。</p>
           </div>
         </div>
 
         <div class="security-cta reveal">
           <a href="https://github.com/Juwan-Hwang/Zephyr/wiki/Security" target="_blank" rel="noopener noreferrer" class="btn-secondary">
-            阅读完整安全审计文档 →
+            <span data-i18n="security.readmore">阅读完整安全审计文档 →</span>
           </a>
         </div>
       </div>
@@ -421,9 +449,9 @@
     <section class="section" id="features" data-section="features" aria-labelledby="features-heading">
       <div class="section-inner">
         <div class="section-header">
-          <span class="section-label">核心特性</span>
-          <h2 class="section-title reveal" id="features-heading">每一个功能，都经过深思熟虑</h2>
-          <p class="section-desc reveal" data-delay="1">不为功能而功能。每一项能力都来自真实的使用场景。</p>
+          <span class="section-label" data-i18n="features.label">核心特性</span>
+          <h2 class="section-title reveal" id="features-heading" data-i18n="features.title">每一个功能，都经过深思熟虑</h2>
+          <p class="section-desc reveal" data-delay="1" data-i18n="features.desc">不为功能而功能。每一项能力都来自真实的使用场景。</p>
         </div>
 
         <div class="features-grid reveal-stagger">
@@ -435,8 +463,8 @@
                   <path d="M2 17h16"/>
                 </svg>
               </div>
-              <h3>实时流量监控</h3>
-              <p>零图表库依赖，原生 Canvas 2D 贝塞尔曲线面积图，60fps 流畅渲染，支持 DPR 高清适配。</p>
+              <h3 data-i18n="features.traffic.title">实时流量监控</h3>
+              <p data-i18n="features.traffic.desc">零图表库依赖，原生 Canvas 2D 贝塞尔曲线面积图，60fps 流畅渲染，支持 DPR 高清适配。</p>
             </div>
             <div class="chart-preview"><canvas id="chartPreviewCanvas"></canvas></div>
           </div>
@@ -448,8 +476,8 @@
                 <path d="M10 2v3M10 15v3M2 10h3M15 10h3"/>
               </svg>
             </div>
-            <h3>智能节点选择</h3>
-            <p>3D 悬浮效果，延迟颜色编码，一键延迟测试，批量测速排序，超时节点自动隐藏。</p>
+            <h3 data-i18n="features.nodes.title">智能节点选择</h3>
+            <p data-i18n="features.nodes.desc">3D 悬浮效果，延迟颜色编码，一键延迟测试，批量测速排序，超时节点自动隐藏。</p>
           </div>
 
           <div class="feature-card reveal" data-delay="3">
@@ -460,8 +488,8 @@
                 <path d="M10 2v4M10 14v4"/>
               </svg>
             </div>
-            <h3>TUN 虚拟网卡</h3>
-            <p>系统级透明代理，macOS osascript 提权，Windows UWP 豁免，无缝接管全局流量。</p>
+            <h3 data-i18n="features.tun.title">TUN 虚拟网卡</h3>
+            <p data-i18n="features.tun.desc">系统级透明代理，macOS osascript 提权，Windows UWP 豁免，无缝接管全局流量。</p>
           </div>
 
           <div class="feature-card wide reveal" data-delay="1">
@@ -471,8 +499,8 @@
                 <path d="M4 8h12M8 8v8"/>
               </svg>
             </div>
-            <h3>订阅管理</h3>
-            <p>多格式兼容（Clash/Mihomo/Surge），客户端 UA 伪装，三重下载策略，自动更新订阅，拖拽排序。</p>
+            <h3 data-i18n="features.subscription.title">订阅管理</h3>
+            <p data-i18n="features.subscription.desc">多格式兼容（Clash/Mihomo/Surge），客户端 UA 伪装，三重下载策略，自动更新订阅，拖拽排序。</p>
           </div>
 
           <div class="feature-card reveal" data-delay="2">
@@ -482,8 +510,8 @@
                 <path d="M10 10l7-4M10 10v8M10 10L3 6"/>
               </svg>
             </div>
-            <h3>多运行模式</h3>
-            <p>Rule / Global / Direct 三种模式一键切换，支持快捷键全局操作。</p>
+            <h3 data-i18n="features.mode.title">多运行模式</h3>
+            <p data-i18n="features.mode.desc">Rule / Global / Direct 三种模式一键切换，支持快捷键全局操作。</p>
           </div>
 
           <div class="feature-card reveal" data-delay="3">
@@ -493,8 +521,8 @@
                 <path d="M7 4v12M13 4v12"/>
               </svg>
             </div>
-            <h3>规则引擎</h3>
-            <p>Prism 扩展规则系统，支持规则分组、导入、提取、自动应用。内置代码编辑器，实时预览。</p>
+            <h3 data-i18n="features.rules.title">规则引擎</h3>
+            <p data-i18n="features.rules.desc">Prism 扩展规则系统，支持规则分组、导入、提取、自动应用。内置代码编辑器，实时预览。</p>
           </div>
 
           <div class="feature-card wide reveal" data-delay="1">
@@ -504,8 +532,8 @@
                 <path d="M3 9h14M9 3v14"/>
               </svg>
             </div>
-            <h3>跨平台原生体验</h3>
-            <p>Windows / macOS / Linux 统一代码库。Tauri v2 原生窗口，系统托盘，全局快捷键，开机自启。</p>
+            <h3 data-i18n="features.crossplatform.title">跨平台原生体验</h3>
+            <p data-i18n="features.crossplatform.desc">Windows / macOS / Linux 统一代码库。Tauri v2 原生窗口，系统托盘，全局快捷键，开机自启。</p>
           </div>
         </div>
       </div>
@@ -515,43 +543,47 @@
     <section class="section" id="architecture" data-section="architecture" aria-labelledby="architecture-heading">
       <div class="section-inner">
         <div class="section-header">
-          <span class="section-label">技术架构</span>
-          <h2 class="section-title reveal" id="architecture-heading">四层架构，层层分明</h2>
-          <p class="section-desc reveal" data-delay="1">每一层只做一件事，每一层都做到极致。</p>
+          <span class="section-label" data-i18n="architecture.label">技术架构</span>
+          <h2 class="section-title reveal" id="architecture-heading" data-i18n="architecture.title">四层架构，层层分明</h2>
+          <p class="section-desc reveal" data-delay="1" data-i18n="architecture.desc">每一层只做一件事，每一层都做到极致。</p>
         </div>
 
         <div class="arch-stack reveal" data-delay="1">
           <div class="arch-layer">
-            <div class="arch-layer-label">用户界面</div>
+            <div class="arch-layer-label" data-i18n="architecture.ui.title">用户界面</div>
             <div class="arch-layer-desc">
-              <span>原生 JavaScript + Tailwind CSS v4 + Canvas 2D</span>
+              <span data-i18n="architecture.ui.tech">原生 JavaScript + Tailwind CSS v4 + Canvas 2D</span>
+              <span class="arch-layer-user-desc" data-i18n="architecture.ui.userdesc">你看到和操作的每一个像素</span>
             </div>
           </div>
           <div class="arch-arrow">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v12M4 10l4 4 4-4"/></svg>
           </div>
           <div class="arch-layer">
-            <div class="arch-layer-label">Tauri IPC</div>
+            <div class="arch-layer-label" data-i18n="architecture.ipc.title">Tauri IPC</div>
             <div class="arch-layer-desc">
-              <span>100+ Commands · 双向异步通信 · Capability 权限模型</span>
+              <span data-i18n="architecture.ipc.tech">100+ Commands · 双向异步通信 · Capability 权限模型</span>
+              <span class="arch-layer-user-desc" data-i18n="architecture.ipc.userdesc">前端与后端的安全通信桥梁</span>
             </div>
           </div>
           <div class="arch-arrow">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v12M4 10l4 4 4-4"/></svg>
           </div>
           <div class="arch-layer">
-            <div class="arch-layer-label">Rust 后端</div>
+            <div class="arch-layer-label" data-i18n="architecture.rust.title">Rust 后端</div>
             <div class="arch-layer-desc">
-              <span>Tauri v2 · reqwest · aes-gcm · SSRF 防护 · 内存安全</span>
+              <span data-i18n="architecture.rust.tech">Tauri v2 · reqwest · aes-gcm · SSRF 防护 · 内存安全</span>
+              <span class="arch-layer-user-desc" data-i18n="architecture.rust.userdesc">零成本抽象，编译期消除 bug</span>
             </div>
           </div>
           <div class="arch-arrow">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v12M4 10l4 4 4-4"/></svg>
           </div>
           <div class="arch-layer">
-            <div class="arch-layer-label">Mihomo 内核</div>
+            <div class="arch-layer-label" data-i18n="architecture.mihomo.title">Mihomo 内核</div>
             <div class="arch-layer-desc">
-              <span>RESTful API · HTTP Streaming · TUN · 规则引擎</span>
+              <span data-i18n="architecture.mihomo.tech">RESTful API · HTTP Streaming · TUN · 规则引擎</span>
+              <span class="arch-layer-user-desc" data-i18n="architecture.mihomo.userdesc">经过实战验证的代理核心</span>
             </div>
           </div>
         </div>
@@ -563,7 +595,7 @@
           <span class="arch-tag">Canvas 2D</span>
           <span class="arch-tag">Tauri v2</span>
           <span class="arch-tag">Mihomo</span>
-          <span class="arch-tag">元数据加密</span>
+          <span class="arch-tag" data-i18n="arch.tag.encryption">元数据加密</span>
           <span class="arch-tag">PBKDF2</span>
         </div>
       </div>
@@ -573,35 +605,35 @@
     <section class="section" id="performance" data-section="performance" aria-labelledby="performance-heading">
       <div class="section-inner">
         <div class="section-header">
-          <span class="section-label">性能</span>
-          <h2 class="section-title reveal" id="performance-heading">轻量到极致</h2>
-          <p class="section-desc reveal" data-delay="1">没有 Electron 的臃肿，没有框架的税。只有原生代码与系统之间的直接对话。</p>
+          <span class="section-label" data-i18n="performance.label">性能</span>
+          <h2 class="section-title reveal" id="performance-heading" data-i18n="performance.title">轻量到极致</h2>
+          <p class="section-desc reveal" data-delay="1" data-i18n="performance.desc">没有 Electron 的臃肿，没有框架的税。只有原生代码与系统之间的直接对话。</p>
         </div>
 
         <div class="perf-grid reveal-stagger">
           <div class="perf-card reveal" data-delay="1">
             <div class="perf-number" data-target="8">0</div>
-            <div class="perf-unit">MB</div>
-            <div class="perf-label">Lite 版安装包</div>
-            <div class="perf-compare">macOS Lite 实测 8.47 MB</div>
+            <div class="perf-unit" data-i18n="performance.size.unit">MB</div>
+            <div class="perf-label" data-i18n="performance.size.label">Lite 版安装包</div>
+            <div class="perf-compare" data-i18n="performance.size.compare">macOS Lite 实测 8.47 MB</div>
           </div>
           <div class="perf-card reveal" data-delay="2">
-            <div class="perf-number" data-target="30">0</div>
-            <div class="perf-unit">MB</div>
-            <div class="perf-label">运行时内存</div>
-            <div class="perf-compare">Tauri 原生窗口，无 Chromium 开销</div>
+            <div class="perf-number" data-target="~30">0</div>
+            <div class="perf-unit" data-i18n="performance.memory.unit">MB</div>
+            <div class="perf-label" data-i18n="performance.memory.label">运行时内存</div>
+            <div class="perf-compare" data-i18n="performance.memory.compare">Tauri 原生窗口，无 Chromium 开销</div>
           </div>
           <div class="perf-card reveal" data-delay="3">
             <div class="perf-number" data-target="0">0</div>
-            <div class="perf-unit">ms</div>
-            <div class="perf-label">冷启动时间</div>
-            <div class="perf-compare">原生窗口，即时响应</div>
+            <div class="perf-unit" data-i18n="performance.startup.unit">ms</div>
+            <div class="perf-label" data-i18n="performance.startup.label">冷启动时间</div>
+            <div class="perf-compare" data-i18n="performance.startup.compare">原生窗口，即时响应</div>
           </div>
           <div class="perf-card reveal" data-delay="1">
             <div class="perf-number" data-target="0">0</div>
-            <div class="perf-unit">个</div>
-            <div class="perf-label">前端框架依赖</div>
-            <div class="perf-compare">零供应链攻击面</div>
+            <div class="perf-unit" data-i18n="performance.deps.unit">个</div>
+            <div class="perf-label" data-i18n="performance.deps.label">前端框架依赖</div>
+            <div class="perf-compare" data-i18n="performance.deps.compare">零供应链攻击面</div>
           </div>
         </div>
       </div>
@@ -611,9 +643,9 @@
     <section class="section demo-section" id="demo" data-section="demo" aria-labelledby="demo-heading">
       <div class="section-inner">
         <div class="section-header">
-          <span class="section-label">在线体验</span>
-          <h2 class="section-title reveal" id="demo-heading">在浏览器中体验 Zephyr</h2>
-          <p class="section-desc reveal" data-delay="1">完整的 UI 还原，Mock 数据驱动。无需安装，即开即用。</p>
+          <span class="section-label" data-i18n="demo.label">在线体验</span>
+          <h2 class="section-title reveal" id="demo-heading" data-i18n="demo.title">在浏览器中体验 Zephyr</h2>
+          <p class="section-desc reveal" data-delay="1" data-i18n="demo.desc">完整的 UI 还原，Mock 数据驱动。无需安装，即开即用。</p>
         </div>
 
         <div class="demo-container reveal" data-delay="1">
@@ -622,40 +654,135 @@
             <div class="demo-launch-content">
               <img src="./app-icon.png" alt="Zephyr" class="demo-launch-icon" draggable="false" width="80" height="80" />
               <h2>Zephyr</h2>
-              <p>点击下方按钮启动交互式演示</p>
+              <p data-i18n="demo.launchHint">点击下方按钮启动交互式演示</p>
+              <p class="demo-launch-limitation" data-i18n="demo.limitation">在线演示使用 Mock 数据，部分功能需安装桌面版</p>
+              <p class="demo-launch-hint" data-i18n="demo.hint">试试点击左侧节点列表切换代理，或浏览设置页面</p>
               <button class="btn-primary demo-launch-btn" id="launchBtn">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><polygon points="6,3 13,8 6,13"/></svg>
-                启动体验
+                <span data-i18n="demo.launch">启动体验</span>
               </button>
             </div>
           </div>
           <div class="demo-frame-wrapper" id="demoFrameWrapper">
-            <iframe id="zephyrFrame" class="demo-frame" src="about:blank" sandbox="allow-scripts allow-same-origin allow-popups" loading="lazy" title="Zephyr Interactive Demo"></iframe>
+            <div class="demo-loading" id="demoLoading">
+              <div class="demo-loading-spinner"></div>
+              <p data-i18n="demo.loading">正在加载 Zephyr...</p>
+            </div>
+            <iframe id="zephyrFrame" class="demo-frame" src="about:blank" sandbox="allow-scripts allow-same-origin allow-popups" title="Zephyr Interactive Demo"></iframe>
           </div>
         </div>
 
         <!-- Demo limitations notice -->
         <div class="demo-limitations reveal" data-delay="2">
-          <p class="demo-limitations-title">⚠ 在线演示限制</p>
-          <p>以下功能需要本地安装桌面版才能使用：<strong>TUN 虚拟网卡</strong>、<strong>系统代理</strong>、<strong>订阅下载与更新</strong>、<strong>规则库管理</strong>、<strong>配置文件读写</strong>、<strong>开机自启</strong>、<strong>核心日志</strong>、<strong>Deep Link 注册</strong>。演示中使用 Mock 数据模拟代理节点和流量。</p>
+          <p class="demo-limitations-title" data-i18n="demo.limitations.title">⚠ 在线演示限制</p>
+          <p><span data-i18n="demo.limitations.body">以下功能需要本地安装桌面版才能使用：</span><strong data-i18n="demo.limitations.tun">TUN 虚拟网卡</strong>、<strong data-i18n="demo.limitations.proxy">系统代理</strong>、<strong data-i18n="demo.limitations.subscription">订阅下载与更新</strong>、<strong data-i18n="demo.limitations.rules">规则库管理</strong>、<strong data-i18n="demo.limitations.config">配置文件读写</strong>、<strong data-i18n="demo.limitations.autostart">开机自启</strong>、<strong data-i18n="demo.limitations.logs">核心日志</strong>、<strong data-i18n="demo.limitations.deeplink">Deep Link 注册</strong>。<span data-i18n="demo.limitations.mock">演示中使用 Mock 数据模拟代理节点和流量。</span></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ FAQ ═══ -->
+    <section class="section" id="faq" data-section="faq" aria-labelledby="faq-heading">
+      <div class="section-inner">
+        <div class="section-header">
+          <span class="section-label" data-i18n="faq.label">常见问题</span>
+          <h2 class="section-title reveal" id="faq-heading" data-i18n="faq.title">你可能想知道的</h2>
+        </div>
+        <div class="faq-list reveal-stagger">
+          <div class="faq-item reveal" data-delay="1">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q1">Zephyr 和其他客户端有什么区别？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a1">Zephyr 基于 Tauri v2 + Rust 构建，Lite 版安装包仅约 8MB，不依赖 React/Vue 等前端框架，零虚拟 DOM 开销。相比 Electron 方案，Zephyr 使用系统原生 WebView，内存占用更低，启动更快。</p></div>
+          </div>
+          <div class="faq-item reveal" data-delay="2">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q2">Zephyr 如何保护我的订阅链接安全？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a2">订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备，攻击者也无法解密。此外，SSRF 防护确保订阅服务器无法通过重定向攻击你的内网。</p></div>
+          </div>
+          <div class="faq-item reveal" data-delay="3">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q3">Zephyr 支持哪些平台？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a3">Windows（x64）、macOS（Apple Silicon 和 Intel）以及 Linux（deb、RPM、AppImage）。提供 Full 版和 Lite 版两种安装包，Lite 版体积仅约 8MB。</p></div>
+          </div>
+          <div class="faq-item reveal" data-delay="1">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q4">Full 版和 Lite 版有什么区别？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a4">Lite 版仅包含核心功能和必要的 WebView 运行时，体积约 8MB。Full 版包含完整的 Tauri 运行时和所有系统依赖，体积约 28MB，适合没有系统 WebView 的环境。</p></div>
+          </div>
+          <div class="faq-item reveal" data-delay="2">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q5">Zephyr 会收集我的数据吗？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a5">不会。Zephyr 是开源软件，所有代码公开可审计。应用没有遥测、没有数据分析、不会上传任何用户数据。</p></div>
+          </div>
+          <div class="faq-item reveal" data-delay="3">
+            <button class="faq-question" aria-expanded="false">
+              <span data-i18n="faq.q6">如何确保 Zephyr 的更新是安全的？</span>
+              <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="faq-answer"><p data-i18n="faq.a6">每次更新都经过 SHA256 完整性校验，且仅从 GitHub Releases 的可信域名下载。CI/CD 流程使用 cargo audit、npm audit 和 Semgrep 持续扫描依赖漏洞。</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ CTA ═══ -->
+    <section class="cta-section" aria-label="Call to action">
+      <div class="cta-inner reveal">
+        <h2 class="cta-title" data-i18n="cta.title">准备好体验更安全美观的代理了吗？</h2>
+        <p class="cta-desc" data-i18n="cta.desc">开源、免费、跨平台。几分钟即可上手。</p>
+        <div class="cta-buttons">
+          <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" class="btn-primary">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 13h12"/></svg>
+            <span data-i18n="cta.download">下载 Zephyr</span>
+          </a>
+          <a href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="btn-secondary">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
         </div>
       </div>
     </section>
 
   </main>
 
+  <!-- Mobile nav overlay + drawer -->
+  <div class="nav-mobile-overlay" id="navMobileOverlay"></div>
+  <div class="nav-mobile-drawer" id="navMobileDrawer" role="dialog" aria-label="Mobile navigation">
+    <a href="#security" data-i18n="nav.security">安全</a>
+    <a href="#features" data-i18n="nav.features">特性</a>
+    <a href="#architecture" data-i18n="nav.architecture">架构</a>
+    <a href="#performance" data-i18n="nav.performance">性能</a>
+    <a href="#demo" data-i18n="nav.demo">在线体验</a>
+    <a href="#faq" data-i18n="nav.faq">常见问题</a>
+    <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" data-i18n="nav.download">下载</a>
+  </div>
+
+  <!-- Back to top -->
+  <button class="back-to-top" id="backToTop" aria-label="Back to top">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M8 12V4M4 8l4-4 4 4"/></svg>
+  </button>
+
   <!-- ═══ Footer ═══ -->
   <footer class="site-footer" role="contentinfo">
     <div class="footer-inner">
       <div class="footer-col">
-        <h4>项目</h4>
+        <h4 data-i18n="footer.project">项目</h4>
         <a href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer">Releases</a>
         <a href="https://github.com/Juwan-Hwang/Zephyr/issues" target="_blank" rel="noopener noreferrer">Issues</a>
         <a href="https://github.com/Juwan-Hwang/Zephyr/wiki" target="_blank" rel="noopener noreferrer">Wiki</a>
       </div>
       <div class="footer-col">
-        <h4>技术</h4>
+        <h4 data-i18n="footer.tech">技术</h4>
         <a href="https://github.com/MetaCubeX/mihomo" target="_blank" rel="noopener noreferrer">Mihomo</a>
         <a href="https://tauri.app" target="_blank" rel="noopener noreferrer">Tauri</a>
         <a href="https://tailwindcss.com" target="_blank" rel="noopener noreferrer">Tailwind CSS</a>
@@ -663,13 +790,13 @@
         <a href="https://github.com/Juwan-Hwang/Clash-Prism-Engine" target="_blank" rel="noopener noreferrer">Prism Engine</a>
       </div>
       <div class="footer-col">
-        <h4>资源</h4>
-        <a href="https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">许可证</a>
-        <a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=date&legend=top-left" target="_blank" rel="noopener noreferrer">Star History</a>
+        <h4 data-i18n="footer.resources">资源</h4>
+        <a href="https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" data-i18n="footer.license">许可证</a>
+        <a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=date&legend=top-left" target="_blank" rel="noopener noreferrer" data-i18n="footer.starhistory">Star History</a>
       </div>
     </div>
     <div class="footer-bottom">
-      <p>© 2025–2026 Juwan · Built with Rust + Tauri v2 · Open Source</p>
+      <p data-i18n="footer.copyright">© 2026 Juwan · Built with Rust + Tauri v2 · Open Source</p>
     </div>
   </footer>
 
