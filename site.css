@@ -200,6 +200,45 @@ a:hover {
   height: 16px;
 }
 
+/* ── Language Toggle Button ── */
+.nav-lang-toggle {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast),
+    background var(--duration-fast);
+}
+
+.nav-lang-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--accent-dim);
+}
+
+.nav-lang-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 1024px) {
+  .nav-lang-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  .nav-lang-toggle svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* ═══════════════════════════════════════
    2. Hero (.hero)
 ═══════════════════════════════════════ */
@@ -837,7 +876,7 @@ a:hover {
 .security-card p {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-top: 4px;
+  margin-top: 8px;
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -951,10 +990,38 @@ a:hover {
   }
 }
 
+/* Default: hide mobile CTA, show desktop CTAs */
+.hero-cta-mobile {
+  display: none;
+}
+
+.hero-cta-desktop {
+  display: inline-flex;
+}
+
 @media (max-width: 480px) {
   .footer-inner {
     grid-template-columns: 1fr;
     gap: 24px;
+  }
+
+  /* Hide demo section on mobile */
+  #demo {
+    display: none;
+  }
+
+  /* Show mobile-only CTA in hero */
+  .hero-cta-mobile {
+    display: inline-flex;
+  }
+
+  .hero-cta-desktop {
+    display: none;
+  }
+
+  /* Hide demo link in mobile nav drawer */
+  .nav-mobile-drawer a[href="#demo"] {
+    display: none;
   }
 }
 
@@ -1450,7 +1517,7 @@ a:hover {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .perf-number {
@@ -1471,7 +1538,7 @@ a:hover {
 .perf-compare {
   font-size: 11px;
   color: var(--text-tertiary);
-  margin-top: 4px;
+  margin-top: 2px;
   font-style: italic;
 }
 
@@ -1495,10 +1562,13 @@ a:hover {
   font-size: 13px;
   color: var(--text-secondary);
   transition: color var(--duration-fast);
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
 }
 
 .footer-col a:hover {
   color: var(--accent);
+  text-decoration-color: var(--accent);
 }
 
 .footer-bottom {
@@ -1525,4 +1595,403 @@ a:hover {
   .perf-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ═══════════════════════════════════════
+   UX Improvements — All Priorities
+   ═══════════════════════════════════════ */
+
+/* ── P0: Hamburger Menu ── */
+.nav-hamburger {
+  display: none;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast), background var(--duration-fast);
+}
+
+.nav-hamburger:hover {
+  color: var(--text-primary);
+  background: var(--accent-dim);
+}
+
+/* Mobile nav overlay */
+.nav-mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 899;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 300ms ease;
+  pointer-events: none;
+}
+
+.nav-mobile-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Mobile nav drawer */
+.nav-mobile-drawer {
+  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(300px, 80vw);
+  z-index: 901;
+  background: var(--depth-2-deep);
+  border-left: 0.5px solid var(--border-subtle);
+  padding: 72px 24px 24px;
+  transform: translateX(100%);
+  transition: transform 350ms var(--spring-standard);
+}
+
+.nav-mobile-drawer.open {
+  transform: translateX(0);
+}
+
+.nav-mobile-drawer a {
+  display: block;
+  padding: 14px 0;
+  font-size: 15px;
+  color: var(--text-secondary);
+  border-bottom: 0.5px solid var(--border-subtle);
+  transition: color var(--duration-fast);
+}
+
+.nav-mobile-drawer a:hover,
+.nav-mobile-drawer a.active {
+  color: var(--accent);
+}
+
+@media (max-width: 1024px) {
+  .nav-hamburger {
+    display: flex;
+  }
+  .nav-mobile-overlay,
+  .nav-mobile-drawer {
+    display: block;
+  }
+
+  /* Unified icon button sizing on mobile */
+  .nav-github {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .nav-github svg {
+    width: 16px;
+    height: 16px;
+  }
+  .theme-toggle {
+    width: 32px;
+    height: 32px;
+  }
+  .theme-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+  .nav-hamburger {
+    width: 32px;
+    height: 32px;
+  }
+  .nav-hamburger svg {
+    width: 16px;
+    height: 16px;
+  }
+  .nav-lang-toggle {
+    width: 32px;
+    height: 32px;
+  }
+  .nav-lang-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* ── P0: Touch Target Sizes ── */
+@media (pointer: coarse) {
+  .theme-toggle {
+    width: 44px;
+    height: 44px;
+  }
+  .demo-expand-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .nav-links a {
+    padding: 8px 12px;
+    margin: -8px -12px;
+  }
+}
+
+/* ── P1: Security Card Font Sizes ── */
+.security-card h3 {
+  font-size: 14px;
+}
+
+.security-card p {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* ── P1: Demo Limitations Font ── */
+.demo-limitations p:last-child {
+  font-size: 13px;
+}
+
+.demo-limitations-title {
+  font-size: 13px;
+}
+
+/* ── P1: Demo Launch Hint ── */
+.demo-launch-hint {
+  font-size: 12px;
+  color: var(--text-ghost);
+  margin: 0;
+  opacity: 0.7;
+}
+
+.demo-launch-limitation {
+  font-size: 11px;
+  color: var(--text-ghost);
+  margin: 0;
+  opacity: 0.6;
+  max-width: 280px;
+  text-align: center;
+}
+
+/* ── P0: Demo Loading Indicator ── */
+.demo-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--depth-0-void);
+  z-index: 50;
+}
+
+.demo-loading p {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.demo-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: demo-spin 0.8s linear infinite;
+}
+
+@keyframes demo-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── P1: FAQ Section ── */
+.faq-list {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.faq-item {
+  background: var(--depth-3-surface);
+  border: 0.5px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color 250ms;
+}
+
+.faq-item:hover {
+  border-color: var(--border-default);
+}
+
+.faq-question {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.5;
+  transition: color var(--duration-fast);
+}
+
+.faq-question:hover {
+  color: var(--accent);
+}
+
+.faq-chevron {
+  flex-shrink: 0;
+  transition: transform 300ms var(--spring-standard);
+  color: var(--text-tertiary);
+}
+
+.faq-item.open .faq-chevron {
+  transform: rotate(180deg);
+}
+
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 400ms var(--spring-standard), padding 300ms ease;
+}
+
+.faq-item.open .faq-answer {
+  max-height: 300px;
+}
+
+.faq-answer p {
+  padding: 0 20px 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* ── P1: CTA Section ── */
+.cta-section {
+  padding: clamp(64px, 8vw, 128px) 0;
+  position: relative;
+}
+
+.cta-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 50%, rgba(124, 139, 160, 0.04) 0%, transparent 60%);
+}
+
+.cta-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  text-align: center;
+  padding-inline: clamp(24px, 5vw, 64px);
+}
+
+.cta-title {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3.5vw, 30px);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.cta-desc {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-top: 12px;
+  line-height: 1.6;
+}
+
+.cta-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+}
+
+/* ── P3: Back to Top ── */
+.back-to-top {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--depth-4-raised);
+  border: 0.5px solid var(--border-default);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 800;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition:
+    opacity 300ms var(--spring-standard),
+    transform 300ms var(--spring-standard),
+    background var(--duration-fast),
+    color var(--duration-fast),
+    box-shadow var(--duration-fast);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.back-to-top:hover {
+  background: var(--depth-5-float);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-depth-3);
+}
+
+/* ── P2: Architecture User-Friendly Description ── */
+.arch-layer-user-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* ── P2: Perf Card Spacing ── */
+.perf-unit {
+  margin-top: 8px;
+}
+
+.perf-compare {
+  margin-top: 2px;
+}
+
+/* ── P2: Security card groups ── */
+.security-group-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-ghost);
+  padding-top: 8px;
+}
+
+.security-group-label:first-child {
+  padding-top: 0;
 }
