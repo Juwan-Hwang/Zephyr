@@ -64,9 +64,64 @@ fn detect_cache_lock_issue(log: &str) -> bool {
 }
 
 /// Redact sensitive directory paths from an error message.
+/// Handles both with-separator and without-separator occurrences, and supports
+/// both forward-slash and backslash path styles (Windows).
+/// Performs case-insensitive matching to handle Windows path casing variations,
+/// and also redacts escaped backslash versions (e.g., `C:\\Users` from JSON output).
 fn redact_error_message(msg: &str, core_dir: &str, profiles_dir: &str) -> String {
-    msg.replace(core_dir, "[CORE_DIR]")
-        .replace(profiles_dir, "[PROFILES_DIR]")
+    let mut result = msg.to_owned();
+
+    // Case-insensitive replace for a single pattern in the string.
+    let replace_ci = |s: &mut String, pattern: &str, replacement: &str| {
+        let mut search_from = 0;
+        while let Some(idx) = s[search_from..].find(pattern) {
+            let abs_idx = search_from + idx;
+            s.replace_range(abs_idx..abs_idx + pattern.len(), replacement);
+            search_from = abs_idx + replacement.len();
+        }
+    };
+
+    // Redact a single directory path in both slash styles and casing.
+    let redact_dir = |s: &mut String, dir: &str, label: &str| {
+        if dir.is_empty() {
+            return;
+        }
+        // Normalize to both slash styles regardless of input format,
+        // because error messages may use either style on any platform.
+        let dir_f = dir.replace('\\', "/");
+        let dir_b = dir.replace('/', "\\");
+
+        // Forward-slash style: handle trailing separator first, then bare path
+        let dir_f_sep = format!("{dir_f}/");
+        let label_f_sep = format!("{label}/");
+        replace_ci(s, &dir_f_sep, &label_f_sep);
+        replace_ci(s, &dir_f, label);
+
+        // Backslash style (Windows): handle trailing separator first, then bare path
+        let dir_b_sep = format!("{dir_b}\\");
+        let label_b_sep = format!("{label}\\");
+        replace_ci(s, &dir_b_sep, &label_b_sep);
+        replace_ci(s, &dir_b, label);
+
+        // Escaped backslash style (JSON/Debug output): C:\\Users\\...
+        let dir_be = dir.replace('\\', "\\\\");
+        let dir_be_sep = format!("{dir_be}\\\\");
+        let label_be_sep = format!("{label}\\\\");
+        replace_ci(s, &dir_be_sep, &label_be_sep);
+        replace_ci(s, &dir_be, label);
+    };
+
+    // Redact the longest (most specific) path first to avoid parent-path
+    // replacements breaking subdirectory matches.
+    let mut dirs: Vec<(&str, &str)> =
+        vec![(core_dir, "[CORE_DIR]"), (profiles_dir, "[PROFILES_DIR]")];
+    dirs.retain(|(d, _)| !d.is_empty());
+    dirs.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
+
+    for (dir, label) in dirs {
+        redact_dir(&mut result, dir, label);
+    }
+    result
 }
 
 /// Parse the version string from `mihomo -v` stdout.
