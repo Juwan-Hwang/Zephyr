@@ -1,10 +1,11 @@
 use rand::RngExt as _;
 use std::fs;
-use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::TcpStream;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt as _;
@@ -850,12 +851,12 @@ async fn health_check(port: u16) -> Result<(), String> {
     let max_interval = std::time::Duration::from_millis(HEALTH_CHECK_MAX_INTERVAL_MS);
 
     for _ in 0..HEALTH_CHECK_MAX_RETRIES {
-        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
+        if let Ok(mut stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
             let request =
                 format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(request.as_bytes()).is_ok() {
+            if stream.write_all(request.as_bytes()).await.is_ok() {
                 let mut response = [0u8; 256];
-                if let Ok(n) = stream.read(&mut response) {
+                if let Ok(n) = stream.read(&mut response).await {
                     let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
                     if resp_str.starts_with("HTTP/1.1 200")
                         || resp_str.starts_with("HTTP/1.1 401")
@@ -870,10 +871,7 @@ async fn health_check(port: u16) -> Result<(), String> {
         }
         let sleep_dur = interval;
         interval = (interval * 2).min(max_interval);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            std::thread::sleep(sleep_dur);
-        })
-        .await;
+        tokio::time::sleep(sleep_dur).await;
     }
 
     if is_healthy {
