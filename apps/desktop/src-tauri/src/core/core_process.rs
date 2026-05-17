@@ -1,10 +1,11 @@
 use rand::RngExt as _;
 use std::fs;
-use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::TcpStream;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt as _;
@@ -102,54 +103,76 @@ pub const fn core_binary_name() -> &'static str {
 /// This helps mihomo exit faster when it has many active connections.
 /// Failure is non-fatal — we fall back to force kill.
 async fn drain_connections_if_alive(port: u16, secret_val: &str) {
-    let secret = secret_val.to_owned();
-    let _ = tokio::task::spawn_blocking(move || {
-        let url = format!("http://127.0.0.1:{port}/connections");
-        let client = match reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
+    let url = format!("http://127.0.0.1:{port}/connections");
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Close all connections via mihomo API
+    let _ = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {secret_val}"))
+        .send()
+        .await;
+
+    // Wait for connections to drain (max 2s)
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {secret_val}"))
+            .send()
+            .await
         {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        // Close all connections via mihomo API
-        let _ = client
-            .delete(&url)
-            .header("Authorization", format!("Bearer {secret}"))
-            .send();
-
-        // Wait for connections to drain (max 2s)
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while std::time::Instant::now() < deadline {
-            match client
-                .get(&url)
-                .header("Authorization", format!("Bearer {secret}"))
-                .send()
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(body) = resp.json::<serde_json::Value>() {
-                        let count = body
-                            .get("connections")
-                            .and_then(|v| v.as_array())
-                            .map_or(0, Vec::len);
-                        if count == 0 {
-                            return;
-                        }
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    let count = body
+                        .get("connections")
+                        .and_then(|v| v.as_array())
+                        .map_or(0, Vec::len);
+                    if count == 0 {
+                        return;
                     }
                 }
-                _ => return, // Core already unreachable
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            _ => return, // Core already unreachable
         }
-    })
-    .await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
+/// Kill all mihomo processes gracefully (SIGTERM first, SIGKILL after timeout).
+///
+/// On Unix: sends SIGTERM, waits up to 2s for exit, then SIGKILL.
+/// On Windows: uses taskkill /F (no graceful option).
 pub fn kill_mihomo() {
     #[cfg(unix)]
     {
-        // Try to kill multiple times to ensure all processes are terminated
+        // Step 1: SIGTERM — allow mihomo to close connections gracefully
+        let _ = std::process::Command::new("killall")
+            .arg("-15") // SIGTERM
+            .arg("mihomo")
+            .output();
+
+        // Step 2: Wait up to 2s for graceful exit
+        for _ in 0..20 {
+            let output = std::process::Command::new("pgrep")
+                .arg("-x")
+                .arg("mihomo")
+                .output();
+            if let Ok(out) = output {
+                if out.stdout.is_empty() {
+                    return; // Process has exited gracefully
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Step 3: Force kill if still alive
         for _ in 0..3 {
             let _ = std::process::Command::new("killall")
                 .arg("-9")
@@ -850,12 +873,12 @@ async fn health_check(port: u16) -> Result<(), String> {
     let max_interval = std::time::Duration::from_millis(HEALTH_CHECK_MAX_INTERVAL_MS);
 
     for _ in 0..HEALTH_CHECK_MAX_RETRIES {
-        if let Ok(mut stream) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
+        if let Ok(mut stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
             let request =
                 format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(request.as_bytes()).is_ok() {
+            if stream.write_all(request.as_bytes()).await.is_ok() {
                 let mut response = [0u8; 256];
-                if let Ok(n) = stream.read(&mut response) {
+                if let Ok(n) = stream.read(&mut response).await {
                     let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
                     if resp_str.starts_with("HTTP/1.1 200")
                         || resp_str.starts_with("HTTP/1.1 401")
@@ -870,10 +893,7 @@ async fn health_check(port: u16) -> Result<(), String> {
         }
         let sleep_dur = interval;
         interval = (interval * 2).min(max_interval);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            std::thread::sleep(sleep_dur);
-        })
-        .await;
+        tokio::time::sleep(sleep_dur).await;
     }
 
     if is_healthy {
