@@ -243,7 +243,7 @@ pub async fn prism_rebuild(
 
     // Read the original profile config before entering spawn_blocking
     // (AppHandle::state() is not available inside spawn_blocking closures)
-    let (raw_profile, current_secret) = {
+    let (raw_profile, current_secret, global_prefs) = {
         let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
         let lock = mihomo.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
         let config_path = lock
@@ -257,7 +257,17 @@ pub async fn prism_rebuild(
         let profile_file = paths.profiles_dir.join(&config_path);
         let content = std::fs::read_to_string(&profile_file)
             .map_err(|e| format!("Failed to read profile '{config_path}': {e}"))?;
-        (content, secret)
+
+        // Read global preferences for injection
+        let settings_state = tauri::Manager::state::<crate::SettingsState>(&app);
+        let settings_lock = settings_state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prefs = settings_lock.to_global_prefs();
+        drop(settings_lock);
+
+        (content, secret, Some(prefs))
     };
 
     tokio::task::spawn_blocking(move || {
@@ -269,9 +279,12 @@ pub async fn prism_rebuild(
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
-            let (prepared, _port) =
-                core_process::prepare_runtime_config(&raw_profile, &current_secret)
-                    .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
+            let (prepared, _port) = core_process::prepare_runtime_config(
+                &raw_profile,
+                &current_secret,
+                global_prefs.as_ref(),
+            )
+            .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
             crate::core_manager::write_file_secure(&run_config_path, &prepared)?;
         }
 
