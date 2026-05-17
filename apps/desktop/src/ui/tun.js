@@ -9,7 +9,7 @@ import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { persistConfigChanges } from './advanced.js';
+import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 
@@ -62,6 +62,7 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
+                        saveSetting('tun_enabled', true);
                     } catch (authErr) {
                         tunLogger.error('authErr', authErr);
                         if (authErr === 'canceled') {
@@ -85,6 +86,7 @@ export function initTunToggle() {
                     try {
                         await invoke(COMMANDS.SET_TUN_ENABLED, { enable: false });
                         await invoke(COMMANDS.DISABLE_CMD);
+                        saveSetting('tun_enabled', false);
                         await new Promise(r => setTimeout(r, 1500));
 
                         const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -99,7 +101,7 @@ export function initTunToggle() {
             } else {
                 // Non-macOS: use API to update config
                 await patchConfig({ tun: { enable } });
-                await persistConfigChanges({ tun: { enable } });
+                await saveSetting('tun_enabled', enable);
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
