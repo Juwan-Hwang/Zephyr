@@ -5,7 +5,7 @@
  */
 
 import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
-import { persistConfigChanges } from './advanced.js';
+import { saveSetting } from './settings-helpers.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
@@ -44,9 +44,9 @@ export function initModeSelector() {
                 await patchConfig({ mode });
                 updateModeUI(mode);
 
-                // 3. Persist to disk + close connections in background
+                // 3. Persist to settings.json + close connections in background
                 // (persist is fire-and-forget; patchConfig success is the source of truth)
-                persistConfigChanges({ mode }).catch((e) =>
+                saveSetting('mode', mode).catch((e) =>
                     modesLogger.warn("Failed to persist mode change", e)
                 );
                 closeAllConnections().catch((e) =>

@@ -7,7 +7,7 @@
  */
 
 import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections, getConfig } from '../api.js';
-import { persistConfigChanges } from './advanced.js';
+import { saveSetting } from './settings-helpers.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
 import { updateSysProxyUI } from './sysproxy.js';
@@ -570,7 +570,7 @@ async function switchMode(/** @type {string} */ mode) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
         await patchConfig({ mode });
-        await persistConfigChanges({ mode });
+        await saveSetting('mode', mode);
         await closeAllConnections();
         const modeNames = /** @type {Record<string, string>} */ ({ rule: t.modeRule || 'Rule', global: t.modeGlobal || 'Global', direct: t.modeDirect || 'Direct' });
         showNotification(`${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`, 'success');

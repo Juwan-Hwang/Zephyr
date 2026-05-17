@@ -682,8 +682,28 @@ fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
     Ok(safe_custom_args)
 }
 
+/// Global user preferences to inject into runtime config.
+/// Fields set to Some(...) override the YAML profile values;
+/// None means "use whatever the YAML profile has".
+/// `Some(0)` for port fields means "disabled"; `None` means "use YAML default".
+#[derive(Debug, Clone, Default)]
+pub struct GlobalPreferences {
+    pub mode: Option<String>,
+    pub tun_enabled: Option<bool>,
+    pub mixed_port: Option<u16>,
+    pub socks_port: Option<u16>,
+    pub http_port: Option<u16>,
+    pub ipv6: Option<bool>,
+    pub allow_lan: Option<bool>,
+    pub unified_delay: Option<bool>,
+}
+
 #[must_use]
-pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u16)> {
+pub fn prepare_runtime_config(
+    content: &str,
+    secret: &str,
+    prefs: Option<&GlobalPreferences>,
+) -> Option<(String, u16)> {
     let mut yaml_val = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
     if !yaml_val.is_mapping() {
         return None;
@@ -704,6 +724,72 @@ pub fn prepare_runtime_config(content: &str, secret: &str) -> Option<(String, u1
         let unified_delay_key = serde_yaml::Value::String("unified-delay".to_owned());
         if !mapping.contains_key(&unified_delay_key) {
             mapping.insert(unified_delay_key, serde_yaml::Value::Bool(true));
+        }
+
+        // Inject global user preferences (override YAML profile values)
+        if let Some(p) = prefs {
+            if let Some(mode) = &p.mode {
+                // Validate mode against supported values
+                if matches!(mode.as_str(), "rule" | "global" | "direct") {
+                    mapping.insert(
+                        serde_yaml::Value::String("mode".to_owned()),
+                        serde_yaml::Value::String(mode.clone()),
+                    );
+                }
+            }
+            if let Some(tun) = p.tun_enabled {
+                let tun_key = serde_yaml::Value::String("tun".to_owned());
+                let tun_val = mapping.get_mut(&tun_key);
+                if let Some(serde_yaml::Value::Mapping(tun_map)) = tun_val {
+                    tun_map.insert(
+                        serde_yaml::Value::String("enable".to_owned()),
+                        serde_yaml::Value::Bool(tun),
+                    );
+                } else {
+                    let mut tun_map = serde_yaml::Mapping::new();
+                    tun_map.insert(
+                        serde_yaml::Value::String("enable".to_owned()),
+                        serde_yaml::Value::Bool(tun),
+                    );
+                    mapping.insert(tun_key, serde_yaml::Value::Mapping(tun_map));
+                }
+            }
+            if let Some(port) = p.mixed_port {
+                mapping.insert(
+                    serde_yaml::Value::String("mixed-port".to_owned()),
+                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
+                );
+            }
+            if let Some(port) = p.socks_port {
+                mapping.insert(
+                    serde_yaml::Value::String("socks-port".to_owned()),
+                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
+                );
+            }
+            if let Some(port) = p.http_port {
+                mapping.insert(
+                    serde_yaml::Value::String("port".to_owned()),
+                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
+                );
+            }
+            if let Some(ipv6) = p.ipv6 {
+                mapping.insert(
+                    serde_yaml::Value::String("ipv6".to_owned()),
+                    serde_yaml::Value::Bool(ipv6),
+                );
+            }
+            if let Some(allow_lan) = p.allow_lan {
+                mapping.insert(
+                    serde_yaml::Value::String("allow-lan".to_owned()),
+                    serde_yaml::Value::Bool(allow_lan),
+                );
+            }
+            if let Some(unified_delay) = p.unified_delay {
+                mapping.insert(
+                    serde_yaml::Value::String("unified-delay".to_owned()),
+                    serde_yaml::Value::Bool(unified_delay),
+                );
+            }
         }
     }
 
@@ -726,10 +812,13 @@ fn select_runtime_config(
     preferred_name: &str,
     preferred_path: &Path,
     secret: &str,
+    prefs: Option<&GlobalPreferences>,
 ) -> Result<(Option<String>, String, u16), String> {
     let preferred_content =
         fs::read_to_string(preferred_path).map_err(|e| format!("Failed to read config: {e}"))?;
-    if let Some((final_config, config_port)) = prepare_runtime_config(&preferred_content, secret) {
+    if let Some((final_config, config_port)) =
+        prepare_runtime_config(&preferred_content, secret, prefs)
+    {
         return Ok((Some(preferred_name.to_owned()), final_config, config_port));
     }
 
@@ -765,7 +854,7 @@ fn select_runtime_config(
             Ok(content) => content,
             Err(_) => continue,
         };
-        if let Some((final_config, config_port)) = prepare_runtime_config(&content, secret) {
+        if let Some((final_config, config_port)) = prepare_runtime_config(&content, secret, prefs) {
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -1135,11 +1224,22 @@ pub async fn start_core(
 
     let resolved_secret = secret.unwrap_or_else(generate_secret);
 
+    // Read global user preferences from settings.json to override YAML profile values
+    let global_prefs = {
+        let settings_state = app.state::<crate::SettingsState>();
+        let settings = settings_state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(settings.to_global_prefs())
+    };
+
     let (active_config_name, final_config, config_port) = select_runtime_config(
         &paths,
         &resolved_config_name,
         &resolved_config_path,
         &resolved_secret,
+        global_prefs.as_ref(),
     )?;
 
     let run_config_path = paths.core_dir.join("run_config.yaml");
@@ -1265,7 +1365,7 @@ mod tests {
     #[test]
     fn prepare_runtime_config_injects_secret_and_controller() {
         let config = "external-controller: 0.0.0.0:7897\nsecret: old\nmode: rule\n";
-        let (prepared, port) = prepare_runtime_config(config, "new-secret").unwrap();
+        let (prepared, port) = prepare_runtime_config(config, "new-secret", None).unwrap();
 
         assert_eq!(port, 7897);
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
@@ -1293,7 +1393,7 @@ mod tests {
     #[test]
     fn test_prepare_runtime_config_basic() {
         let content = "port: 7890\nmode: rule";
-        let result = prepare_runtime_config(content, "mysecret");
+        let result = prepare_runtime_config(content, "mysecret", None);
         assert!(result.is_some());
         let (config, port) = result.unwrap();
         assert_eq!(port, 9090);
@@ -1305,7 +1405,7 @@ mod tests {
     #[test]
     fn test_prepare_runtime_config_custom_port() {
         let content = "external-controller: 0.0.0.0:8080\nport: 7890";
-        let result = prepare_runtime_config(content, "secret");
+        let result = prepare_runtime_config(content, "secret", None);
         assert!(result.is_some());
         let (config, port) = result.unwrap();
         assert_eq!(port, 8080);
@@ -1315,7 +1415,7 @@ mod tests {
     #[test]
     fn test_prepare_runtime_config_preserves_unified_delay() {
         let content = "unified-delay: false\nport: 7890";
-        let result = prepare_runtime_config(content, "s");
+        let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
         let (config, _) = result.unwrap();
         assert!(config.contains("unified-delay: false"));
@@ -1324,21 +1424,148 @@ mod tests {
 
     #[test]
     fn test_prepare_runtime_config_invalid_yaml() {
-        assert!(prepare_runtime_config("not: valid: yaml: :", "s").is_none());
+        assert!(prepare_runtime_config("not: valid: yaml: :", "s", None).is_none());
     }
 
     #[test]
     fn test_prepare_runtime_config_non_mapping() {
-        assert!(prepare_runtime_config("just a string", "s").is_none());
+        assert!(prepare_runtime_config("just a string", "s", None).is_none());
     }
 
     #[test]
     fn test_prepare_runtime_config_empty_secret() {
         let content = "port: 7890";
-        let result = prepare_runtime_config(content, "");
+        let result = prepare_runtime_config(content, "", None);
         assert!(result.is_some());
         let (config, _) = result.unwrap();
         assert!(config.contains("secret: "));
+    }
+
+    // ── GlobalPreferences injection tests ──────────────────────────────────
+
+    #[test]
+    fn test_prefs_mode_override() {
+        let content = "mode: rule\nport: 7890";
+        let prefs = GlobalPreferences {
+            mode: Some("global".to_owned()),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("mode: global"));
+        assert!(!config.contains("mode: rule"));
+    }
+
+    #[test]
+    fn test_prefs_none_does_not_override() {
+        let content = "mode: rule\nport: 7890";
+        let prefs = GlobalPreferences::default();
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("mode: rule"));
+    }
+
+    #[test]
+    fn test_prefs_tun_enabled_inject_into_existing() {
+        let content = "tun:\n  enable: false\nport: 7890";
+        let prefs = GlobalPreferences {
+            tun_enabled: Some(true),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("enable: true"));
+    }
+
+    #[test]
+    fn test_prefs_tun_enabled_creates_when_missing() {
+        let content = "port: 7890";
+        let prefs = GlobalPreferences {
+            tun_enabled: Some(true),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("tun:\n  enable: true"));
+    }
+
+    #[test]
+    fn test_prefs_mixed_port_override() {
+        let content = "mixed-port: 7890\nport: 7891";
+        let prefs = GlobalPreferences {
+            mixed_port: Some(9090),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("mixed-port: 9090"));
+    }
+
+    #[test]
+    fn test_prefs_socks_port_override() {
+        let content = "socks-port: 7891";
+        let prefs = GlobalPreferences {
+            socks_port: Some(1080),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("socks-port: 1080"));
+    }
+
+    #[test]
+    fn test_prefs_http_port_override() {
+        let content = "port: 7890";
+        let prefs = GlobalPreferences {
+            http_port: Some(8080),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("port: 8080"));
+    }
+
+    #[test]
+    fn test_prefs_ipv6_override() {
+        let content = "ipv6: false\nport: 7890";
+        let prefs = GlobalPreferences {
+            ipv6: Some(true),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("ipv6: true"));
+    }
+
+    #[test]
+    fn test_prefs_allow_lan_override() {
+        let content = "allow-lan: false\nport: 7890";
+        let prefs = GlobalPreferences {
+            allow_lan: Some(true),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("allow-lan: true"));
+    }
+
+    #[test]
+    fn test_prefs_unified_delay_override() {
+        let content = "unified-delay: false\nport: 7890";
+        let prefs = GlobalPreferences {
+            unified_delay: Some(true),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("unified-delay: true"));
+    }
+
+    #[test]
+    fn test_prefs_multiple_overrides() {
+        let content = "mode: rule\nipv6: false\nallow-lan: false\nport: 7890";
+        let prefs = GlobalPreferences {
+            mode: Some("direct".to_owned()),
+            ipv6: Some(true),
+            allow_lan: Some(true),
+            mixed_port: Some(7892),
+            ..Default::default()
+        };
+        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("mode: direct"));
+        assert!(config.contains("ipv6: true"));
+        assert!(config.contains("allow-lan: true"));
+        assert!(config.contains("mixed-port: 7892"));
     }
 
     // ── validate_custom_args extended tests ───────────────────────────────
