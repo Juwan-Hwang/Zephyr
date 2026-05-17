@@ -43,6 +43,7 @@ serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 sha2 = "0.10"
 hex = "0.4"
 tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
 regex = "1"
 tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
