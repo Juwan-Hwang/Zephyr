@@ -4,7 +4,8 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen, switchToConfig } from '../api.js';
+import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
+import { switchToConfig } from './lifecycle.js';
 import { translations, currentLang } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
