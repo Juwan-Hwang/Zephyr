@@ -64,9 +64,50 @@ fn detect_cache_lock_issue(log: &str) -> bool {
 }
 
 /// Redact sensitive directory paths from an error message.
+/// Handles both with-separator and without-separator occurrences, and supports
+/// both forward-slash and backslash path styles (Windows).
 fn redact_error_message(msg: &str, core_dir: &str, profiles_dir: &str) -> String {
-    msg.replace(core_dir, "[CORE_DIR]")
-        .replace(profiles_dir, "[PROFILES_DIR]")
+    let mut result = msg.to_owned();
+
+    // Redact a single directory path in both slash styles.
+    // Replaces path followed by separator first, then bare path at end of string.
+    let redact_dir = |s: &mut String, dir: &str, label: &str| {
+        if dir.is_empty() {
+            return;
+        }
+        // Forward-slash style: /path/dir/ or /path/dir (at word boundary)
+        let dir_f = format!("{dir}/");
+        *s = s.replace(&dir_f, &format!("{label}/"));
+        // Bare path at end of string or before non-path char
+        // Use a simple approach: also replace the dir itself when followed by
+        // a non-alphanumeric character (word boundary).
+        let patterns: &[&str] = &[
+            &format!("{dir}\""),
+            &format!("{dir}'"),
+            &format!("{dir})"),
+            dir,
+        ];
+        for pat in patterns {
+            *s = s.replace(pat, label);
+        }
+        // Backslash style: C:\path\dir\ or C:\path\dir
+        let dir_b = dir.replace('/', "\\");
+        let dir_b_sep = format!("{dir_b}\\");
+        *s = s.replace(&dir_b_sep, &format!("{label}\\"));
+        let patterns_b: &[&str] = &[
+            &format!("{dir_b}\""),
+            &format!("{dir_b}'"),
+            &format!("{dir_b})"),
+            &dir_b,
+        ];
+        for pat in patterns_b {
+            *s = s.replace(pat, label);
+        }
+    };
+
+    redact_dir(&mut result, core_dir, "[CORE_DIR]");
+    redact_dir(&mut result, profiles_dir, "[PROFILES_DIR]");
+    result
 }
 
 /// Parse the version string from `mihomo -v` stdout.
