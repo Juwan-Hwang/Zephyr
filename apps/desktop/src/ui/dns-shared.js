@@ -16,19 +16,20 @@ import { translations, currentLang } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { Bus, Events } from './events.js';
+import { getSetting, saveSetting } from './settings-helpers.js';
 
 // ---------------------------------------------------------------------------
 //  Helper: DNS rewrite enabled state (default true for new users)
 // ---------------------------------------------------------------------------
 
 /**
- * Check if DNS rewrite is saved as enabled in localStorage.
+ * Check if DNS rewrite is saved as enabled in settings.json.
  * Default to true for new users (security feature).
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-function isDnsRewriteSavedEnabled() {
-    const saved = localStorage.getItem('dnsRewrite');
-    return saved === null ? true : saved === 'true';
+async function isDnsRewriteSavedEnabled() {
+    const saved = await getSetting('dns_rewrite_enabled', null);
+    return saved === null ? true : saved === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +222,7 @@ export async function initDnsRewriteToggle() {
         /** @type {{dns?: {enable?: boolean}}} */
         const config = await getConfig();
         const isEnabled = config?.dns?.enable === true;
-        const savedEnabled = isDnsRewriteSavedEnabled();
+        const savedEnabled = await isDnsRewriteSavedEnabled();
 
         // If user previously enabled DNS rewrite but core restarted without it,
         // re-apply automatically.
@@ -230,7 +231,7 @@ export async function initDnsRewriteToggle() {
                 await applyDnsRewrite();
                 toggle.checked = true;
                 // Persist the decision so CORE_RESTARTED handler won't hit null
-                localStorage.setItem('dnsRewrite', 'true');
+                await saveSetting('dns_rewrite_enabled', true);
             } catch {
                 // Core may not be ready yet; sync toggle with runtime state
                 toggle.checked = false;
@@ -334,7 +335,7 @@ export async function initDnsRewriteToggle() {
             try {
                 await applyDnsRewrite();
                 await closeAllConnections();
-                localStorage.setItem('dnsRewrite', 'true');
+                await saveSetting('dns_rewrite_enabled', true);
                 showNotification(t.notifDnsEnabled, 'success');
             } catch {
                 showNotification(t.dnsEnableFailed || 'Failed to enable DNS Rewrite', 'error');
@@ -345,7 +346,7 @@ export async function initDnsRewriteToggle() {
                 const payload = { dns: { enable: false }, sniffing: false };
                 await patchConfig(payload);
                 await closeAllConnections();
-                localStorage.setItem('dnsRewrite', 'false');
+                await saveSetting('dns_rewrite_enabled', false);
                 showNotification(t.notifDnsDisabled, 'info');
             } catch (err) {
                 dnsLogger.error('Failed to disable DNS rewrite', err);
@@ -357,14 +358,14 @@ export async function initDnsRewriteToggle() {
 
     // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle)
     Bus.on(Events.CORE_RESTARTED, async () => {
-        if (!isDnsRewriteSavedEnabled()) return;
+        if (!(await isDnsRewriteSavedEnabled())) return;
 
         for (let i = 0; i < 5; i++) {
             try {
                 await applyDnsRewrite();
                 if (toggle) toggle.checked = true;
                 // Persist the decision so future checks won't hit null
-                localStorage.setItem('dnsRewrite', 'true');
+                await saveSetting('dns_rewrite_enabled', true);
                 return;
             } catch {
                 await new Promise(resolve => setTimeout(resolve, 500));
