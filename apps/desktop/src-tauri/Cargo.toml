@@ -31,7 +31,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.13", features = ["json", "stream", "gzip", "brotli", "deflate", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "stream", "gzip", "brotli", "deflate"] }
 zip = "2.2"
 flate2 = "1"
 tar = "0.4"
