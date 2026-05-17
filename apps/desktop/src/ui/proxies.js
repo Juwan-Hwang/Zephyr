@@ -967,7 +967,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
     const fragment = document.createDocumentFragment();
 
     const createCard = (/** @type {HTMLElement} */ wrapper) => {
-        const { proxies: virtProxies, data: virtData, current: virtCurrent, isTestingLatency: _isTestingLatency, mainGroup: _virtMainGroup } = /** @type {any} */ (_virtState.get(container));
+        const { proxies: virtProxies, data: virtData, current: virtCurrent, isTestingLatency: _isTestingLatency, mainGroup: _virtMainGroup, nodeScroll: isScrollingEnabled } = /** @type {any} */ (_virtState.get(container));
         const index = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.index || '0', 10);
         const name = virtProxies[index];
         const proxy = (/** @type {any} */ (virtData)).proxies[name];
@@ -1008,7 +1008,6 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         top.className = 'flex items-center justify-between pointer-events-none w-full gap-2';
 
         const nameContainer = document.createElement('div');
-        const isScrollingEnabled = localStorage.getItem('nodeScroll') === 'true';
         nameContainer.className = `flex-1 text-sm font-semibold text-zinc-100 tracking-tight transition-all duration-300 ${isScrollingEnabled && name.length > 12 ? 'scrolling-text-container' : 'overflow-hidden'}`;
 
         const nameSpan = document.createElement('span');
@@ -1296,7 +1295,7 @@ export async function renderProxies() {
     }
 
     // Store virtual data for lazy card creation
-    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup: uiGroupName });
+    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup: uiGroupName, nodeScroll: !!settings?.node_scroll });
 
     // --- In-place update path ---
     if (await updateProxiesInPlace(container, proxies, data, current)) {
