@@ -141,6 +141,59 @@ struct Settings {
     /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
     #[serde(default)]
     hide_timeout_nodes: bool,
+    // --- Global user preferences (applied to all profiles) ---
+    /// Proxy mode: rule, global, or direct.
+    #[serde(default)]
+    mode: Option<String>,
+    /// TUN mode enabled.
+    #[serde(default)]
+    tun_enabled: Option<bool>,
+    /// Mixed port for HTTP/SOCKS proxy.
+    #[serde(default)]
+    mixed_port: Option<u16>,
+    /// SOCKS port.
+    #[serde(default)]
+    socks_port: Option<u16>,
+    /// HTTP port.
+    #[serde(default)]
+    http_port: Option<u16>,
+    /// IPv6 enabled.
+    #[serde(default)]
+    ipv6: Option<bool>,
+    /// Allow LAN access.
+    #[serde(default)]
+    allow_lan: Option<bool>,
+    /// Unified delay test.
+    #[serde(default)]
+    unified_delay: Option<bool>,
+    /// DNS rewrite enabled.
+    #[serde(default)]
+    dns_rewrite_enabled: Option<bool>,
+    /// Theme mode: light, dark, or system.
+    #[serde(default)]
+    theme_mode: Option<String>,
+    /// App window opacity (0-100).
+    #[serde(default)]
+    app_opacity: Option<u8>,
+    /// Node list scroll mode.
+    #[serde(default)]
+    node_scroll: Option<bool>,
+}
+
+impl Settings {
+    /// Extract global preferences for runtime config injection.
+    pub fn to_global_prefs(&self) -> crate::core_manager::core::core_process::GlobalPreferences {
+        crate::core_manager::core::core_process::GlobalPreferences {
+            mode: self.mode.clone(),
+            tun_enabled: self.tun_enabled,
+            mixed_port: self.mixed_port,
+            socks_port: self.socks_port,
+            http_port: self.http_port,
+            ipv6: self.ipv6,
+            allow_lan: self.allow_lan,
+            unified_delay: self.unified_delay,
+        }
+    }
 }
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
@@ -170,6 +223,52 @@ fn save_settings(
         *guard = settings.clone();
     }
     persist_settings(&app, &settings)
+}
+
+/// Atomically patch a subset of settings fields.
+/// Accepts a JSON object of partial updates and merges them into the
+/// existing settings under the Mutex lock, then persists.
+/// This avoids the Read-Modify-Write race condition of GET + SAVE.
+/// Only valid field types are applied; malformed values are silently ignored.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, clippy::cognitive_complexity)]
+fn patch_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    patch: serde_json::Value,
+) -> Result<(), String> {
+    let updated = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        if let serde_json::Value::Object(map) = patch {
+            macro_rules! patch_field {
+                ($field:ident) => {
+                    if let Some(v) = map.get(stringify!($field)) {
+                        if let Ok(val) = serde_json::from_value(v.clone()) {
+                            guard.$field = val;
+                        }
+                    }
+                };
+            }
+            patch_field!(theme);
+            patch_field!(mode);
+            patch_field!(tun_enabled);
+            patch_field!(mixed_port);
+            patch_field!(socks_port);
+            patch_field!(http_port);
+            patch_field!(ipv6);
+            patch_field!(allow_lan);
+            patch_field!(unified_delay);
+            patch_field!(dns_rewrite_enabled);
+            patch_field!(theme_mode);
+            patch_field!(app_opacity);
+            patch_field!(node_scroll);
+        }
+        guard.clone()
+    };
+    persist_settings(&app, &updated)
 }
 
 /// Atomically update a single proxy selection entry in settings.
@@ -510,6 +609,19 @@ pub fn run() {
                     primary_group_preference: std::collections::HashMap::new(),
                     subscription_user_agent: None,
                     hide_timeout_nodes: false,
+                    // Global user preferences (all None = use YAML defaults)
+                    mode: None,
+                    tun_enabled: None,
+                    mixed_port: None,
+                    socks_port: None,
+                    http_port: None,
+                    ipv6: None,
+                    allow_lan: None,
+                    unified_delay: None,
+                    dns_rewrite_enabled: None,
+                    theme_mode: None,
+                    app_opacity: None,
+                    node_scroll: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
@@ -622,6 +734,7 @@ pub fn run() {
             get_sys_proxy,
             get_settings,
             save_settings,
+            patch_settings,
             update_proxy_selection,
             update_primary_group_preference,
             update_subscription_user_agent,
