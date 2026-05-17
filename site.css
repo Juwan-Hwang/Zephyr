@@ -992,11 +992,11 @@ a:hover {
 
 /* Default: hide mobile CTA, show desktop CTAs */
 .hero-cta-mobile {
-  display: none;
+  display: none !important;
 }
 
 .hero-cta-desktop {
-  display: inline-flex;
+  display: inline-flex !important;
 }
 
 @media (max-width: 480px) {
