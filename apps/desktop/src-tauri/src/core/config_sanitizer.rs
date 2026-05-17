@@ -1,9 +1,22 @@
 use std::path::Path;
 
-/// Recursively remove dangerous keys from YAML structure to prevent code execution
-/// This function is security-critical and used by both production code and tests
+/// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
+const MAX_YAML_DEPTH: usize = 100;
+
+/// Internal implementation with depth tracking.
 #[allow(clippy::wildcard_enum_match_arm)]
-pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
+fn remove_dangerous_keys_internal(
+    value: &mut serde_yaml::Value,
+    in_provider_context: bool,
+    depth: usize,
+) {
+    // Prevent stack overflow from deeply nested YAML structures (Billion Laughs attack).
+    // Clear the value entirely to prevent dangerous keys from surviving at depth limit.
+    if depth > MAX_YAML_DEPTH {
+        *value = serde_yaml::Value::Null;
+        return;
+    }
+
     match value {
         serde_yaml::Value::Mapping(map) => {
             // Always remove script-related keys globally
@@ -40,17 +53,24 @@ pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_c
 
             // Recursively process all values in the mapping
             for (_, v) in map.iter_mut() {
-                remove_dangerous_keys(v, is_provider);
+                remove_dangerous_keys_internal(v, is_provider, depth + 1);
             }
         }
         serde_yaml::Value::Sequence(seq) => {
             // Recursively process all items in the sequence
             for item in seq.iter_mut() {
-                remove_dangerous_keys(item, in_provider_context);
+                remove_dangerous_keys_internal(item, in_provider_context, depth + 1);
             }
         }
         _ => {}
     }
+}
+
+/// Recursively remove dangerous keys from YAML structure to prevent code execution.
+/// This function is security-critical and used by both production code and tests.
+/// Automatically limits recursion depth to prevent Billion Laughs attacks.
+pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
+    remove_dangerous_keys_internal(value, in_provider_context, 0);
 }
 
 /// Complete URL decoding for path traversal detection
