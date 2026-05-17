@@ -12,6 +12,7 @@ import { applyTheme } from '../theme.js';
 import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
+import { getSetting, saveSetting } from '../settings-helpers.js';
 
 /**
  * Initialize theme-related settings controls.
@@ -70,9 +71,10 @@ export function initThemeSettings({
     let currentThemeMode = 'auto';
     const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 
-    const getStoredThemeMode = () => {
-        const savedThemeMode = localStorage.getItem('themeMode');
+    const getStoredThemeMode = async () => {
+        const savedThemeMode = await getSetting('theme_mode', null);
         if (savedThemeMode && themeModeMap.includes(savedThemeMode)) return savedThemeMode;
+        // Legacy fallback: check localStorage for migration
         const legacyDarkMode = localStorage.getItem('darkMode');
         if (legacyDarkMode === 'true') return 'dark';
         if (legacyDarkMode === 'false') return 'light';
@@ -112,11 +114,11 @@ export function initThemeSettings({
      * @param {string} mode
      * @param {boolean} [persist=true]
      */
-    function setThemeMode(mode, persist = true) {
+    async function setThemeMode(mode, persist = true) {
         if (!themeModeMap.includes(mode)) return;
         currentThemeMode = mode;
         if (persist) {
-            localStorage.setItem('themeMode', mode);
+            await saveSetting('theme_mode', mode);
             localStorage.removeItem('darkMode');
         }
         updateThemeModeUI(mode);
@@ -124,7 +126,8 @@ export function initThemeSettings({
         Bus.emit(Events.THEME_MODE_CHANGED, mode);
     }
 
-    setThemeMode(getStoredThemeMode(), false);
+    // Load stored theme mode and opacity asynchronously (fire-and-forget to keep init synchronous)
+    getStoredThemeMode().then(mode => setThemeMode(mode, false)).catch(() => {});
 
     if (!themeModeContainer?.dataset.bound) {
         if (themeModeContainer) themeModeContainer.dataset.bound = '1';
@@ -178,24 +181,27 @@ export function initThemeSettings({
     });
 
     // ---- Opacity slider (with debounce) ----
-    const savedOpacity = localStorage.getItem('appOpacity') || '100';
-    if (opacitySlider) {
-        opacitySlider.value = savedOpacity;
-        if (opacityValText) opacityValText.textContent = `${savedOpacity}%`;
-        document.documentElement.style.setProperty('--app-opacity', String(Number(savedOpacity) / 100));
+    // Load asynchronously to keep init synchronous
+    getSetting('app_opacity', 100).then(savedOpacity => {
+        const opacityVal = String(savedOpacity);
+        if (opacitySlider) {
+            opacitySlider.value = opacityVal;
+            if (opacityValText) opacityValText.textContent = `${opacityVal}%`;
+            document.documentElement.style.setProperty('--app-opacity', String(Number(opacityVal) / 100));
 
-        const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
-            document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
-            localStorage.setItem('appOpacity', val);
-        }, 50);
+            const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
+                document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
+                saveSetting('app_opacity', Number(val));
+            }, 50);
 
-        opacitySlider.addEventListener('input', (e) => {
-            const target = /** @type {HTMLInputElement} */ (e.target);
-            const val = target.value;
-            if (opacityValText) opacityValText.textContent = `${val}%`;
-            debouncedOpacity(val);
-        });
-    }
+            opacitySlider.addEventListener('input', (e) => {
+                const target = /** @type {HTMLInputElement} */ (e.target);
+                const val = target.value;
+                if (opacityValText) opacityValText.textContent = `${val}%`;
+                debouncedOpacity(val);
+            });
+        }
+    }).catch(() => {});
 
     // Return helpers needed by restore defaults
     return {

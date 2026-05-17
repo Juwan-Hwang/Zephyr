@@ -141,6 +141,43 @@ struct Settings {
     /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
     #[serde(default)]
     hide_timeout_nodes: bool,
+    // --- Global user preferences (applied to all profiles) ---
+    /// Proxy mode: rule, global, or direct.
+    #[serde(default)]
+    mode: Option<String>,
+    /// TUN mode enabled.
+    #[serde(default)]
+    tun_enabled: Option<bool>,
+    /// Mixed port for HTTP/SOCKS proxy.
+    #[serde(default)]
+    mixed_port: Option<u16>,
+    /// SOCKS port.
+    #[serde(default)]
+    socks_port: Option<u16>,
+    /// HTTP port.
+    #[serde(default)]
+    http_port: Option<u16>,
+    /// IPv6 enabled.
+    #[serde(default)]
+    ipv6: Option<bool>,
+    /// Allow LAN access.
+    #[serde(default)]
+    allow_lan: Option<bool>,
+    /// Unified delay test.
+    #[serde(default)]
+    unified_delay: Option<bool>,
+    /// DNS rewrite enabled.
+    #[serde(default)]
+    dns_rewrite_enabled: Option<bool>,
+    /// Theme mode: light, dark, or system.
+    #[serde(default)]
+    theme_mode: Option<String>,
+    /// App window opacity (0-100).
+    #[serde(default)]
+    app_opacity: Option<u8>,
+    /// Node list scroll mode.
+    #[serde(default)]
+    node_scroll: Option<bool>,
 }
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
@@ -510,6 +547,19 @@ pub fn run() {
                     primary_group_preference: std::collections::HashMap::new(),
                     subscription_user_agent: None,
                     hide_timeout_nodes: false,
+                    // Global user preferences (all None = use YAML defaults)
+                    mode: None,
+                    tun_enabled: None,
+                    mixed_port: None,
+                    socks_port: None,
+                    http_port: None,
+                    ipv6: None,
+                    allow_lan: None,
+                    unified_delay: None,
+                    dns_rewrite_enabled: None,
+                    theme_mode: None,
+                    app_opacity: None,
+                    node_scroll: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

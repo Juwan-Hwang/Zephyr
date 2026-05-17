@@ -9,7 +9,7 @@ import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { persistConfigChanges } from './advanced.js';
+import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 
@@ -99,7 +99,7 @@ export function initTunToggle() {
             } else {
                 // Non-macOS: use API to update config
                 await patchConfig({ tun: { enable } });
-                await persistConfigChanges({ tun: { enable } });
+                await saveSetting('tun_enabled', enable);
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
