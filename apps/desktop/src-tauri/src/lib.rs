@@ -441,7 +441,7 @@ pub fn run() {
 
     // Single instance detection: only enabled in release builds.
     // In debug builds (pnpm run dev), multiple instances are allowed for testing.
-    #[cfg(not(debug_assertions))]
+    #[cfg(all(desktop, not(debug_assertions)))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Focus the existing window when a second instance is started.
