@@ -123,6 +123,7 @@ export const SCHEDULER = Object.freeze({
 export const SETTINGS = Object.freeze({
     GET_SETTINGS: "get_settings",
     SAVE_SETTINGS: "save_settings",
+    PATCH_SETTINGS: "patch_settings",
     SET_UI_SCALE: "set_ui_scale",
 });
 

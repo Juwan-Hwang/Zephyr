@@ -12,12 +12,15 @@ import { applyTheme } from '../theme.js';
 import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
+import { saveSetting } from '../settings-helpers.js';
 
 /**
  * Initialize theme-related settings controls.
  *
  * @param {object} opts
  * @param {string} opts.savedTheme - The theme color string from backend settings (e.g. "zinc").
+ * @param {string|null} opts.savedThemeMode - The theme mode from backend settings ("light", "dark", "auto").
+ * @param {number|null} opts.savedOpacity - The opacity value from backend settings (0-100).
  * @param {HTMLElement|null} opts.appMainContainer - The main app container element.
  * @param {HTMLElement|null} opts.appTitleIcon - The app title icon element.
  * @param {NodeListOf<HTMLElement>} opts.themeCircles - All [data-theme] circle elements.
@@ -31,6 +34,8 @@ import { debounce } from '../../utils/debounce.js';
  */
 export function initThemeSettings({
     savedTheme,
+    savedThemeMode,
+    savedOpacity,
     appMainContainer,
     appTitleIcon,
     themeCircles,
@@ -70,15 +75,6 @@ export function initThemeSettings({
     let currentThemeMode = 'auto';
     const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 
-    const getStoredThemeMode = () => {
-        const savedThemeMode = localStorage.getItem('themeMode');
-        if (savedThemeMode && themeModeMap.includes(savedThemeMode)) return savedThemeMode;
-        const legacyDarkMode = localStorage.getItem('darkMode');
-        if (legacyDarkMode === 'true') return 'dark';
-        if (legacyDarkMode === 'false') return 'light';
-        return 'auto';
-    };
-
     /**
      * @param {string} mode
      * @returns {boolean}
@@ -112,11 +108,11 @@ export function initThemeSettings({
      * @param {string} mode
      * @param {boolean} [persist=true]
      */
-    function setThemeMode(mode, persist = true) {
+    async function setThemeMode(mode, persist = true) {
         if (!themeModeMap.includes(mode)) return;
         currentThemeMode = mode;
         if (persist) {
-            localStorage.setItem('themeMode', mode);
+            await saveSetting('theme_mode', mode);
             localStorage.removeItem('darkMode');
         }
         updateThemeModeUI(mode);
@@ -124,7 +120,21 @@ export function initThemeSettings({
         Bus.emit(Events.THEME_MODE_CHANGED, mode);
     }
 
-    setThemeMode(getStoredThemeMode(), false);
+    // Apply theme mode synchronously from settings (no flicker)
+    // Migrate legacy localStorage.darkMode if theme_mode not set
+    let effectiveThemeMode = savedThemeMode && themeModeMap.includes(savedThemeMode) ? savedThemeMode : null;
+    if (!effectiveThemeMode) {
+        const legacyDarkMode = localStorage.getItem('darkMode');
+        if (legacyDarkMode !== null) {
+            effectiveThemeMode = legacyDarkMode === 'true' ? 'dark' : 'light';
+            // Persist migrated value to settings.json
+            saveSetting('theme_mode', effectiveThemeMode).catch(() => {});
+            localStorage.removeItem('darkMode');
+        } else {
+            effectiveThemeMode = 'auto';
+        }
+    }
+    setThemeMode(effectiveThemeMode, false);
 
     if (!themeModeContainer?.dataset.bound) {
         if (themeModeContainer) themeModeContainer.dataset.bound = '1';
@@ -178,15 +188,17 @@ export function initThemeSettings({
     });
 
     // ---- Opacity slider (with debounce) ----
-    const savedOpacity = localStorage.getItem('appOpacity') || '100';
+    // Use synchronously passed value to avoid UI flicker
+    const rawOpacity = savedOpacity != null ? Number(savedOpacity) : 100;
+    const opacityVal = Number.isFinite(rawOpacity) ? String(Math.min(100, Math.max(0, rawOpacity))) : '100';
+    document.documentElement.style.setProperty('--app-opacity', String(Number(opacityVal) / 100));
     if (opacitySlider) {
-        opacitySlider.value = savedOpacity;
-        if (opacityValText) opacityValText.textContent = `${savedOpacity}%`;
-        document.documentElement.style.setProperty('--app-opacity', String(Number(savedOpacity) / 100));
+        opacitySlider.value = opacityVal;
+        if (opacityValText) opacityValText.textContent = `${opacityVal}%`;
 
         const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
             document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
-            localStorage.setItem('appOpacity', val);
+            saveSetting('app_opacity', Number(val));
         }, 50);
 
         opacitySlider.addEventListener('input', (e) => {
