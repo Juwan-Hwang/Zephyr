@@ -360,11 +360,29 @@ export async function closeConnection(id) {
 let latencyTestController = new AbortController();
 
 /**
- * 中止所有正在进行的延迟测试，并重置控制器以供后续使用。
+ * 获取当前延迟测试的 AbortSignal（供 worker 循环检查是否被中止）。
+ */
+export function getLatencyTestSignal() {
+  return latencyTestController.signal;
+}
+
+/**
+ * 重置延迟测试控制器（在每次测速开始前调用）。
+ * 必须在 api.js 内部调用，确保每次测速都有新的未中止的 controller。
+ */
+export function resetLatencyTestController() {
+  latencyTestController = new AbortController();
+}
+
+/**
+ * 中止所有正在进行的延迟测试。
+ *
+ * 不再创建新 controller —— 新 controller 在下次测速开始时通过 resetLatencyTestController() 创建。
+ * 旧实现中 abort 后立即 new 会导致后续 testProxy() 绑定到新的未中止 signal，
+ * 使 abort 形同虚设。
  */
 export function abortLatencyTests() {
   latencyTestController.abort();
-  latencyTestController = new AbortController();
 }
 
 /**
@@ -519,18 +537,13 @@ export async function restartCore(configPath, customArgs = []) {
  * @returns {Promise<Object>} coreResult from restartCore
  */
 export async function switchToConfig(configName, customArgs = []) {
-  const t0 = performance.now();
-
   // Abort ongoing latency tests so mihomo is idle for faster kill
   abortLatencyTests();
   // Also close all connections to unblock mihomo's request queue
   // (delay tests may still be processing server-side even after frontend abort)
   try { await closeAllConnections(); } catch { /* non-fatal */ }
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] abortLatencyTests took ${Math.round(performance.now() - t0)}ms`);
 
   // Save current proxy selection before switching
-  const t1 = performance.now();
   try {
     const { fetchProxyGroups } = await import('./ui/proxy-groups.js');
     const groupName = appStore.get('uiGroupName');
@@ -548,54 +561,35 @@ export async function switchToConfig(configName, customArgs = []) {
         group: groupName,
       });
     }
-    // eslint-disable-next-line no-console
-    console.log(`[switchToConfig] saveProxySelection took ${Math.round(performance.now() - t1)}ms (fetchProxyGroups ${currentProxyGroups ? 'resolved' : 'timed out'})`);
   } catch { /* non-fatal */ }
 
   // Restart core
-  const t2 = performance.now();
   const coreResult = await restartCore(configName, customArgs);
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] restartCore took ${Math.round(performance.now() - t2)}ms`);
   if (!coreResult?.secret) throw new Error('Core start failed: no secret returned');
 
   // Persist new active config
-  const t3 = performance.now();
   /** @type {any} */
   const s = await invoke(COMMANDS.GET_SETTINGS);
   s.last_config = configName;
   await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
   invalidateSettingsCache();
   invalidateRunConfigCache();
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] saveSettings took ${Math.round(performance.now() - t3)}ms`);
 
   // Close stale connections
-  const t4 = performance.now();
   await closeAllConnections();
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] closeAllConnections took ${Math.round(performance.now() - t4)}ms`);
 
   // Rebuild prism patches (__when__.profile conditions need re-evaluation)
-  const t5 = performance.now();
   try {
     const { default: prism } = await import('./ui/prism.js');
     await prism.rebuild();
   } catch { /* non-fatal */ }
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] prism.rebuild took ${Math.round(performance.now() - t5)}ms`);
 
   // Restore proxy selection
-  const t6 = performance.now();
   try {
     const { restoreProxySelection } = await import('./ui/proxy-memory.js');
     await restoreProxySelection(configName);
   } catch { /* non-fatal */ }
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] restoreProxySelection took ${Math.round(performance.now() - t6)}ms`);
 
-  // eslint-disable-next-line no-console
-  console.log(`[switchToConfig] TOTAL: ${Math.round(performance.now() - t0)}ms`);
   return coreResult;
 }
 

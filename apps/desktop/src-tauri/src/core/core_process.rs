@@ -870,10 +870,7 @@ async fn health_check(port: u16) -> Result<(), String> {
         }
         let sleep_dur = interval;
         interval = (interval * 2).min(max_interval);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            std::thread::sleep(sleep_dur);
-        })
-        .await;
+        tokio::time::sleep(sleep_dur).await;
     }
 
     if is_healthy {
