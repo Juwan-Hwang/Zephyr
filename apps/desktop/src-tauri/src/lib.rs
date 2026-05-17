@@ -437,7 +437,24 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    // Single instance detection: only enabled in release builds.
+    // In debug builds (pnpm run dev), multiple instances are allowed for testing.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Focus the existing window when a second instance is started.
+            let _ = app
+                .get_webview_window("main")
+                .map(|w| {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                });
+        }));
+    }
+
+    builder = builder
         .manage(MihomoState(Mutex::new(CoreData::new())))
         .manage(TrayState::default())
         .manage(RateLimiter::new())
