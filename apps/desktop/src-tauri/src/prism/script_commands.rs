@@ -97,6 +97,8 @@ pub fn script_get_sandbox(state: State<PrismState>) -> Result<serde_json::Value,
 }
 
 /// Set the sandbox configuration.
+/// Security: This is a sensitive operation that weakens script isolation.
+/// Changes are logged for audit purposes.
 #[tauri::command]
 pub fn script_set_sandbox(
     state: State<PrismState>,
@@ -105,6 +107,11 @@ pub fn script_set_sandbox(
     allow_child_process: bool,
     allow_workers: bool,
 ) -> Result<(), String> {
+    // Log security-sensitive configuration changes
+    eprintln!(
+        "[SECURITY] Script sandbox config changed: network={allow_network}, filesystem={allow_filesystem}, child_process={allow_child_process}, workers={allow_workers}"
+    );
+
     let mut lock = state.lock_inner()?;
     lock.sandbox_config.allow_network = allow_network;
     lock.sandbox_config.allow_filesystem = allow_filesystem;
