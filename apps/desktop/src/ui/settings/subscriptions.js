@@ -11,10 +11,10 @@
 import {
     invoke,
     restartCore,
-    switchToConfig,
     reloadConfig,
     abortLatencyTests,
 } from '../../api.js';
+import { switchToConfig } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
