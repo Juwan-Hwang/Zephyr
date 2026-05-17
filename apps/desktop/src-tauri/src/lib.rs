@@ -141,6 +141,43 @@ struct Settings {
     /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
     #[serde(default)]
     hide_timeout_nodes: bool,
+    // --- Global user preferences (applied to all profiles) ---
+    /// Proxy mode: rule, global, or direct.
+    #[serde(default)]
+    mode: Option<String>,
+    /// TUN mode enabled.
+    #[serde(default)]
+    tun_enabled: Option<bool>,
+    /// Mixed port for HTTP/SOCKS proxy.
+    #[serde(default)]
+    mixed_port: Option<u16>,
+    /// SOCKS port.
+    #[serde(default)]
+    socks_port: Option<u16>,
+    /// HTTP port.
+    #[serde(default)]
+    http_port: Option<u16>,
+    /// IPv6 enabled.
+    #[serde(default)]
+    ipv6: Option<bool>,
+    /// Allow LAN access.
+    #[serde(default)]
+    allow_lan: Option<bool>,
+    /// Unified delay test.
+    #[serde(default)]
+    unified_delay: Option<bool>,
+    /// DNS rewrite enabled.
+    #[serde(default)]
+    dns_rewrite_enabled: Option<bool>,
+    /// Theme mode: light, dark, or system.
+    #[serde(default)]
+    theme_mode: Option<String>,
+    /// App window opacity (0-100).
+    #[serde(default)]
+    app_opacity: Option<u8>,
+    /// Node list scroll mode.
+    #[serde(default)]
+    node_scroll: Option<bool>,
 }
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
@@ -170,6 +207,68 @@ fn save_settings(
         *guard = settings.clone();
     }
     persist_settings(&app, &settings)
+}
+
+/// Atomically patch a subset of settings fields.
+/// Accepts a JSON object of partial updates and merges them into the
+/// existing settings under the Mutex lock, then persists.
+/// This avoids the Read-Modify-Write race condition of GET + SAVE.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn patch_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    patch: serde_json::Value,
+) -> Result<(), String> {
+    let updated = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("Settings lock failed: {e}"))?;
+        let mut settings = guard.clone();
+        if let serde_json::Value::Object(map) = patch {
+            // Apply each field from the patch
+            if let Some(v) = map.get("mode") {
+                settings.mode = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("tun_enabled") {
+                settings.tun_enabled = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("mixed_port") {
+                settings.mixed_port = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("socks_port") {
+                settings.socks_port = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("http_port") {
+                settings.http_port = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("ipv6") {
+                settings.ipv6 = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("allow_lan") {
+                settings.allow_lan = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("unified_delay") {
+                settings.unified_delay = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("dns_rewrite_enabled") {
+                settings.dns_rewrite_enabled = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("theme_mode") {
+                settings.theme_mode = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("app_opacity") {
+                settings.app_opacity = serde_json::from_value(v.clone()).ok();
+            }
+            if let Some(v) = map.get("node_scroll") {
+                settings.node_scroll = serde_json::from_value(v.clone()).ok();
+            }
+        }
+        *guard = settings.clone();
+        settings
+    };
+    persist_settings(&app, &updated)
 }
 
 /// Atomically update a single proxy selection entry in settings.
@@ -510,6 +609,19 @@ pub fn run() {
                     primary_group_preference: std::collections::HashMap::new(),
                     subscription_user_agent: None,
                     hide_timeout_nodes: false,
+                    // Global user preferences (all None = use YAML defaults)
+                    mode: None,
+                    tun_enabled: None,
+                    mixed_port: None,
+                    socks_port: None,
+                    http_port: None,
+                    ipv6: None,
+                    allow_lan: None,
+                    unified_delay: None,
+                    dns_rewrite_enabled: None,
+                    theme_mode: None,
+                    app_opacity: None,
+                    node_scroll: None,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
@@ -622,6 +734,7 @@ pub fn run() {
             get_sys_proxy,
             get_settings,
             save_settings,
+            patch_settings,
             update_proxy_selection,
             update_primary_group_preference,
             update_subscription_user_agent,
