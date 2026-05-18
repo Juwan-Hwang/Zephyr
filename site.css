@@ -1012,11 +1012,11 @@ a:hover {
 
   /* Show mobile-only CTA in hero */
   .hero-cta-mobile {
-    display: inline-flex;
+    display: inline-flex !important;
   }
 
   .hero-cta-desktop {
-    display: none;
+    display: none !important;
   }
 
   /* Hide demo link in mobile nav drawer */
