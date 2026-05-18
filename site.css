@@ -271,6 +271,8 @@ a:hover {
   position: relative;
   z-index: 1;
   will-change: transform;
+  max-width: 900px;
+  width: 100%;
 }
 
 .hero-title {
@@ -366,9 +368,8 @@ a:hover {
   position: relative;
   z-index: 1;
   margin-top: 72px;
-  max-width: 900px;
-  width: 100%;
-  aspect-ratio: 16 / 10;
+  width: 900px;
+  height: 562px;
   background: var(--depth-2-deep);
   border: 0.5px solid var(--border-default);
   border-radius: var(--radius-xl);
