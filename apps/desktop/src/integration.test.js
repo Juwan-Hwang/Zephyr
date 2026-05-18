@@ -654,6 +654,23 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'dns_fallbacks',
         'auto_apply',
         'ui_scale',
+        'config_order',
+        'last_proxy_selection',
+        'primary_group_preference',
+        'subscription_user_agent',
+        'hide_timeout_nodes',
+        'mode',
+        'tun_enabled',
+        'mixed_port',
+        'socks_port',
+        'http_port',
+        'ipv6',
+        'allow_lan',
+        'unified_delay',
+        'dns_rewrite_enabled',
+        'theme_mode',
+        'app_opacity',
+        'node_scroll',
     ];
 
     // All settings.xxx property accesses in frontend JS code
@@ -669,6 +686,19 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'dns_nameservers',   // dns-shared.js
         'dns_fallbacks',     // dns-shared.js
         'ui_scale',          // main.js, settings.js
+        'mode',              // modes.js, global-shortcut.js, settings.js
+        'tun_enabled',       // tun.js, settings.js
+        'mixed_port',        // settings.js
+        'socks_port',        // settings.js
+        'http_port',         // settings.js (read-only, for port display)
+        'ipv6',              // settings.js
+        'allow_lan',         // settings.js
+        'unified_delay',     // settings.js
+        'dns_rewrite_enabled', // dns-shared.js, settings.js
+        'theme_mode',        // settings.js, theme.js
+        'app_opacity',       // settings.js, theme.js
+        'node_scroll',       // settings.js, proxies.js
+        'hide_timeout_nodes', // settings.js
     ];
 
     it('every frontend settings.xxx access has a matching Rust struct field', () => {
@@ -689,7 +719,14 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
 
         // auto_apply is intentionally read via a separate IPC command (RULE_GET_AUTO_APPLY)
         // rather than from the Settings struct, so it's a known exception.
-        const knownUnread = new Set(['auto_apply']);
+        // The following fields are backend-only or accessed via dedicated IPC commands:
+        const knownUnread = new Set([
+            'auto_apply',
+            'config_order',
+            'last_proxy_selection',
+            'primary_group_preference',
+            'subscription_user_agent',
+        ]);
         const unexpected = unread.filter(f => !knownUnread.has(f));
 
         expect(
