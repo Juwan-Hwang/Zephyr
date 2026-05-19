@@ -68,3 +68,6 @@ id_ed25519*
 *.crt
 *.cer
 *.der
+
+.claude/
+
