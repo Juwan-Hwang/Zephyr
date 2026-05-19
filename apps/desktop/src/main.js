@@ -186,6 +186,18 @@ async function initApp() {
                 'Check that .prism.yaml files use $prepend/$append DSL syntax.',
             );
         }
+
+        // 5c. Apply all enabled JS overrides after prism.apply completes.
+        // This ensures override scripts run against the latest compiled config.
+        invoke(COMMANDS.OVERRIDE.APPLY_ALL).then((logs) => {
+            const successCount = logs?.filter((/** @type {{success: boolean}} */ l) => l.success).length ?? 0;
+            const failCount = logs?.filter((/** @type {{success: boolean}} */ l) => !l.success).length ?? 0;
+            if (logs && logs.length > 0) {
+                apiLogger.info(`[Zephyr] override_apply_all: ${successCount} succeeded, ${failCount} failed (${logs.length} total)`);
+            }
+        }).catch((err) => {
+            apiLogger.warn('[Zephyr] override_apply_all failed (non-fatal):', err);
+        });
     }).catch((err) => {
         apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
     });
