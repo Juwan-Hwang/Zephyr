@@ -54,7 +54,7 @@ hmac = "0.12"
 clash-prism-core = "0.1.4"
 clash-prism-extension = { version = "0.1.7", features = ["watcher"] }
 clash-prism-plugin = "0.1.1"
-clash-prism-script = "0.1.1"
+clash-prism-script = "0.1.2"
 clash-prism-smart = "0.1.1"
 chrono = { version = "0.4", features = ["serde"] }
 toml = "1.1"
