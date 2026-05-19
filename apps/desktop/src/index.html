@@ -244,31 +244,71 @@
                 <div id="plugin-panel" class="hidden absolute inset-0 z-50 flex items-center justify-center">
                     <div class="absolute inset-0 bg-black/40" id="plugin-panel-backdrop"></div>
                     <div class="plugin-panel relative w-full max-w-2xl max-h-[80vh] flex flex-col p-6 gap-4">
+                        <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
-                            <h3 class="text-lg font-light text-zinc-100" data-i18n="plugins">Plugins</h3>
+                            <h3 class="text-lg font-light text-zinc-100" data-i18n="overrideTitle">覆写脚本</h3>
                             <button id="close-plugins-btn" class="text-zinc-500 hover:text-zinc-200 transition-colors">
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
-                        <div id="plugin-list" class="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
-                            <!-- Plugin items rendered by plugins.js -->
+                        <!-- Toolbar: search + new + bulk actions -->
+                        <div class="flex items-center gap-2 shrink-0">
+                            <input
+                                id="plugin-search-input"
+                                class="input-mono text-xs flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-accent/50"
+                                placeholder="搜索覆写..." data-i18n-placeholder="overrideSearchPlaceholder"
+                            />
+                            <!-- New override dropdown -->
+                            <div class="relative">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    <span data-i18n="overrideNew">新建</span>
+                                </button>
+                                <div id="plugin-new-dropdown" class="hidden absolute right-0 mt-2 z-50 flex flex-col gap-1 bg-zinc-900 border border-white/10 rounded-xl p-2 shadow-2xl min-w-[160px]">
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-white/5 text-zinc-300" data-action="new-js"><span data-i18n="overrideNewJs">📜 新建 JS 覆写</span></button>
+                                    <!-- Prism YAML override: Phase 2 — DSL pipeline integration -->
+                                    <!-- <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-white/5 text-zinc-300" data-action="new-prism">⚡ 新建 Prism YAML</button> -->
+                                </div>
+                            </div>
+                            <button id="plugin-enable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideEnableAll">启用全部</button>
+                            <button id="plugin-disable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideDisableAll">禁用全部</button>
                         </div>
-                        <div id="plugin-script-area" class="hidden flex flex-col gap-3 shrink-0">
-                            <div class="flex items-center justify-between">
+                        <!-- Override cards list -->
+                        <div id="plugin-list" class="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                            <!-- Override cards rendered by plugins.js -->
+                        </div>
+                        <!-- Script editor area -->
+                        <div id="plugin-script-area" class="hidden flex flex-col flex-1 overflow-hidden" style="min-height: 0;">
+                            <div class="flex items-center justify-between shrink-0 mb-3">
                                 <h4 id="plugin-script-title" class="text-sm font-semibold text-zinc-200"></h4>
-                                <button id="plugin-script-back-btn" class="btn-ghost text-xs">
+                                <button id="plugin-script-back-btn" class="btn-ghost text-xs flex items-center gap-1">
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-                                    <span data-i18n="plugins">Plugins</span>
+                                    <span data-i18n="overrideBack">返回</span>
                                 </button>
                             </div>
-                            <textarea id="plugin-script-editor" class="hidden script-editor input-mono w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 focus:outline-none focus:border-accent/50 transition-all" spellcheck="false" placeholder="// Write your script here..."></textarea>
-                            <div id="plugin-script-cm6" class="w-full bg-black/40 border border-white/5 rounded-xl overflow-hidden"></div>
-                            <div class="flex items-center gap-2">
-                                <button id="plugin-script-validate-btn" class="btn-ghost text-xs" data-i18n="pluginScriptValidate">Validate</button>
-                                <button id="plugin-script-run-btn" class="btn-accent text-xs" data-i18n="pluginScriptRun">Run</button>
-                                <span id="plugin-script-status" class="text-2xs ml-auto"></span>
+                            <!-- Scrollable content area -->
+                            <div id="plugin-script-scroll-area" class="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
+                                <!-- CodeMirror editor -->
+                                <div id="plugin-script-cm6" class="w-full bg-black/40 border border-white/5 rounded-xl overflow-hidden" style="height: 240px; min-height: 120px;"></div>
+                                <!-- Action buttons -->
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button id="plugin-script-validate-btn" class="btn-ghost text-xs" data-i18n="overrideValidate">验证</button>
+                                    <button id="plugin-script-run-btn" class="btn-accent text-xs" data-i18n="overrideSaveAndRun">保存并执行</button>
+                                    <button id="plugin-script-fullscreen-btn" class="btn-ghost text-xs flex items-center gap-1" data-i18n-title="overrideFullscreen" title="全屏编辑">
+                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                                        <span data-i18n="overrideFullscreen">全屏</span>
+                                    </button>
+                                    <span id="plugin-script-status" class="text-2xs ml-auto"></span>
+                                </div>
+                                <!-- Collapsible output -->
+                                <div id="plugin-script-output-wrap" class="bg-black/30 border border-white/5 rounded-xl shrink-0">
+                                    <button id="plugin-script-output-toggle" class="w-full flex items-center justify-between px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors rounded-xl">
+                                        <span id="plugin-script-output-label" data-i18n="overrideOutput">输出</span>
+                                        <svg id="plugin-script-output-chevron" class="w-3.5 h-3.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                                    </button>
+                                    <div id="plugin-script-output" class="script-output px-4 pb-3 text-zinc-400 whitespace-pre-wrap break-all custom-scrollbar" style="display:none; max-height: 120px; overflow-y: auto;"></div>
+                                </div>
                             </div>
-                            <div id="plugin-script-output" class="script-output bg-black/30 border border-white/5 rounded-xl px-4 py-3 text-zinc-400 whitespace-pre-wrap"></div>
                         </div>
                     </div>
                 </div>
@@ -279,8 +319,16 @@
                 <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
                 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
-                    <div>
+                    <div class="flex items-center gap-4">
                         <h2 class="text-2xl font-light text-zinc-100" data-i18n="proxiesTitle">Proxy Nodes</h2>
+                        <!-- Group Selector Dropdown -->
+                        <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all" style="background-color: color-mix(in srgb, var(--color-accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent); color: var(--text-primary);">
+                                <span id="proxy-group-label">Auto</span>
+                                <svg class="w-3.5 h-3.5 transition-transform duration-200 dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            </button>
+                            <!-- Menu is dynamically created and attached to body -->
+                        </div>
                     </div>
                     <div class="flex items-center gap-3">
                         <!-- Sort Button -->
@@ -1097,6 +1145,66 @@
             <div class="flex gap-3 justify-end mt-6">
                 <button id="port-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
                 <button id="port-config-save" class="btn-primary" data-i18n="confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Editor Overlay -->
+    <div id="fullscreen-editor-overlay" role="dialog" aria-modal="true" aria-labelledby="fullscreen-editor-title" class="hidden fixed inset-0 bg-black/40 backdrop-blur-md z-[var(--z-modal)] flex items-center justify-center p-4 transition-all duration-300 opacity-0 pointer-events-none">
+        <div id="fullscreen-editor-container" class="w-[90vw] h-[85vh] max-w-[1400px] border rounded-2xl flex flex-col shadow-2xl overflow-hidden glass-card transform scale-95 transition-all duration-300">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b shrink-0" style="border-color: var(--border-primary, rgba(255,255,255,0.1));">
+                <div class="flex items-center gap-3">
+                    <h3 id="fullscreen-editor-title" class="text-lg font-medium" data-i18n="overrideEditScript">编辑脚本</h3>
+                    <span id="fullscreen-editor-type-badge" class="text-2xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">JS</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="fullscreen-editor-validate-btn" class="btn-ghost text-sm">
+                        <svg class="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <span data-i18n="overrideValidate">验证</span>
+                    </button>
+                    <button id="fullscreen-editor-run-btn" class="btn-accent text-sm">
+                        <svg class="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+                        <span data-i18n="overrideSaveAndRun">保存并执行</span>
+                    </button>
+                    <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
+                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <!-- Editor Area -->
+            <div class="flex-1 flex overflow-hidden">
+                <!-- Main Editor -->
+                <div id="fullscreen-editor-main" class="flex-1 flex flex-col min-w-[300px]" style="flex-basis: 60%;">
+                    <div id="fullscreen-editor-cm6" class="flex-1 w-full overflow-hidden"></div>
+                    <!-- Status Bar -->
+                    <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary, rgba(0,0,0,0.3)); border-color: var(--border-primary, rgba(255,255,255,0.05));">
+                        <div class="flex items-center gap-4" style="color: var(--text-muted, #71717a);">
+                            <span id="fullscreen-editor-cursor-pos">行 1, 列 1</span>
+                            <span id="fullscreen-editor-char-count">0 字符</span>
+                        </div>
+                        <span id="fullscreen-editor-status"></span>
+                    </div>
+                </div>
+                <!-- Resizer Handle -->
+                <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--border-primary, rgba(255,255,255,0.1));">
+                    <div class="absolute inset-y-0 -left-1 -right-1"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--color-accent, #6366f1);"></div>
+                </div>
+                <!-- Right Sidebar - Output Panel -->
+                <div id="fullscreen-editor-sidebar" class="flex flex-col min-w-[200px] max-w-[600px]" style="flex-basis: 350px; border-left: 1px solid var(--border-primary, rgba(255,255,255,0.1)); background: var(--bg-secondary, rgba(0,0,0,0.2));">
+                    <div class="px-4 py-3 border-b flex items-center justify-between shrink-0" style="border-color: var(--border-primary, rgba(255,255,255,0.05));">
+                        <span class="text-sm font-medium" data-i18n="overrideOutput">输出</span>
+                        <div class="flex items-center gap-3">
+                            <button id="fullscreen-editor-copy-output-btn" class="text-xs transition-colors" style="color: var(--text-muted, #71717a);" data-i18n="overrideCopied">复制</button>
+                            <button id="fullscreen-editor-clear-output-btn" class="text-xs transition-colors" style="color: var(--text-muted, #71717a);" data-i18n="overrideClear">清空</button>
+                        </div>
+                    </div>
+                    <div id="fullscreen-editor-output" class="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar" style="color: var(--text-secondary, #a1a1aa);">
+                        <div style="color: var(--text-muted, #52525b);" class="italic">点击"保存并执行"查看输出...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
