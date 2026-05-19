@@ -189,6 +189,19 @@ async function initApp() {
     }).catch((err) => {
         apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
     });
+
+    // 5c. Apply all enabled overrides (JS + Prism YAML).
+    // Runs independently of prism.apply so overrides are always applied on startup,
+    // even if Prism compilation fails.
+    invoke(COMMANDS.OVERRIDE.APPLY_ALL).then((logs) => {
+        const successCount = logs?.filter((/** @type {{success: boolean}} */ l) => l.success).length ?? 0;
+        const failCount = logs?.filter((/** @type {{success: boolean}} */ l) => !l.success).length ?? 0;
+        if (logs && logs.length > 0) {
+            apiLogger.info(`[Zephyr] override_apply_all: ${successCount} succeeded, ${failCount} failed (${logs.length} total)`);
+        }
+    }).catch((err) => {
+        apiLogger.warn('[Zephyr] override_apply_all failed (non-fatal):', err);
+    });
   } catch (err) {
     const message = err?.toString?.() || 'Core start failed';
     apiLogger.error('Failed to start core', err);

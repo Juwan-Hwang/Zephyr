@@ -6,6 +6,7 @@ use tauri::State;
 
 use clash_prism_script::{SandboxConfig, ScriptContext, ScriptRuntime};
 
+use crate::prism::pipeline::{execute_write_pipeline, pipeline_result_to_json};
 use crate::prism::types::check_input_size;
 use crate::prism::PrismState;
 
@@ -62,6 +63,31 @@ pub fn script_execute(
         "logs": logs,
     });
     Ok(value)
+}
+
+/// Execute a JavaScript override script inside the Prism sandbox.
+///
+/// The script receives the running Mihomo configuration as context and can
+/// **modify** it via `main(config)`. The modified config is written back to
+/// `run_config.yaml` and hot-reloaded via the Mihomo REST API.
+///
+/// Rate-limited: 5 calls per 10 seconds.
+///
+/// Note: This function is synchronous internally but declared as async to allow
+/// Tauri to run it on a blocking thread, preventing UI freezes during script execution.
+#[tauri::command]
+pub async fn script_execute_write(
+    state: State<'_, PrismState>,
+    script: String,
+    script_name: String,
+) -> Result<serde_json::Value, String> {
+    state.check_rate_limit("script_execute_write")?;
+    check_input_size(&script, "Script")?;
+
+    // Tauri automatically runs async commands on a blocking thread pool,
+    // so we can call the synchronous pipeline directly without blocking the UI.
+    let result = execute_write_pipeline(&state, &script, &script_name)?;
+    Ok(pipeline_result_to_json(&result))
 }
 
 #[tauri::command]
