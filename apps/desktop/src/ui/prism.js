@@ -482,3 +482,124 @@ export async function traceStatistics() {
 export async function traceFilterBySource(source) {
     return invoke(COMMANDS.TRACE_ADVANCED.FILTER_BY_SOURCE, { source });
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Override System
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * @typedef {Object} OverrideItem
+ * @property {string} id
+ * @property {string} name
+ * @property {'local'|'remote'} type
+ * @property {'js'|'prismYaml'} ext
+ * @property {boolean} enabled
+ * @property {boolean} global
+ * @property {string[]} profileIds
+ * @property {string|null} url
+ * @property {number} order
+ * @property {number|null} updatedAt
+ * @property {number} createdAt
+ */
+
+/**
+ * @typedef {Object} OverrideLog
+ * @property {string} scriptId
+ * @property {string} scriptName
+ * @property {number} executedAt
+ * @property {number} durationUs
+ * @property {boolean} success
+ * @property {boolean} configModified
+ * @property {string|null} error
+ * @property {{level: string, message: string}[]} logs
+ */
+
+/** List all override items.
+ *  @returns {Promise<OverrideItem[]>}
+ */
+export async function overrideList() {
+    return invoke(COMMANDS.OVERRIDE.LIST);
+}
+
+/** Create a new override item.
+ *  @param {string} name
+ *  @param {'js'|'prism.yaml'} ext
+ *  @param {'local'|'remote'} type
+ *  @param {string|null} [url]
+ *  @returns {Promise<OverrideItem>}
+ */
+export async function overrideCreate(name, ext, type, url = null) {
+    return invoke(COMMANDS.OVERRIDE.CREATE, { name, ext, type, url });
+}
+
+/** Update override metadata.
+ *  @param {string} id
+ *  @param {Partial<{name: string, enabled: boolean, global: boolean, profileIds: string[], url: string}>} patch
+ *  @returns {Promise<OverrideItem>}
+ */
+export async function overrideUpdate(id, patch) {
+    return invoke(COMMANDS.OVERRIDE.UPDATE, { id, ...patch });
+}
+
+/** Delete an override item.
+ *  @param {string} id
+ */
+export async function overrideDelete(id) {
+    return invoke(COMMANDS.OVERRIDE.DELETE, { id });
+}
+
+/** Get override script content.
+ *  @param {string} id
+ *  @returns {Promise<string>}
+ */
+export async function overrideGetContent(id) {
+    return invoke(COMMANDS.OVERRIDE.GET_CONTENT, { id });
+}
+
+/** Save override content and execute.
+ *  @param {string} id
+ *  @param {string} content
+ *  @param {boolean} [dryRun]
+ *  @returns {Promise<OverrideLog>}
+ */
+export async function overrideSetContent(id, content, dryRun = false) {
+    return invoke(COMMANDS.OVERRIDE.SET_CONTENT, { id, content, dryRun });
+}
+
+/** Reorder override items.
+ *  @param {string[]} ids - New order of override IDs
+ */
+export async function overrideReorder(ids) {
+    return invoke(COMMANDS.OVERRIDE.REORDER, { ids });
+}
+
+/** Toggle override enabled/disabled.
+ *  @param {string} id
+ *  @param {boolean} enabled
+ */
+export async function overrideToggle(id, enabled) {
+    return invoke(COMMANDS.OVERRIDE.TOGGLE, { id, enabled });
+}
+
+/** Test-execute an override without saving.
+ *  @param {string} id
+ *  @returns {Promise<OverrideLog>}
+ */
+export async function overrideTest(id) {
+    return invoke(COMMANDS.OVERRIDE.TEST, { id });
+}
+
+/** Refresh a remote override (download + re-execute).
+ *  @param {string} id
+ *  @returns {Promise<OverrideLog>}
+ */
+export async function overrideRefreshRemote(id) {
+    return invoke(COMMANDS.OVERRIDE.REFRESH_REMOTE, { id });
+}
+
+/** Apply all enabled overrides.
+ *  @returns {Promise<OverrideLog[]>}
+ */
+export async function overrideApplyAll() {
+    return invoke(COMMANDS.OVERRIDE.APPLY_ALL);
+}

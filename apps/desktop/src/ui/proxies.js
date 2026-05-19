@@ -852,6 +852,125 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     bar.appendChild(dismiss);
 }
 
+// --- Group Selector Dropdown ---
+
+/** @type {boolean} */
+let _groupSelectorInitialized = false;
+
+/** @type {HTMLElement|null} */
+let _groupMenuElement = null;
+
+/**
+ * Render the group selector dropdown with available groups.
+ * @param {string[]} groups - List of available group names
+ * @param {string} currentGroup - Currently selected group name
+ */
+function renderGroupSelector(groups, currentGroup) {
+    const selector = document.getElementById('proxy-group-selector');
+    const trigger = document.getElementById('proxy-group-trigger');
+    const label = document.getElementById('proxy-group-label');
+
+    if (!selector || !trigger || !label) return;
+
+    // Hide if no groups available
+    if (!groups || groups.length === 0) {
+        selector.classList.add('hidden');
+        return;
+    }
+
+    // Show selector
+    selector.classList.remove('hidden');
+
+    // Update label
+    label.textContent = currentGroup || 'Auto';
+
+    // Create or get menu element (attached to body to avoid overflow clipping)
+    if (!_groupMenuElement) {
+        _groupMenuElement = document.createElement('div');
+        _groupMenuElement.id = 'proxy-group-menu';
+        _groupMenuElement.className = 'hidden fixed min-w-[160px] rounded-xl max-h-[300px] overflow-y-auto custom-scrollbar';
+        _groupMenuElement.style.zIndex = '99999';
+        document.body.appendChild(_groupMenuElement);
+    }
+    const menu = _groupMenuElement;
+
+    // Build menu items
+    menu.innerHTML = '';
+    groups.forEach(groupName => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-lg text-xs transition-all';
+        if (groupName === currentGroup) {
+            btn.classList.add('active');
+        }
+        btn.textContent = groupName;
+        btn.onclick = async () => {
+            // Close menu
+            menu.classList.add('hidden');
+            trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+
+            // Switch group
+            try {
+                appStore.set('uiGroupName', groupName);
+                invalidateProxiesCache();
+                invalidateRunConfigCache();
+
+                // Persist preference
+                const settings = await getSettingsCached();
+                const profileName = settings?.last_config;
+                if (profileName) {
+                    savePrimaryGroupPreference(profileName, groupName).catch(() => {});
+                }
+
+                // Re-render
+                await renderProxies();
+            } catch (e) {
+                proxyLogger.warn('Failed to switch group', e);
+                showNotification(String(e), 'error');
+            }
+        };
+        menu.appendChild(btn);
+    });
+
+    // Initialize event listeners once
+    if (!_groupSelectorInitialized) {
+        _groupSelectorInitialized = true;
+
+        // Toggle menu
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = menu.classList.contains('hidden');
+            if (isHidden) {
+                // Position the fixed menu below the trigger
+                const rect = trigger.getBoundingClientRect();
+                menu.style.left = rect.left + 'px';
+                menu.style.top = (rect.bottom + 6) + 'px';
+                menu.classList.remove('hidden');
+                trigger.querySelector('.dropdown-arrow')?.classList.add('rotate-180');
+            } else {
+                menu.classList.add('hidden');
+                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+            }
+        });
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+            if (!selector.contains(/** @type {Node} */ (e.target)) && !menu.contains(/** @type {Node} */ (e.target))) {
+                menu.classList.add('hidden');
+                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+            }
+        });
+
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
+                menu.classList.add('hidden');
+                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+            }
+        });
+    }
+}
+
 /**
  * Show loading state in the proxy container.
  * @param {HTMLElement} container
@@ -1246,6 +1365,9 @@ export async function renderProxies() {
     // Use the resolved uiGroupName for node list rendering
     const uiGroupName = proxyGroupsResult.uiGroupName || mainGroup;
     const effectiveGroupName = proxyGroupsResult.effectiveGroupName;
+
+    // Render group selector dropdown
+    renderGroupSelector(proxyGroupsResult.groups || [], uiGroupName);
 
     // If no writable group was found, show a clean empty state instead of
     // rendering actionable buttons that would fail on PUT /proxies/{group}
