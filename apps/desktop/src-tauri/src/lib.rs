@@ -837,6 +837,19 @@ pub fn run() {
             // Script Engine commands
             prism::script_execute,
             prism::script_validate,
+            prism::script_execute_write,
+            // Override System commands
+            prism::override_list,
+            prism::override_create,
+            prism::override_update,
+            prism::override_delete,
+            prism::override_get_content,
+            prism::override_set_content,
+            prism::override_reorder,
+            prism::override_toggle,
+            prism::override_test,
+            prism::override_refresh_remote,
+            prism::override_apply_all,
             // Smart Proxy Selector commands
             prism::smart_score,
             prism::smart_config,
