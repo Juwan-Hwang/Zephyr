@@ -42,6 +42,7 @@ function zephyrTheme() {
             fontSize: '0.75rem',
             backgroundColor: 'transparent',
             color: 'var(--text-primary, #e4e4e7)',
+            height: '100%',
         },
         '.cm-content': {
             fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'DejaVu Sans Mono', 'Ubuntu Mono', monospace",
@@ -166,7 +167,6 @@ export function createEditor(options) {
         bracketMatching(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([indentWithTab]),
-        EditorView.lineWrapping,
         zephyrTheme(),
         EditorState.readOnly.of(readOnly),
     ];
