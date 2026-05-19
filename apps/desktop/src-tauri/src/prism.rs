@@ -44,6 +44,8 @@ mod commands_core;
 mod failover_commands;
 mod host;
 mod kv_commands;
+pub mod overrides;
+pub mod pipeline;
 mod plugin_commands;
 mod rate_limiter;
 mod rule_groups;
@@ -61,6 +63,7 @@ pub mod types;
 pub use commands_core::*;
 pub use failover_commands::*;
 pub use kv_commands::*;
+pub use overrides::*;
 pub use plugin_commands::*;
 pub use rule_groups::*;
 pub use rule_library::*;
@@ -230,6 +233,12 @@ impl PrismState {
                     let mut rl = rate_limiter::RateLimiter::new();
                     // script_execute: max 10 calls per 10 seconds
                     rl.register("script_execute", 10, std::time::Duration::from_secs(10));
+                    // script_execute_write: max 5 calls per 10 seconds
+                    rl.register(
+                        "script_execute_write",
+                        5,
+                        std::time::Duration::from_secs(10),
+                    );
                     // rule_import_url: max 5 calls per 10 seconds
                     rl.register("rule_import_url", 5, std::time::Duration::from_secs(10));
                     rl
@@ -255,6 +264,14 @@ impl PrismState {
 
     pub(crate) fn get_prism_workspace(&self) -> Result<std::path::PathBuf, String> {
         prism_data_dir(&self.app)
+    }
+
+    /// Return the `prism/overrides/` directory, creating it if needed.
+    pub(crate) fn get_overrides_dir(&self) -> Result<std::path::PathBuf, String> {
+        let dir = self.get_prism_workspace()?.join("overrides");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create overrides dir: {e}"))?;
+        Ok(dir)
     }
 
     /// Read and parse the smart.toml config file.

@@ -1192,3 +1192,48 @@ html:not(.dark) .log-line {
 html:not(.dark) .log-line:hover {
     background: rgba(0, 0, 0, 0.03);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Fullscreen Editor - Light/Dark Mode Support
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Light mode - overlay uses same style as other modals */
+html:not(.dark) #fullscreen-editor-overlay {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+html:not(.dark) #fullscreen-editor-container {
+    background: rgba(255, 255, 255, 0.98);
+    border-color: rgba(30, 41, 59, 0.15);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+}
+
+html:not(.dark) #fullscreen-editor-title {
+    color: var(--text-primary);
+}
+
+html:not(.dark) #fullscreen-editor-output {
+    color: var(--text-secondary);
+}
+
+html:not(.dark) #fullscreen-editor-output .italic {
+    color: var(--text-muted, #94a3b8);
+}
+
+/* Dark mode */
+html.dark #fullscreen-editor-overlay {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+html.dark #fullscreen-editor-container {
+    background: rgba(24, 24, 27, 0.95);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+html.dark #fullscreen-editor-title {
+    color: #f4f4f5;
+}
+
+html.dark #fullscreen-editor-output {
+    color: #a1a1aa;
+}
