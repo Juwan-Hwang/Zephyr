@@ -291,6 +291,24 @@ export const TRACE_ADVANCED = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Override System
+// ---------------------------------------------------------------------------
+
+export const OVERRIDE = Object.freeze({
+    LIST: "override_list",
+    CREATE: "override_create",
+    UPDATE: "override_update",
+    DELETE: "override_delete",
+    GET_CONTENT: "override_get_content",
+    SET_CONTENT: "override_set_content",
+    REORDER: "override_reorder",
+    TOGGLE: "override_toggle",
+    TEST: "override_test",
+    REFRESH_REMOTE: "override_refresh_remote",
+    APPLY_ALL: "override_apply_all",
+});
+
+// ---------------------------------------------------------------------------
 // Convenience: all command names in one flat object
 // ---------------------------------------------------------------------------
 
@@ -315,9 +333,10 @@ export const COMMANDS = Object.freeze({
     ...FAILOVER,
     ...KV,
     ...TRACE_ADVANCED,
+    ...OVERRIDE,
     // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
     CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
     UPDATER, SHORTCUTS, SCHEDULER, SETTINGS, MISC, CRYPTO,
     SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
-    FAILOVER, KV, TRACE_ADVANCED,
+    FAILOVER, KV, TRACE_ADVANCED, OVERRIDE,
 });
