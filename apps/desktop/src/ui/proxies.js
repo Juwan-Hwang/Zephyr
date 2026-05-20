@@ -888,7 +888,7 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-        _groupMenuElement.className = 'hidden fixed min-w-[160px] rounded-xl max-h-[300px] overflow-y-auto custom-scrollbar';
+_groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border border-white/10 rounded-xl shadow-2xl p-2 max-h-[300px] overflow-y-auto custom-scrollbar';
         _groupMenuElement.style.zIndex = '99999';
         document.body.appendChild(_groupMenuElement);
     }
