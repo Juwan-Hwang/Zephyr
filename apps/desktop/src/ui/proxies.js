@@ -899,7 +899,7 @@ _groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border bor
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-lg text-xs transition-all';
+btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-300 hover:bg-white/5 transition-all';
         if (groupName === currentGroup) {
             btn.classList.add('active');
         }
