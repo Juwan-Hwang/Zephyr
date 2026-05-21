@@ -9,7 +9,7 @@
 import { abortLatencyTests, closeAllConnections, restartCore, invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { appStore } from './state.js';
-import { invalidateSettingsCache } from './cache.js';
+import { invalidateSettingsCache, invalidateProxiesCache, invalidateConfigCache } from './cache.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { apiLogger } from '../utils/logger.js';
 
@@ -74,10 +74,24 @@ export async function switchToConfig(configName, customArgs = []) {
 
   // 重建 prism patches（__when__.profile 条件需要重新评估）
   try {
-    const { default: prism } = await import('./prism.js');
-    await prism.rebuild();
+    const { rebuild } = await import('./prism.js');
+    await rebuild();
   } catch (e) {
     apiLogger.warn('[switchToConfig] prism.rebuild failed:', e);
+  }
+
+  // 重新应用所有启用的覆写脚本（JS 覆写可能修改 proxy-groups 等，
+  // 切换订阅后必须重新执行，否则规则引用的代理组可能不存在）
+  try {
+    const { overrideApplyAll } = await import('./prism.js');
+    const logs = await overrideApplyAll();
+    const successCount = logs?.filter(l => l.success).length ?? 0;
+    const failCount = logs?.filter(l => !l.success).length ?? 0;
+    if (logs && logs.length > 0) {
+      apiLogger.info(`[switchToConfig] override_apply_all: ${successCount} succeeded, ${failCount} failed`);
+    }
+  } catch (e) {
+    apiLogger.warn('[switchToConfig] override_apply_all failed:', e);
   }
 
   // 恢复代理选择
@@ -87,6 +101,17 @@ export async function switchToConfig(configName, customArgs = []) {
   } catch (e) {
     apiLogger.warn('[switchToConfig] restoreProxySelection failed:', e);
   }
+
+  // 刷新前端代理组数据（复用「保存并执行」的逻辑）
+  // 覆写脚本可能修改 proxy-groups，必须清缓存并重新渲染
+  invalidateProxiesCache();
+  invalidateConfigCache();
+  setTimeout(() => {
+    import('./proxies.js').then(({ renderProxies, startSmartAutoTest }) => {
+      renderProxies();
+      startSmartAutoTest();
+    }).catch(e => apiLogger.warn('[switchToConfig] renderProxies failed:', e));
+  }, 1000);
 
   return coreResult;
 }
