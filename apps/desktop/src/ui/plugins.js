@@ -333,7 +333,7 @@ async function importFromUrl() {
     if (!url?.trim()) return;
 
     const trimmedUrl = url.trim();
-    if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+    if (!trimmedUrl.toLowerCase().startsWith('http://') && !trimmedUrl.toLowerCase().startsWith('https://')) {
         showNotification(t('overrideInvalidUrl') ?? 'Invalid URL', 'error');
         return;
     }
