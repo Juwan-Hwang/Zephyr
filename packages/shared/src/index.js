@@ -295,17 +295,19 @@ export const TRACE_ADVANCED = Object.freeze({
 // ---------------------------------------------------------------------------
 
 export const OVERRIDE = Object.freeze({
-    LIST: "override_list",
-    CREATE: "override_create",
-    UPDATE: "override_update",
-    DELETE: "override_delete",
-    GET_CONTENT: "override_get_content",
-    SET_CONTENT: "override_set_content",
-    REORDER: "override_reorder",
-    TOGGLE: "override_toggle",
-    TEST: "override_test",
-    REFRESH_REMOTE: "override_refresh_remote",
-    APPLY_ALL: "override_apply_all",
+LIST: "override_list",
+CREATE: "override_create",
+UPDATE: "override_update",
+DELETE: "override_delete",
+GET_CONTENT: "override_get_content",
+SET_CONTENT: "override_set_content",
+REORDER: "override_reorder",
+TOGGLE: "override_toggle",
+TEST: "override_test",
+REFRESH_REMOTE: "override_refresh_remote",
+APPLY_ALL: "override_apply_all",
+EXPORT: "override_export",
+IMPORT: "override_import",
 });
 
 // ---------------------------------------------------------------------------

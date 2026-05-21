@@ -248,28 +248,39 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
     format!("rules:\n  $append:\n{}\n", rules.join("\n"))
 }
 
-/// Replace the 3rd field (policy) in a rule line with {{proxy}} if it's not a built-in policy.
+/// Replace the policy field in a rule line with {{proxy}} if it's not a built-in policy.
 /// This makes imported rules cross-subscription compatible.
 ///
-/// Rule format: TYPE,MATCH,POLICY[,opts]
-/// Example: "DOMAIN-SUFFIX,example.com,Proxy" → "DOMAIN-SUFFIX,example.com,{{proxy}}"
+/// Standard rules: "DOMAIN-SUFFIX,example.com,Proxy" → "DOMAIN-SUFFIX,example.com,{{proxy}}"
+/// MATCH/FINAL:   "MATCH,Proxy" → "MATCH,{{proxy}}"
 fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
     let parts: Vec<&str> = rule.splitn(4, ',').collect();
-    if parts.len() < 3 {
+    // MATCH/FINAL rules have only 2 fields: the 2nd IS the policy.
+    let policy_index = if parts.len() == 2
+        && parts
+            .first()
+            .is_some_and(|t| t.eq_ignore_ascii_case("MATCH") || t.eq_ignore_ascii_case("FINAL"))
+    {
+        1
+    } else if parts.len() >= 3 {
+        2
+    } else {
         return rule.to_owned();
-    }
-    let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
+    };
+    let policy = parts.get(policy_index).map(|p| p.trim()).unwrap_or("");
     if builtin.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
         return rule.to_owned();
     }
     // Reconstruct with {{proxy}}
     let mut out = String::new();
-    if let Some(p0) = parts.first() {
-        out.push_str(p0);
-    }
-    out.push(',');
-    if let Some(p1) = parts.get(1) {
-        out.push_str(p1);
+    for (i, part) in parts.iter().enumerate() {
+        if i == policy_index {
+            break;
+        }
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(part);
     }
     out.push_str(",{{proxy}}");
     if let Some(opts) = parts.get(3) {

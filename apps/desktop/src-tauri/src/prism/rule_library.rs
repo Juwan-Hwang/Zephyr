@@ -212,34 +212,48 @@ pub fn rule_extract_from_profile(
             // Rule format: TYPE,MATCH,POLICY[,opts]
             // Replace the 3rd field (policy) with {{proxy}} unless it's a built-in
             let parts: Vec<&str> = s.splitn(4, ',').collect();
-            if parts.len() >= 3 {
-                let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
-                if BUILTIN_POLICIES
-                    .iter()
-                    .any(|b| b.eq_ignore_ascii_case(policy))
-                {
-                    lines.push(format!("    - {s}"));
-                } else {
-                    // Reconstruct with {{proxy}} as the policy
-                    let mut rebuilt = String::new();
-                    if let Some(p0) = parts.first() {
-                        rebuilt.push_str(p0);
-                    }
-                    rebuilt.push(',');
-                    if let Some(p1) = parts.get(1) {
-                        rebuilt.push_str(p1);
-                    }
-                    rebuilt.push_str(",{{proxy}}");
-                    let mut line = String::from("    - ");
-                    line.push_str(&rebuilt);
-                    if let Some(opts) = parts.get(3) {
-                        line.push(',');
-                        line.push_str(opts);
-                    }
-                    lines.push(line);
-                }
+            // MATCH/FINAL rules have only 2 fields: "MATCH,Proxy" —
+            // the 2nd field IS the policy. All other rules have 3+ fields
+            // where the 3rd field is the policy.
+            let policy_index = if parts.len() == 2
+                && parts
+                    .first()
+                    .is_some_and(|t| t.eq_ignore_ascii_case("MATCH") || t.eq_ignore_ascii_case("FINAL"))
+            {
+                1
+            } else if parts.len() >= 3 {
+                2
             } else {
+                // Malformed rule — keep as-is
                 lines.push(format!("    - {s}"));
+                continue;
+            };
+            let policy = parts.get(policy_index).map(|p| p.trim()).unwrap_or("");
+            if BUILTIN_POLICIES
+                .iter()
+                .any(|b| b.eq_ignore_ascii_case(policy))
+            {
+                lines.push(format!("    - {s}"));
+            } else {
+                // Reconstruct with {{proxy}} as the policy
+                let mut rebuilt = String::new();
+                // Build prefix: all fields before the policy
+                for (i, part) in parts.iter().enumerate() {
+                    if i == policy_index {
+                        break;
+                    }
+                    if i > 0 {
+                        rebuilt.push(',');
+                    }
+                    rebuilt.push_str(part);
+                }
+                rebuilt.push_str(",{{proxy}}");
+                // Append any trailing options (4th field onward)
+                if let Some(opts) = parts.get(3) {
+                    rebuilt.push(',');
+                    rebuilt.push_str(opts);
+                }
+                lines.push(format!("    - {rebuilt}"));
             }
         }
     }

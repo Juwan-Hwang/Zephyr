@@ -65,6 +65,7 @@ html:not(.dark) * {
     --color-blue-600: oklch(54.6% 0.245 262.881);
     --color-indigo-400: oklch(67.3% 0.182 276.935);
     --color-indigo-500: oklch(58.5% 0.233 277.117);
+    --color-indigo-600: oklch(51.1% 0.262 276.966);
     --color-purple-300: oklch(82.7% 0.119 306.383);
     --color-purple-400: oklch(71.4% 0.203 305.504);
     --color-purple-500: oklch(62.7% 0.265 303.9);
@@ -691,6 +692,18 @@ html:not(.dark) * {
     transition-duration: 0.21s;
     transition-timing-function: ease-out;
   }
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
   .block {
     display: block;
   }
@@ -793,11 +806,17 @@ html:not(.dark) * {
   .max-h-40 {
     max-height: calc(var(--spacing) * 40);
   }
+  .max-h-\[40vh\] {
+    max-height: 40vh;
+  }
   .max-h-\[60vh\] {
     max-height: 60vh;
   }
   .max-h-\[65vh\] {
     max-height: 65vh;
+  }
+  .max-h-\[70vh\] {
+    max-height: 70vh;
   }
   .max-h-\[80vh\] {
     max-height: 80vh;
@@ -952,11 +971,11 @@ html:not(.dark) * {
   .max-w-\[320px\] {
     max-width: 320px;
   }
-  .max-w-\[400px\] {
-    max-width: 400px;
-  }
   .max-w-\[420px\] {
     max-width: 420px;
+  }
+  .max-w-\[480px\] {
+    max-width: 480px;
   }
   .max-w-\[600px\] {
     max-width: 600px;
@@ -993,6 +1012,9 @@ html:not(.dark) * {
   }
   .min-w-\[320px\] {
     min-width: 320px;
+  }
+  .min-w-\[360px\] {
+    min-width: 360px;
   }
   .flex-1 {
     flex: 1;
@@ -1217,6 +1239,9 @@ html:not(.dark) * {
   }
   .overflow-x-clip {
     overflow-x: clip;
+  }
+  .overflow-x-hidden {
+    overflow-x: hidden;
   }
   .overflow-y-auto {
     overflow-y: auto;
@@ -1584,6 +1609,9 @@ html:not(.dark) * {
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);
     }
+  }
+  .bg-indigo-600 {
+    background-color: var(--color-indigo-600);
   }
   .bg-orange-500\/15 {
     background-color: color-mix(in srgb, oklch(70.5% 0.213 47.604) 15%, transparent);
@@ -2191,6 +2219,9 @@ html:not(.dark) * {
   .accent-accent {
     accent-color: var(--color-accent);
   }
+  .accent-indigo-500 {
+    accent-color: var(--color-indigo-500);
+  }
   .opacity-0 {
     opacity: 0%;
   }
@@ -2627,6 +2658,16 @@ html:not(.dark) * {
       }
     }
   }
+  .hover\:bg-black\/5 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: color-mix(in srgb, #000 5%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--color-black) 5%, transparent);
+        }
+      }
+    }
+  }
   .hover\:bg-black\/10 {
     &:hover {
       @media (hover: hover) {
@@ -2634,6 +2675,13 @@ html:not(.dark) * {
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--color-black) 10%, transparent);
         }
+      }
+    }
+  }
+  .hover\:bg-indigo-500 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-indigo-500);
       }
     }
   }
@@ -2820,6 +2868,13 @@ html:not(.dark) * {
     &:hover {
       @media (hover: hover) {
         color: var(--color-zinc-900);
+      }
+    }
+  }
+  .hover\:opacity-80 {
+    &:hover {
+      @media (hover: hover) {
+        opacity: 80%;
       }
     }
   }
@@ -3298,6 +3353,9 @@ button, [role="button"], input[type="checkbox"], input[type="range"], .cursor-po
   --text-primary: rgba(255, 255, 255, 0.95);
   --text-secondary: rgba(255, 255, 255, 0.6);
   --text-tertiary: rgba(255, 255, 255, 0.4);
+  --text-muted: #71717a;
+  --bg-secondary: rgba(12, 12, 16, 0.55);
+  --bg-tertiary: rgba(12, 12, 16, 0.5);
   --border-primary: hsla(0, 0%, 100%, 0.1);
   --app-opacity: 0.6;
   --accent-primary: #AF52DE;
@@ -3319,6 +3377,12 @@ html:not(.dark) {
   --brightness: 0.95;
   --dialog-shadow-color: rgba(0, 0, 0, 0.25);
   --border-primary: rgba(0, 0, 0, 0.15);
+  --text-primary: rgba(24, 24, 28, 0.95);
+  --text-secondary: rgba(24, 24, 28, 0.65);
+  --text-tertiary: rgba(24, 24, 28, 0.4);
+  --text-muted: #71717a;
+  --bg-secondary: rgba(0, 0, 0, 0.04);
+  --bg-tertiary: rgba(0, 0, 0, 0.06);
 }
 html.dark {
   --brightness: 0.88;
@@ -3730,6 +3794,7 @@ html:not(.dark) .score-badge.score-low {
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-xl);
   box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5);
+  overflow-x: hidden;
 }
 html:not(.dark) .plugin-panel {
   background: rgba(255, 255, 255, 0.85);
