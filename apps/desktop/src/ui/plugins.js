@@ -340,7 +340,7 @@ async function importFromUrl() {
 
     // Extract filename once (strip query params / fragments) — reuse for name & ext detection
     const name = trimmedUrl.split('/').filter(Boolean).pop()?.split(/[?#]/)[0] || 'Remote Override';
-    const ext = name.endsWith('.yaml') || name.endsWith('.yml')
+    const ext = name.toLowerCase().endsWith('.yaml') || name.toLowerCase().endsWith('.yml')
         ? 'prism.yaml'
         : 'js';
 
