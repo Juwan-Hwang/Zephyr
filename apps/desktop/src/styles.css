@@ -253,6 +253,9 @@ input[type="range"],
   --text-primary: rgba(255, 255, 255, 0.95);
   --text-secondary: rgba(255, 255, 255, 0.6);
   --text-tertiary: rgba(255, 255, 255, 0.4);
+  --text-muted: #71717a;
+  --bg-secondary: rgba(12, 12, 16, 0.55);
+  --bg-tertiary: rgba(12, 12, 16, 0.5);
   --border-primary: hsla(0, 0%, 100%, 0.1);
   --app-opacity: 0.6;
   --accent-primary: #AF52DE;
@@ -287,6 +290,12 @@ html:not(.dark) {
   --brightness: 0.95;
   --dialog-shadow-color: rgba(0, 0, 0, 0.25);
   --border-primary: rgba(0, 0, 0, 0.15);
+  --text-primary: rgba(24, 24, 28, 0.95);
+  --text-secondary: rgba(24, 24, 28, 0.65);
+  --text-tertiary: rgba(24, 24, 28, 0.4);
+  --text-muted: #71717a;
+  --bg-secondary: rgba(0, 0, 0, 0.04);
+  --bg-tertiary: rgba(0, 0, 0, 0.06);
 }
 
 html.dark {
@@ -659,6 +668,7 @@ html:not(.dark) .score-badge.score-low {
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-xl);
   box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5);
+  overflow-x: hidden;
 }
 html:not(.dark) .plugin-panel {
   background: rgba(255, 255, 255, 0.85);

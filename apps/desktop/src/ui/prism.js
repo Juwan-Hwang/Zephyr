@@ -603,3 +603,18 @@ export async function overrideRefreshRemote(id) {
 export async function overrideApplyAll() {
     return invoke(COMMANDS.OVERRIDE.APPLY_ALL);
 }
+
+/** Export all overrides to a JSON file on disk.
+ *  @returns {Promise<string>} Absolute path of the exported file
+ */
+export async function overrideExport() {
+    return invoke(COMMANDS.OVERRIDE.EXPORT);
+}
+
+/** Import overrides from a JSON string.
+ *  @param {string} json - Raw JSON content from the export file
+ *  @returns {Promise<number>} Number of overrides imported
+ */
+export async function overrideImport(json) {
+    return invoke(COMMANDS.OVERRIDE.IMPORT, { json });
+}
