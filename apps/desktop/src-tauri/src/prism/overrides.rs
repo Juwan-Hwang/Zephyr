@@ -9,6 +9,7 @@
 //!       {id}.js           # JS override content
 //!       {id}.prism.yaml  # Prism YAML override content
 //!       {id}.log.json    # Last execution log
+//!       exports/          # Exported override bundles (JSON)
 //! ```
 //!
 //! Design principles:

@@ -13,19 +13,20 @@
 import {
     overrideList,
     overrideCreate,
-    // eslint-disable-next-line no-unused-vars
     overrideUpdate,
     overrideDelete,
     overrideGetContent,
     overrideSetContent,
     overrideReorder,
     overrideToggle,
-    // eslint-disable-next-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars -- reserved for future use
     overrideTest,
-    // eslint-disable-next-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars -- reserved for future use
     overrideRefreshRemote,
-    // eslint-disable-next-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars -- reserved for future use
     overrideApplyAll,
+    overrideExport,
+    overrideImport,
 } from './prism.js';
 import { SVG_ICONS } from './icons.js';
 import { stopSmartAutoTest, startSmartAutoTest, renderProxies } from './proxies.js';
@@ -92,7 +93,7 @@ export function initPlugins() {
     const pluginList = document.getElementById('plugin-list');
     const scriptArea = document.getElementById('plugin-script-area');
     const scriptEditor = document.getElementById('plugin-script-editor');
-    // eslint-disable-next-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars -- placeholder for CodeMirror editor
     const scriptCm6 = document.getElementById('plugin-script-cm6');
     const scriptOutput = document.getElementById('plugin-script-output');
     const scriptOutputToggle = document.getElementById('plugin-script-output-toggle');
@@ -110,7 +111,7 @@ export function initPlugins() {
             scriptOutputLabel.textContent = (t('overrideOutputLineCount') || 'Output (@@count@@ lines)').replace('@@count@@', String(lineCount));
         }
     });
-    // eslint-disable-next-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars -- placeholder for editor title
     const scriptTitle = document.getElementById('plugin-script-title');
     const scriptRunBtn = document.getElementById('plugin-script-run-btn');
     const scriptValidateBtn = document.getElementById('plugin-script-validate-btn');
@@ -276,8 +277,7 @@ export function initPlugins() {
 //  New override dropdown
 // ═══════════════════════════════════════════════════════════════════════
 
-// eslint-disable-next-line no-unused-vars
-function setupNewOverrideDropdown(panel) {
+function setupNewOverrideDropdown(_panel) {
     const newBtn = document.getElementById('plugin-new-btn');
     const dropdown = document.getElementById('plugin-new-dropdown');
 
@@ -299,6 +299,8 @@ function setupNewOverrideDropdown(panel) {
         if (action === 'new-js') createNewOverride('js');
         else if (action === 'new-prism') createNewOverride('prism.yaml');
         else if (action === 'import-url') importFromUrl();
+        else if (action === 'export-all') exportAllOverrides();
+        else if (action === 'import-file') importFromFile();
         dropdown.classList.add('hidden');
     });
 }
@@ -356,6 +358,214 @@ async function importFromUrl() {
     } catch (err) {
         showNotification(String(err), 'error');
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Export / Import
+// ═══════════════════════════════════════════════════════════════════════
+
+async function exportAllOverrides() {
+    if (overrideItems.length === 0) {
+        showNotification(t('overrideExportEmpty') ?? 'No overrides to export', 'info');
+        return;
+    }
+
+    try {
+        const filePath = await overrideExport();
+        const fileName = filePath.split(/[/\\]/).pop() || filePath;
+        const label = t('overrideExportSuccess') ?? 'Exported to: @@path@@';
+        showNotification(filePath, 'success', label.replace('@@path@@', fileName));
+    } catch (err) {
+        showNotification(String(err), 'error');
+    }
+}
+
+/**
+ * Import overrides from a user-selected JSON file.
+ * Reads the file, validates format, then creates each override.
+ */
+async function importFromFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+
+    input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+
+        try {
+            const json = await file.text();
+            const count = await overrideImport(json);
+            showNotification(
+                (t('overrideImportSuccess') ?? 'Imported @@count@@ overrides').replace('@@count@@', String(count)),
+                'success'
+            );
+            loadOverrides();
+        } catch (err) {
+            showNotification(String(err), 'error');
+        }
+    });
+
+    input.click();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Scope Editor (subscription association)
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Open a scope editor modal for the given override.
+ * Lets the user toggle between "global" and "specific subscriptions".
+ * @param {string} overrideId
+ * @param {boolean} currentGlobal
+ * @param {string[]} currentProfileIds
+ */
+function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
+    const existing = document.getElementById('scope-editor-overlay');
+    existing?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'scope-editor-overlay';
+    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center';
+    overlay.style.background = 'rgba(0,0,0,0.5)';
+
+    const card = document.createElement('div');
+    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[360px] max-w-[480px] max-h-[70vh] shadow-2xl';
+
+    // Title
+    const title = document.createElement('div');
+    title.className = 'text-sm font-semibold text-zinc-800 dark:text-zinc-200';
+    title.textContent = t('overrideScopeTitle') ?? 'Override Scope';
+
+    // Global toggle
+    const globalRow = document.createElement('label');
+    globalRow.className = 'flex items-center gap-3 cursor-pointer';
+    const globalCheck = document.createElement('input');
+    globalCheck.type = 'checkbox';
+    globalCheck.checked = currentGlobal;
+    globalCheck.className = 'w-4 h-4 rounded accent-indigo-500';
+    const globalLabel = document.createElement('span');
+    globalLabel.className = 'text-sm text-zinc-700 dark:text-zinc-300';
+    globalLabel.textContent = t('overrideScopeGlobal') ?? 'Global (applies to all subscriptions)';
+    globalRow.appendChild(globalCheck);
+    globalRow.appendChild(globalLabel);
+
+    // Profile list container
+    const profileContainer = document.createElement('div');
+    profileContainer.className = 'flex flex-col gap-1.5 overflow-y-auto max-h-[40vh] custom-scrollbar';
+
+    // Fetch and render profiles
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium';
+    saveBtn.textContent = t('confirm') ?? 'OK';
+    saveBtn.disabled = true; // Disabled until profiles are loaded
+
+    (async () => {
+        let configs = [];
+        try {
+            const { invoke } = await import('../api.js');
+            const { COMMANDS } = await import('@zephyr/shared');
+            configs = await invoke(COMMANDS.LIST_CONFIGS) ?? [];
+        } catch { configs = []; }
+
+        const profileIds = currentGlobal ? [] : (currentProfileIds || []);
+
+        if (configs.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'text-xs text-zinc-400 dark:text-zinc-500 py-2';
+            empty.textContent = t('overrideNoProfiles') ?? 'No subscriptions found';
+            profileContainer.appendChild(empty);
+        }
+
+        for (const cfg of configs) {
+            const row = document.createElement('label');
+            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = cfg.name || cfg;
+            cb.checked = profileIds.includes(cb.value);
+            cb.className = 'w-4 h-4 rounded accent-indigo-500 profile-scope-cb';
+            cb.dataset.profileName = cb.value;
+            const label = document.createElement('span');
+            label.className = 'text-xs text-zinc-700 dark:text-zinc-300 truncate';
+            label.textContent = cfg.name || cfg;
+            row.appendChild(cb);
+            row.appendChild(label);
+            profileContainer.appendChild(row);
+        }
+
+        saveBtn.disabled = false;
+    })();
+
+    // Toggle profile container visibility based on global checkbox
+    const updateVisibility = () => {
+        profileContainer.style.display = globalCheck.checked ? 'none' : '';
+    };
+    globalCheck.addEventListener('change', updateVisibility);
+    updateVisibility();
+
+    // Auto-detect: if all profiles are checked, switch to global mode
+    const checkAllSelected = () => {
+        const allCbs = [...profileContainer.querySelectorAll('.profile-scope-cb')];
+        if (allCbs.length === 0) return;
+        const allChecked = allCbs.every(cb => cb.checked);
+        if (allChecked && !globalCheck.checked) {
+            globalCheck.checked = true;
+            updateVisibility();
+        }
+    };
+    profileContainer.addEventListener('change', (e) => {
+        if (/** @type {HTMLInputElement} */(e.target).classList.contains('profile-scope-cb')) {
+            checkAllSelected();
+        }
+    });
+
+    // Button row
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex items-center justify-end gap-2';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-lg';
+    cancelBtn.textContent = t('cancel') ?? 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+
+    saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        cancelBtn.disabled = true;
+
+        // Collect selected profiles; auto-upgrade to global if all are checked
+        const allCbs = [...profileContainer.querySelectorAll('.profile-scope-cb')];
+        const selectedProfiles = allCbs.filter(cb => cb.checked).map(cb => cb.dataset.profileName);
+        const isGlobal = globalCheck.checked || selectedProfiles.length === allCbs.length;
+
+        try {
+            await overrideUpdate(overrideId, {
+                global: isGlobal,
+                profileIds: isGlobal ? [] : selectedProfiles,
+            });
+            overlay.remove();
+            loadOverrides();
+        } catch (err) {
+            showNotification(String(err), 'error');
+            overlay.remove();
+        }
+    });
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(saveBtn);
+    card.appendChild(title);
+    card.appendChild(globalRow);
+    card.appendChild(profileContainer);
+    card.appendChild(btnRow);
+    overlay.appendChild(card);
+
+    // Click backdrop to close
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    document.body.appendChild(overlay);
+    saveBtn.focus();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -663,7 +873,7 @@ function buildOverrideCard(item) {
                     ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 shrink-0">🌐</span>' : ''}
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-2xs px-1.5 py-0.5 rounded ${scopeClass}">${escapeHtml(scopeLabel)}</span>
+                    <span class="text-2xs px-1.5 py-0.5 rounded ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
                     <span class="text-xs text-zinc-500">${summaryText}</span>
                 </div>
             </div>
@@ -718,6 +928,12 @@ function buildOverrideCard(item) {
     card.querySelector('.rounded-full')?.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleOverride(item.id, !item.enabled);
+    });
+
+    // ── Click: scope badge → edit scope ───────────────────────
+    card.querySelector('[data-action="edit-scope"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openScopeEditor(item.id, item.global, item.profileIds || []);
     });
 
     return card;
