@@ -850,6 +850,8 @@ pub fn run() {
             prism::override_test,
             prism::override_refresh_remote,
             prism::override_apply_all,
+            prism::override_export,
+            prism::override_import,
             // Smart Proxy Selector commands
             prism::smart_score,
             prism::smart_config,

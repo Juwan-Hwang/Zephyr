@@ -188,6 +188,75 @@ fn reorder_items_in_place(meta: &mut OverrideMeta, ids: &[String]) {
     meta.items = new_items;
 }
 
+/// Batch import override items with their content.
+///
+/// All metadata updates happen within a single lock acquisition, and content
+/// files are written after the lock is released. This reduces I/O overhead
+/// and lock contention compared to per-item create/write/update cycles.
+///
+/// # Arguments
+/// * `items` - Vec of (`OverrideItem`, content) tuples. Items should have
+///   all fields (global, `profile_ids`, enabled) pre-populated.
+///
+/// # Returns
+/// Number of successfully imported items.
+pub fn import_items_batch(
+    state: &PrismState,
+    items: Vec<(OverrideItem, String)>,
+) -> Result<u32, String> {
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    // Phase 1: Write content files first (before metadata).
+    // If any write fails, we skip that item and don't add it to meta,
+    // avoiding broken state where UI shows an override with no content.
+    let dir = overrides_dir(state)?;
+    let mut valid_items: Vec<OverrideItem> = Vec::with_capacity(items.len());
+
+    for (item, content) in &items {
+        if content.is_empty() {
+            valid_items.push(item.clone());
+            continue;
+        }
+        let path = dir.join(item.content_filename());
+        match write_file_secure(&path, content) {
+            Ok(_) => valid_items.push(item.clone()),
+            Err(e) => {
+                eprintln!(
+                    "[overrides] Failed to write content for '{}': {e}",
+                    item.name
+                );
+            }
+        }
+    }
+
+    if valid_items.is_empty() {
+        return Ok(0);
+    }
+
+    // Phase 2: Update metadata under single lock (only for items with content written)
+    let guard = acquire_meta_lock()?;
+    let mut meta = load_meta_inner(state)?;
+
+    let start_order = meta
+        .items
+        .iter()
+        .map(|i| i.order)
+        .max()
+        .map_or(0, |m| m + 1);
+
+    for (item, order) in valid_items.iter_mut().zip(start_order..) {
+        item.order = order;
+        meta.items.push(item.clone());
+    }
+
+    save_meta_inner(state, &meta)?;
+    drop(guard);
+
+    Ok(u32::try_from(valid_items.len()).unwrap_or(u32::MAX))
+}
+
 // ===========================================================================
 // Content file I/O
 // ===========================================================================
