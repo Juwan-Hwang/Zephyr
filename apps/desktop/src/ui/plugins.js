@@ -36,6 +36,19 @@ import { escapeAttr } from '../utils/sanitize.js';
 import { EditorView, StateEffect } from '../../cm6.bundle.js';
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Internal helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Get override card elements that are direct children of the list container.
+ * IMPORTANT: Cards contain buttons with data-id, so querySelectorAll('[data-id]')
+ * would match those too (4 matches per card). We must only select top-level cards.
+ */
+function getOverrideCards(container) {
+    return [...container.children].filter(c => c.dataset?.id);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Internal state
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -47,6 +60,9 @@ let activeOverrideName = '';
 
 /** Current override items list (for reorder). */
 let overrideItems = [];
+
+/** Drag state for mouse-based reorder (HTML5 DnD unreliable in Tauri WebView). */
+let _dragState = null;
 
 /** CodeMirror EditorView for the override script editor (null when not active). */
 let scriptEditorView = null;
@@ -282,6 +298,7 @@ function setupNewOverrideDropdown(panel) {
         const action = e.target.closest('[data-action]')?.dataset.action;
         if (action === 'new-js') createNewOverride('js');
         else if (action === 'new-prism') createNewOverride('prism.yaml');
+        else if (action === 'import-url') importFromUrl();
         dropdown.classList.add('hidden');
     });
 }
@@ -296,6 +313,44 @@ async function createNewOverride(ext) {
 
     try {
         await overrideCreate(name.trim(), ext, 'local', null);
+        showNotification(t('overrideCreated') ?? 'Override created', 'success');
+        loadOverrides();
+    } catch (err) {
+        showNotification(String(err), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Import from URL
+// ═══════════════════════════════════════════════════════════════════════
+
+async function importFromUrl() {
+    const url = await showModal(
+        t('overrideImportUrlPrompt') ?? 'Enter remote URL:',
+        '',
+        'https://'
+    );
+    if (!url?.trim()) return;
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl.toLowerCase().startsWith('http://') && !trimmedUrl.toLowerCase().startsWith('https://')) {
+        showNotification(t('overrideInvalidUrl') ?? 'Invalid URL', 'error');
+        return;
+    }
+
+    // Extract filename once (strip query params / fragments) — reuse for name & ext detection
+    const name = trimmedUrl.split('/').filter(Boolean).pop()?.split(/[?#]/)[0] || 'Remote Override';
+    const ext = name.toLowerCase().endsWith('.yaml') || name.toLowerCase().endsWith('.yml')
+        ? 'prism.yaml'
+        : 'js';
+
+    try {
+        await overrideCreate(
+            name,
+            ext,
+            'remote',
+            trimmedUrl,
+        );
         showNotification(t('overrideCreated') ?? 'Override created', 'success');
         loadOverrides();
     } catch (err) {
@@ -327,6 +382,206 @@ async function bulkToggle(enabled) {
 async function loadOverrides() {
     const pluginList = document.getElementById('plugin-list');
     if (!pluginList) return;
+
+    // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
+    // Bind document-level listeners only once
+    if (!pluginList._dragBound) {
+        pluginList._dragBound = true;
+
+        // body has transform: scale(var(--ui-scale)), so CSS pixel values
+        // are scaled when rendered. getBoundingClientRect/clientY return
+        // viewport pixels (already scaled). Divide by ui-scale to convert
+        // viewport px → CSS px for style properties inside the scaled body.
+        const getUiScale = () =>
+            parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+
+        pluginList.addEventListener('mousedown', (e) => {
+            const card = e.target.closest('[data-id]');
+            if (!card || e.button !== 0) return;
+            // Don't start drag from buttons
+            if (e.target.closest('button')) return;
+            _dragState = { el: card, id: card.dataset.id, startY: e.clientY, moved: false };
+        });
+
+        // space-y-2 = 0.5rem = 8px (CSS pixels, not viewport pixels)
+        const gap = 8;
+
+        document.addEventListener('mousemove', (e) => {
+            if (!_dragState) return;
+            if (!_dragState.moved && Math.abs(e.clientY - _dragState.startY) < 5) return;
+
+            // First move — create floating clone & cache card positions
+            if (!_dragState.moved) {
+                _dragState.moved = true;
+                const uiScale = getUiScale();
+                const rect = _dragState.el.getBoundingClientRect();
+                // Convert viewport px → CSS px for use in style properties
+                _dragState.elHeight = rect.height / uiScale;
+                _dragState.offsetY = (e.clientY - rect.top) / uiScale;
+                _dragState.el.style.opacity = '0';
+                _dragState.el.style.pointerEvents = 'none';
+
+                const clone = _dragState.el.cloneNode(true);
+                clone.style.cssText = `
+                    position: fixed;
+                    left: ${rect.left / uiScale}px;
+                    top: ${rect.top / uiScale}px;
+                    width: ${rect.width / uiScale}px;
+                    pointer-events: none;
+                    z-index: 1000;
+                    opacity: 0.95;
+                    transform: scale(1.05);
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.3), 0 0 0 1px rgba(124,139,160,0.2);
+                    transition: transform 0.1s ease;
+                `;
+                document.body.appendChild(clone);
+                _dragState.clone = clone;
+
+                // Cache cards and their vertical midpoints once at drag start
+                const cards = getOverrideCards(pluginList);
+                const listRect = pluginList.getBoundingClientRect();
+                _dragState.currentIndex = cards.indexOf(_dragState.el);
+                // Midpoints stored in CSS-px space so they can be directly
+                // compared with scrollTop (also CSS px) and translateY offsets.
+                _dragState.cardMids = cards.map((c) => {
+                    const cr = c.getBoundingClientRect();
+                    return (cr.top + cr.height / 2 - listRect.top) / uiScale + pluginList.scrollTop;
+                });
+                _dragState.cards = cards;
+
+                // Apply transition to all non-dragged cards once
+                cards.forEach((card, i) => {
+                    if (i === _dragState.currentIndex) return;
+                    card.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0.2, 1)';
+                });
+            }
+
+            // Move clone with mouse (e.clientY is viewport px → convert to CSS px)
+            const uiScale = getUiScale();
+            const cloneY = (e.clientY / uiScale) - _dragState.offsetY;
+            _dragState.clone.style.top = cloneY + 'px';
+
+            // Calculate insert position using cached midpoints
+            // Convert viewport delta to CSS px, then add scrollTop (already CSS px)
+            const listRect = pluginList.getBoundingClientRect();
+            const relativeY = (e.clientY - listRect.top) / uiScale + pluginList.scrollTop;
+
+            let insertAfter = -1;
+            for (let i = 0; i < _dragState.cardMids.length; i++) {
+                if (i === _dragState.currentIndex) continue;
+                if (relativeY > _dragState.cardMids[i]) {
+                    insertAfter = i;
+                }
+            }
+            _dragState.targetIndex = insertAfter;
+
+            // Animate cards to make room — only update transform (not transition)
+            _dragState.cards.forEach((card, i) => {
+                if (i === _dragState.currentIndex) return;
+                let offset = 0;
+                if (_dragState.currentIndex < i && i <= insertAfter) {
+                    offset = -(_dragState.elHeight + gap);
+                } else if (insertAfter < i && i < _dragState.currentIndex) {
+                    offset = _dragState.elHeight + gap;
+                }
+                card.style.transform = `translateY(${offset}px)`;
+            });
+        });
+
+        document.addEventListener('mouseup', async (e) => {
+            if (!_dragState) return;
+            const { el, moved, clone, targetIndex, currentIndex, cards } = _dragState;
+            _dragState = null;
+
+            if (!moved) {
+                el.style.opacity = '';
+                el.style.pointerEvents = '';
+                return;
+            }
+
+            e.stopImmediatePropagation();
+
+            if (clone) {
+                const insertAfter = targetIndex;
+                const finalIndex = insertAfter >= currentIndex ? insertAfter : insertAfter + 1;
+                const needsMove = finalIndex !== currentIndex;
+
+                if (needsMove) {
+                    // 1. Clear transforms so cards are at natural positions
+                    cards.forEach(c => {
+                        c.style.transition = 'none';
+                        c.style.transform = '';
+                    });
+
+                    // 2. Move DOM — insert el after cards[insertAfter]
+                    el.remove();
+                    if (insertAfter === -1) {
+                        const firstCard = cards[0];
+                        if (firstCard) {
+                            firstCard.parentElement.insertBefore(el, firstCard);
+                        } else {
+                            pluginList.appendChild(el);
+                        }
+                    } else {
+                        const anchor = cards[insertAfter];
+                        const parent = anchor.parentElement;
+                        const next = anchor.nextSibling;
+                        if (next) {
+                            parent.insertBefore(el, next);
+                        } else {
+                            parent.appendChild(el);
+                        }
+                    }
+
+                    // 3. Force reflow before reading positions
+                    void el.offsetWidth;
+
+                    // 4. Animate clone to final position
+                    // deltaY is in viewport px — convert to CSS px for
+                    // the Web Animations API running inside the scaled body.
+                    const uiScale = getUiScale();
+                    const elFinalRect = el.getBoundingClientRect();
+                    const cloneRect = clone.getBoundingClientRect();
+                    const deltaY = (elFinalRect.top - cloneRect.top) / uiScale;
+
+                    const animation = clone.animate([
+                        { transform: 'translateY(0) scale(1.05)', opacity: 0.95 },
+                        { transform: `translateY(${deltaY}px) scale(1)`, opacity: 1 }
+                    ], {
+                        duration: 150,
+                        easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
+                        fill: 'forwards'
+                    });
+
+                    animation.onfinish = async () => {
+                        el.style.opacity = '';
+                        el.style.pointerEvents = '';
+                        clone.remove();
+
+                        // Save new order
+                        const newIds = getOverrideCards(pluginList)
+                            .map(c => c.dataset.id);
+                        try {
+                            await overrideReorder(newIds);
+                            await loadOverrides();
+                        } catch (err) {
+                            showNotification(String(err), 'error');
+                            await loadOverrides();
+                        }
+                    };
+                } else {
+                    // No actual position change — snap back
+                    cards.forEach(c => {
+                        c.style.transition = 'none';
+                        c.style.transform = '';
+                    });
+                    clone.remove();
+                    el.style.opacity = '';
+                    el.style.pointerEvents = '';
+                }
+            }
+        });
+    }
 
     pluginList.innerHTML = '';
 
