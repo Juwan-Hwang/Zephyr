@@ -188,6 +188,73 @@ fn reorder_items_in_place(meta: &mut OverrideMeta, ids: &[String]) {
     meta.items = new_items;
 }
 
+/// Batch import override items with their content.
+///
+/// All metadata updates happen within a single lock acquisition, and content
+/// files are written after the lock is released. This reduces I/O overhead
+/// and lock contention compared to per-item create/write/update cycles.
+///
+/// # Arguments
+/// * `items` - Vec of (`OverrideItem`, content) tuples. Items should have
+///   all fields (global, `profile_ids`, enabled) pre-populated.
+///
+/// # Returns
+/// Number of successfully imported items.
+pub fn import_items_batch(
+    state: &PrismState,
+    items: Vec<(OverrideItem, String)>,
+) -> Result<u32, String> {
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    // Phase 1: Update metadata under single lock
+    let guard = acquire_meta_lock()?;
+    let mut meta = load_meta_inner(state)?;
+
+    // Calculate starting order
+    let mut next_order = meta
+        .items
+        .iter()
+        .map(|i| i.order)
+        .max()
+        .map_or(0, |m| m + 1);
+
+    for (item, _) in &items {
+        let mut new_item = item.clone();
+        new_item.order = next_order;
+        next_order += 1;
+        meta.items.push(new_item);
+    }
+
+    save_meta_inner(state, &meta)?;
+    drop(guard); // Release lock before file I/O
+
+    // Phase 2: Write content files (best-effort, no lock needed)
+    let dir = overrides_dir(state)?;
+    let mut success_count = 0u32;
+
+    for (item, content) in items {
+        if content.is_empty() {
+            success_count += 1;
+            continue;
+        }
+        let path = dir.join(item.content_filename());
+        match write_file_secure(&path, &content) {
+            Ok(_) => success_count += 1,
+            Err(e) => {
+                eprintln!(
+                    "[overrides] Failed to write content for '{}': {e}",
+                    item.name
+                );
+                // Note: metadata entry remains; user can delete and re-import
+            }
+        }
+    }
+
+    Ok(success_count)
+}
+
 // ===========================================================================
 // Content file I/O
 // ===========================================================================

@@ -259,10 +259,13 @@ impl PrismHost for ZephyrPrismHost {
                 }
 
                 // Also provide each group name as a variable (identity mapping)
-                // so users can reference specific groups: {{VPN07}}, {{一分机场}}, etc.
+                // so users can reference specific groups.
                 for name in &names {
                     vars.insert(name.clone(), name.clone());
                 }
+                // Debug: log resolved variables for diagnosing cross-subscription rule errors
+                let proxy_val = vars.get("proxy").map(String::as_str).unwrap_or("<none>");
+                eprintln!("[Prism] get_variables: proxy={proxy_val}, groups={names:?}");
             }
         }
 
