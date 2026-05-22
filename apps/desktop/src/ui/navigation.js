@@ -11,6 +11,7 @@ import { setup3DEffect } from './3d-effect.js';
 /**
  * Switch the visible page by pageId.
  * Direct hidden toggle — no opacity transition to prevent flicker.
+ * Also toggles the shared background glow layer.
  *
  * @param {string} pageId - The data-page attribute value of the target page
  */
@@ -22,6 +23,11 @@ export function switchPage(pageId) {
         } else {
             p.classList.add('hidden');
         }
+    });
+
+    // Toggle shared background glow for the active page
+    document.querySelectorAll('[id^="glow-"]').forEach(g => {
+        g.classList.toggle('hidden', g.id !== `glow-${pageId}`);
     });
 }
 

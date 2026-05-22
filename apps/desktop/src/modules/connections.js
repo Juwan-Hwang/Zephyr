@@ -67,8 +67,6 @@ let _unsubTheme = null;
 
 // HTML template for the connections page (injected into DOM on init)
 const PAGE_HTML = `
-<div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-cyan-500/5 blur-[100px] pointer-events-none rounded-full"></div>
-
 <header class="flex items-center justify-between relative z-10 shrink-0">
     <div>
         <h2 class="text-2xl font-light text-zinc-100" data-i18n="connectionsTitle">Connections</h2>

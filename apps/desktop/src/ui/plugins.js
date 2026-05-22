@@ -425,9 +425,9 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     existing?.remove();
 
     const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
     overlay.id = 'scope-editor-overlay';
-    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center';
-    overlay.style.background = 'rgba(0,0,0,0.5)';
+    overlay.style.background = '';
 
     const card = document.createElement('div');
     card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[360px] max-w-[480px] max-h-[70vh] shadow-2xl';
@@ -1178,9 +1178,9 @@ function showDeleteConfirm(overrideId, overrideName) {
     existing?.remove();
 
     const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
     overlay.id = 'plugin-unload-confirm';
-    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center';
-    overlay.style.background = 'rgba(0,0,0,0.5)';
+    overlay.style.background = '';
 
     const card = document.createElement('div');
     card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[320px] max-w-[420px] shadow-2xl';

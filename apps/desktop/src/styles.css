@@ -7,24 +7,24 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
 }
 html:not(.dark) ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.05);
 }
 html:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.12);
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.05) transparent;
 }
 html:not(.dark) * {
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.05) transparent;
 }
 
 :root {
@@ -461,21 +461,14 @@ body {
 }
 
 html.dark #app-main-container {
-  background-color: rgb(9 9 11 / var(--app-opacity, 0.6));
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background-color: rgb(24 24 27 / var(--app-opacity, 0.6));
 }
 
-html.dark #app-main-container > div:first-child {
-  background: linear-gradient(180deg, rgba(24, 24, 28, 0.7), rgba(15, 15, 18, 0.78)) !important;
-  border-right-color: rgba(255, 255, 255, 0.08) !important;
+/* Sidebar — theme-aware subtle background */
+html.dark #sidebar-nav {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.01);
 }
-
-html.dark [data-tauri-drag-region] {
-  background: linear-gradient(180deg, rgba(36, 36, 42, 0.52), rgba(19, 19, 23, 0.42)) !important;
-  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
-}
-
 html.dark .glass-card {
   background: rgba(255, 255, 255, 0.05);
 }
@@ -489,10 +482,14 @@ html.dark .glass-card:hover {
   filter: drop-shadow(0 0 8px var(--color-accent-glow));
 }
 
+/* Sidebar — light mode: subtle dark tint so it reads as a card */
+html:not(.dark) #sidebar-nav {
+  background: rgba(0, 0, 0, 0.015);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
 html:not(.dark) #app-main-container {
   background-color: rgb(248 250 252 / var(--app-opacity, 0.4));
-  border-color: rgba(15, 23, 42, 0.12);
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
 }
 
 html:not(.dark) .glass-card {
