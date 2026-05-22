@@ -110,9 +110,9 @@ export async function switchToConfig(configName, customArgs = []) {
     const { renderProxies, startSmartAutoTest } = await import('./proxies.js');
     const { waitForMihomoReady } = await import('./proxy-memory.js');
     await waitForMihomoReady();
-    renderProxies();
+    await renderProxies();
     startSmartAutoTest();
-  }).catch(e => apiLogger.warn('[switchToConfig] renderProxies failed:', e));
+  })().catch(e => apiLogger.warn('[switchToConfig] renderProxies failed:', e));
 
   return coreResult;
 }
