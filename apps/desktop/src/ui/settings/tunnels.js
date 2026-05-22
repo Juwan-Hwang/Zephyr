@@ -82,7 +82,7 @@ export function initTunnelSettings({
 
         currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
-            item.className = 'flex items-center justify-between bg-black/20 border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all';
+            item.className = 'flex items-center justify-between bg-black/20 border border-white/5 rounded-lg p-3 hover:border-white/10 transition-all';
 
             const info = document.createElement('div');
             info.className = 'flex flex-col gap-1';

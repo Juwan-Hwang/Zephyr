@@ -288,7 +288,7 @@ function buildPageHTML() {
             </div>
 
             <!-- Virtual scroll container -->
-            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
+            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
                 <div id="log-spacer-top" style="height:0"></div>
                 <div id="log-lines-container"></div>
                 <div id="log-spacer-bottom" style="height:0"></div>
@@ -297,7 +297,7 @@ function buildPageHTML() {
 
         <!-- Extension Logs Panel -->
         <div id="log-panel-ext" class="hidden flex-1 min-h-0 flex flex-col gap-4 relative z-10">
-            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
+            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
                 <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-zinc-600">
                     <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span data-i18n="ruleLibraryLogEmpty">${t('ruleLibraryLogEmpty')}</span>
@@ -794,7 +794,7 @@ function renderExtLogEntry(entry) {
 
     // 事件类型徽章
     const badge = document.createElement('span');
-    badge.className = 'shrink-0 px-1.5 py-0.5 rounded text-2xs font-bold';
+    badge.className = 'shrink-0 px-1.5 py-0.5 rounded-sm text-2xs font-bold';
     badge.style.color = color;
     badge.style.backgroundColor = `${color}15`;
     badge.textContent = entry.type;

@@ -773,7 +773,7 @@ function showConnDetail(conn, mode) {
 
     // Build close button HTML (only for active connections)
     const closeBtnHtml = mode === 'active'
-        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-2xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider">
+        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-sm bg-rose-500/10 border border-rose-500/20 text-2xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all uppercase tracking-wider">
              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
              <span>${t.closeConn || 'Close Connection'}</span>
            </button>`
@@ -787,20 +787,20 @@ function showConnDetail(conn, mode) {
                 <h3 class="text-lg font-light text-zinc-800 dark:text-zinc-100 truncate">${host}</h3>
                 <p class="text-xs text-zinc-400 dark:text-zinc-500 mt-1 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-lg bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/5 flex items-center justify-center text-zinc-400 hover:text-zinc-800 dark:hover:text-white hover:bg-black/10 dark:hover:bg-white/10 transition-all">
+            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-sm bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/5 flex items-center justify-center text-zinc-400 hover:text-zinc-800 dark:hover:text-white hover:bg-black/10 dark:hover:bg-white/10 transition-all">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
 
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
-            <span class="inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold ${ruleColorClass}">${rule}</span>
+            <span class="inline-flex px-2.5 py-1 rounded-sm text-xs font-semibold ${ruleColorClass}">${rule}</span>
             <span class="text-xs text-zinc-400 truncate">${chains}</span>
         </div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-3 border border-black/5 dark:border-white/5">
+            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-lg p-3 border border-black/5 dark:border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
                     <span class="text-2xs text-purple-500/70 dark:text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
                     <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>
@@ -811,7 +811,7 @@ function showConnDetail(conn, mode) {
                     <span class="text-2xs text-zinc-500 dark:text-zinc-400 tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-3 border border-black/5 dark:border-white/5">
+            <div class="bg-black/[0.03] dark:bg-white/[0.03] rounded-lg p-3 border border-black/5 dark:border-white/5">
                 <div class="flex items-center justify-between mb-1.5">
                     <span class="text-2xs text-blue-500/70 dark:text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
                     <span class="text-[8px] text-zinc-400 dark:text-zinc-600">${t.totalLabel || 'Total'}</span>

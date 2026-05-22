@@ -105,7 +105,7 @@ async function showEditPanel(configInfo) {
 
     // Build dropdown menu items (escape labels for XSS safety)
     const dropdownMenuItems = autoUpdateOptions.map(opt => 
-        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-200 transition-all">${escapeHtml(opt.label)}</button>`
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-200 transition-all">${escapeHtml(opt.label)}</button>`
     ).join('');
 
     // Remove any existing modal to prevent duplicate IDs
@@ -148,7 +148,7 @@ async function showEditPanel(configInfo) {
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
                             <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30 w-40">
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30 w-40">
                             ${dropdownMenuItems}
                         </div>
                         <select id="edit-auto-update" class="hidden">
