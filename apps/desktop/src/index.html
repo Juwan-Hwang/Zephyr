@@ -16,9 +16,19 @@
     <script type="module" src="main.js" defer></script>
 </head>
 <body class="bg-transparent h-screen w-screen overflow-hidden select-none">
-    <div id="app-main-container" class="w-full h-full bg-transparent flex overflow-hidden border border-white/10 ring-1 ring-black/20 transition-all duration-300">
+    <div id="app-main-container" class="w-full h-full flex overflow-hidden p-3 gap-0 rounded-lg transition-all duration-300 relative">
+        <!-- Page Background Glows (shared layer, above sidebar but below content) -->
+        <div id="glow-home" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0"></div>
+        <div id="glow-subscriptions" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-proxies" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-connections" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-cyan-500/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-rule-library" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-logs" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-settings" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
+
         <!-- Sidebar -->
-        <nav class="w-20 flex flex-col items-center py-8 bg-black/20 border-r border-white/5 gap-8" aria-label="Main navigation">
+        <nav id="sidebar-nav" class="w-20 flex flex-col items-center py-8 rounded-lg gap-8 relative z-10 backdrop-blur-sm" aria-label="Main navigation">
             <button data-nav="home" class="w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-all duration-300 bg-white/10 text-white shadow-lg ring-1 ring-white/20" title="Home" aria-current="page">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 <span class="sr-only" data-i18n="home">Home</span>
@@ -64,9 +74,9 @@
         </nav>
 
         <!-- Main Area -->
-        <div class="flex-1 flex flex-col min-w-0">
+        <div class="flex-1 flex flex-col min-w-0 relative z-10">
             <!-- Title Bar -->
-            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-4 select-none cursor-grab active:cursor-grabbing border-b border-white/5 bg-white/5">
+            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-4 select-none cursor-grab active:cursor-grabbing">
                 <div class="flex items-center gap-2 pointer-events-none">
                     <img src="app-icon.png" id="app-title-icon" alt="Icon" class="w-5 h-5 opacity-90 filter drop-shadow-[0_0_8px_var(--color-accent-glow)] transition-all duration-300">
                     <span class="text-xs font-semibold text-zinc-300 tracking-wide">Zephyr</span>
@@ -83,9 +93,7 @@
 
             <!-- Dashboard Page -->
             <div data-page="home" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar relative">
-                <!-- Background Glow -->
-                <div class="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full"></div>
-                
+
                 <div class="flex flex-col items-center justify-center py-12 relative z-10">
                     <!-- Current Node Display (Interactive Wheel) -->
                     <div id="node-wheel-container" class="absolute top-0 left-0 right-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-2">
@@ -214,8 +222,7 @@
 
             <!-- Subscriptions Page -->
             <div data-page="subscriptions" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
-                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
-                
+
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div>
                         <h2 class="text-2xl font-light text-zinc-100" data-i18n="subscriptions">Subscriptions</h2>
@@ -241,8 +248,8 @@
                 </div>
 
                 <!-- Plugin Panel (overlay) -->
-                <div id="plugin-panel" class="hidden absolute inset-0 z-50 flex items-center justify-center">
-                    <div class="absolute inset-0 bg-black/40" id="plugin-panel-backdrop"></div>
+                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+                    <div class="absolute inset-0 bg-black/40 backdrop-blur-md" id="plugin-panel-backdrop"></div>
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
@@ -320,8 +327,7 @@
 
             <!-- Proxies Page -->
             <div data-page="proxies" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
-                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
-                
+
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-4">
                         <h2 class="text-2xl font-light text-zinc-100" data-i18n="proxiesTitle">Proxy Nodes</h2>
@@ -370,7 +376,6 @@
 
             <!-- Rule Library Page -->
             <div data-page="rule-library" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
-                <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500 z-0"></div>
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-light text-zinc-900 dark:text-zinc-100" data-i18n="ruleLibraryTitle">Rule Library</h2>
@@ -389,8 +394,7 @@
 
             <!-- Settings Page -->
             <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
-                <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full transition-colors duration-500 z-0"></div>
-                
+
                 <h2 class="text-2xl font-light text-zinc-100 mb-8 relative z-10" data-i18n="settingsTitle">Settings</h2>
                 
                 <div class="space-y-6 relative z-10">
@@ -1029,8 +1033,7 @@
 
             <!-- Advanced Page -->
             <div data-page="advanced" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
-                <div class="absolute top-[-10%] right-1/2 translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full"></div>
-                
+
                 <header class="flex items-center justify-between relative z-10">
                     <div class="flex items-center gap-4">
                         <button id="btn-back-settings" class="btn-ghost">
@@ -1071,7 +1074,7 @@
     <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 right-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
 
     <!-- Modal Background -->
-    <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-slate-900/20 dark:bg-black/40 backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-300 opacity-0 pointer-events-auto">
+    <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-black/40 backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-300 opacity-0 pointer-events-auto">
         <div id="modal-container" class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-300">
             <h3 id="modal-title" class="text-xl font-light text-zinc-800 dark:text-zinc-100 mb-6">Subscription Name</h3>
             <div class="space-y-6">
