@@ -7,21 +7,6 @@
 
 #![allow(clippy::needless_pass_by_value)]
 
-use std::collections::HashMap;
-
-/// Recursively replace all `null` values in a JSON tree with `0`.
-/// This handles forward-compat when a library struct adds new non-optional
-/// numeric fields but older persisted data has `null` for those fields.
-fn sanitize_nulls_to_zero(val: &mut serde_json::Value) {
-    match val {
-        serde_json::Value::Null => *val = serde_json::Value::Number(0.into()),
-        serde_json::Value::Array(arr) => arr.iter_mut().for_each(sanitize_nulls_to_zero),
-        serde_json::Value::Object(obj) => obj.values_mut().for_each(sanitize_nulls_to_zero),
-        serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::String(_) => {}
-    }
-}
 use std::sync::{Arc, Mutex};
 
 use tauri::AppHandle;
@@ -31,10 +16,9 @@ use clash_prism_extension::PrismExtension;
 use clash_prism_plugin::PluginLoader;
 use clash_prism_script::limits::ScriptLimits;
 use clash_prism_script::{KvStore, SandboxConfig};
-use clash_prism_smart::history::NodeHistory;
 use clash_prism_smart::SmartConfig;
 
-use crate::core_manager::{core::secure_io::write_file_secure, ensure_app_storage};
+use crate::core_manager::ensure_app_storage;
 
 // ---------------------------------------------------------------------------
 // Sub-modules
@@ -51,7 +35,8 @@ mod rate_limiter;
 mod rule_groups;
 mod rule_library;
 mod script_commands;
-mod smart_commands;
+pub mod smart_commands;
+pub mod smart_state;
 mod trace_commands;
 pub mod types;
 
@@ -91,13 +76,12 @@ pub(crate) fn prism_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, Stri
 pub struct PrismState {
     pub(crate) inner: Arc<Mutex<PrismInner>>,
     pub(crate) app: AppHandle,
+    /// New smart state with async persistence
+    pub smart_state: Option<smart_state::SmartState>,
 }
 
 pub(crate) struct PrismInner {
     extension: Option<PrismExtension<host::ZephyrPrismHost>>,
-    /// Per-node speed test history, keyed by node name.
-    /// Accumulates across calls; persisted to disk on each update.
-    node_histories: HashMap<String, NodeHistory>,
     /// Failover tracker for automatic node switching on failures.
     failover_tracker: FailoverTracker,
     /// Key-value store for scripts and plugins.
@@ -115,102 +99,31 @@ pub(crate) struct PrismInner {
     rate_limiter: rate_limiter::RateLimiter,
 }
 
-impl PrismInner {
-    /// Load persisted histories from disk, or return empty map.
-    /// Tolerates `null` values in numeric fields (replaces with 0) for forward compat.
-    pub(crate) fn load_histories(prism_dir: &std::path::Path) -> HashMap<String, NodeHistory> {
-        let path = prism_dir.join("smart_history.json");
-        if !path.exists() {
-            return HashMap::new();
-        }
-        let json = match std::fs::read_to_string(&path) {
-            Ok(j) => j,
-            Err(e) => {
-                eprintln!("[prism] Failed to read smart_history.json: {e}, starting fresh");
-                return HashMap::new();
-            }
-        };
-
-        // Try strict parse first
-        if let Ok(map) = serde_json::from_str::<HashMap<String, NodeHistory>>(&json) {
-            eprintln!(
-                "[prism] loaded {} node histories from smart_history.json",
-                map.len()
-            );
-            return map;
-        }
-
-        // Fallback: sanitize null → 0 in numeric fields, then retry
-        eprintln!("[prism] smart_history.json has null values, sanitizing...");
-        let mut val: serde_json::Value = match serde_json::from_str(&json) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[prism] smart_history.json is not valid JSON: {e}, starting fresh");
-                return HashMap::new();
-            }
-        };
-        sanitize_nulls_to_zero(&mut val);
-        let sanitized = serde_json::to_string(&val).unwrap_or_default();
-        match serde_json::from_str::<HashMap<String, NodeHistory>>(&sanitized) {
-            Ok(map) => {
-                eprintln!(
-                    "[prism] loaded {} node histories (after null sanitization)",
-                    map.len()
-                );
-                // Re-persist the sanitized version so we don't need to fix it again
-                let _ = write_file_secure(&path, &sanitized);
-                map
-            }
-            Err(e) => {
-                eprintln!("[prism] Failed to parse smart_history.json even after sanitization: {e}, starting fresh");
-                HashMap::new()
-            }
-        }
-    }
-
-    /// Persist node histories to disk (can be called outside the lock).
-    /// NaN values in numeric fields are replaced with 0 to prevent null in JSON,
-    /// which would cause deserialization failures on next load.
-    pub(crate) fn persist_histories(
-        histories: &HashMap<String, NodeHistory>,
-        prism_dir: &std::path::Path,
-    ) {
-        let path = prism_dir.join("smart_history.json");
-        let mut json_val: serde_json::Value = serde_json::to_value(histories).unwrap_or_default();
-        sanitize_nulls_to_zero(&mut json_val);
-        if let Err(e) =
-            write_file_secure(&path, &serde_json::to_string(&json_val).unwrap_or_default())
-        {
-            eprintln!("[prism] Failed to save smart_history.json: {e}");
-        }
-    }
-}
-
 impl PrismState {
     #[must_use]
     pub fn new(app: &AppHandle) -> Self {
         let host = host::ZephyrPrismHost::new(app.clone());
         let extension = PrismExtension::new(host);
 
-        // Load persisted smart histories
-        let node_histories = ensure_app_storage(app)
+        let prism_dir = ensure_app_storage(app)
             .ok()
-            .and_then(|paths| {
-                let prism_dir = paths.app_data_dir.join("prism");
-                std::fs::create_dir_all(&prism_dir).ok()?;
-                Some(PrismInner::load_histories(&prism_dir))
-            })
-            .unwrap_or_default();
+            .map(|paths| paths.app_data_dir.join("prism"));
+
+        // Initialize SmartState using tauri::async_runtime::block_on
+        // This works regardless of whether a tokio runtime is already active
+        let smart_state = prism_dir.as_ref().and_then(|dir| {
+            std::fs::create_dir_all(dir).ok()?;
+            let config = smart_state::SmartStateConfig::new(dir);
+            tauri::async_runtime::block_on(async { smart_state::SmartState::init(config).await })
+                .ok()
+        });
 
         Self {
             inner: Arc::new(Mutex::new(PrismInner {
                 extension: Some(extension),
-                node_histories,
                 failover_tracker: FailoverTracker::new(NodeFailPolicy::new()),
                 kv_store: {
-                    let db_path = ensure_app_storage(app)
-                        .ok()
-                        .map(|p| p.app_data_dir.join("prism").join("kv_store.db"));
+                    let db_path = prism_dir.as_ref().map(|p| p.join("kv_store.db"));
                     match db_path {
                         Some(p) => Arc::new(KvStore::with_persistence(p)),
                         None => Arc::new(KvStore::new()),
@@ -218,10 +131,10 @@ impl PrismState {
                 },
                 plugin_loader: {
                     let mut loader = PluginLoader::new();
-                    if let Ok(paths) = ensure_app_storage(app) {
-                        let dir = paths.app_data_dir.join("prism").join("plugins");
-                        if dir.exists() {
-                            loader.add_search_path(dir);
+                    if let Some(dir) = &prism_dir {
+                        let plugins_dir = dir.join("plugins");
+                        if plugins_dir.exists() {
+                            loader.add_search_path(plugins_dir);
                         }
                     }
                     loader
@@ -245,6 +158,7 @@ impl PrismState {
                 },
             })),
             app: app.clone(),
+            smart_state,
         }
     }
 
