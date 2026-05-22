@@ -916,8 +916,8 @@ function updateOverrideCardContent(card, item) {
     if (toggleBtn) {
         toggleBtn.dataset.enabled = String(item.enabled);
         toggleBtn.title = item.enabled
-            ? escapeAttr(t('overrideDisable'))
-            : escapeAttr(t('overrideEnable'));
+            ? t('overrideDisable')
+            : t('overrideEnable');
         toggleBtn.innerHTML = item.enabled
             ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
             : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
