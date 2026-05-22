@@ -51,7 +51,8 @@ mod rate_limiter;
 mod rule_groups;
 mod rule_library;
 mod script_commands;
-mod smart_commands;
+pub mod smart_commands;
+pub mod smart_state;
 mod trace_commands;
 pub mod types;
 
@@ -91,12 +92,15 @@ pub(crate) fn prism_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, Stri
 pub struct PrismState {
     pub(crate) inner: Arc<Mutex<PrismInner>>,
     pub(crate) app: AppHandle,
+    /// New smart state with async persistence
+    pub smart_state: Option<smart_state::SmartState>,
 }
 
 pub(crate) struct PrismInner {
     extension: Option<PrismExtension<host::ZephyrPrismHost>>,
     /// Per-node speed test history, keyed by node name.
     /// Accumulates across calls; persisted to disk on each update.
+    /// Deprecated: use `smart_state` instead
     node_histories: HashMap<String, NodeHistory>,
     /// Failover tracker for automatic node switching on failures.
     failover_tracker: FailoverTracker,
@@ -202,15 +206,27 @@ impl PrismState {
             })
             .unwrap_or_default();
 
+        let prism_dir = ensure_app_storage(app)
+            .ok()
+            .map(|paths| paths.app_data_dir.join("prism"));
+
+        // Initialize new SmartState asynchronously
+        let smart_state = prism_dir.as_ref().and_then(|dir| {
+            // Use block_on for sync context initialization
+            tokio::runtime::Handle::try_current().ok().and_then(|rt| {
+                let config = smart_state::SmartStateConfig::new(dir);
+                rt.block_on(async { smart_state::SmartState::init(config).await })
+                    .ok()
+            })
+        });
+
         Self {
             inner: Arc::new(Mutex::new(PrismInner {
                 extension: Some(extension),
                 node_histories,
                 failover_tracker: FailoverTracker::new(NodeFailPolicy::new()),
                 kv_store: {
-                    let db_path = ensure_app_storage(app)
-                        .ok()
-                        .map(|p| p.app_data_dir.join("prism").join("kv_store.db"));
+                    let db_path = prism_dir.as_ref().map(|p| p.join("kv_store.db"));
                     match db_path {
                         Some(p) => Arc::new(KvStore::with_persistence(p)),
                         None => Arc::new(KvStore::new()),
@@ -218,10 +234,10 @@ impl PrismState {
                 },
                 plugin_loader: {
                     let mut loader = PluginLoader::new();
-                    if let Ok(paths) = ensure_app_storage(app) {
-                        let dir = paths.app_data_dir.join("prism").join("plugins");
-                        if dir.exists() {
-                            loader.add_search_path(dir);
+                    if let Some(dir) = &prism_dir {
+                        let plugins_dir = dir.join("plugins");
+                        if plugins_dir.exists() {
+                            loader.add_search_path(plugins_dir);
                         }
                     }
                     loader
@@ -245,6 +261,7 @@ impl PrismState {
                 },
             })),
             app: app.clone(),
+            smart_state,
         }
     }
 
