@@ -61,6 +61,18 @@ Zephyr 不是"功能堆满就好"的客户端。它更关注三个方向：
 
 详细功能清单见 [FEATURES.md](FEATURES.md)。
 
+## 社区成长
+
+Zephyr 正在受到开发者与用户的关注。
+
+<a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=timeline&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&legend=top-left" width="450" />
+  </picture>
+</a>
+
 ---
 
 ## 功能特性
