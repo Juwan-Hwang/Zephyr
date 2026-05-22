@@ -381,7 +381,7 @@ function renderArraySection(title, arr, fullKey, depth) {
         title,
         defaultOpen: false,
         badgeText: `${arr.length}`,
-        cardClass: 'bg-black/20 rounded-xl overflow-hidden',
+        cardClass: 'bg-black/20 rounded-lg overflow-hidden',
         headerClass: 'p-3',
         contentClass: 'border-t border-white/5 space-y-2 p-3',
     });
@@ -401,7 +401,7 @@ function renderSimpleArrayEditor(container, arr, fullKey) {
     wrapper.className = "space-y-1";
 
     const textarea = document.createElement('textarea');
-    textarea.className = "w-full min-h-[60px] bg-black/40 border border-white/5 rounded-lg px-3 py-2 text-2xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all font-mono resize-y";
+    textarea.className = "w-full min-h-[60px] bg-black/40 border border-white/5 rounded-md px-3 py-2 text-2xs text-zinc-300 focus:outline-none focus:border-accent/50 transition-all font-mono resize-y";
     textarea.value = arr.join('\n');
     textarea.rows = Math.min(arr.length, 10);
 
@@ -509,14 +509,14 @@ function renderConfigItem(key, value, fullKey) {
         wrapper.appendChild(badge);
 
         const setBtn = document.createElement('button');
-        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded transition-colors";
+        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
         setBtn.title = "Set value";
         setBtn.innerHTML = SVG_ICONS.plus;
         setBtn.onclick = (e) => {
             e.stopPropagation();
             const input = document.createElement('input');
             input.type = "text";
-            input.className = "w-full max-w-[120px] bg-black/40 border border-accent/50 rounded-lg px-2 py-1 text-xs text-zinc-300 focus:outline-none font-mono";
+            input.className = "w-full max-w-[120px] bg-black/40 border border-accent/50 rounded-md px-2 py-1 text-xs text-zinc-300 focus:outline-none font-mono";
             input.placeholder = "value...";
             input.onkeydown = (ev) => {
                 if (ev.key === 'Enter') {

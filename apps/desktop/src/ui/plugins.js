@@ -456,7 +456,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     // Fetch and render profiles
     const saveBtn = document.createElement('button');
-    saveBtn.className = 'bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium';
+    saveBtn.className = 'bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
     saveBtn.textContent = t('confirm') ?? 'OK';
     saveBtn.disabled = true; // Disabled until profiles are loaded
 
@@ -479,7 +479,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
         for (const cfg of configs) {
             const row = document.createElement('label');
-            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5';
+            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.value = cfg.name || cfg;
@@ -525,7 +525,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     btnRow.className = 'flex items-center justify-end gap-2';
 
     const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-lg';
+    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
     cancelBtn.textContent = t('cancel') ?? 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
 
@@ -899,7 +899,7 @@ function updateOverrideCardContent(card, item) {
             : (item.profileIds?.length
                 ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
                 : t('overrideScopeNone'));
-        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
+        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
         scopeBadge.textContent = scopeLabel;
     }
 
@@ -972,26 +972,26 @@ function buildOverrideCard(item) {
             <div class="flex flex-col gap-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="text-sm text-zinc-200 font-medium truncate">${escapeHtml(item.name ?? '')}</span>
-                    <span class="text-2xs px-1.5 py-0.5 rounded ${typeColor} shrink-0">${typeLabel}</span>
-                    ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 shrink-0">🌐</span>' : ''}
+                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${typeColor} shrink-0">${typeLabel}</span>
+                    ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded-sm bg-sky-500/20 text-sky-400 shrink-0">🌐</span>' : ''}
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-2xs px-1.5 py-0.5 rounded ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
+                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
                     <span class="text-xs text-zinc-500">${summaryText}</span>
                 </div>
             </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-            <button class="override-toggle-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-accent/10 transition-all" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
+            <button class="override-toggle-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-all" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
                 ${item.enabled
                     ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
                     : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
                 }
             </button>
-            <button class="override-up-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
+            <button class="override-up-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowUp}
             </button>
-            <button class="override-down-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
+            <button class="override-down-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowDown}
             </button>
             <button class="btn-delete-icon opacity-0 group-hover:opacity-100" title="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
@@ -1197,12 +1197,12 @@ function showDeleteConfirm(overrideId, overrideName) {
     btnRow.className = 'flex items-center justify-end gap-2';
 
     const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-lg';
+    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
     cancelBtn.textContent = t('cancel') ?? '取消';
     cancelBtn.addEventListener('click', () => overlay.remove());
 
     const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'bg-rose-600 hover:bg-rose-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium';
+    confirmBtn.className = 'bg-rose-600 hover:bg-rose-500 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
     confirmBtn.textContent = t('confirm') ?? '确认';
     confirmBtn.addEventListener('click', async () => {
         confirmBtn.disabled = true;
@@ -1304,7 +1304,7 @@ function openFullscreenEditor() {
     const isJs = activeOverrideExt === 'js';
     if (typeBadge) {
         typeBadge.textContent = isJs ? 'JS' : 'Prism';
-        typeBadge.className = `text-2xs px-2 py-0.5 rounded ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`;
+        typeBadge.className = `text-2xs px-2 py-0.5 rounded-sm ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`;
     }
 
     // Create fullscreen editor

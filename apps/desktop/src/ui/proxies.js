@@ -888,7 +888,7 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-_groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border border-white/10 rounded-xl shadow-2xl p-2 max-h-[300px] overflow-y-auto custom-scrollbar';
+_groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border border-white/10 rounded-lg shadow-2xl p-2 max-h-[300px] overflow-y-auto custom-scrollbar';
         _groupMenuElement.style.zIndex = '99999';
         document.body.appendChild(_groupMenuElement);
     }
@@ -899,7 +899,7 @@ _groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border bor
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
-btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-300 hover:bg-white/5 transition-all';
+btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-300 hover:bg-white/5 transition-all';
         if (groupName === currentGroup) {
             btn.classList.add('active');
         }
@@ -1331,7 +1331,7 @@ export async function renderProxies() {
     if (!data || !data.proxies) {
         container.innerHTML = '';
         const err = document.createElement('div');
-        err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-2xl border border-rose-400/20';
+        err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20';
         err.textContent = t.failedToConnect;
         container.appendChild(err);
         return;
@@ -1340,7 +1340,7 @@ export async function renderProxies() {
     if (config?.mode?.toLowerCase() === 'direct') {
         container.innerHTML = '';
         const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-3xl border border-white/5 flex flex-col items-center gap-4';
+        prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-lg border border-white/5 flex flex-col items-center gap-4';
         prompt.innerHTML = `
             ${SVG_ICONS.externalLink}
             <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>

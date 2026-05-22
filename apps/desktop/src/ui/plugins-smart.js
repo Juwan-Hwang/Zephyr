@@ -110,7 +110,7 @@ async function renderPluginsList(plugins) {
         <div class="glass-card p-4">
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-xl ${isLoaded ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-500'} border flex items-center justify-center">
+                    <div class="w-10 h-10 rounded-md ${isLoaded ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-500'} border flex items-center justify-center">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                     </div>
                     <div>
@@ -171,7 +171,7 @@ async function loadHooksList() {
             return;
         }
         container.innerHTML = hooks.map(h => `
-            <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-white/5">
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
                 <span class="text-xs text-zinc-300">${esc(h.name)}</span>
                 <div class="flex items-center gap-2">
                     ${h.isHighFrequency ? '<span class="text-2xs text-yellow-500">high-freq</span>' : ''}
@@ -207,7 +207,7 @@ async function loadPermissionsList() {
             return;
         }
         container.innerHTML = perms.map(p => `
-            <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-white/5">
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
                 <div>
                     <span class="text-xs text-zinc-300 font-mono">${esc(p.name)}</span>
                     <span class="text-2xs text-zinc-500 ml-2">${esc(p.displayName)}</span>
@@ -240,7 +240,7 @@ async function loadKvStore() {
             entries.push({ key, value });
         }
         container.innerHTML = entries.map(e => `
-            <div class="flex items-center justify-between py-1 px-2 rounded hover:bg-white/5">
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
                 <div class="flex-1 min-w-0">
                     <span class="text-xs text-zinc-300 font-mono">${esc(e.key)}</span>
                     <span class="text-2xs text-zinc-600 ml-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>

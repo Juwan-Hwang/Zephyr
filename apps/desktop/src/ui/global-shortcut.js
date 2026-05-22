@@ -344,7 +344,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     `;
 
     const dropdownMenu = document.createElement('div');
-    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-xl p-1 z-30';
+    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg p-1 z-30';
 
     // Populate options: filter out already-bound actions when adding new row
     const currentShortcuts = loadShortcuts();
@@ -357,7 +357,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         const opt = document.createElement('button');
         opt.type = 'button';
         opt.dataset.value = actionDef.id;
-        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 transition-all';
+        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-700 dark:text-zinc-200 transition-all';
         if (actionDef.id === actionId) opt.classList.add('active');
         opt.textContent = getActionLabel(actionDef.id, t);
         opt.addEventListener('click', () => {
