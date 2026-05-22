@@ -245,9 +245,6 @@ function t(key) {
 
 function buildPageHTML() {
     return `
-        <!-- Background Glow (consistent with other pages) -->
-        <div class="absolute top-[-10%] right-[-10%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full"></div>
-
         <header class="flex items-center justify-between relative z-10 shrink-0">
             <div class="flex items-center gap-4">
                 <h2 class="text-2xl font-light text-zinc-100" data-i18n="logsTitle">${t('logsTitle')}</h2>

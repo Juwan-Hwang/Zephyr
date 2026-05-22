@@ -23,6 +23,7 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI --disable-logging --log-level=3",
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "visible": false,
         "center": true
       }
