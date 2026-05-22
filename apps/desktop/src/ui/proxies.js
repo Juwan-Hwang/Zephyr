@@ -713,7 +713,7 @@ export function initProxyControls() {
                 const targetGroup = appStore.get('uiGroupName') || mainGroup;
                 const success = await switchProxy(targetGroup, best.name);
                 if (success) {
-                    showNotification(`Switched to best node: ${best.name} (score: ${displayScore})`, 'success');
+                    showNotification(t('notifSwitchedBest', { name: best.name, score: displayScore }), 'success');
                     await syncCoreConfig();
                     await renderProxies();
                 }

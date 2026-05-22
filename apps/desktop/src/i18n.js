@@ -530,6 +530,9 @@ export const translations = {
         smartProxyScore: "Score",
         smartAutoTest: "Auto Speed Test",
         smartAutoTestDesc: "Periodically test all proxies to keep scores accurate",
+        notifSwitchedBest: "Switched to best node: @@name@@ (score: @@score@@)",
+        notifBestNode: "Best node: @@name@@ (score: @@score@@)",
+        notifNoNodesForSelection: "No nodes available for selection",
         // Plugin System
         plugins: "Plugins",
         pluginVersion: "v@@version@@",
@@ -1121,6 +1124,9 @@ export const translations = {
         smartProxyScore: "评分",
         smartAutoTest: "自动测速",
         smartAutoTestDesc: "定期测试所有代理以保持评分准确",
+        notifSwitchedBest: "已切换到最佳节点: @@name@@ (评分: @@score@@)",
+        notifBestNode: "最佳节点: @@name@@ (评分: @@score@@)",
+        notifNoNodesForSelection: "没有可选的节点",
         // 插件系统
         plugins: "插件",
         pluginVersion: "v@@version@@",
