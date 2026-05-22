@@ -215,10 +215,6 @@ pub fn import_items_batch(
     let mut valid_items: Vec<OverrideItem> = Vec::with_capacity(items.len());
 
     for (item, content) in &items {
-        if content.is_empty() {
-            valid_items.push(item.clone());
-            continue;
-        }
         let path = dir.join(item.content_filename());
         match write_file_secure(&path, content) {
             Ok(_) => valid_items.push(item.clone()),
