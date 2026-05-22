@@ -243,7 +243,7 @@
                 <!-- Plugin Panel (overlay) -->
                 <div id="plugin-panel" class="hidden absolute inset-0 z-50 flex items-center justify-center">
                     <div class="absolute inset-0 bg-black/40" id="plugin-panel-backdrop"></div>
-                    <div class="plugin-panel relative w-full max-w-2xl max-h-[80vh] flex flex-col p-6 gap-4">
+                    <div class="plugin-panel relative w-full max-w-2xl max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
                             <h3 class="text-lg font-light text-zinc-100" data-i18n="overrideTitle">覆写脚本</h3>
@@ -265,17 +265,20 @@
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
                                 <div id="plugin-new-dropdown" class="hidden absolute right-0 mt-2 z-50 flex flex-col gap-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-xl p-2 shadow-2xl min-w-[160px]">
-                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="new-js"><span data-i18n="overrideNewJs">📜 New JS Override</span></button>
-                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="new-prism"><span data-i18n="overrideNewPrism">⚡ New Prism YAML</span></button>
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
                                     <div class="h-px bg-zinc-200 dark:bg-white/10 my-1"></div>
-                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="import-url"><span data-i18n="overrideImportUrl">📥 Import from URL</span></button>
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
+                                    <div class="h-px bg-zinc-200 dark:bg-white/10 my-1"></div>
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
+                                    <button class="text-xs text-left px-3 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
                                 </div>
                             </div>
                             <button id="plugin-enable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideEnableAll">启用全部</button>
                             <button id="plugin-disable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideDisableAll">禁用全部</button>
                         </div>
                         <!-- Override cards list -->
-                        <div id="plugin-list" class="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 custom-scrollbar">
                             <!-- Override cards rendered by plugins.js -->
                         </div>
                         <!-- Script editor area -->
@@ -1180,8 +1183,8 @@
                 <div id="fullscreen-editor-main" class="flex-1 flex flex-col min-w-[300px]" style="flex-basis: 60%;">
                     <div id="fullscreen-editor-cm6" class="flex-1 w-full overflow-hidden"></div>
                     <!-- Status Bar -->
-                    <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary, rgba(0,0,0,0.3)); border-color: var(--border-primary, rgba(255,255,255,0.05));">
-                        <div class="flex items-center gap-4" style="color: var(--text-muted, #71717a);">
+                    <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
+                        <div class="flex items-center gap-4" style="color: var(--text-muted);">
                             <span id="fullscreen-editor-cursor-pos">行 1, 列 1</span>
                             <span id="fullscreen-editor-char-count">0 字符</span>
                         </div>
@@ -1189,21 +1192,21 @@
                     </div>
                 </div>
                 <!-- Resizer Handle -->
-                <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--border-primary, rgba(255,255,255,0.1));">
+                <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--bg-tertiary);">
                     <div class="absolute inset-y-0 -left-1 -right-1"></div>
                     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--color-accent, #6366f1);"></div>
                 </div>
                 <!-- Right Sidebar - Output Panel -->
-                <div id="fullscreen-editor-sidebar" class="flex flex-col min-w-[200px] max-w-[600px]" style="flex-basis: 350px; border-left: 1px solid var(--border-primary, rgba(255,255,255,0.1)); background: var(--bg-secondary, rgba(0,0,0,0.2));">
-                    <div class="px-4 py-3 border-b flex items-center justify-between shrink-0" style="border-color: var(--border-primary, rgba(255,255,255,0.05));">
+                <div id="fullscreen-editor-sidebar" class="flex flex-col min-w-[200px] max-w-[600px]" style="flex-basis: 350px; border-left: 1px solid var(--border-primary); background: var(--bg-secondary);">
+                    <div class="px-4 py-3 border-b flex items-center justify-between shrink-0" style="border-color: var(--border-primary);">
                         <span class="text-sm font-medium" data-i18n="overrideOutput">输出</span>
                         <div class="flex items-center gap-3">
-                            <button id="fullscreen-editor-copy-output-btn" class="text-xs transition-colors" style="color: var(--text-muted, #71717a);" data-i18n="overrideCopied">复制</button>
-                            <button id="fullscreen-editor-clear-output-btn" class="text-xs transition-colors" style="color: var(--text-muted, #71717a);" data-i18n="overrideClear">清空</button>
+                            <button id="fullscreen-editor-copy-output-btn" class="text-xs transition-colors" style="color: var(--text-muted);" data-i18n="overrideCopy">复制</button>
+                            <button id="fullscreen-editor-clear-output-btn" class="text-xs transition-colors" style="color: var(--text-muted);" data-i18n="overrideClear">清空</button>
                         </div>
                     </div>
-                    <div id="fullscreen-editor-output" class="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar" style="color: var(--text-secondary, #a1a1aa);">
-                        <div style="color: var(--text-muted, #52525b);" class="italic">点击"保存并执行"查看输出...</div>
+                    <div id="fullscreen-editor-output" class="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar" style="color: var(--text-secondary);">
+                        <div style="color: var(--text-muted);" class="italic">点击"保存并执行"查看输出...</div>
                     </div>
                 </div>
             </div>

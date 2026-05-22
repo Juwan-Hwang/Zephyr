@@ -278,8 +278,7 @@ fn execute_prism_yaml_write(
     let prism_dir = crate::prism::prism_data_dir(&state.app)?;
     let patch_filename = item.patch_filename();
     let patch_path = prism_dir.join(&patch_filename);
-    let normalized = crate::prism::types::normalize_to_prism_yaml(content);
-    write_file_secure(&patch_path, &normalized)
+    write_file_secure(&patch_path, content)
         .map_err(|e| format!("Failed to write Prism patch: {e}"))?;
 
     // Apply through the Prism extension
@@ -346,8 +345,7 @@ pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> R
             // Re-enable: restore patch file from stored content
             let content = overrides_store::read_content(&state, &id)
                 .map_err(|e| format!("Failed to read override content to restore patch: {e}"))?;
-            let normalized = crate::prism::types::normalize_to_prism_yaml(&content);
-            write_file_secure(&patch_path, &normalized)
+            write_file_secure(&patch_path, &content)
                 .map_err(|e| format!("Failed to restore patch file: {e}"))?;
         } else {
             // Disable: remove patch so Prism extension stops applying it
@@ -639,4 +637,150 @@ async fn fetch_body(
     }
 
     String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8 in remote override: {e}"))
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Export / Import
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Serializable export entry — metadata + content for a single override.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportEntry {
+    name: String,
+    ext: String,
+    r#type: String,
+    global: bool,
+    profile_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    enabled: bool,
+    content: String,
+}
+
+/// Export payload with version for forward compatibility.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportPayload {
+    version: u32,
+    exported_at: i64,
+    items: Vec<ExportEntry>,
+}
+
+/// Export all overrides as a JSON file in the `prism/overrides/exports/` directory.
+///
+/// Returns the absolute path of the written file so the UI can display it.
+#[tauri::command]
+pub fn override_export(state: State<PrismState>) -> Result<String, String> {
+    use chrono::Local;
+
+    let meta = overrides_store::load_meta(&state)?;
+    if meta.items.is_empty() {
+        return Err("No overrides to export".to_owned());
+    }
+
+    let mut entries = Vec::with_capacity(meta.items.len());
+    for item in &meta.items {
+        let content = match overrides_store::read_content(&state, &item.id) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "[overrides] Failed to read content for '{}', skipping: {e}",
+                    item.name
+                );
+                continue;
+            }
+        };
+        entries.push(ExportEntry {
+            name: item.name.clone(),
+            ext: item.ext.file_ext().to_owned(),
+            r#type: match item.r#type {
+                OverrideType::Local => "local".to_owned(),
+                OverrideType::Remote => "remote".to_owned(),
+            },
+            global: item.global,
+            profile_ids: item.profile_ids.clone(),
+            url: item.url.clone(),
+            enabled: item.enabled,
+            content,
+        });
+    }
+
+    let payload = ExportPayload {
+        version: 1,
+        exported_at: chrono::Utc::now().timestamp_millis(),
+        items: entries,
+    };
+
+    let json = serde_json::to_string_pretty(&payload)
+        .map_err(|e| format!("Failed to serialize export: {e}"))?;
+
+    // Write to prism/overrides/exports/
+    let overrides_dir = overrides_store::overrides_dir(&state)?;
+    let exports_dir = overrides_dir.join("exports");
+    std::fs::create_dir_all(&exports_dir)
+        .map_err(|e| format!("Failed to create exports dir: {e}"))?;
+
+    let filename = format!(
+        "zephyr-overrides-{}.json",
+        Local::now().format("%Y-%m-%d-%H%M%S")
+    );
+    let export_path = exports_dir.join(&filename);
+    write_file_secure(&export_path, &json)
+        .map_err(|e| format!("Failed to write export file: {e}"))?;
+
+    // Return the absolute path as a string for the UI to display
+    Ok(export_path.to_string_lossy().into_owned())
+}
+
+/// Import overrides from a JSON string (read by the front-end file picker).
+///
+/// Accepts the raw JSON content of a previously exported file.
+/// Creates each override, writes its content, and applies scope/enabled state.
+/// Uses batch import for efficiency (single metadata lock for all items).
+/// Returns the number of overrides imported.
+#[tauri::command]
+pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, String> {
+    check_input_size(&json, "Import payload")?;
+
+    let payload: ExportPayload =
+        serde_json::from_str(&json).map_err(|e| format!("Invalid export file format: {e}"))?;
+
+    if payload.items.is_empty() {
+        return Err("Export file contains no overrides".to_owned());
+    }
+
+    // Build items with all fields pre-populated (avoids per-item update_item calls)
+    let mut items_to_import: Vec<(OverrideItem, String)> = Vec::with_capacity(payload.items.len());
+
+    for entry in payload.items {
+        if entry.name.is_empty() || entry.ext.is_empty() {
+            eprintln!("[overrides] Skipping malformed import entry: empty name or ext");
+            continue;
+        }
+
+        let Some(ext) = OverrideExt::from_ext(&entry.ext) else {
+            eprintln!(
+                "[overrides] Skipping import entry with unknown ext: {}",
+                entry.ext
+            );
+            continue;
+        };
+        let r#type = match entry.r#type.as_str() {
+            "remote" => OverrideType::Remote,
+            _ => OverrideType::Local,
+        };
+
+        // Pre-populate all fields to avoid redundant update_item call
+        let mut item = OverrideItem::new(entry.name, ext, r#type);
+        item.global = entry.global;
+        item.profile_ids = entry.profile_ids;
+        item.enabled = entry.enabled;
+        item.url = entry.url;
+
+        items_to_import.push((item, entry.content));
+    }
+
+    // Batch import: single metadata lock, then best-effort content writes
+    overrides_store::import_items_batch(&state, items_to_import)
 }

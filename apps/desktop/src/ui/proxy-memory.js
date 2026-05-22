@@ -101,7 +101,7 @@ function parseSelection(raw) {
  * e.g., in DIRECT mode where no proxy candidates exist).
  * @returns {Promise<boolean>} Whether mihomo is ready
  */
-async function waitForMihomoReady() {
+export async function waitForMihomoReady() {
     for (let i = 0; i < MAX_READY_RETRIES; i++) {
         try {
             const result = await fetchProxyGroups();

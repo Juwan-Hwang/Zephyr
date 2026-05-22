@@ -212,34 +212,38 @@ pub fn rule_extract_from_profile(
             // Rule format: TYPE,MATCH,POLICY[,opts]
             // Replace the 3rd field (policy) with {{proxy}} unless it's a built-in
             let parts: Vec<&str> = s.splitn(4, ',').collect();
-            if parts.len() >= 3 {
-                let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
-                if BUILTIN_POLICIES
-                    .iter()
-                    .any(|b| b.eq_ignore_ascii_case(policy))
-                {
-                    lines.push(format!("    - {s}"));
-                } else {
-                    // Reconstruct with {{proxy}} as the policy
-                    let mut rebuilt = String::new();
-                    if let Some(p0) = parts.first() {
-                        rebuilt.push_str(p0);
-                    }
-                    rebuilt.push(',');
-                    if let Some(p1) = parts.get(1) {
-                        rebuilt.push_str(p1);
-                    }
-                    rebuilt.push_str(",{{proxy}}");
-                    let mut line = String::from("    - ");
-                    line.push_str(&rebuilt);
-                    if let Some(opts) = parts.get(3) {
-                        line.push(',');
-                        line.push_str(opts);
-                    }
-                    lines.push(line);
-                }
+            // MATCH/FINAL rules have only 2 fields: "MATCH,Proxy" —
+            // the 2nd field IS the policy. All other rules have 3+ fields
+            // where the 3rd field is the policy.
+            // MATCH/FINAL rules always have the policy at index 1 (regardless of
+            // additional options like "no-resolve"). All other rules use index 2.
+            let is_match_final = parts.first().is_some_and(|t| {
+                t.eq_ignore_ascii_case("MATCH") || t.eq_ignore_ascii_case("FINAL")
+            });
+            let policy_index = if is_match_final {
+                1
+            } else if parts.len() >= 3 {
+                2
             } else {
+                // Malformed rule — keep as-is
                 lines.push(format!("    - {s}"));
+                continue;
+            };
+            let policy = parts.get(policy_index).map(|p| p.trim()).unwrap_or("");
+            if BUILTIN_POLICIES
+                .iter()
+                .any(|b| b.eq_ignore_ascii_case(policy))
+            {
+                lines.push(format!("    - {s}"));
+            } else {
+                // Reconstruct: replace only the policy_index field with {{proxy}}
+                let rebuilt = parts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, part)| if i == policy_index { "{{proxy}}" } else { part })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                lines.push(format!("    - {rebuilt}"));
             }
         }
     }
