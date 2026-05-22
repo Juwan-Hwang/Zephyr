@@ -30,13 +30,14 @@
 - **Script Engine** — JavaScript sandbox with 9 resource limits (time, memory, string length, loop iterations, recursion depth, etc.) and 4 permission controls (network, filesystem, child process, workers)
 - **Plugin System** — Discovery, loading, lifecycle hooks, fine-grained permission checks
 - **KV Store** — Persistent key-value storage (`kv_store.db`)
+- **Override System** — Prism DSL + JavaScript dual-engine config overrides, scope management (global/per-profile), drag-reorder, import/export, remote override support
 
 ## Security
 
 - **AES-GCM + PBKDF2** — Configuration encryption with hardware-fingerprint-derived machine key (hex-encoded, strict UTF-8 on decrypt)
 - **SSRF Protection** — DNS validation for subscription/rule URLs; user-initiated private address input allowed, but redirects to private IPs are blocked
 - **DNS Leak Prevention** — TUN mode auto-injects `dns-hijack` to route all DNS traffic through Mihomo
-- **Config Sanitizer** — Recursive removal of dangerous YAML keys (`script`, `script-path`, 6 CFW legacy keys), provider path traversal prevention
+- **Config Sanitizer** — Recursive removal of dangerous YAML keys (`script`, `script-path`, 6 CFW legacy keys), provider path traversal prevention, Billion Laughs attack defense (MAX_YAML_DEPTH = 100)
 - **REALITY short-id Protection** — Quote hex values before YAML parsing to prevent scientific notation misinterpretation
 - **Input Validation** — Length limits, format checks, UTF-8 safe truncation across all IPC commands
 - **XSS Prevention** — `escapeHtml` (NFKC normalization + browser round-trip) and `escapeAttr` (additional `"`/`'` escaping) for all user input rendering
@@ -87,15 +88,18 @@ apps/desktop/src-tauri/src/
     core_log.rs             — Mihomo core log reader with line truncation (64 KB)
     crypto.rs               — AES-256-GCM encryption/decryption, machine key management
     config_sanitizer.rs     — Dangerous YAML key removal, CFW legacy cleanup
-  prism/                    — Prism engine (81 IPC commands)
+  prism/                    — Prism engine (95 IPC commands)
     commands_core.rs        — Core Prism commands (apply, validate, watch, trace, rebuild, preview, insert, toggle, stats)
     rule_library.rs         — Rule CRUD, import, extract, groups
     smart_commands.rs       — Smart proxy selector (EMA scoring, scheduler)
+    smart_state.rs          — Smart State async persistence (WAL + DashMap + mpsc)
     failover_commands.rs    — Failover detection and policy
     script_commands.rs      — JS sandbox execution and limits
     plugin_commands.rs      — Plugin lifecycle and permissions
     kv_commands.rs          — Persistent key-value store
     rate_limiter.rs         — Sliding-window rate limiter
+    overrides_commands.rs   — Override system (14 commands)
+    pipeline.rs             — Override execution pipeline (batch apply, hot reload, test)
   sys_proxy.rs              — System proxy (Windows/macOS/Linux)
   tray.rs                   — System tray management
   updater.rs                — Core/client/geo update system
@@ -104,4 +108,4 @@ apps/desktop/src-tauri/src/
   uwp_loopback.rs           — Windows UWP loopback exemption
 ```
 
-128 IPC commands · 341 Rust tests · Tauri 2.11 · Rust 1.92
+145 IPC commands · 354 Rust tests · Tauri 2.11 · Rust 1.92
