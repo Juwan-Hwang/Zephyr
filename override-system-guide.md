@@ -64,7 +64,8 @@
 ```
 
 **关键设计**：
-- Prism DSL 在前，JS 覆写在后。JS 可以读取和修改 Prism 处理后的结果。
+- Prism DSL 和 JS 覆写走两条独立管道：Prism 先执行（编译 patch 文件），JS 后执行（链式脚本），JS 可以读取和修改 Prism 处理后的结果。两者在 UI 中可混合排列，但实际执行顺序由管道架构决定，跨类型拖拽不改变执行先后。
+- Prism YAML 的启用/禁用通过 patch 文件的创建/删除实现，与 UI 中 `order` 字段无关。
 - GlobalPreferences 最后注入，确保 UI 设置始终拥有最高优先级。
 - 热重载而非重启内核进程，配置变更瞬时生效。
 
@@ -94,16 +95,16 @@
 
 ## 3. 覆写管道与执行顺序
 
-所有覆写项在管道中按以下规则排序执行：
+Prism YAML 和 JS 覆写走**两条完全独立的管道**，在 UI 中虽然可以混合排列，但实际执行时互不影响：
 
-1. **Prism YAML 覆写**：按 `__after__` 依赖拓扑排序（无依赖则按文件名排序）
-2. **JS 覆写**：按 UI 中拖拽排列的 `order` 字段顺序执行
+1. **Prism YAML 管道**（`prism_apply` / `prism_rebuild`）：扫描 Prism workspace 目录中的 `.prism.yaml` patch 文件，按 `__after__` 依赖拓扑排序执行（无依赖则按文件名排序）。启用/禁用对应 patch 文件的创建/删除，**与 UI 中的 `order` 字段无关**
+2. **JS 覆写管道**（`override_apply_all`）：仅收集 `ext == Js` 的已启用项，按 UI 中拖拽排列的 `order` 字段顺序链式执行。每个 JS 覆写接收上一个覆写输出的 config 作为输入
 3. **容错机制**：单个覆写失败只记录日志和警告，不中断后续覆写
 
-每个 JS 覆写接收上一个覆写输出的 config 作为输入，形成链式处理：
+> **注意**：在 UI 中将 Prism YAML 拖到 JS 覆写上方（或反之），**不会**改变两者的实际执行顺序。Prism YAML 始终先于 JS 执行，这是由管道架构决定的，无法通过 UI 排序跨越。
 
 ```
-原始 config → Prism patches → JS 覆写 #1 → JS 覆写 #2 → ... → GlobalPrefs → 最终 config
+原始 config → Prism patches（独立管道）→ JS 覆写 #1 → JS 覆写 #2 → ... → GlobalPrefs → 最终 config
 ```
 
 ---
@@ -999,8 +1000,11 @@ Zephyr 会通过当前 Mihomo 代理下载远程脚本，因此只要代理可�
 
 ### Q: 覆写的执行顺序如何调整？
 
-- **Prism YAML**：通过 `__after__` 声明依赖关系，引擎自动拓扑排序
+两种覆写的排序机制完全独立，UI 中的拖拽排序**仅影响同类型覆写之间的顺序**：
+
+- **Prism YAML**：通过 `__after__` 声明依赖关系，引擎自动拓扑排序。UI 中的拖拽排序对 Prism YAML 无实际效果
 - **JS 覆写**：在 UI 中拖拽卡片调整顺序，`order` 值越小越先执行
+- **跨类型**：无法通过 UI 排序改变 Prism YAML 与 JS 之间的执行先后关系，Prism YAML 始终先于 JS 执行
 
 ### Q: 切换订阅后覆写会自动重新应用吗？
 
