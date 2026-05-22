@@ -61,7 +61,20 @@ Zephyr is not a "more features is better" client. It focuses on three directions
 
 See [FEATURES.md](FEATURES.md) for the complete feature list.
 
+## Community Growth
+
+Zephyr is gaining traction among developers and users.
+
+<a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=timeline&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Juwan-Hwang/Zephyr&type=timeline&legend=top-left" width="450" />
+  </picture>
+</a>
+
 ---
+
 
 ## Features
 
