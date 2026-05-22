@@ -28,7 +28,8 @@ fn build_scorer(state: &PrismState) -> Result<SmartScorer, String> {
 /// - Success rate (default 0.4)
 /// - Stability / inverse stddev (default 0.2)
 ///
-/// The result is persisted to `prism/smart_history.json`.
+/// The result is persisted asynchronously via `SmartState` (WAL + threshold flush).
+/// Also syncs to `PrismInner.node_histories` for other commands.
 #[tauri::command]
 pub fn smart_score(
     state: State<PrismState>,
@@ -36,6 +37,27 @@ pub fn smart_score(
     latency_ms: f64,
     success: bool,
 ) -> Result<f64, String> {
+    // Use new SmartState for non-blocking persistence
+    if let Some(smart_state) = &state.smart_state {
+        // 1. 记录数据到 SmartState (不内嵌 scorer，确保使用最新配置)
+        smart_state.record(&node_name, latency_ms, success)?;
+
+        // 2. 使用 build_scorer() 从 smart.toml 读取最新配置计算分数
+        let scorer = build_scorer(&state)?;
+        let history = smart_state
+            .get_history(&node_name)
+            .ok_or_else(|| format!("Failed to get history for {node_name}"))?;
+        let score = scorer.score(&history);
+
+        // 3. 同步到 PrismInner.node_histories 供其他命令读取
+        let mut lock = state.lock_inner()?;
+        lock.node_histories.insert(node_name, history);
+        drop(lock);
+
+        return Ok(score);
+    }
+
+    // Fallback to legacy implementation if SmartState not initialized
     let scorer = build_scorer(&state)?;
     let prism_dir = state.get_prism_workspace()?;
 
@@ -142,6 +164,27 @@ pub fn smart_next_interval(
 pub fn smart_rank(state: State<PrismState>) -> Result<Vec<serde_json::Value>, String> {
     let scorer = build_scorer(&state)?;
 
+    // Prefer SmartState if available
+    if let Some(smart_state) = &state.smart_state {
+        let histories: Vec<NodeHistory> = smart_state.get_all_histories().into_values().collect();
+        if histories.is_empty() {
+            return Ok(vec![]);
+        }
+        let ranking = scorer.rank(&histories);
+        let result: Vec<serde_json::Value> = ranking
+            .into_iter()
+            .map(|(name, score, rank)| {
+                serde_json::json!({
+                    "name": name,
+                    "score": score,
+                    "rank": rank,
+                })
+            })
+            .collect();
+        return Ok(result);
+    }
+
+    // Fallback to PrismInner.node_histories
     let lock = state.lock_inner()?;
 
     if lock.node_histories.is_empty() {
@@ -173,6 +216,29 @@ pub fn smart_rank(state: State<PrismState>) -> Result<Vec<serde_json::Value>, St
 pub fn smart_select_best(state: State<PrismState>) -> Result<Option<serde_json::Value>, String> {
     let scorer = build_scorer(&state)?;
 
+    // Prefer SmartState if available
+    if let Some(smart_state) = &state.smart_state {
+        let histories: Vec<NodeHistory> = smart_state.get_all_histories().into_values().collect();
+        if histories.is_empty() {
+            return Ok(None);
+        }
+        return match scorer.select_best(&histories) {
+            Some(node) => {
+                let score = scorer.score(node);
+                Ok(Some(serde_json::json!({
+                    "name": node.name,
+                    "score": score,
+                    "successRate": node.success_rate,
+                    "p90Latency": node.p90_latency,
+                    "stddev": node.latency_stddev,
+                    "recordCount": node.latency_records.len(),
+                })))
+            }
+            None => Ok(None),
+        };
+    }
+
+    // Fallback to PrismInner.node_histories
     let lock = state.lock_inner()?;
 
     if lock.node_histories.is_empty() {
@@ -202,9 +268,17 @@ pub fn smart_select_best(state: State<PrismState>) -> Result<Option<serde_json::
 #[tauri::command]
 pub fn smart_clear_history(state: State<PrismState>) -> Result<(), String> {
     let prism_dir = state.get_prism_workspace()?;
+
+    // Clear SmartState if available
+    if let Some(smart_state) = &state.smart_state {
+        smart_state.clear();
+    }
+
+    // Clear PrismInner.node_histories
     let mut lock = state.lock_inner()?;
     lock.node_histories.clear();
     drop(lock);
+
     // Write empty histories outside the lock
     super::PrismInner::persist_histories(&HashMap::new(), &prism_dir);
     Ok(())
@@ -221,11 +295,24 @@ pub fn smart_score_at(
     node_name: String,
     timestamp_ms: i64,
 ) -> Result<f64, String> {
+    let scorer = build_scorer(&state)?;
+
+    // Prefer SmartState if available
+    if let Some(smart_state) = &state.smart_state {
+        let history = smart_state
+            .get_history(&node_name)
+            .ok_or_else(|| format!("No history for node '{node_name}'"))?;
+        let now = chrono::DateTime::from_timestamp_millis(timestamp_ms)
+            .ok_or_else(|| "Invalid timestamp".to_owned())?
+            .with_timezone(&chrono::Utc);
+        return Ok(scorer.score_at(&history, now));
+    }
+
+    // Fallback to PrismInner.node_histories
     let lock = state.lock_inner()?;
     let found = lock.node_histories.get(&node_name).cloned();
     drop(lock);
     let history = found.ok_or_else(|| format!("No history for node '{node_name}'"))?;
-    let scorer = SmartScorer::new();
     let now = chrono::DateTime::from_timestamp_millis(timestamp_ms)
         .ok_or_else(|| "Invalid timestamp".to_owned())?
         .with_timezone(&chrono::Utc);
@@ -258,6 +345,12 @@ pub fn smart_scheduler_config(state: State<PrismState>) -> Result<serde_json::Va
 /// Trim node history to `max_records`.
 #[tauri::command]
 pub fn smart_trim_history(state: State<PrismState>, max_records: usize) -> Result<(), String> {
+    // Trim SmartState if available
+    if let Some(smart_state) = &state.smart_state {
+        smart_state.trim(max_records);
+    }
+
+    // Trim PrismInner.node_histories
     let mut lock = state.lock_inner()?;
     let keys: Vec<String> = lock.node_histories.keys().cloned().collect();
     for key in keys {
