@@ -2,8 +2,6 @@
 
 #![allow(clippy::needless_pass_by_value)]
 
-use std::collections::HashMap;
-
 use tauri::State;
 
 use clash_prism_smart::history::NodeHistory;
@@ -28,7 +26,7 @@ fn build_scorer(state: &PrismState) -> Result<SmartScorer, String> {
 /// - Success rate (default 0.4)
 /// - Stability / inverse stddev (default 0.2)
 ///
-/// The result is persisted to `prism/smart_history.json`.
+/// The result is persisted asynchronously via `SmartState` (WAL + threshold flush).
 #[tauri::command]
 pub fn smart_score(
     state: State<PrismState>,
@@ -36,27 +34,20 @@ pub fn smart_score(
     latency_ms: f64,
     success: bool,
 ) -> Result<f64, String> {
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
+
+    // 1. Record data to SmartState (no embedded scorer, uses latest config)
+    smart_state.record(&node_name, latency_ms, success)?;
+
+    // 2. Use build_scorer() to read latest config from smart.toml
     let scorer = build_scorer(&state)?;
-    let prism_dir = state.get_prism_workspace()?;
-
-    let mut lock = state.lock_inner()?;
-
-    // Get or create history for this node
-    let history = lock
-        .node_histories
-        .entry(node_name.clone())
-        .or_insert_with(|| NodeHistory::new(&node_name));
-
-    // Accumulate the new record
-    history.add_record(latency_ms, success);
-
-    // Calculate score using full history
-    let score = scorer.score(history);
-
-    // Persist to disk (outside the lock)
-    let histories = lock.node_histories.clone();
-    drop(lock);
-    super::PrismInner::persist_histories(&histories, &prism_dir);
+    let history = smart_state
+        .get_history(&node_name)
+        .ok_or_else(|| format!("Failed to get history for {node_name}"))?;
+    let score = scorer.score(&history);
 
     Ok(score)
 }
@@ -141,18 +132,17 @@ pub fn smart_next_interval(
 #[tauri::command]
 pub fn smart_rank(state: State<PrismState>) -> Result<Vec<serde_json::Value>, String> {
     let scorer = build_scorer(&state)?;
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
 
-    let lock = state.lock_inner()?;
-
-    if lock.node_histories.is_empty() {
+    let histories: Vec<NodeHistory> = smart_state.get_histories_vec();
+    if histories.is_empty() {
         return Ok(vec![]);
     }
 
-    // Compute ranking inside the lock to avoid cloning all histories
-    let histories: Vec<NodeHistory> = lock.node_histories.values().cloned().collect();
     let ranking = scorer.rank(&histories);
-    drop(lock);
-
     let result: Vec<serde_json::Value> = ranking
         .into_iter()
         .map(|(name, score, rank)| {
@@ -172,19 +162,19 @@ pub fn smart_rank(state: State<PrismState>) -> Result<Vec<serde_json::Value>, St
 #[tauri::command]
 pub fn smart_select_best(state: State<PrismState>) -> Result<Option<serde_json::Value>, String> {
     let scorer = build_scorer(&state)?;
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
 
-    let lock = state.lock_inner()?;
-
-    if lock.node_histories.is_empty() {
+    let histories: Vec<NodeHistory> = smart_state.get_histories_vec();
+    if histories.is_empty() {
         return Ok(None);
     }
 
-    // Compute inside the lock to avoid cloning all histories
-    let histories: Vec<NodeHistory> = lock.node_histories.values().cloned().collect();
     match scorer.select_best(&histories) {
         Some(node) => {
             let score = scorer.score(node);
-            drop(lock);
             Ok(Some(serde_json::json!({
                 "name": node.name,
                 "score": score,
@@ -201,12 +191,12 @@ pub fn smart_select_best(state: State<PrismState>) -> Result<Option<serde_json::
 /// Clear all smart history data.
 #[tauri::command]
 pub fn smart_clear_history(state: State<PrismState>) -> Result<(), String> {
-    let prism_dir = state.get_prism_workspace()?;
-    let mut lock = state.lock_inner()?;
-    lock.node_histories.clear();
-    drop(lock);
-    // Write empty histories outside the lock
-    super::PrismInner::persist_histories(&HashMap::new(), &prism_dir);
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
+
+    smart_state.clear();
     Ok(())
 }
 
@@ -221,11 +211,15 @@ pub fn smart_score_at(
     node_name: String,
     timestamp_ms: i64,
 ) -> Result<f64, String> {
-    let lock = state.lock_inner()?;
-    let found = lock.node_histories.get(&node_name).cloned();
-    drop(lock);
-    let history = found.ok_or_else(|| format!("No history for node '{node_name}'"))?;
-    let scorer = SmartScorer::new();
+    let scorer = build_scorer(&state)?;
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
+
+    let history = smart_state
+        .get_history(&node_name)
+        .ok_or_else(|| format!("No history for node '{node_name}'"))?;
     let now = chrono::DateTime::from_timestamp_millis(timestamp_ms)
         .ok_or_else(|| "Invalid timestamp".to_owned())?
         .with_timezone(&chrono::Utc);
@@ -258,13 +252,11 @@ pub fn smart_scheduler_config(state: State<PrismState>) -> Result<serde_json::Va
 /// Trim node history to `max_records`.
 #[tauri::command]
 pub fn smart_trim_history(state: State<PrismState>, max_records: usize) -> Result<(), String> {
-    let mut lock = state.lock_inner()?;
-    let keys: Vec<String> = lock.node_histories.keys().cloned().collect();
-    for key in keys {
-        if let Some(history) = lock.node_histories.get_mut(&key) {
-            history.trim(max_records);
-        }
-    }
-    drop(lock);
+    let smart_state = state
+        .smart_state
+        .as_ref()
+        .ok_or_else(|| "SmartState not initialized".to_owned())?;
+
+    smart_state.trim(max_records);
     Ok(())
 }
