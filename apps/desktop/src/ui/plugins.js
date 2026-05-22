@@ -771,11 +771,21 @@ async function loadOverrides() {
                         // Save new order
                         const newIds = getOverrideCards(pluginList)
                             .map(c => c.dataset.id);
+
+                        // Update in-memory order to match DOM
+                        const newItems = [];
+                        for (const id of newIds) {
+                            const item = overrideItems.find(i => i.id === id);
+                            if (item) newItems.push(item);
+                        }
+                        overrideItems = newItems;
+
                         try {
                             await overrideReorder(newIds);
-                            await loadOverrides();
+                            // No need to reload — DOM already matches
                         } catch (err) {
                             showNotification(String(err), 'error');
+                            // Revert: reload from backend
                             await loadOverrides();
                         }
                     };
@@ -805,17 +815,17 @@ async function loadOverrides() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  renderOverrideCards — build card grid
+//  renderOverrideCards — build card grid (with in-place diff for no flash)
 // ═══════════════════════════════════════════════════════════════════════
 
 function renderOverrideCards(container, items, filter) {
-    container.innerHTML = '';
-
     const filtered = items.filter(item =>
         !filter || item.name?.toLowerCase().includes(filter)
     );
 
+    // Empty state
     if (filtered.length === 0) {
+        container.innerHTML = '';
         const empty = document.createElement('div');
         empty.className = 'text-center text-zinc-500 text-sm py-12';
         empty.textContent = filter
@@ -825,9 +835,102 @@ function renderOverrideCards(container, items, filter) {
         return;
     }
 
-    for (const item of filtered) {
-        const card = buildOverrideCard(item);
-        container.appendChild(card);
+    // Get existing cards
+    const existingCards = getOverrideCards(container);
+    const existingIds = new Set(existingCards.map(c => c.dataset.id));
+    const newIds = new Set(filtered.map(i => i.id));
+
+    // Check if we can do in-place update (same items, just reorder or update)
+    const canUpdateInPlace = existingCards.length > 0 &&
+        existingCards.length === filtered.length &&
+        [...existingIds].every(id => newIds.has(id));
+
+    if (canUpdateInPlace) {
+        // In-place update: just reorder and update content
+        const cardMap = new Map();
+        existingCards.forEach(c => cardMap.set(c.dataset.id, c));
+
+        filtered.forEach((item) => {
+            const card = cardMap.get(item.id);
+            if (!card) return;
+
+            // Update content that may have changed
+            updateOverrideCardContent(card, item);
+        });
+
+        // Re-append in new order
+        filtered.forEach(item => {
+            const card = cardMap.get(item.id);
+            if (card) container.appendChild(card);
+        });
+    } else {
+        // Full rebuild (first render or items added/removed)
+        container.innerHTML = '';
+        for (const item of filtered) {
+            const card = buildOverrideCard(item);
+            container.appendChild(card);
+        }
+    }
+}
+
+/**
+ * Update card content without rebuilding (prevents flash)
+ * @param {HTMLElement} card
+ * @param {any} item
+ */
+function updateOverrideCardContent(card, item) {
+    // Update status indicator
+    const statusDot = card.querySelector('.rounded-full[title]');
+    if (statusDot) {
+        const statusColor = item.enabled ? 'bg-emerald-400' : 'bg-zinc-600';
+        const summaryText = item.enabled
+            ? t('overrideEnabled')
+            : t('overrideDisabled');
+        statusDot.className = `w-2 h-2 rounded-full shrink-0 ${statusColor}`;
+        statusDot.title = summaryText;
+    }
+
+    // Update scope badge
+    const scopeBadge = card.querySelector('[data-action="edit-scope"]');
+    if (scopeBadge) {
+        const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400';
+        const scopeLabel = item.global
+            ? t('overrideScopeGlobal')
+            : (item.profileIds?.length
+                ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
+                : t('overrideScopeNone'));
+        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
+        scopeBadge.textContent = scopeLabel;
+    }
+
+    // Update status text
+    const statusText = card.querySelector('.text-xs.text-zinc-500');
+    if (statusText) {
+        statusText.textContent = item.enabled
+            ? t('overrideEnabled')
+            : t('overrideDisabled');
+    }
+
+    // Update toggle button
+    const toggleBtn = card.querySelector('.override-toggle-btn');
+    if (toggleBtn) {
+        toggleBtn.dataset.enabled = String(item.enabled);
+        toggleBtn.title = item.enabled
+            ? t('overrideDisable')
+            : t('overrideEnable');
+        toggleBtn.innerHTML = item.enabled
+            ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
+            : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
+    }
+
+    // Update up/down button visibility
+    const upBtn = card.querySelector('.override-up-btn');
+    const downBtn = card.querySelector('.override-down-btn');
+    if (upBtn) {
+        upBtn.classList.toggle('invisible', isFirst(item.id));
+    }
+    if (downBtn) {
+        downBtn.classList.toggle('invisible', isLast(item.id));
     }
 }
 
@@ -848,10 +951,10 @@ function buildOverrideCard(item) {
     // ── Scope badge ───────────────────────────────────────────
     const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400';
     const scopeLabel = item.global
-        ? (t('overrideScopeGlobal') ?? '全局')
+        ? t('overrideScopeGlobal')
         : (item.profileIds?.length
             ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
-            : (t('overrideScopeNone') ?? '无'));
+            : t('overrideScopeNone'));
 
     // ── Status indicator ───────────────────────────────────────
     const statusColor = item.enabled
@@ -860,8 +963,8 @@ function buildOverrideCard(item) {
 
     // ── Status summary line ────────────────────────────────────
     const summaryText = item.enabled
-        ? (t('overrideEnabled') ?? '● 已启用')
-        : (t('overrideDisabled') ?? '○ 已禁用');
+        ? t('overrideEnabled')
+        : t('overrideDisabled');
 
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
@@ -1002,10 +1105,23 @@ async function openEditor(id, name, ext) {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function toggleOverride(id, enabled) {
+    // Update in memory first for instant UI feedback
+    const item = overrideItems.find(i => i.id === id);
+    if (!item) return;
+
+    const oldEnabled = item.enabled;
+    item.enabled = enabled;
+
+    // Update UI immediately
+    const pluginList = document.getElementById('plugin-list');
+    renderOverrideCards(pluginList, overrideItems, searchFilter);
+
     try {
         await overrideToggle(id, enabled);
-        await loadOverrides();
     } catch (err) {
+        // Revert on error
+        item.enabled = oldEnabled;
+        renderOverrideCards(pluginList, overrideItems, searchFilter);
         showNotification(String(err), 'error');
     }
 }
@@ -1015,20 +1131,28 @@ async function toggleOverride(id, enabled) {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function reorderItem(id, direction) {
-    const ids = overrideItems.map(i => i.id);
-    const idx = ids.indexOf(id);
+    const idx = overrideItems.findIndex(i => i.id === id);
     if (idx < 0) return;
 
     const newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= ids.length) return;
+    if (newIdx < 0 || newIdx >= overrideItems.length) return;
 
-    // Swap
-    [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
+    // Swap in memory first for instant UI feedback (no flash)
+    const newItems = [...overrideItems];
+    [newItems[idx], newItems[newIdx]] = [newItems[newIdx], newItems[idx]];
+    overrideItems = newItems;
 
+    // Update UI immediately without full reload
+    const pluginList = document.getElementById('plugin-list');
+    renderOverrideCards(pluginList, overrideItems, searchFilter);
+
+    // Persist the NEW order to backend
     try {
-        await overrideReorder(ids);
-        await loadOverrides();
+        await overrideReorder(overrideItems.map(i => i.id));
     } catch (err) {
+        // Revert on error
+        [overrideItems[idx], overrideItems[newIdx]] = [overrideItems[newIdx], overrideItems[idx]];
+        renderOverrideCards(pluginList, overrideItems, searchFilter);
         showNotification(String(err), 'error');
     }
 }

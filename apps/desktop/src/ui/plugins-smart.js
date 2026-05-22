@@ -8,6 +8,7 @@
 
 import * as prism from './prism.js';
 import { showNotification } from './notifications.js';
+import { t } from '../i18n.js';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Navigation
@@ -447,9 +448,9 @@ function initSmartPage() {
             try {
                 const best = await prism.smartSelectBest();
                 if (best) {
-                    showNotification(`Best node: ${best.name} (score: ${best.score?.toFixed(1) || '?'})`, 'success');
+                    showNotification(t('notifBestNode', { name: best.name, score: best.score?.toFixed(1) || '?' }), 'success');
                 } else {
-                    showNotification('No nodes available for selection', 'error');
+                    showNotification(t('notifNoNodesForSelection'), 'error');
                 }
             } catch (e) { showNotification(String(e), 'error'); }
         });

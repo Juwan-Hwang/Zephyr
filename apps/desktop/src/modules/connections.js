@@ -665,7 +665,7 @@ function buildConnectionRow(conn, mode) {
 
     const ruleColorClass = getRuleColorClass(rule);
     const processHtml = process
-        ? `<span class="text-zinc-500 truncate max-w-[120px] block">${process}</span>`
+        ? `<span class="text-xs text-zinc-500 truncate max-w-[120px] block">${process}</span>`
         : '';
 
     const { dlSpeed, ulSpeed, dlTotal, ulTotal } = resolveConnStats(conn, mode);
