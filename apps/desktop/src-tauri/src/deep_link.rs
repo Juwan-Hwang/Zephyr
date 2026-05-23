@@ -1,5 +1,4 @@
 use serde::Serialize;
-use tauri::{Emitter as _, Manager as _};
 
 /// Payload sent to the frontend when a deep link is received.
 #[derive(Debug, Clone, Serialize)]
@@ -108,9 +107,7 @@ pub fn handle_cli_deep_links(app: &tauri::AppHandle) {
     for arg in &args {
         if arg.starts_with("clash://") {
             if let Some(payload) = parse_deep_link(arg) {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("deep-link", payload);
-                }
+                crate::backend_event::emit_to_main(app, "deep-link", payload);
             }
         }
     }
@@ -120,9 +117,7 @@ pub fn handle_cli_deep_links(app: &tauri::AppHandle) {
 /// Can be called from any context where we have an `AppHandle`.
 pub fn emit_deep_link(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(payload) = parse_deep_link(raw_url) {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.emit("deep-link", payload);
-        }
+        crate::backend_event::emit_to_main(app, "deep-link", payload);
     }
 }
 

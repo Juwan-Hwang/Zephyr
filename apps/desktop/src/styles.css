@@ -863,10 +863,6 @@ html:not(.dark) .textarea-common::placeholder {
 }
 
 /* Search input focus glow */
-#connections-search-input:focus {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 15%, transparent);
-}
-
 /* Connection list smooth scroll */
 #connections-list {
   scroll-behavior: smooth;
@@ -1183,6 +1179,7 @@ html:not(.dark) .log-tab-btn.active {
 .log-level-btn[data-level="info"].active { color: #60a5fa; background: rgba(96, 165, 250, 0.15); border-color: rgba(96, 165, 250, 0.25); }
 .log-level-btn[data-level="warn"].active { color: #f59e0b; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.25); }
 .log-level-btn[data-level="error"].active { color: #ef4444; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.25); }
+.log-level-btn[data-level="fatal"].active { color: #dc2626; background: rgba(220, 38, 38, 0.20); border-color: rgba(220, 38, 38, 0.35); }
 
 /* ── Log Content Area ── */
 .log-line {
@@ -1210,6 +1207,7 @@ html:not(.dark) .log-level-btn[data-level="debug"].active { color: #6b7280; back
 html:not(.dark) .log-level-btn[data-level="info"].active { color: #2563eb; background: rgba(37, 99, 235, 0.12); border-color: rgba(37, 99, 235, 0.20); }
 html:not(.dark) .log-level-btn[data-level="warn"].active { color: #d97706; background: rgba(217, 119, 6, 0.12); border-color: rgba(217, 119, 6, 0.20); }
 html:not(.dark) .log-level-btn[data-level="error"].active { color: #dc2626; background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.20); }
+html:not(.dark) .log-level-btn[data-level="fatal"].active { color: #991b1b; background: rgba(153, 27, 27, 0.15); border-color: rgba(153, 27, 27, 0.25); }
 
 html:not(.dark) .log-line {
     border-bottom-color: rgba(0, 0, 0, 0.04);

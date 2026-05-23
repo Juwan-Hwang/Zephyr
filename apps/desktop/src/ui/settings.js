@@ -882,6 +882,19 @@ export async function initSettings() {
         if (portModal) {
             portModal.classList.remove('hidden');
             portModal.classList.add('flex');
+            // Animate in
+            requestAnimationFrame(() => {
+                const inner = portModal.querySelector('.glass-card');
+                if (inner) {
+                    inner.style.transform = 'scale(0.96)';
+                    inner.style.opacity = '0';
+                    requestAnimationFrame(() => {
+                        inner.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                        inner.style.transform = 'scale(1)';
+                        inner.style.opacity = '1';
+                    });
+                }
+            });
             if (portFocusTrap) portFocusTrap.destroy();
             portFocusTrap = createFocusTrap(portModal, { onEscape: closePortModal });
             portFocusTrap.activate();
@@ -896,8 +909,19 @@ export async function initSettings() {
         if (portFocusTrap) {
             portFocusTrap.deactivate();
         }
-        portModal.classList.add('hidden');
-        portModal.classList.remove('flex');
+        const inner = portModal.querySelector('.glass-card');
+        if (inner) {
+            inner.style.transition = 'all 0.15s ease-in';
+            inner.style.transform = 'scale(0.96)';
+            inner.style.opacity = '0';
+            setTimeout(() => {
+                portModal.classList.add('hidden');
+                portModal.classList.remove('flex');
+            }, 150);
+        } else {
+            portModal.classList.add('hidden');
+            portModal.classList.remove('flex');
+        }
     }
 
     if (portConfigBtn) {

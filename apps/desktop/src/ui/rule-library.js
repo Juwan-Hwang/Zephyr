@@ -13,6 +13,7 @@ import { invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, currentLang } from '../i18n.js';
 import { showNotification, showModal, showConfirmModal } from './notifications.js';
+import { Bus, Events } from './events.js';
 import * as prism from './prism.js';
 import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
 import { getPolicyColor } from '../utils/rule-utils.js';
@@ -87,6 +88,9 @@ export async function initRuleLibraryPage() {
             e.stopPropagation();
             handleImportRules();
         });
+
+        // Re-render tab bar text when language changes
+        Bus.on(Events.I18N_APPLIED, () => render());
     }
 
     // Always refresh data on page entry
@@ -233,9 +237,14 @@ function render() {
         tabContent = document.getElementById('rl-tab-content');
     }
 
-    // Update tab button active states
+    // Update tab button active states and text (for i18n reactivity)
     content.querySelectorAll('.rl-tab').forEach((btn) => {
         const tab = /** @type {HTMLElement} */ (btn).dataset.rlTab;
+        if (tab === 'rule-sets') {
+            btn.textContent = t.ruleLibraryManageFiles || 'Manage Rule Files';
+        } else if (tab === 'active-rules') {
+            btn.textContent = t.ruleLibraryActiveRules || 'Active Rules';
+        }
         if (tab === activeTab) {
             btn.classList.add('bg-accent/20', 'text-accent');
             btn.classList.remove('text-zinc-500');

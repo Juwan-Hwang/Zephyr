@@ -11,7 +11,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Emitter as _, Manager as _,
+    AppHandle, Manager as _,
 };
 
 use crate::core_manager::MihomoState;
@@ -225,7 +225,11 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             let state = app.state::<MihomoState>();
             let _ = crate::core_manager::stop_core_inner(app, &state);
             if let Err(e) = sys_proxy::clear_sys_proxy() {
-                eprintln!("[warn] Failed to clear system proxy on exit: {e}");
+                emit_warn!(
+                    System,
+                    SYS_PROXY_FAILED,
+                    "Failed to clear system proxy on exit: {e}"
+                );
             }
             app.cleanup_before_exit();
             app.exit(0);
@@ -238,19 +242,20 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         }
         "mode_rule" | "mode_global" | "mode_direct" => {
             let mode = id.strip_prefix("mode_").unwrap_or("rule");
-            let _ = app.emit("tray-mode-changed", mode);
+            crate::backend_event::emit_to_main(app, "tray-mode-changed", mode);
         }
         _ => {
             // Handle subscription switching (prefix: sub_)
             if let Some(sub_name) = id.strip_prefix("sub_") {
-                let _ = app.emit("tray-subscription-changed", sub_name);
+                crate::backend_event::emit_to_main(app, "tray-subscription-changed", sub_name);
             }
             // Handle proxy switching (prefix: proxy_)
             else if let Some(proxy_name) = id.strip_prefix("proxy_") {
                 let parts: Vec<&str> = proxy_name.splitn(2, ':').collect();
                 if parts.len() == 2 {
                     if let (Some(group), Some(proxy)) = (parts.first(), parts.get(1)) {
-                        let _ = app.emit(
+                        crate::backend_event::emit_to_main(
+                            app,
                             "tray-proxy-changed",
                             serde_json::json!({
                                 "group": group,
@@ -282,7 +287,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
     }
 
     // Emit event to frontend
-    let _ = app.emit("tray-sysproxy-changed", !current);
+    crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", !current);
 }
 
 fn toggle_tun(app: &AppHandle) {
@@ -301,7 +306,7 @@ fn toggle_tun(app: &AppHandle) {
 
     // Emit event to frontend to handle TUN toggle
     // The lock will be released by the frontend via release_tun_toggle command
-    let _ = app.emit("tray-tun-changed", !current);
+    crate::backend_event::emit_to_main(app, "tray-tun-changed", !current);
 }
 
 /// Parameters for [`update_tray_full_menu`].

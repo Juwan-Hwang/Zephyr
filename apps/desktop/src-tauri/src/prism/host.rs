@@ -1,6 +1,6 @@
 //! `ZephyrPrismHost` — bridges Prism Engine to Zephyr's internal state.
 
-use tauri::{Emitter as _, Manager as _};
+use tauri::Manager as _;
 
 use clash_prism_extension::{ApplyStatus, CoreInfo, PrismEvent, PrismHost, ProfileInfo};
 
@@ -142,7 +142,7 @@ impl PrismHost for ZephyrPrismHost {
     }
 
     fn notify(&self, event: PrismEvent) {
-        let _ = self.app.emit("prism-event", event);
+        crate::backend_event::emit_to_main(&self.app, "prism-event", event);
     }
 
     // -- Optional methods (override defaults) --------------------------------
@@ -265,7 +265,11 @@ impl PrismHost for ZephyrPrismHost {
                 }
                 // Debug: log resolved variables for diagnosing cross-subscription rule errors
                 let proxy_val = vars.get("proxy").map(String::as_str).unwrap_or("<none>");
-                eprintln!("[Prism] get_variables: proxy={proxy_val}, groups={names:?}");
+                emit_info!(
+                    Prism,
+                    PRISM_SCRIPT_ERROR,
+                    "get_variables: proxy={proxy_val}, groups={names:?}"
+                );
             }
         }
 

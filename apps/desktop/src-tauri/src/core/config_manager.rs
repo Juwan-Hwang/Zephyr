@@ -475,7 +475,11 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
             let settings = guard.clone();
             drop(guard);
             if let Err(e) = crate::persist_settings(&app, &settings) {
-                eprintln!("[rename_config] Failed to persist settings: {e}");
+                emit_error!(
+                    Config,
+                    CONFIG_SAVE_FAILED,
+                    "Failed to persist settings: {e}"
+                );
             }
         }
     }

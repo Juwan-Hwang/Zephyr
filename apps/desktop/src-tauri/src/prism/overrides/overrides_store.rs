@@ -129,10 +129,18 @@ pub fn delete_item(state: &PrismState, id: &str) -> Result<(), String> {
     // Delete files (best effort) after metadata is successfully updated
     let dir = overrides_dir(state)?;
     if let Err(e) = fs::remove_file(dir.join(item.content_filename())) {
-        eprintln!("[overrides] Failed to delete content file: {e}");
+        emit_warn!(
+            Override,
+            OVERRIDE_APPLY_FAILED,
+            "Failed to delete content file: {e}"
+        );
     }
     if let Err(e) = fs::remove_file(dir.join(item.log_filename())) {
-        eprintln!("[overrides] Failed to delete log file: {e}");
+        emit_warn!(
+            Override,
+            OVERRIDE_APPLY_FAILED,
+            "Failed to delete log file: {e}"
+        );
     }
 
     // Clean up generated Prism workspace patch file (best effort)
@@ -140,10 +148,18 @@ pub fn delete_item(state: &PrismState, id: &str) -> Result<(), String> {
         match crate::prism::prism_data_dir(&state.app) {
             Ok(prism_dir) => {
                 if let Err(e) = fs::remove_file(prism_dir.join(item.patch_filename())) {
-                    eprintln!("[overrides] Failed to delete Prism patch file: {e}");
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Failed to delete Prism patch file: {e}"
+                    );
                 }
             }
-            Err(e) => eprintln!("[overrides] Failed to get prism data dir for patch cleanup: {e}"),
+            Err(e) => emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Failed to get prism data dir for patch cleanup: {e}"
+            ),
         }
     }
 
@@ -219,7 +235,9 @@ pub fn import_items_batch(
         match write_file_secure(&path, content) {
             Ok(_) => valid_items.push(item.clone()),
             Err(e) => {
-                eprintln!(
+                emit_error!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
                     "[overrides] Failed to write content for '{}': {e}",
                     item.name
                 );

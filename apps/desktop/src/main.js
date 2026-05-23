@@ -22,6 +22,7 @@ import {
 } from './i18n.js';
 import { initChart, updateTrafficData, cleanupChart } from './modules/traffic-chart.js';
 import { initConnectionsPage } from './modules/connections.js';
+import { initBackendEventListeners, cleanupBackendEventListeners } from './modules/backend-events.js';
 import { apiLogger } from './utils/logger.js';
 import { registerCleanup, runCleanup } from './utils/cleanup-registry.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -212,6 +213,12 @@ async function initApp() {
 
   // 6. Initialize all UI modules
   const tUI = performance.now();
+
+  // 6a. Initialize backend event listeners (before other UI, so events aren't missed)
+  initBackendEventListeners().catch((err) => {
+    apiLogger.warn('Failed to init backend event listeners', err);
+  });
+  registerCleanup(cleanupBackendEventListeners);
 
   initNavigation({
     onProxies: () => { renderProxies(); },

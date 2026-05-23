@@ -104,7 +104,9 @@ impl SmartState {
 
             let loaded: BTreeMap<String, NodeHistory> =
                 serde_json::from_str(&data).unwrap_or_else(|e| {
-                    eprintln!(
+                    emit_warn!(
+                        Smart,
+                        SMART_SELECT_FAILED,
                         "[smart_state] Failed to parse smart_history.json: {e}, starting fresh"
                     );
                     BTreeMap::new()
@@ -155,7 +157,11 @@ impl SmartState {
                     Ok(Some(_)) => {}
                     Ok(None) => break,
                     Err(e) => {
-                        eprintln!("[smart_state] WAL read error: {e}, stopping replay");
+                        emit_error!(
+                            Smart,
+                            SMART_SELECT_FAILED,
+                            "WAL read error: {e}, stopping replay"
+                        );
                         break;
                     }
                 }
@@ -205,7 +211,11 @@ impl SmartState {
         let mut wal_file = match Self::open_wal_file(&config.wal_path).await {
             Ok(f) => Some(f),
             Err(e) => {
-                eprintln!("[smart_state] Failed to open WAL file: {e}, crash recovery disabled");
+                emit_warn!(
+                    Smart,
+                    SMART_SELECT_FAILED,
+                    "Failed to open WAL file: {e}, crash recovery disabled"
+                );
                 None
             }
         };
@@ -216,7 +226,7 @@ impl SmartState {
                     // 1. 立即追加到 WAL (崩溃安全)
                     if let Some(ref mut file) = wal_file {
                         if let Err(e) = Self::append_wal_to_file(file, &record).await {
-                            eprintln!("[smart_state] WAL append failed: {e}");
+                            emit_warn!(Smart, SMART_SELECT_FAILED, "WAL append failed: {e}");
                         }
                     }
 
@@ -232,12 +242,16 @@ impl SmartState {
                             // Windows 需要先关闭文件句柄才能删除
                             drop(wal_file);
                             if let Err(e) = tokio::fs::remove_file(&config.wal_path).await {
-                                eprintln!("[smart_state] WAL remove failed: {e}");
+                                emit_warn!(Smart, SMART_SELECT_FAILED, "WAL remove failed: {e}");
                             }
                             // 重新打开 WAL 文件
                             wal_file = Self::open_wal_file(&config.wal_path).await.ok();
                         } else {
-                            eprintln!("[smart_state] Flush failed, keeping WAL for recovery");
+                            emit_warn!(
+                                Smart,
+                                SMART_SELECT_FAILED,
+                                "Flush failed, keeping WAL for recovery"
+                            );
                         }
                         pending_count = 0;
                     }
@@ -360,7 +374,11 @@ impl SmartState {
 
         // try_send: 满了就丢弃，打印警告
         if let Err(e) = self.tx.try_send(record) {
-            eprintln!("[smart_state] Failed to queue record for persistence: {e}");
+            emit_error!(
+                Smart,
+                SMART_SELECT_FAILED,
+                "Failed to queue record for persistence: {e}"
+            );
         }
 
         Ok(())
@@ -393,7 +411,11 @@ impl SmartState {
         self.histories.clear();
         // 发送 Clear 信号到后台任务删除磁盘文件
         if let Err(e) = self.tx.try_send(ChangeRecord::Clear) {
-            eprintln!("[smart_state] Failed to send clear signal: {e}");
+            emit_error!(
+                Smart,
+                SMART_SELECT_FAILED,
+                "Failed to send clear signal: {e}"
+            );
         }
     }
 

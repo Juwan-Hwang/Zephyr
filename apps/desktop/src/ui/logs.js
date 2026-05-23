@@ -32,11 +32,12 @@
  * @module ui/logs
  */
 
-import { readCoreLog, listen } from '../api.js';
+import { readCoreLog } from '../api.js';
 import { translations, currentLang } from '../i18n.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
+import { getExtLogEvents, subscribeToEvents, unsubscribeFromEvents } from '../modules/backend-events.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ const LEVEL_COLORS_DARK = Object.freeze({
     info:  '#60a5fa',
     warn:  '#f59e0b',
     error: '#ef4444',
+    fatal: '#dc2626',
 });
 
 /** Level → color mapping (light mode) */
@@ -63,6 +65,7 @@ const LEVEL_COLORS_LIGHT = Object.freeze({
     info:  '#3b82f6',
     warn:  '#d97706',
     error: '#dc2626',
+    fatal: '#991b1b',
 });
 
 /** Level → numeric priority for filtering */
@@ -71,6 +74,7 @@ const LEVEL_PRIORITY = Object.freeze({
     info:  1,
     warn:  2,
     error: 3,
+    fatal: 4,
 });
 
 // ── Log Level Parser (regex compiled once, reused) ────────────────────────
@@ -128,13 +132,17 @@ let _initialized = false;
 /** @type {(() => void)|null} */
 let _cleanupUnregister = null;
 
-// Extension logs state
-/** @type {boolean} Whether the Extension Logs tab is currently active */
+// App logs state
+/** @type {boolean} Whether the App Logs tab is currently active */
 let _extLogTabActive = false;
-/** @type {Array<{type: string, message: string, timestamp: string}>} Extension event log entries */
-let _extLogEvents = [];
-/** @type {(() => void)|null} Tauri event unlisten handle */
-let _prismEventUnlisten = null;
+/** @type {'all'|'info'|'warn'|'error'} Level filter for app logs */
+let _extLevelFilter = 'all';
+/** @type {string} Search query for app logs */
+let _extSearchQuery = '';
+/** @type {number|null} Debounce timer for app log search */
+let _extDebounceTimer = null;
+/** @type {boolean} Auto scroll for app logs */
+let _extAutoScroll = true;
 
 // Virtual scroll instance (shared module)
 /** @type {ReturnType<typeof createVirtualScroll>|null} */
@@ -176,17 +184,14 @@ export async function initLogsPage() {
 }
 
 /**
- * Stop the logs page — called when navigating away.
- * Stops polling and releases resources.
+ * Destroy logs page. Called when user navigates away.
+ * Stops polling and cleans up virtual scroll, but keeps event history.
  */
 export function destroyLogsPage() {
     stopPolling();
     _vs?.destroy();
     _vs = null;
-    if (_prismEventUnlisten) {
-        _prismEventUnlisten();
-        _prismEventUnlisten = null;
-    }
+    unsubscribeFromEvents();
 }
 
 // ── State Management ───────────────────────────────────────────────────────
@@ -203,10 +208,16 @@ function resetState() {
     _vs?.destroy();
     _vs = null;
     _extLogTabActive = false;
-    _extLogEvents = [];
+    _extLevelFilter = 'all';
+    _extSearchQuery = '';
+    _extAutoScroll = true;
     if (_debounceTimer) {
         clearTimeout(_debounceTimer);
         _debounceTimer = null;
+    }
+    if (_extDebounceTimer) {
+        clearTimeout(_extDebounceTimer);
+        _extDebounceTimer = null;
     }
 }
 
@@ -273,7 +284,7 @@ function buildPageHTML() {
                 <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
                 <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
                 <div class="flex-1"></div>
-                <!-- Search Box (Journal Style — consistent with rules page) -->
+                <!-- Search Box -->
                 <div class="relative group flex items-center">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                         <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -292,8 +303,26 @@ function buildPageHTML() {
             </div>
         </div>
 
-        <!-- Extension Logs Panel -->
+        <!-- App Logs Panel -->
         <div id="log-panel-ext" class="hidden flex-1 min-h-0 flex flex-col gap-4 relative z-10">
+            <!-- Filter bar (no Debug — app logs have no debug level) -->
+            <div class="flex items-center gap-2 flex-wrap relative z-10">
+                <button class="log-level-btn active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
+                <button class="log-level-btn" data-level="info" data-i18n="logLevelInfo">${t('logLevelInfo')}</button>
+                <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
+                <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
+                <button class="log-level-btn" data-level="fatal" data-i18n="logLevelFatal">${t('logLevelFatal')}</button>
+                <div class="flex-1"></div>
+                <!-- Search Box -->
+                <div class="relative group flex items-center">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
+                </div>
+            </div>
             <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
                 <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-zinc-600">
                     <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -308,7 +337,9 @@ function buildPageHTML() {
 // ── Event Binding ──────────────────────────────────────────────────────────
 
 function bindEvents() {
-    if (!_container) return;
+    if (!_container) {
+        return;
+    }
 
     // Tab switching
     const tabCore = _container.querySelector('#log-tab-core');
@@ -324,9 +355,7 @@ function bindEvents() {
         panelCore?.classList.add('flex', 'flex-col', 'gap-4');
         panelExt?.classList.add('hidden');
         panelExt?.classList.remove('flex', 'flex-col', 'gap-4');
-        // Show core log controls
-        _lineCountEl?.parentElement?.classList.remove('hidden');
-        _autoScrollBtn?.parentElement?.classList.remove('hidden');
+        updateLineCount();
     };
 
     const switchToExtTab = () => {
@@ -337,104 +366,43 @@ function bindEvents() {
         panelExt?.classList.add('flex', 'flex-col', 'gap-4');
         panelCore?.classList.add('hidden');
         panelCore?.classList.remove('flex', 'flex-col', 'gap-4');
-        // Hide core log controls
-        _lineCountEl?.parentElement?.classList.add('hidden');
-        _autoScrollBtn?.parentElement?.classList.add('hidden');
+        updateExtLineCount();
     };
 
     tabCore?.addEventListener('click', switchToCoreTab);
     tabExt?.addEventListener('click', switchToExtTab);
 
-    // Listen for Prism engine events
-    if (_prismEventUnlisten) {
-        _prismEventUnlisten();
-        _prismEventUnlisten = null;
-    }
-    listen('prism-event', (/** @type {{ payload: any }} */ event) => {
-        const payload = event.payload;
-        if (!payload) return;
-
-        // PrismEvent is a Rust serde-tagged enum.  Serialized shape:
-        //   { "ConfigReloaded": { "success": true, "message": "..." } }
-        //   { "PatchFailed": { "patch_id": "...", "error": "..." } }
-        //   { "WatcherEvent": { "file": "...", "change_type": "..." } }
-        //   { "WatcherStatus": { "running": true, "watching_count": 1 } }
-        // Extract the variant name as the type and build a human-readable message.
-        let type = 'Unknown';
-        let message = '';
-        const variants = ['ConfigReloaded', 'PatchFailed', 'PatchApplied', 'WatcherEvent', 'WatcherStatus', 'RulesChanged'];
-        for (const v of variants) {
-            if (payload[v] !== undefined) {
-                type = v;
-                const data = payload[v];
-                if (typeof data === 'object' && data !== null) {
-                    if (data.message) message = data.message;
-                    else if (data.error) message = data.error;
-                    else if (data.file) message = `${data.change_type || 'changed'}: ${data.file}`;
-                    else if (v === 'WatcherStatus') message = data.running ? `Watching ${data.watching_count} dir(s)` : 'Watch stopped';
-                    else if (v === 'PatchApplied') {
-                        const pid = data.patch_id || data.id || '';
-                        const parts = [];
-                        const a = data.added || data.added_count || 0;
-                        const r = data.removed || data.removed_count || 0;
-                        const m = data.modified || data.modified_count || 0;
-                        if (a) parts.push(`+${a}`);
-                        if (r) parts.push(`-${r}`);
-                        if (m) parts.push(`~${m}`);
-                        const stats = parts.length ? ` [${parts.join(' ')}]` : '';
-                        const dur = data.duration || data.elapsed ? ` in ${data.duration || data.elapsed}` : '';
-                        message = `${pid}${stats}${dur}`;
-                    }
-                    else if (v === 'RulesChanged') {
-                        const parts = [];
-                        const a = data.added || data.added_count || 0;
-                        const r = data.removed || data.removed_count || 0;
-                        const m = data.modified || data.modified_count || 0;
-                        if (a) parts.push(`+${a} added`);
-                        if (r) parts.push(`-${r} removed`);
-                        if (m) parts.push(`~${m} modified`);
-                        message = parts.length ? parts.join(', ') : 'no changes';
-                    }
-                    else message = JSON.stringify(data);
-                } else {
-                    message = String(data);
-                }
-                break;
-            }
-        }
-
-        const entry = {
-            type,
-            message,
-            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        };
-        _extLogEvents.push(entry);
-        // Cap at 500 events
-        if (_extLogEvents.length > 500) {
-            _extLogEvents = _extLogEvents.slice(-500);
-        }
+    // Subscribe to new events from global listener
+    subscribeToEvents((entry) => {
         renderExtLogEntry(entry);
-    }).then(unlisten => {
-        _prismEventUnlisten = unlisten;
-    }).catch(() => {
-        // Tauri event API not available (e.g. in browser dev mode)
     });
 
-    // Auto scroll toggle
+    // Rebuild ext-log DOM from accumulated events (if any)
+    rebuildExtLogDOM();
+
+    // Auto scroll toggle (shared by both tabs)
     _autoScrollBtn?.addEventListener('click', () => {
         _autoScroll = !_autoScroll;
+        _extAutoScroll = _autoScroll;
         _autoScrollBtn?.classList.toggle('active', _autoScroll);
-        if (_autoScroll && _logContent) {
-            _logContent.scrollTop = _logContent.scrollHeight;
-            render();
+        if (_extLogTabActive) {
+            if (_autoScroll) {
+                const extContent = _container?.querySelector('#log-ext-content');
+                if (extContent) extContent.scrollTop = extContent.scrollHeight;
+            }
+        } else {
+            if (_autoScroll && _logContent) {
+                _logContent.scrollTop = _logContent.scrollHeight;
+                render();
+            }
         }
     });
 
-    // Level filter buttons
-    _container.querySelectorAll('.log-level-btn').forEach(btn => {
+    // Level filter buttons (core panel)
+    _container.querySelectorAll('#log-panel-core .log-level-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             if (!_container) return;
-            _container.querySelectorAll('.log-level-btn').forEach(b => b.classList.remove('active'));
+            _container.querySelectorAll('#log-panel-core .log-level-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
             invalidateFilter();
@@ -451,6 +419,28 @@ function bindEvents() {
             invalidateFilter();
             render();
             _debounceTimer = null;
+        }, DEBOUNCE_MS);
+    });
+
+    // App logs: Level filter buttons (ext panel)
+    _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!_container) return;
+            _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            _extLevelFilter = /** @type {'all'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
+            rebuildExtLogDOM();
+        });
+    });
+
+    // App logs: Search input — debounced
+    const extSearchInput = /** @type {HTMLInputElement|null} */ (_container.querySelector('#log-ext-search'));
+    extSearchInput?.addEventListener('input', () => {
+        if (_extDebounceTimer) clearTimeout(_extDebounceTimer);
+        _extDebounceTimer = setTimeout(() => {
+            _extSearchQuery = (extSearchInput?.value || '').trim();
+            rebuildExtLogDOM();
+            _extDebounceTimer = null;
         }, DEBOUNCE_MS);
     });
 
@@ -632,6 +622,12 @@ function updateLineCount() {
     }
 }
 
+function updateExtLineCount() {
+    if (_lineCountEl) {
+        _lineCountEl.textContent = `${getExtLogEvents().length} ${t('logLines')}`;
+    }
+}
+
 // ── Extension Logs Rendering ────────────────────────────────────────────────
 
 /** 事件类型 → 颜色映射（覆盖全部 6 种 PrismEvent 类型） */
@@ -658,6 +654,18 @@ const EXT_EVENT_COLORS = Object.freeze({
  * @returns {string} 安全的 HTML 片段
  */
 function formatExtLogMessage(entry) {
+    // Backend events: render with level-colored dot
+    if (entry.source === 'backend') {
+        const levelColor = {
+            error: 'var(--color-red-400, #ef4444)',
+            fatal: 'var(--color-red-400, #ef4444)',
+            warn: 'var(--color-amber-400, #f59e0b)',
+            info: 'var(--color-blue-400, #60a5fa)',
+        };
+        const color = levelColor[entry.type] || 'var(--color-gray-400, #a1a1aa)';
+        return `<span style="color:${color}">&#9679;</span> ${escapeHtml(entry.message)}`;
+    }
+
     // 尝试从 message 中解析出 JSON payload（后端可能将 payload 序列化在 message 字段中）
     let payload = null;
     try {
@@ -768,35 +776,75 @@ function formatExtLogMessage(entry) {
 
 /**
  * 渲染单条扩展日志到 ext-log 列表。
- * 支持 6 种 PrismEvent 类型的富文本渲染。
- * @param {{ type: string, message: string, timestamp: string }} entry
- */
+* 支持 6 种 PrismEvent 类型的富文本渲染。
+* @param {{ type: string, message: string, timestamp: string }} entry
+*/
 function renderExtLogEntry(entry) {
-    const emptyEl = _container?.querySelector('#log-ext-empty');
+    // When the page is not mounted, skip DOM rendering — the event is
+    // already collected and will be batch-rendered on the next initLogsPage().
     const listEl = _container?.querySelector('#log-ext-list');
     if (!listEl) return;
 
-    // 隐藏空状态占位
+    // Apply level filter (inclusive: selected level and above, same as core logs)
+    if (_extLevelFilter !== 'all') {
+        const minPriority = LEVEL_PRIORITY[_extLevelFilter];
+        const type = entry.type.toLowerCase();
+        const priority = LEVEL_PRIORITY[type];
+        // Events without a log level (e.g. PrismEvent types) default to info priority
+        if ((priority ?? 1) < minPriority) return;
+    }
+
+    // Apply search filter
+    if (_extSearchQuery) {
+        const query = _extSearchQuery.toLowerCase();
+        if (!entry.message.toLowerCase().includes(query) &&
+            !entry.type.toLowerCase().includes(query) &&
+            !entry.timestamp.toLowerCase().includes(query)) {
+            return;
+        }
+    }
+
+    // Hide empty placeholder
+    const emptyEl = _container?.querySelector('#log-ext-empty');
     if (emptyEl) emptyEl.style.display = 'none';
 
-    const color = EXT_EVENT_COLORS[entry.type] || '#a1a1aa';
+    listEl.appendChild(createExtLogRow(entry));
+
+    // Auto scroll to bottom (respect _extAutoScroll)
+    const extContent = _container?.querySelector('#log-ext-content');
+    if (extContent && _extAutoScroll) {
+        extContent.scrollTop = extContent.scrollHeight;
+    }
+}
+
+/**
+ * Create a DOM row element for an extension log entry.
+ * Shared by both incremental `renderExtLogEntry` and batch `rebuildExtLogDOM`.
+ * @param {{ type: string, message: string, timestamp: string }} entry
+ * @returns {HTMLDivElement}
+ */
+function createExtLogRow(entry) {
+    const isDark = document.documentElement.classList.contains('dark');
+    const levelColors = isDark ? LEVEL_COLORS_DARK : LEVEL_COLORS_LIGHT;
+    const color = entry.source === 'backend'
+        ? (levelColors[entry.type] || (isDark ? '#a1a1aa' : '#71717a'))
+        : (EXT_EVENT_COLORS[entry.type] || '#a1a1aa');
 
     const row = document.createElement('div');
     row.className = 'flex items-start gap-3 py-1 border-b border-white/5 last:border-0';
 
-    // 时间戳
     const ts = document.createElement('span');
     ts.className = 'text-zinc-600 shrink-0 select-none';
     ts.textContent = entry.timestamp;
 
-    // 事件类型徽章
     const badge = document.createElement('span');
     badge.className = 'shrink-0 px-1.5 py-0.5 rounded-sm text-2xs font-bold';
     badge.style.color = color;
     badge.style.backgroundColor = `${color}15`;
-    badge.textContent = entry.type;
+    badge.textContent = entry.source === 'backend'
+        ? entry.type.toUpperCase()
+        : entry.type;
 
-    // 富文本消息（使用 innerHTML 展示格式化内容）
     const msg = document.createElement('span');
     msg.className = 'text-zinc-400 break-all';
     msg.innerHTML = formatExtLogMessage(entry);
@@ -804,9 +852,59 @@ function renderExtLogEntry(entry) {
     row.appendChild(ts);
     row.appendChild(badge);
     row.appendChild(msg);
-    listEl.appendChild(row);
+    return row;
+}
 
-    // 自动滚动到底部
+/**
+ * Rebuild the extension log list DOM from accumulated events.
+ * Called on each `initLogsPage()` to restore previously collected events.
+ * Uses a DocumentFragment for a single reflow, then scrolls to bottom.
+ */
+function rebuildExtLogDOM() {
+    const listEl = _container?.querySelector('#log-ext-list');
+    let events = getExtLogEvents();
+    if (!listEl) return;
+
+    // Apply level filter (inclusive: selected level and above, same as core logs)
+    if (_extLevelFilter !== 'all') {
+        const minPriority = LEVEL_PRIORITY[_extLevelFilter];
+        events = events.filter(e => {
+            const type = e.type.toLowerCase();
+            const priority = LEVEL_PRIORITY[type];
+            // Events without a log level (e.g. PrismEvent types) default to info priority
+            return (priority ?? 1) >= minPriority;
+        });
+    }
+
+    // Apply search filter
+    if (_extSearchQuery) {
+        const query = _extSearchQuery.toLowerCase();
+        events = events.filter(e =>
+            e.message.toLowerCase().includes(query) ||
+            e.type.toLowerCase().includes(query) ||
+            e.timestamp.toLowerCase().includes(query)
+        );
+    }
+
+    // Clear existing content
+    listEl.innerHTML = '';
+
+    if (events.length === 0) {
+        const emptyEl = _container?.querySelector('#log-ext-empty');
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+
+    const emptyEl = _container?.querySelector('#log-ext-empty');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const frag = document.createDocumentFragment();
+    for (const entry of events) {
+        frag.appendChild(createExtLogRow(entry));
+    }
+    listEl.appendChild(frag);
+
+    // Scroll to bottom
     const extContent = _container?.querySelector('#log-ext-content');
     if (extContent) {
         extContent.scrollTop = extContent.scrollHeight;

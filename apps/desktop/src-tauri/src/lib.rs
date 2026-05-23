@@ -1,3 +1,5 @@
+#[macro_use]
+pub mod backend_event;
 pub mod config_manager;
 pub mod core_manager;
 pub mod deep_link;
@@ -97,7 +99,7 @@ macro_rules! rate_limit {
                 "{} rate limited (min {}ms interval), please wait",
                 $cmd, $ms
             );
-            eprintln!("[RateLimit] {msg}");
+            emit_warn!(Core, CORE_START_FAILED, "RateLimit: {msg}");
             return Err(msg);
         }
     };
@@ -253,8 +255,10 @@ fn patch_settings(
                             guard.$field = val;
                             modified = true;
                         } else {
-                            eprintln!(
-                                "[patch_settings] failed to deserialize field '{}': {:?}",
+                            emit_warn!(
+                                Core,
+                                CORE_START_FAILED,
+                                "failed to deserialize field '{}': {:?}",
                                 stringify!($field),
                                 v
                             );
@@ -529,7 +533,11 @@ pub fn run() {
     // Setup panic hook to cleanup child processes
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        eprintln!("[PANIC] Application panicked, cleaning up child processes...");
+        emit_error!(
+            Core,
+            CORE_CRASHED,
+            "Application panicked, cleaning up child processes..."
+        );
         // Kill all mihomo processes on panic
         crate::core_manager::kill_mihomo();
         default_panic(info);
@@ -576,6 +584,8 @@ pub fn run() {
         .manage(RateLimiter::new())
         .manage(ShortcutRegistry::default())
         .setup(|app| {
+            backend_event::init_app_handle(app.handle());
+
             // Set AppUserModelId on Windows so notifications show "Zephyr" instead of "Windows PowerShell"
             #[cfg(target_os = "windows")]
             {
@@ -595,7 +605,12 @@ pub fn run() {
                 }
             }
 
-            ensure_app_storage(app.handle())?;
+            let paths = ensure_app_storage(app.handle())?;
+            // Initialize redaction paths for error message sanitization
+            backend_event::init_redact_paths(
+                paths.core_dir.to_str().unwrap_or(""),
+                paths.profiles_dir.to_str().unwrap_or(""),
+            );
             // Initialize TUN mode flag from config (before tray init so icon is correct)
             let _ = init_tun_mode_from_config(app.handle());
             let paths = core_manager::resolve_app_paths(app.handle())?;
@@ -720,8 +735,7 @@ pub fn run() {
                             }
                         }
                         if imported_count > 0 {
-                            use tauri::Emitter as _;
-                            let _ = window.emit("profiles-imported", imported_count);
+                            crate::backend_event::emit_to_main(app, "profiles-imported", imported_count);
                         }
                     }
                 }

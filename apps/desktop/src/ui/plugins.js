@@ -123,10 +123,33 @@ export function initPlugins() {
     // ── Panel open / close ──────────────────────────────────────────
     openBtn?.addEventListener('click', () => {
         panel.classList.remove('hidden');
+        // Animate in
+        requestAnimationFrame(() => {
+            const inner = panel.querySelector('.plugin-panel');
+            if (inner) {
+                inner.style.transform = 'scale(0.96)';
+                inner.style.opacity = '0';
+                requestAnimationFrame(() => {
+                    inner.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                    inner.style.transform = 'scale(1)';
+                    inner.style.opacity = '1';
+                });
+            }
+        });
         loadOverrides();
     });
 
-    const closePanel = () => panel.classList.add('hidden');
+    const closePanel = () => {
+        const inner = panel.querySelector('.plugin-panel');
+        if (inner) {
+            inner.style.transition = 'all 0.15s ease-in';
+            inner.style.transform = 'scale(0.96)';
+            inner.style.opacity = '0';
+            setTimeout(() => panel.classList.add('hidden'), 150);
+        } else {
+            panel.classList.add('hidden');
+        }
+    };
 
     closeBtn?.addEventListener('click', closePanel);
     backdrop?.addEventListener('click', closePanel);

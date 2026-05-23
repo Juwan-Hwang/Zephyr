@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tauri::{command, AppHandle, Emitter as _, Manager as _, State};
+use tauri::{command, AppHandle, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt as _, Shortcut, ShortcutState};
 
 /// Maximum number of global shortcuts allowed.
@@ -77,14 +77,13 @@ pub fn register_shortcut(
     app.global_shortcut()
         .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
             if event.state() == ShortcutState::Pressed {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.emit(
-                        "global-shortcut",
-                        ShortcutPayload {
-                            action: action_clone.clone(),
-                        },
-                    );
-                }
+                crate::backend_event::emit_to_main(
+                    app_handle,
+                    "global-shortcut",
+                    ShortcutPayload {
+                        action: action_clone.clone(),
+                    },
+                );
             }
         })
         .map_err(|e| format!("Failed to register shortcut: {e}"))?;
