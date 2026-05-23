@@ -49,6 +49,7 @@
 - **Clippy** — 165+ deny rules including `unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`
 - **Release Hardening** — LTO, single codegen unit, strip symbols, panic=abort
 - **URL Leakage Prevention** — `get_config_url` demoted to internal function (not exposed to frontend)
+- **Backend Event System** — Structured logging with 4 levels (Fatal/Error/Warn/Info), 10 modules, 22 error codes; automatic path redaction; frontend event bus with Toast notifications for Fatal/Error
 
 ## System Integration
 
@@ -79,6 +80,7 @@
 ```
 apps/desktop/src-tauri/src/
   lib.rs                    — App entry, command registration, state management, rate limiting
+  backend_event.rs          — Structured event system, error codes, path redaction, frontend dispatch
   config_manager.rs         — Settings read/write
   os_notification.rs        — OS-level notification dispatch
   core/                     — Mihomo process, TUN, config, crypto, subscription
@@ -108,4 +110,4 @@ apps/desktop/src-tauri/src/
   uwp_loopback.rs           — Windows UWP loopback exemption
 ```
 
-145 IPC commands · 354 Rust tests · Tauri 2.11 · Rust 1.92
+145 IPC commands · 348 Rust tests · Tauri 2.11 · Rust 1.92
