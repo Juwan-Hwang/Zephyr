@@ -31,6 +31,8 @@ use super::core_process::ensure_app_storage;
 use super::crypto::{load_metadata, save_metadata};
 use super::secure_io::write_file_secure;
 use super::{MihomoState, MAX_RESPONSE_SIZE};
+#[allow(unused_imports)]
+use crate::emit_warn;
 
 // ── Pure functions for subscription content sanitization ─────────────────
 
@@ -473,7 +475,11 @@ pub(crate) async fn download_sub_inner(
 
         if !resp.status().is_success() {
             let status = resp.status();
-            println!("Download failed with status: {status}");
+            emit_warn!(
+                Subscription,
+                SUB_UPDATE_FAILED,
+                "Download failed with status: {status}"
+            );
             return Err("Download failed with error status".to_owned());
         }
 

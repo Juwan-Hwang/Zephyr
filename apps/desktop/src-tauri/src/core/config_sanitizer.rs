@@ -141,7 +141,11 @@ pub(crate) fn sanitize_base_filename(raw: &str) -> Result<String, String> {
         .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or_else(|| {
-            eprintln!("[config_sanitizer] Warning: Path::new({decoded:?}).file_name() returned None, using raw input");
+            emit_warn!(
+                Config,
+                CONFIG_PARSE_FAILED,
+                "Path::new({decoded:?}).file_name() returned None, using raw input"
+            );
             &decoded
         })
         .to_owned();

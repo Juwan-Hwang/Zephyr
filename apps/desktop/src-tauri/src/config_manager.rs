@@ -1,6 +1,8 @@
 use crate::core_manager::core::config_sanitizer::remove_dangerous_keys;
 use crate::core_manager::ensure_app_storage;
 use crate::core_manager::MihomoState;
+#[allow(unused_imports)]
+use crate::emit_warn;
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
@@ -73,7 +75,11 @@ fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettings) 
     // Restore external-controller: always bind to localhost
     if let Some(ctrl) = &settings.external_controller {
         let port = ctrl.split(':').next_back().unwrap_or_else(|| {
-            eprintln!("[config_manager] Warning: external-controller has no port, using 9090");
+            emit_warn!(
+                Config,
+                CONFIG_PARSE_FAILED,
+                "external-controller has no port, using 9090"
+            );
             "9090"
         });
         map.insert(
@@ -227,8 +233,10 @@ pub async fn update_config(
                                     &profile_path,
                                     &new_profile_content,
                                 ) {
-                                    eprintln!(
-                                        "[warn] Failed to update profile {profile_name}: {e}"
+                                    emit_warn!(
+                                        Config,
+                                        CONFIG_PARSE_FAILED,
+                                        "Failed to update profile {profile_name}: {e}"
                                     );
                                 }
                             }
@@ -247,7 +255,11 @@ pub async fn update_config(
     {
         if let Some(p) = ext_ctrl.split(':').next_back() {
             p.parse::<u16>().unwrap_or_else(|_| {
-                eprintln!("[config_manager] Warning: failed to parse external-controller port, using default");
+                emit_warn!(
+                    Config,
+                    CONFIG_PARSE_FAILED,
+                    "failed to parse external-controller port, using default"
+                );
                 port
             })
         } else {
@@ -284,12 +296,20 @@ pub async fn update_config(
                 hot_reload_success = true;
             } else {
                 let text = res.text().await.unwrap_or_default();
-                println!("Warning: Core reload API returned non-success: {text}");
+                emit_warn!(
+                    Core,
+                    CORE_RELOAD_FAILED,
+                    "Core reload API returned non-success: {text}"
+                );
                 hot_reload_message = format!("Hot reload returned status {status}");
             }
         }
         Err(e) => {
-            println!("Warning: Failed to reload core via API: {e}");
+            emit_warn!(
+                Core,
+                CORE_RELOAD_FAILED,
+                "Failed to reload core via API: {e}"
+            );
             "Core API unavailable for hot reload".clone_into(&mut hot_reload_message);
         }
     }

@@ -45,8 +45,10 @@ fn validate_legitimate_call(app: &AppHandle) -> Result<(), String> {
         .unwrap_or(false);
 
     // Log the security validation
-    eprintln!(
-        "[Security] UWP exemption request - Core running: {}, Timestamp: {:?}",
+    emit_info!(
+        System,
+        SYS_PROXY_FAILED,
+        "UWP exemption request - Core running: {}, Timestamp: {:?}",
         core_running,
         std::time::SystemTime::now()
     );
@@ -119,18 +121,30 @@ Get-AppxPackage | Where-Object {
 
         match cmd.status() {
             Ok(status) if status.success() => {
-                eprintln!("[Security] UWP exemption completed successfully");
+                emit_info!(
+                    System,
+                    SYS_PROXY_FAILED,
+                    "UWP exemption completed successfully"
+                );
                 Ok(
                     "UWP Loopback exemption process started. Please check the UAC prompt."
                         .to_owned(),
                 )
             }
             Ok(status) => {
-                eprintln!("[Security] UWP exemption failed with status: {status}");
+                emit_warn!(
+                    System,
+                    SYS_PROXY_FAILED,
+                    "UWP exemption failed with status: {status}"
+                );
                 Err(format!("PowerShell exited with status: {status}"))
             }
             Err(e) => {
-                eprintln!("[Security] UWP exemption failed with error: {e}");
+                emit_error!(
+                    System,
+                    SYS_PROXY_FAILED,
+                    "UWP exemption failed with error: {e}"
+                );
                 Err(format!("Failed to execute PowerShell: {e}"))
             }
         }

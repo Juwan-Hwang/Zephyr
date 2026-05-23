@@ -243,7 +243,7 @@
                     </div>
                 </header>
 
-                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pr-2 pt-2 -mt-2 custom-scrollbar relative z-10">
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pr-2 pt-2 -mt-2 -mb-8 custom-scrollbar relative z-10">
                     <!-- Subscriptions will be rendered here -->
                 </div>
 
@@ -285,7 +285,7 @@
                             <button id="plugin-disable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideDisableAll">禁用全部</button>
                         </div>
                         <!-- Override cards list -->
-                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 custom-scrollbar">
+                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 -mb-8 custom-scrollbar">
                             <!-- Override cards rendered by plugins.js -->
                         </div>
                         <!-- Script editor area -->
@@ -363,7 +363,7 @@
                 <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
                 <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 relative z-10 shrink-0" data-flex-class="flex"></div>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
-                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -m-4 custom-scrollbar relative z-10">
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
                 </div>
             </div>
@@ -387,7 +387,7 @@
                         <button id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200" data-i18n="ruleLibraryImport">Import Rules</button>
                     </div>
                 </header>
-                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 space-y-4 relative z-10">
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 -mb-8 space-y-4 relative z-10">
                     <!-- Rendered by rule-library.js -->
                 </div>
             </div>
@@ -414,7 +414,7 @@
                                     </div>
                                 </div>
                                 <div id="setting-lang-wrap" class="relative w-40">
-                                    <button id="setting-lang-trigger" type="button" class="w-full bg-black/40 border border-white/5 rounded-md px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-purple-500/50 transition-all cursor-pointer flex items-center justify-between">
+                                    <button id="setting-lang-trigger" type="button" class="w-full bg-black/40 border border-white/5 rounded-md px-3 py-1.5 text-xs text-zinc-300 focus:outline-none transition-all cursor-pointer flex items-center justify-between">
                                         <span id="setting-lang-label">English</span>
                                         <svg id="setting-lang-arrow" class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="m6 9 6 6 6-6"></path>

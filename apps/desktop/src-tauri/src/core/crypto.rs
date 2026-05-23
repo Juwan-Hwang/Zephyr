@@ -241,7 +241,11 @@ fn compute_machine_key() -> Vec<u8> {
 
     // Absolute last resort: session-only key
     // This is a critical failure - warn user that data will be lost on restart
-    eprintln!("[Security] CRITICAL: Could not persist machine key. Encrypted data will be lost on restart!");
+    emit_error!(
+        Core,
+        CORE_CRASHED,
+        "Could not persist machine key. Encrypted data will be lost on restart!"
+    );
     // Session-only key - will not persist
     // Callers should check is_machine_key_persisted() before storing sensitive data
     let mut key_buf = [0u8; 32];
@@ -362,13 +366,21 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
                 meta
             }
             Err(e) => {
-                eprintln!("[Metadata] Warning: Failed to parse metadata.json: {e}. Using default.");
+                emit_warn!(
+                    Core,
+                    CORE_CRASHED,
+                    "Failed to parse metadata.json: {e}. Using default."
+                );
                 ProfilesMetadata::default()
             }
         },
         Err(e) => {
             if meta_path.exists() {
-                eprintln!("[Metadata] Warning: Failed to read metadata.json: {e}. Using default.");
+                emit_warn!(
+                    Core,
+                    CORE_CRASHED,
+                    "Failed to read metadata.json: {e}. Using default."
+                );
             }
             ProfilesMetadata::default()
         }
@@ -439,7 +451,11 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
 
     if changed {
         if let Err(e) = save_metadata(paths, &metadata) {
-            eprintln!("[warn] Failed to save metadata during cleanup: {e}");
+            emit_warn!(
+                Core,
+                CORE_CRASHED,
+                "Failed to save metadata during cleanup: {e}"
+            );
         }
     }
 }

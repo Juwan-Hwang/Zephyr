@@ -12,6 +12,9 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
+use crate::backend_event::redact_error_message;
+#[allow(unused_imports)]
+use crate::{emit_error, emit_info, emit_warn};
 
 const DEFAULT_API_PORT: u16 = 9090;
 const DEFAULT_MIXED_PORT: u16 = 7890;
@@ -63,77 +66,6 @@ fn detect_cache_lock_issue(log: &str) -> bool {
         || log.contains("database disk image is malformed")
 }
 
-/// Redact sensitive directory paths from an error message.
-/// Handles both with-separator and without-separator occurrences, and supports
-/// both forward-slash and backslash path styles (Windows).
-/// Performs case-insensitive matching to handle Windows path casing variations,
-/// and also redacts escaped backslash versions (e.g., `C:\\Users` from JSON output).
-fn redact_error_message(msg: &str, core_dir: &str, profiles_dir: &str) -> String {
-    let mut result = msg.to_owned();
-
-    // Case-insensitive replace for a single pattern in the string.
-    let replace_ci = |s: &mut String, pattern: &str, replacement: &str| {
-        let p_len = pattern.len();
-        if p_len == 0 {
-            return;
-        }
-        let mut i = 0;
-        while i + p_len <= s.len() {
-            if s.is_char_boundary(i)
-                && s.is_char_boundary(i + p_len)
-                && s[i..i + p_len].eq_ignore_ascii_case(pattern)
-            {
-                s.replace_range(i..i + p_len, replacement);
-                i += replacement.len();
-            } else {
-                i += 1;
-            }
-        }
-    };
-
-    // Redact a single directory path in both slash styles and casing.
-    let redact_dir = |s: &mut String, dir: &str, label: &str| {
-        if dir.is_empty() {
-            return;
-        }
-        // Normalize to both slash styles regardless of input format,
-        // because error messages may use either style on any platform.
-        let dir_f = dir.replace('\\', "/");
-        let dir_b = dir.replace('/', "\\");
-
-        // Forward-slash style: handle trailing separator first, then bare path
-        let dir_f_sep = format!("{dir_f}/");
-        let label_f_sep = format!("{label}/");
-        replace_ci(s, &dir_f_sep, &label_f_sep);
-        replace_ci(s, &dir_f, label);
-
-        // Backslash style (Windows): handle trailing separator first, then bare path
-        let dir_b_sep = format!("{dir_b}\\");
-        let label_b_sep = format!("{label}\\");
-        replace_ci(s, &dir_b_sep, &label_b_sep);
-        replace_ci(s, &dir_b, label);
-
-        // Escaped backslash style (JSON/Debug output): C:\\Users\\...
-        let dir_be = dir.replace('\\', "\\\\");
-        let dir_be_sep = format!("{dir_be}\\\\");
-        let label_be_sep = format!("{label}\\\\");
-        replace_ci(s, &dir_be_sep, &label_be_sep);
-        replace_ci(s, &dir_be, label);
-    };
-
-    // Redact the longest (most specific) path first to avoid parent-path
-    // replacements breaking subdirectory matches.
-    let mut dirs: Vec<(&str, &str)> =
-        vec![(core_dir, "[CORE_DIR]"), (profiles_dir, "[PROFILES_DIR]")];
-    dirs.retain(|(d, _)| !d.is_empty());
-    dirs.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
-
-    for (dir, label) in dirs {
-        redact_dir(&mut result, dir, label);
-    }
-    result
-}
-
 /// Parse the version string from `mihomo -v` stdout.
 fn parse_version_output(stdout: &str) -> String {
     let trimmed = stdout.trim();
@@ -175,7 +107,11 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[drain_connections] Failed to build HTTP client: {e}");
+            emit_error!(
+                Core,
+                CORE_STOP_FAILED,
+                "Failed to build HTTP client for drain: {e}"
+            );
             return;
         }
     };
@@ -187,7 +123,7 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
         .send()
         .await
     {
-        eprintln!("[drain_connections] DELETE request failed: {e}");
+        emit_error!(Core, CORE_STOP_FAILED, "DELETE /connections failed: {e}");
     }
 
     // Wait for connections to drain (max 2s)
@@ -211,26 +147,40 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[drain_connections] Failed to parse JSON: {e}");
+                        emit_error!(
+                            Core,
+                            CORE_STOP_FAILED,
+                            "Failed to parse drain response JSON: {e}"
+                        );
                         return;
                     }
                 }
             }
             Ok(resp) => {
-                eprintln!(
-                    "[drain_connections] GET request failed with status: {}",
+                emit_warn!(
+                    Core,
+                    CORE_STOP_FAILED,
+                    "GET /connections returned status: {}",
                     resp.status()
                 );
                 return; // Core already unreachable
             }
             Err(e) => {
-                eprintln!("[drain_connections] GET request error: {e}");
+                emit_error!(
+                    Core,
+                    CORE_STOP_FAILED,
+                    "GET /connections request error: {e}"
+                );
                 return; // Core already unreachable
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    eprintln!("[drain_connections] Timeout waiting for connections to drain");
+    emit_warn!(
+        Core,
+        CORE_STOP_FAILED,
+        "Timeout waiting for connections to drain"
+    );
 }
 
 /// Kill all mihomo processes gracefully (SIGTERM first, SIGKILL after timeout).
@@ -420,7 +370,11 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 // Only copy if target doesn't exist
                 if !target.exists() {
                     if let Err(e) = fs::copy(&source, &target) {
-                        eprintln!("Warning: Failed to copy bundled file {file_name}: {e}");
+                        emit_warn!(
+                            Core,
+                            CORE_START_FAILED,
+                            "Failed to copy bundled file {file_name}: {e}"
+                        );
                     }
                 }
 
@@ -562,7 +516,7 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
 }
 
 /// Create a minimal default configuration file for first-time users
-fn create_default_config(path: &PathBuf) -> Result<(), String> {
+fn create_default_config(path: &Path) -> Result<(), String> {
     let default_config = r"# Zephyr Default Configuration
 # This is a minimal config file created for first-time setup.
 # Please add your proxy nodes or import a subscription.
@@ -604,7 +558,7 @@ rules:
     write_file_secure(path, default_config)
         .map_err(|e| format!("Failed to create default config: {e}"))?;
 
-    println!("Created default config at {path:?}");
+    emit_info!(Config, CONFIG_CREATED_DEFAULT, "Created default config");
     Ok(())
 }
 
@@ -860,15 +814,19 @@ fn select_runtime_config(
                 .and_then(|name| name.to_str())
                 .ok_or("Invalid fallback config filename encoding")?
                 .to_owned();
-            println!(
-                "Requested config {preferred_name} is not a valid Clash YAML profile, falling back to {file_name}"
+            emit_warn!(
+                Config,
+                CONFIG_PARSE_FAILED,
+                "Requested config {preferred_name} is not valid, falling back to {file_name}"
             );
             return Ok((Some(file_name), final_config, config_port));
         }
     }
 
-    println!(
-        "Requested config {preferred_name} is not a valid Clash YAML profile, falling back to generated minimal config"
+    emit_warn!(
+        Config,
+        CONFIG_PARSE_FAILED,
+        "Requested config {preferred_name} is not valid, falling back to minimal config"
     );
     let (final_config, config_port) = build_minimal_runtime_config(secret);
     Ok((None, final_config, config_port))
@@ -902,20 +860,26 @@ pub(super) fn generate_secret() -> String {
 async fn wait_for_port_free(port: u16) {
     for i in 0..PORT_WAIT_MAX_RETRIES {
         if std::net::TcpListener::bind(format!("127.0.0.1:{port}")).is_ok() {
-            eprintln!(
-                "[CORE] port {port} confirmed free after {}ms",
+            emit_info!(
+                Core,
+                CORE_START_FAILED,
+                "port {port} confirmed free after {}ms",
                 i * PORT_WAIT_INTERVAL_MS
             );
             break;
         }
         if i == PORT_WAIT_MAX_RETRIES - 1 {
-            eprintln!(
-                "[CORE] WARNING: port {port} still occupied after {}ms, proceeding anyway",
+            emit_warn!(
+                Core,
+                CORE_START_FAILED,
+                "port {port} still occupied after {}ms, proceeding anyway",
                 PORT_WAIT_MAX_RETRIES * PORT_WAIT_INTERVAL_MS
             );
         } else {
-            eprintln!(
-                "[CORE] waiting for port {port}... {}ms",
+            emit_info!(
+                Core,
+                CORE_START_FAILED,
+                "waiting for port {port}... {}ms",
                 (i + 1) * PORT_WAIT_INTERVAL_MS
             );
         }
@@ -996,7 +960,11 @@ async fn spawn_with_cache_retry(
             let log = std::fs::read_to_string(&log_path).unwrap_or_default();
 
             if detect_cache_lock_issue(&log) {
-                eprintln!("[CORE] Detected cache.db lock issue, removing and retrying...");
+                emit_warn!(
+                    Core,
+                    CORE_CACHE_LOCKED,
+                    "Detected cache.db lock issue, removing and retrying..."
+                );
                 let cache_path = core_dir.join("cache.db");
                 let _ = std::fs::remove_file(&cache_path);
 
@@ -1097,7 +1065,11 @@ pub async fn start_core(
         .is_err()
     {
         if wait_ms > 10000 {
-            eprintln!("[CORE] WARNING: Core start lock timeout, forcing reset");
+            emit_warn!(
+                Core,
+                CORE_START_FAILED,
+                "Core start lock timeout, forcing reset"
+            );
             CORE_STARTING.store(false, Ordering::SeqCst);
             if CORE_STARTING
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1209,12 +1181,8 @@ pub async fn start_core(
         }
         let mut err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
         // Basic path redaction
-        err_msg = redact_error_message(
-            &err_msg,
-            paths.core_dir.to_str().unwrap_or(""),
-            paths.profiles_dir.to_str().unwrap_or(""),
-        );
-        println!("Config test failed: {err_msg}");
+        err_msg = redact_error_message(&err_msg);
+        emit_error!(Config, CONFIG_PARSE_FAILED, "Config test failed: {err_msg}");
         return Err(
             "Config test failed. Please check the config file for syntax errors.".to_owned(),
         );
@@ -1253,8 +1221,10 @@ pub async fn start_core(
             .output()
             .ok();
         if let Some(o) = ps {
-            eprintln!(
-                "[CORE] mihomo processes before spawn:\n{}",
+            emit_info!(
+                Core,
+                CORE_START_FAILED,
+                "mihomo processes before spawn:\n{}",
                 String::from_utf8_lossy(&o.stdout)
             );
         }
@@ -1316,7 +1286,11 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
         let run_config_path = paths.core_dir.join("run_config.yaml");
         if run_config_path.exists() {
             if let Err(e) = fs::remove_file(&run_config_path) {
-                println!("Warning: Failed to remove run_config.yaml: {e}");
+                emit_warn!(
+                    Core,
+                    CORE_STOP_FAILED,
+                    "Failed to remove run_config.yaml: {e}"
+                );
             }
         }
     }
@@ -1686,60 +1660,6 @@ mod tests {
         assert!(detect_cache_lock_issue(
             "error: unable to open database file at path"
         ));
-    }
-
-    // ── redact_error_message tests ────────────────────────────────────────
-
-    #[test]
-    fn test_redact_replaces_core_dir() {
-        let msg = format!("Failed to read {}/config.yaml", "/home/user/.config/zephyr");
-        let redacted = redact_error_message(
-            &msg,
-            "/home/user/.config/zephyr",
-            "/home/user/.config/zephyr/profiles",
-        );
-        assert!(!redacted.contains("/home/user/.config/zephyr"));
-        assert!(redacted.contains("[CORE_DIR]"));
-    }
-
-    #[test]
-    fn test_redact_replaces_profiles_dir() {
-        let msg = format!("Error in {}/test.yaml", "/home/user/profiles");
-        let redacted = redact_error_message(&msg, "/core", "/home/user/profiles");
-        assert!(!redacted.contains("/home/user/profiles"));
-        assert!(redacted.contains("[PROFILES_DIR]"));
-    }
-
-    #[test]
-    fn test_redact_no_match() {
-        let redacted = redact_error_message("Generic error message", "/core", "/profiles");
-        assert_eq!(redacted, "Generic error message");
-    }
-
-    #[test]
-    fn test_redact_empty_message() {
-        let redacted = redact_error_message("", "/core", "/profiles");
-        assert_eq!(redacted, "");
-    }
-
-    #[test]
-    fn test_redact_empty_dirs() {
-        let msg = "Error at /some/path";
-        let redacted = redact_error_message(msg, "", "");
-        assert!(!redacted.is_empty());
-    }
-
-    #[test]
-    fn test_redact_both_dirs_in_message() {
-        let msg = format!(
-            "Core dir {}/file and profiles dir {}/other",
-            "/core", "/profiles"
-        );
-        let redacted = redact_error_message(&msg, "/core", "/profiles");
-        assert!(!redacted.contains("/core"));
-        assert!(!redacted.contains("/profiles"));
-        assert!(redacted.contains("[CORE_DIR]"));
-        assert!(redacted.contains("[PROFILES_DIR]"));
     }
 
     // ── parse_version_output tests ────────────────────────────────────────

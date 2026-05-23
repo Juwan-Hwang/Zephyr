@@ -440,6 +440,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'tray-proxy-changed',    // tray.rs:252
         'global-shortcut',       // global_shortcut.rs:82
         'core-download-status',  // updater.rs:95
+        'backend-event',         // backend_event.rs:136 (infrastructure event)
     ];
 
     // All event names listened to by JS frontend
@@ -455,6 +456,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'profiles-imported',         // ui/settings.js:1035
         'prism-event',               // ui/logs.js:371
         'core-download-status',      // ui/client-updater.js:48
+        'backend-event',             // ui/logs.js:445 (prism logs via backend_event.rs)
     ];
 
     it('every backend-emitted event has a frontend listener', () => {

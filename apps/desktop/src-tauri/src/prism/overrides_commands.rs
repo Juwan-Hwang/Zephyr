@@ -440,7 +440,11 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         let lock = match mihomo_state.0.lock() {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("[overrides] MihomoState lock poisoned, scope filtering disabled: {e}");
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "MihomoState lock poisoned, scope filtering disabled: {e}"
+                );
                 return Ok(Vec::new());
             }
         };
@@ -489,7 +493,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
                     }],
                 };
                 if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    eprintln!("[overrides] Failed to save log for '{}': {e}", item.name);
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Failed to save log for '{}': {e}",
+                        item.name
+                    );
                 }
                 pre_logs.push(log);
             }
@@ -508,7 +517,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
                     }],
                 };
                 if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    eprintln!("[overrides] Failed to save log for '{}': {e}", item.name);
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Failed to save log for '{}': {e}",
+                        item.name
+                    );
                 }
                 pre_logs.push(log);
             }
@@ -551,7 +565,11 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
             };
             // Persist individual logs (ignore errors)
             if let Err(e) = overrides_store::save_log(&state, id, &log) {
-                eprintln!("[overrides] Failed to save log for '{id}': {e}");
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "Failed to save log for '{id}': {e}"
+                );
             }
             log
         })
@@ -595,7 +613,11 @@ async fn download_remote_content(url: &str, proxy_port: Option<u16>) -> Result<S
                 return Ok(content);
             }
             Err(proxy_err) => {
-                eprintln!("[override] Proxy download failed ({proxy_err}), retrying direct...");
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "Proxy download failed ({proxy_err}), retrying direct..."
+                );
             }
         }
     }
@@ -684,7 +706,9 @@ pub fn override_export(state: State<PrismState>) -> Result<String, String> {
         let content = match overrides_store::read_content(&state, &item.id) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!(
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
                     "[overrides] Failed to read content for '{}', skipping: {e}",
                     item.name
                 );
@@ -755,12 +779,18 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
 
     for entry in payload.items {
         if entry.name.is_empty() || entry.ext.is_empty() {
-            eprintln!("[overrides] Skipping malformed import entry: empty name or ext");
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Skipping malformed import entry: empty name or ext"
+            );
             continue;
         }
 
         let Some(ext) = OverrideExt::from_ext(&entry.ext) else {
-            eprintln!(
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
                 "[overrides] Skipping import entry with unknown ext: {}",
                 entry.ext
             );

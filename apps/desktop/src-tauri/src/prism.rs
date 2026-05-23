@@ -119,7 +119,11 @@ impl PrismState {
             }) {
                 Ok(state) => Some(state),
                 Err(e) => {
-                    eprintln!("[prism] Failed to initialize SmartState: {e}");
+                    emit_error!(
+                        Prism,
+                        PRISM_APPLY_FAILED,
+                        "Failed to initialize SmartState: {e}"
+                    );
                     None
                 }
             }
