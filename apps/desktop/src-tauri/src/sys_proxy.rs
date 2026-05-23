@@ -274,7 +274,11 @@ fn enable_gnome_proxy(host: &str, port: &str, bypass: Option<&str>) -> bool {
         let _ = Command::new("gsettings")
             .args(["set", "org.gnome.system.proxy", "mode", "none"])
             .status();
-        eprintln!("[Proxy] Warning: Failed to set all GNOME proxy settings, rolling back");
+        emit_warn!(
+            System,
+            SYS_PROXY_FAILED,
+            "Failed to set all GNOME proxy settings, rolling back"
+        );
     }
     false
 }
@@ -377,7 +381,11 @@ fn enable_kde_proxy(kwrite_cmd: &str, host: &str, port: &str) -> bool {
                 "0",
             ])
             .status();
-        eprintln!("[Proxy] Warning: Failed to set all KDE proxy settings, rolling back");
+        emit_warn!(
+            System,
+            SYS_PROXY_FAILED,
+            "Failed to set all KDE proxy settings, rolling back"
+        );
     }
     false
 }

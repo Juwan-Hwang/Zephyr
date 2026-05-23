@@ -133,18 +133,25 @@ function invoke(cmd, args) {
 /** Listen to a Tauri event emitted from Rust backend.
  *  Since the event plugin's JS shim isn't loaded without global Tauri,
  *  we manually wire up via transformCallback + raw IPC.
+ *
+ *  When Tauri v2 fires an event via `WebviewWindow::emit()`, the runtime's
+ *  `event_initialization_script` dispatches to the callback registered
+ *  here. The callback receives the full TauriEvent object:
+ *  `{ event: string, payload: T, id: number }`.
+ *
  * @param {string} event
- * @param {(event: any) => void} handler
+ * @param {(event: { payload: any, event: string, id: number }) => void} handler
  * @returns {Promise<() => void>}
  */
 async function listen(event, handler) {
   if (!_t?.transformCallback) throw new Error('[API] Tauri IPC not available');
-  const callbackId = _t.transformCallback(/** @type {(...args: any[]) => void} */ (handler));
+
+  const callbackId = _t.transformCallback(handler);
   let eventId;
   try {
     eventId = await invoke('plugin:event|listen', {
       event,
-      target: { kind: 'Any' },
+      target: { kind: 'Window', label: 'main' },
       handler: callbackId,
     });
   } catch (e) {
@@ -153,6 +160,20 @@ async function listen(event, handler) {
   }
   return async () => {
     _t.transformCallback(undefined, false, callbackId);
+    // Clean up the listener entry from the internal listeners object.
+    // Tauri's unlisten_js_script only calls unregisterCallback but does NOT
+    // delete `obj[event][eventId]`, leaving a stale entry. This causes
+    // emit_to_main to falsely believe a listener still exists and dispatch
+    // events to a dead callback (which silently fails, losing the event).
+    const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
+    if (obj?.[event]) {
+      delete obj[event][eventId];
+      // If no listeners remain for this event, clean up the event key too
+      // so emit_to_main correctly detects "no listeners" and buffers the event.
+      if (Object.getOwnPropertyNames(obj[event]).length === 0) {
+        delete obj[event];
+      }
+    }
     await invoke('plugin:event|unlisten', { event, eventId });
   };
 }
@@ -298,7 +319,7 @@ export async function patchConfig(payload) {
 
 /**
  * 从磁盘热重载核心配置文件
- * @param {string} [path='run_config.yaml'] - 配置文件名（仅用于语义，实际由 core 决定）
+ * @param {string} [_path='run_config.yaml'] - 配置文件名（仅用于语义，实际由 core 决定）
  * @returns {Promise<boolean>} 是否成功
  */
 export async function reloadConfig(_path = 'run_config.yaml') {

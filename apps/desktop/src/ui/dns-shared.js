@@ -269,6 +269,19 @@ export async function initDnsRewriteToggle() {
             if (modal) {
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
+                // Animate in
+                requestAnimationFrame(() => {
+                    const inner = modal.querySelector('.glass-card');
+                    if (inner) {
+                        inner.style.transform = 'scale(0.96)';
+                        inner.style.opacity = '0';
+                        requestAnimationFrame(() => {
+                            inner.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                            inner.style.transform = 'scale(1)';
+                            inner.style.opacity = '1';
+                        });
+                    }
+                });
                 createFocusTrap(modal, { onEscape: closeModal });
             }
         });
@@ -277,8 +290,19 @@ export async function initDnsRewriteToggle() {
     // Close modal
     function closeModal() {
         if (!modal) return;
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
+        const inner = modal.querySelector('.glass-card');
+        if (inner) {
+            inner.style.transition = 'all 0.15s ease-in';
+            inner.style.transform = 'scale(0.96)';
+            inner.style.opacity = '0';
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 150);
+        } else {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
     }
 
     if (cancelBtn) {

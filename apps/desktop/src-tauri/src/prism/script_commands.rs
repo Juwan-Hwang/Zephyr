@@ -141,7 +141,7 @@ pub fn script_set_sandbox(
     drop(lock);
 
     // Log after successful mutation to ensure audit accuracy
-    eprintln!(
+    emit_info!(Prism, PRISM_SCRIPT_ERROR,
         "[SECURITY] Script sandbox config changed: network={allow_network}, filesystem={allow_filesystem}, child_process={allow_child_process}, workers={allow_workers}"
     );
     Ok(())
