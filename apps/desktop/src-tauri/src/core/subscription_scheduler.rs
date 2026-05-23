@@ -11,6 +11,8 @@ use tokio::time::{interval, timeout, MissedTickBehavior};
 use super::core_process::ensure_app_storage;
 use super::crypto::load_metadata;
 use super::subscription::download_sub_inner;
+#[allow(unused_imports)]
+use crate::{emit_error, emit_info, emit_warn};
 
 /// Download timeout per subscription (15 seconds).
 const DOWNLOAD_TIMEOUT_SECS: u64 = 15;
@@ -116,10 +118,18 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
         match check_and_update_subscriptions(&app, &state).await {
             Ok(updated_count) => {
                 if updated_count > 0 {
-                    println!("[Scheduler] Updated {updated_count} subscription(s)");
+                    emit_info!(
+                        Subscription,
+                        SUB_UPDATE_SUCCESS,
+                        "Updated {updated_count} subscription(s)"
+                    );
                 }
             }
-            Err(e) => eprintln!("[Scheduler] Error checking subscriptions: {e}"),
+            Err(e) => emit_error!(
+                Subscription,
+                SUB_UPDATE_FAILED,
+                "Error checking subscriptions: {e}"
+            ),
         }
 
         state.running.store(false, Ordering::SeqCst);
@@ -154,7 +164,11 @@ async fn check_and_update_subscriptions(
         match lock {
             Ok(guard) => guard.subscription_user_agent.clone(),
             Err(e) => {
-                eprintln!("[Scheduler] Failed to acquire settings lock for user agent: {e}");
+                emit_warn!(
+                    Subscription,
+                    SUB_UPDATE_FAILED,
+                    "Failed to acquire settings lock for user agent: {e}"
+                );
                 None
             }
         }
@@ -210,14 +224,18 @@ async fn check_and_update_subscriptions(
 
         match result {
             Ok(Ok(_)) => {
-                println!("[Scheduler] Updated {name}");
+                emit_info!(Subscription, SUB_UPDATE_SUCCESS, "Updated {name}");
                 updated += 1;
             }
             Ok(Err(e)) => {
-                eprintln!("[Scheduler] Failed to update {name}: {e}");
+                emit_error!(
+                    Subscription,
+                    SUB_UPDATE_FAILED,
+                    "Failed to update {name}: {e}"
+                );
             }
             Err(_) => {
-                eprintln!("[Scheduler] Timeout updating {name}");
+                emit_warn!(Subscription, SUB_UPDATE_TIMEOUT, "Timeout updating {name}");
             }
         }
     }

@@ -199,7 +199,11 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
             let path = format!("{h}/Library/Logs");
             // Create directory if it doesn't exist
             if let Err(e) = std::fs::create_dir_all(&path) {
-                eprintln!("[TUN] Failed to create log directory: {e}");
+                emit_warn!(
+                    System,
+                    SYS_TUN_FAILED,
+                    "Failed to create log directory: {e}"
+                );
             }
             format!("{path}/mihomo-tun.log")
         })
@@ -295,7 +299,11 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     }
 
     // MSL is already set in the root osascript above (sysctl needs root)
-    eprintln!("[TUN] Set MSL=1000 for short TIME_WAIT (via root shell)");
+    emit_info!(
+        System,
+        SYS_TUN_FAILED,
+        "Set MSL=1000 for short TIME_WAIT (via root shell)"
+    );
 
     // Mark TUN mode as active
     set_tun_mode(true);
@@ -602,7 +610,11 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let tun_enabled = extract_tun_enabled_from_yaml(&content);
 
     set_tun_mode(tun_enabled);
-    eprintln!("[CORE] TUN mode initialized from config: {tun_enabled}");
+    emit_info!(
+        System,
+        SYS_TUN_FAILED,
+        "TUN mode initialized from config: {tun_enabled}"
+    );
 
     Ok(())
 }

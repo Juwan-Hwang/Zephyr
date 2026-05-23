@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
 use std::time::Duration;
-use tauri::{command, Emitter as _, Manager as _, State, Window};
+use tauri::{command, Manager as _, State, Window};
 
 // ── Pure helper functions ────────────────────────────────────────────────
 
@@ -92,7 +92,8 @@ fn build_github_client() -> Result<reqwest::Client, String> {
 }
 
 fn emit_core_download_status(window: &Window, status_text: impl Into<String>, progress: u8) {
-    let _ = window.emit(
+    crate::backend_event::emit_to_main(
+        window.app_handle(),
         "core-download-status",
         CoreDownloadStatus {
             status_text: status_text.into(),
@@ -747,7 +748,11 @@ pub async fn update_core(
     // Step 2b: Set executable permissions (may fail on some platforms)
     if let Err(e) = install_core_binary(app) {
         // Rollback: remove failed binary, restore backup
-        eprintln!("[update_core] install_core_binary failed: {e}, rolling back...");
+        emit_error!(
+            Updater,
+            UPDATE_DOWNLOAD_FAILED,
+            "install_core_binary failed: {e}, rolling back..."
+        );
         let _ = std::fs::remove_file(&exe_path);
         if backup_path.exists() {
             let _ = std::fs::rename(&backup_path, &exe_path);
@@ -795,7 +800,11 @@ pub async fn update_core(
         }
         Err(e) => {
             // Step 4: Rollback — atomic rename swap
-            eprintln!("[update_core] New core failed to start: {e}, attempting rollback...");
+            emit_error!(
+                Updater,
+                UPDATE_DOWNLOAD_FAILED,
+                "New core failed to start: {e}, attempting rollback..."
+            );
             let rollback_ok = if backup_path.exists() {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 // Remove the failed new binary, then rename backup back

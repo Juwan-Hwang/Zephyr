@@ -137,7 +137,7 @@ const PAGE_HTML = `
         </div>
     </div>
     <!-- List Body -->
-    <div id="connections-list" class="flex-1 overflow-y-auto custom-scrollbar py-1 space-y-0.5 px-2">
+    <div id="connections-list" class="flex-1 overflow-y-auto custom-scrollbar py-1 pb-1 space-y-0.5 px-2">
         <!-- Empty State (Active) -->
         <div id="connections-empty" class="flex flex-col items-center justify-center h-full py-16 gap-3">
             <svg class="w-12 h-12 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="17" r="4"/><path d="M4 17l6-6-6-6"/><path d="M13 11h8"/></svg>
@@ -875,10 +875,11 @@ function showConnDetail(conn, mode) {
         bg.classList.add('opacity-0');
         const panel = document.getElementById('conn-detail-panel');
         if (panel) {
+            panel.style.transition = 'all 0.15s ease-in';
             panel.style.transform = 'scale(0.96)';
             panel.style.opacity = '0';
         }
-        setTimeout(() => { bg.classList.add('hidden'); bg.classList.remove('flex'); }, 200);
+        setTimeout(() => { bg.classList.add('hidden'); bg.classList.remove('flex'); }, 150);
     };
 
     document.getElementById('detail-dismiss-btn')?.addEventListener('click', dismiss);

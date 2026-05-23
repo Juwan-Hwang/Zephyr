@@ -1,0 +1,334 @@
+use serde::Serialize;
+use std::sync::OnceLock;
+use std::time::SystemTime;
+use tauri::{AppHandle, Manager as _};
+
+// ── Path Redaction ───────────────────────────────────────────────────────────
+
+/// Cached paths for redaction. Set once during app startup.
+static REDACT_PATHS: OnceLock<(String, String)> = OnceLock::new();
+
+/// Initialize redaction paths. Call once after `ensure_app_storage` succeeds.
+pub fn init_redact_paths(core_dir: &str, profiles_dir: &str) {
+    let _ = REDACT_PATHS.set((core_dir.to_owned(), profiles_dir.to_owned()));
+}
+
+/// Redact sensitive paths (`core_dir`, `profiles_dir`) from error messages.
+/// Replaces paths with `[CORE_DIR]` and `[PROFILES_DIR]` placeholders.
+///
+/// Handles both forward-slash and backslash path styles (Windows).
+/// Performs case-insensitive matching to handle Windows path casing variations,
+/// and also redacts escaped backslash versions (e.g., `C:\\Users` from JSON output).
+pub fn redact_error_message(msg: &str) -> String {
+    let Some((core_dir, profiles_dir)) = REDACT_PATHS.get() else {
+        // Paths not initialized — return original message
+        return msg.to_owned();
+    };
+
+    let mut result = msg.to_owned();
+
+    // Case-insensitive replace for a single pattern in the string.
+    let replace_ci = |s: &mut String, pattern: &str, replacement: &str| {
+        let p_len = pattern.len();
+        if p_len == 0 {
+            return;
+        }
+        let mut i = 0;
+        while i + p_len <= s.len() {
+            if s.is_char_boundary(i)
+                && s.is_char_boundary(i + p_len)
+                && s[i..i + p_len].eq_ignore_ascii_case(pattern)
+            {
+                s.replace_range(i..i + p_len, replacement);
+                i += replacement.len();
+            } else {
+                i += 1;
+            }
+        }
+    };
+
+    // Redact a single directory path in both slash styles and casing.
+    let redact_dir = |s: &mut String, dir: &str, label: &str| {
+        if dir.is_empty() {
+            return;
+        }
+        // Normalize to both slash styles regardless of input format,
+        // because error messages may use either style on any platform.
+        let dir_f = dir.replace('\\', "/");
+        let dir_b = dir.replace('/', "\\");
+
+        // Forward-slash style: handle trailing separator first, then bare path
+        let dir_f_sep = format!("{dir_f}/");
+        let label_f_sep = format!("{label}/");
+        replace_ci(s, &dir_f_sep, &label_f_sep);
+        replace_ci(s, &dir_f, label);
+
+        // Backslash style (Windows): handle trailing separator first, then bare path
+        let dir_b_sep = format!("{dir_b}\\");
+        let label_b_sep = format!("{label}\\");
+        replace_ci(s, &dir_b_sep, &label_b_sep);
+        replace_ci(s, &dir_b, label);
+
+        // Escaped backslash style (JSON/Debug output): C:\\Users\\...
+        let dir_be = dir.replace('\\', "\\\\");
+        let dir_be_sep = format!("{dir_be}\\\\");
+        let label_be_sep = format!("{label}\\\\");
+        replace_ci(s, &dir_be_sep, &label_be_sep);
+        replace_ci(s, &dir_be, label);
+    };
+
+    // Redact the longest (most specific) path first to avoid parent-path
+    // replacements breaking subdirectory matches.
+    let mut dirs: Vec<(&str, &str)> =
+        vec![(core_dir, "[CORE_DIR]"), (profiles_dir, "[PROFILES_DIR]")];
+    dirs.retain(|(d, _)| !d.is_empty());
+    dirs.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
+
+    for (dir, label) in dirs {
+        redact_dir(&mut result, dir, label);
+    }
+    result
+}
+
+// ── Event Types ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendLevel {
+    Fatal,
+    Error,
+    Warn,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendModule {
+    Core,
+    Subscription,
+    Prism,
+    Config,
+    Plugin,
+    System,
+    Updater,
+    Override,
+    Rule,
+    Smart,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackendEvent {
+    pub level: BackendLevel,
+    pub module: BackendModule,
+    pub code: u16,
+    pub message: String,
+    pub timestamp: u64,
+}
+
+impl BackendEvent {
+    pub fn fatal(module: BackendModule, code: u16, message: impl Into<String>) -> Self {
+        Self::new(BackendLevel::Fatal, module, code, message)
+    }
+    pub fn error(module: BackendModule, code: u16, message: impl Into<String>) -> Self {
+        Self::new(BackendLevel::Error, module, code, message)
+    }
+    pub fn warn(module: BackendModule, code: u16, message: impl Into<String>) -> Self {
+        Self::new(BackendLevel::Warn, module, code, message)
+    }
+    pub fn info(module: BackendModule, code: u16, message: impl Into<String>) -> Self {
+        Self::new(BackendLevel::Info, module, code, message)
+    }
+
+    fn new(
+        level: BackendLevel,
+        module: BackendModule,
+        code: u16,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            level,
+            module,
+            code,
+            message: message.into(),
+            timestamp: SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis().try_into().unwrap_or(0))
+                .unwrap_or(0),
+        }
+    }
+}
+
+// ── Error Code Constants ────────────────────────────────────────────────────
+
+pub mod codes {
+    // Core: 1000-1999
+    pub const CORE_START_FAILED: u16 = 1001;
+    pub const CORE_STOP_FAILED: u16 = 1002;
+    pub const CORE_HEALTH_CHECK_FAILED: u16 = 1003;
+    pub const CORE_CRASHED: u16 = 1004;
+    pub const CORE_CACHE_LOCKED: u16 = 1005;
+    pub const CORE_RELOAD_FAILED: u16 = 1006;
+
+    // Subscription: 2000-2999
+    pub const SUB_UPDATE_FAILED: u16 = 2001;
+    pub const SUB_UPDATE_TIMEOUT: u16 = 2002;
+    pub const SUB_PARSE_FAILED: u16 = 2003;
+    pub const SUB_ALL_FAILED: u16 = 2004;
+    pub const SUB_UPDATE_SUCCESS: u16 = 2005;
+
+    // Prism: 3000-3999
+    pub const PRISM_APPLY_FAILED: u16 = 3001;
+    pub const PRISM_SCRIPT_ERROR: u16 = 3002;
+    pub const PRISM_HOT_RELOAD_FAILED: u16 = 3003;
+
+    // Config: 4000-4999
+    pub const CONFIG_SAVE_FAILED: u16 = 4001;
+    pub const CONFIG_PARSE_FAILED: u16 = 4002;
+    pub const CONFIG_DELETE_FAILED: u16 = 4003;
+    pub const CONFIG_CREATED_DEFAULT: u16 = 4004;
+
+    // Plugin: 5000-5999
+    pub const PLUGIN_LOAD_FAILED: u16 = 5001;
+    pub const PLUGIN_EXEC_ERROR: u16 = 5002;
+
+    // System: 6000-6999
+    pub const SYS_PROXY_FAILED: u16 = 6001;
+    pub const SYS_TUN_FAILED: u16 = 6002;
+    pub const SYS_DNS_FAILED: u16 = 6003;
+
+    // Updater: 7000-7999
+    pub const UPDATE_CHECK_FAILED: u16 = 7001;
+    pub const UPDATE_DOWNLOAD_FAILED: u16 = 7002;
+
+    // Override: 8000-8999
+    pub const OVERRIDE_APPLY_FAILED: u16 = 8001;
+
+    // Rule: 9000-9999
+    pub const RULE_PARSE_FAILED: u16 = 9001;
+
+    // Smart: 10000-10999
+    pub const SMART_SELECT_FAILED: u16 = 10001;
+}
+
+// ── Global Emitter ──────────────────────────────────────────────────────────
+
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// Initialize the global `AppHandle`. Call once in `app.setup()`.
+pub fn init_app_handle(app: &AppHandle) {
+    let _ = APP_HANDLE.set(app.clone());
+}
+
+/// Emit an event to the main webview via direct `eval()` dispatch.
+///
+/// Bypasses Tauri's `manager().emit()` → `emit_js_filter()` pipeline,
+/// which fails to dispatch events in the `withGlobalTauri: false` config
+/// (the JS-side `__internal_unstable_listeners_object_id__` never gets
+/// populated by `listen_js_script`'s `eval()`, so `emit_js_filter` finds
+/// no matching handlers and skips the dispatch).
+///
+/// Instead, we inject JS that directly reads `__internal_unstable_listeners_object_id__`,
+/// collects listener IDs, and calls the dispatch function — exactly mirroring
+/// what `emit_js_script` does, but from the "right side" of the JS context.
+pub fn emit_to_main<S: Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
+    if let Some(wv) = app.get_webview_window("main") {
+        let payload_json = serde_json::to_string(&payload).unwrap_or_default();
+
+        // Direct dispatch to JS listeners
+        #[allow(clippy::uninlined_format_args)]
+        let js = format!(
+            "(function() {{ \
+               const fn = window['__internal_unstable_listeners_function_id__']; \
+               const obj = window['__internal_unstable_listeners_object_id__']; \
+               if (fn && obj && obj['{evt}']) {{ \
+                 const ids = Object.getOwnPropertyNames(obj['{evt}']).map(Number).filter(n => !isNaN(n)); \
+                 if (ids.length) {{ fn({{event: '{evt}', payload: {payload}}}, ids); }} \
+               }} \
+             }})()",
+            evt = event,
+            payload = payload_json,
+        );
+        let _ = wv.eval(&js);
+    }
+}
+
+/// Emit a backend event.
+/// Always prints to stderr; pushes to frontend when `AppHandle` is ready.
+/// Message is automatically redacted to remove sensitive paths.
+pub fn emit_backend_event(event: &BackendEvent) {
+    // Redact message to remove sensitive paths
+    let redacted_message = redact_error_message(&event.message);
+    let redacted_event = BackendEvent {
+        level: event.level.clone(),
+        module: event.module.clone(),
+        code: event.code,
+        message: redacted_message,
+        timestamp: event.timestamp,
+    };
+
+    // stderr — always available, zero dependency
+    eprintln!(
+        "[{}] [{}] (#{}) {}",
+        match redacted_event.level {
+            BackendLevel::Fatal => "FATAL",
+            BackendLevel::Error => "ERROR",
+            BackendLevel::Warn => "WARN",
+            BackendLevel::Info => "INFO",
+        },
+        serde_json::to_string(&redacted_event.module)
+            .unwrap_or_default()
+            .trim_matches('"'),
+        redacted_event.code,
+        redacted_event.message,
+    );
+
+    // Tauri emit — direct eval dispatch to main webview.
+    if let Some(handle) = APP_HANDLE.get() {
+        emit_to_main(handle, "backend-event", &redacted_event);
+    }
+}
+
+// ── Convenience Macros ──────────────────────────────────────────────────────
+//
+// Usage: emit_error!(Core, CORE_START_FAILED, "message {}", var);
+//
+// Both module and code are identifiers, auto-resolved via $crate paths.
+
+#[macro_export]
+macro_rules! emit_error {
+    ($module:ident, $code:ident, $($arg:tt)*) => {
+        $crate::backend_event::emit_backend_event(
+            &$crate::backend_event::BackendEvent::error(
+                $crate::backend_event::BackendModule::$module,
+                $crate::backend_event::codes::$code,
+                format!($($arg)*)
+            )
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! emit_warn {
+    ($module:ident, $code:ident, $($arg:tt)*) => {
+        $crate::backend_event::emit_backend_event(
+            &$crate::backend_event::BackendEvent::warn(
+                $crate::backend_event::BackendModule::$module,
+                $crate::backend_event::codes::$code,
+                format!($($arg)*)
+            )
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! emit_info {
+    ($module:ident, $code:ident, $($arg:tt)*) => {
+        $crate::backend_event::emit_backend_event(
+            &$crate::backend_event::BackendEvent::info(
+                $crate::backend_event::BackendModule::$module,
+                $crate::backend_event::codes::$code,
+                format!($($arg)*)
+            )
+        )
+    };
+}
