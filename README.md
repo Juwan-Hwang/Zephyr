@@ -43,9 +43,9 @@ Zephyr 的开发起因很简单：目前我还没有找到符合自己审美的 
 <details>
 <summary>更多截图</summary>
 
-| 设置页面 | 深色模式 |
+| 深色模式 | 设置页面 |
 |:---:|:---:|
-| ![Zephyr 设置页面 - 系统代理与 TUN 配置](apps/desktop/assets/screenshot-settings.png) | ![Zephyr 深色模式 - 代理节点管理界面](apps/desktop/assets/screenshot-dark.png) |
+| ![Zephyr 深色模式 - 代理节点管理界面](apps/desktop/assets/screenshot-dark.png) | ![Zephyr 设置页面 - 系统代理与 TUN 配置](apps/desktop/assets/screenshot-settings.png)  |
 
 </details>
 
