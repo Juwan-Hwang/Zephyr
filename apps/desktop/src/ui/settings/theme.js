@@ -111,13 +111,14 @@ export function initThemeSettings({
     async function setThemeMode(mode, persist = true) {
         if (!themeModeMap.includes(mode)) return;
         currentThemeMode = mode;
-        if (persist) {
-            await saveSetting('theme_mode', mode);
-            localStorage.removeItem('darkMode');
-        }
+        appStore.set('currentThemeMode', mode);
         updateThemeModeUI(mode);
         applyDarkMode(resolveThemeModeToDark(mode));
         Bus.emit(Events.THEME_MODE_CHANGED, mode);
+        if (persist) {
+            localStorage.removeItem('darkMode');
+            await saveSetting('theme_mode', mode);
+        }
     }
 
     // Apply theme mode synchronously from settings (no flicker)
