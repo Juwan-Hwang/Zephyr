@@ -75,6 +75,9 @@ jobs:
           # JS-YAML library
           cp main/apps/desktop/src/js-yaml.min.js dist/app/ 2>/dev/null || true
 
+          # CodeMirror 6 bundle (referenced as ../../cm6.bundle.js from app/ui/)
+          cp main/apps/desktop/src/cm6.bundle.js dist/cm6.bundle.js 2>/dev/null || true
+
           # 4. Verify
           echo "=== Verifying ==="
           echo "1. Demo bootstrap in app/index.html:"

@@ -57,6 +57,11 @@ const ruleGroups = [
   { id: 'group-1', name: '默认分组', rules: ['rule-1', 'rule-2'], created: '2026-04-15' },
 ];
 
+const overrides = [
+  { id: 'ov-1', name: '广告拦截', ext: '.yaml', type: 'script', enabled: true, content: 'payload:\n  - DOMAIN-SUFFIX,ad.com,REJECT', created: '2026-04-15' },
+  { id: 'ov-2', name: '分流增强', ext: '.yaml', type: 'script', enabled: false, content: 'payload:\n  - DOMAIN-KEYWORD,openai,Proxy', created: '2026-04-14' },
+];
+
 const connections = new Map();
 let connectionIdCounter = 1;
 
@@ -320,7 +325,7 @@ proxy-groups:
   // ─── Rule Library ──────────────────────────────────────────────────
   'rule_list': () => ({ rules: ruleLibrary }),
   'rule_read': (args) => ruleLibrary.find(r => r.id === args?.id) || null,
-  'RULE_EXTRACT_FROM_PROFILE': (args) => {
+  'rule_extract_from_profile': (args) => {
     const configName = args?.profile || settingsState.last_config;
     const proxySet = getProxySet(configName);
     const extractedRules = [];
@@ -331,7 +336,7 @@ proxy-groups:
     }
     return { rules: extractedRules };
   },
-  'RULE_CREATE': (args) => {
+  'rule_create': (args) => {
     const newRule = {
       id: `rule-${Date.now()}`,
       name: args?.name || '新规则',
@@ -341,7 +346,7 @@ proxy-groups:
     ruleLibrary.push(newRule);
     return { id: newRule.id };
   },
-  'RULE_UPDATE': (args) => {
+  'rule_update': (args) => {
     const rule = ruleLibrary.find(r => r.id === args?.id);
     if (rule) {
       if (args?.name) rule.name = args.name;
@@ -349,12 +354,12 @@ proxy-groups:
     }
     return null;
   },
-  'RULE_DELETE': (args) => {
+  'rule_delete': (args) => {
     const idx = ruleLibrary.findIndex(r => r.id === args?.id);
     if (idx > -1) ruleLibrary.splice(idx, 1);
     return null;
   },
-  'RULE_RENAME': (args) => {
+  'rule_rename': (args) => {
     const rule = ruleLibrary.find(r => r.id === args?.id);
     if (rule && args?.name) rule.name = args.name;
     return null;
@@ -393,6 +398,112 @@ proxy-groups:
   'rule_get_auto_apply': () => false,
   'rule_set_auto_apply': (args) => { /* store but no-op in mock */ return null; },
   'open_prism_folder': () => getOSPaths(currentOS).config_dir,
+
+  // ─── Override System ───────────────────────────────────────────────
+  'override_list': () => ({ overrides }),
+  'override_create': (args) => {
+    const ov = {
+      id: `ov-${Date.now()}`,
+      name: args?.name || '新覆盖',
+      ext: args?.ext || '.yaml',
+      type: args?.type || 'script',
+      enabled: true,
+      content: args?.content || '',
+      created: new Date().toISOString().slice(0, 10),
+    };
+    overrides.push(ov);
+    return { id: ov.id };
+  },
+  'override_update': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    if (ov) {
+      if (args?.name !== undefined) ov.name = args.name;
+      if (args?.ext !== undefined) ov.ext = args.ext;
+      if (args?.type !== undefined) ov.type = args.type;
+    }
+    return null;
+  },
+  'override_delete': (args) => {
+    const idx = overrides.findIndex(o => o.id === args?.id);
+    if (idx > -1) overrides.splice(idx, 1);
+    return null;
+  },
+  'override_get_content': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    return ov ? { content: ov.content } : { content: '' };
+  },
+  'override_set_content': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    if (ov && args?.content !== undefined) ov.content = args.content;
+    return null;
+  },
+  'override_reorder': (args) => {
+    if (args?.ids) {
+      const ordered = args.ids.map(id => overrides.find(o => o.id === id)).filter(Boolean);
+      overrides.length = 0;
+      overrides.push(...ordered);
+    }
+    return null;
+  },
+  'override_toggle': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    if (ov && args?.enabled !== undefined) ov.enabled = args.enabled;
+    return null;
+  },
+  'override_test': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    return { success: true, id: args?.id, name: ov?.name || '', applied: 0 };
+  },
+  'override_refresh_remote': (args) => {
+    const ov = overrides.find(o => o.id === args?.id);
+    if (ov) ov.content = '# Refreshed remote content\n' + (ov.content || '');
+    return { success: true };
+  },
+  'override_apply_all': () => {
+    const applied = overrides.filter(o => o.enabled).length;
+    return { success: true, applied };
+  },
+  'override_export': () => {
+    const data = overrides.map(o => ({ name: o.name, ext: o.ext, type: o.type, enabled: o.enabled, content: o.content }));
+    return { data: JSON.stringify(data) };
+  },
+  'override_import': (args) => {
+    try {
+      const items = JSON.parse(args?.data || '[]');
+      let count = 0;
+      for (const item of items) {
+        overrides.push({
+          id: `ov-${Date.now()}-${count}`,
+          name: item.name || '导入覆盖',
+          ext: item.ext || '.yaml',
+          type: item.type || 'script',
+          enabled: item.enabled ?? true,
+          content: item.content || '',
+          created: new Date().toISOString().slice(0, 10),
+        });
+        count++;
+      }
+      return { success: true, count };
+    } catch {
+      return { success: false, count: 0 };
+    }
+  },
+
+  // ─── Settings (partial) ───────────────────────────────────────────
+  'patch_settings': (args) => {
+    if (args?.settings) {
+      settingsState = { ...settingsState, ...args.settings };
+    }
+    return null;
+  },
+  'update_last_config': (args) => {
+    if (args?.config) settingsState.last_config = args.config;
+    return null;
+  },
+  'update_primary_group_preference': (args) => {
+    if (args?.group) settingsState.primary_group = args.group;
+    return null;
+  },
 
   // ─── Prism Engine ──────────────────────────────────────────────────
   'prism_apply': () => { emitTauriEvent('prism-event', { type: 'applied' }); return null; },
@@ -741,4 +852,4 @@ setTimeout(() => {
   emitTauriEvent('core-download-status', { status: 'done', progress: 100 });
 }, 2000);
 
-console.log(`[Mock API] v2 initialized — ${Object.keys(INVOKE_HANDLERS).length} handlers, event system active, JSON traffic stream`);
+console.log(`[Mock API] v3 initialized — ${Object.keys(INVOKE_HANDLERS).length} handlers, event system active, JSON traffic stream`);
