@@ -161,6 +161,7 @@ export async function initLogsPage() {
     // If already initialized, just reset and restart
     if (_initialized) {
         resetState();
+        // eslint-disable-next-line no-unsanitized/property -- static HTML template from buildPageHTML()
         _container.innerHTML = buildPageHTML();
         cacheDOMRefs();
         bindEvents();
@@ -172,6 +173,7 @@ export async function initLogsPage() {
 
     _initialized = true;
     resetState();
+    // eslint-disable-next-line no-unsanitized/property -- static HTML template from buildPageHTML()
     _container.innerHTML = buildPageHTML();
     cacheDOMRefs();
     bindEvents();
@@ -593,6 +595,7 @@ function createVirtualScrollInstance() {
                 }
             );
 
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
             pre.innerHTML = html;
             fragment.appendChild(pre);
         },
@@ -847,6 +850,7 @@ function createExtLogRow(entry) {
 
     const msg = document.createElement('span');
     msg.className = 'text-zinc-400 break-all';
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
     msg.innerHTML = formatExtLogMessage(entry);
 
     row.appendChild(ts);
@@ -887,6 +891,7 @@ function rebuildExtLogDOM() {
     }
 
     // Clear existing content
+     
     listEl.innerHTML = '';
 
     if (events.length === 0) {
