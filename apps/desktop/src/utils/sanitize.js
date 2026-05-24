@@ -269,3 +269,80 @@ export function sanitizeHtml(input, options = {}) {
 
     return doc.body.innerHTML;
 }
+
+// ---------------------------------------------------------------------------
+// Safe HTML Template Literal
+// ---------------------------------------------------------------------------
+
+/**
+ * Escape a single value for safe interpolation inside an HTML template.
+ * Arrays are flattened recursively; null/undefined produce empty strings.
+ *
+ * @param {any} v - Value to escape
+ * @returns {string} HTML-safe string
+ */
+function _htmlEscape(v) {
+    if (Array.isArray(v)) return v.map(_htmlEscape).join('');
+    return (v !== null && v !== undefined) ? escapeAttr(String(v)) : '';
+}
+
+/**
+ * Normalize a single value for safeHtml interpolation (no escaping —
+ * the final result passes through sanitizeHtml whitelist filtering).
+ * Arrays are flattened recursively; null/undefined produce empty strings.
+ *
+ * @param {any} v - Value to normalize
+ * @returns {string} Raw string (will be sanitized later)
+ */
+function _htmlRaw(v) {
+    if (Array.isArray(v)) return v.map(_htmlRaw).join('');
+    return (v === null || v === undefined) ? '' : String(v);
+}
+
+/**
+ * Safe HTML template literal tag.
+ * Automatically escapes all ${} interpolations to prevent XSS.
+ * Uses escapeAttr to ensure safety in both text and attribute contexts.
+ * Arrays are flattened recursively without comma separators.
+ *
+ * Usage:
+ *   import { html } from './utils/sanitize.js';
+ *   element.innerHTML = html`<div>${userInput}</div>`;  // userInput is auto-escaped
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values
+ * @returns {string} HTML-safe string with all values escaped
+ */
+export function html(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(_htmlEscape(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return result.join('');
+}
+
+/**
+ * Safe HTML template literal tag that also sanitizes the result.
+ * Use this when template variables contain HTML structure that needs to be
+ * preserved (e.g., rich text with allowed tags). All interpolations pass
+ * through the whitelist-based sanitizeHtml filter, which strips disallowed
+ * tags, event handlers, and javascript: URIs.
+ * Arrays are flattened recursively without comma separators.
+ *
+ * Usage:
+ *   import { safeHtml } from './utils/sanitize.js';
+ *   element.innerHTML = safeHtml`<div>${htmlContent}</div>`;
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values (may contain HTML)
+ * @returns {string} Sanitized HTML string
+ */
+export function safeHtml(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(_htmlRaw(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return sanitizeHtml(result.join(''));
+}
