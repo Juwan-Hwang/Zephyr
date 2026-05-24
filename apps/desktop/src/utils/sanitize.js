@@ -269,3 +269,60 @@ export function sanitizeHtml(input, options = {}) {
 
     return doc.body.innerHTML;
 }
+
+// ---------------------------------------------------------------------------
+// Safe HTML Template Literal
+// ---------------------------------------------------------------------------
+
+/**
+ * Safe HTML template literal tag.
+ * Automatically escapes all ${} interpolations to prevent XSS.
+ * Uses escapeAttr to ensure safety in both text and attribute contexts.
+ *
+ * Usage:
+ *   import { html } from './utils/sanitize.js';
+ *   element.innerHTML = html`<div>${userInput}</div>`;  // userInput is auto-escaped
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values
+ * @returns {string} HTML-safe string with all values escaped
+ */
+export function html(strings, ...values) {
+    const escape = (v) => {
+        if (Array.isArray(v)) return v.map(escape).join('');
+        return (v !== null && v !== undefined) ? escapeAttr(String(v)) : '';
+    };
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(escape(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return result.join('');
+}
+
+/**
+ * Safe HTML template literal tag that also sanitizes the result.
+ * Use this when the template may contain HTML tags that need to be preserved.
+ * Note: Variables are NOT escaped before sanitization, allowing safe HTML tags
+ * in variables to be preserved. Only use with trusted input.
+ *
+ * Usage:
+ *   import { safeHtml } from './utils/sanitize.js';
+ *   element.innerHTML = safeHtml`<div>${trustedHtml}</div>`;
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values (may contain safe HTML)
+ * @returns {string} Sanitized HTML string
+ */
+export function safeHtml(strings, ...values) {
+    const process = (v) => {
+        if (Array.isArray(v)) return v.map(process).join('');
+        return (v === null || v === undefined) ? '' : String(v);
+    };
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(process(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return sanitizeHtml(result.join(''));
+}
