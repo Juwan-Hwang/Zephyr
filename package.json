@@ -16,13 +16,13 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.0",
-    "@tauri-apps/cli": "2.11.1",
-    "eslint": "10.3.0",
+    "@tauri-apps/cli": "2.11.2",
+    "eslint": "10.4.0",
     "globals": "^17.6.0",
     "happy-dom": "^20.9.0",
     "tailwindcss": "4.3.0",
     "typescript": "^6.0.2",
-    "vitest": "4.1.6"
+    "vitest": "4.1.7"
   },
   "pnpm": {
     "overrides": {
