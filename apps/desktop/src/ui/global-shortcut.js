@@ -200,6 +200,7 @@ function openShortcutModal() {
     const modal = document.createElement('div');
     modal.id = 'shortcut-modal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md';
+    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys only
     modal.innerHTML = `
         <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
             <div class="flex items-center justify-between">
@@ -285,7 +286,8 @@ function renderShortcutList(/** @type {Record<string, string>} */ t) {
     if (!list) return;
 
     const shortcuts = loadShortcuts();
-    list.innerHTML = '';
+     
+list.innerHTML = '';
 
     // Only show actions that have an accelerator set
     for (const actionDef of SUPPORTED_ACTIONS) {
@@ -338,6 +340,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     selectBtn.type = 'button';
     selectBtn.className = 'select-common w-full flex items-center justify-between';
     const currentLabel = actionId ? getActionLabel(actionId, t) : (t.selectAction || 'Select action');
+    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
     selectBtn.innerHTML = `
         <span class="select-label">${currentLabel}</span>
         <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
@@ -449,7 +452,8 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     const clearBtn = document.createElement('button');
     clearBtn.className = 'text-zinc-500 hover:text-rose-400 transition-colors p-1';
     clearBtn.title = t.delete || 'Delete';
-    clearBtn.innerHTML = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+     
+clearBtn.innerHTML = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
     clearBtn.addEventListener('click', async () => {
         const currentAction = row.dataset.action;
         if (!currentAction) return;
