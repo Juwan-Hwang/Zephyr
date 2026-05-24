@@ -9,7 +9,7 @@
  * Zero external dependencies.
  */
 
-import { escapeHtml } from './sanitize.js';
+import { escapeHtml, escapeAttr, sanitizeHtml } from './sanitize.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -75,7 +75,7 @@ export function markdownToHtml(md) {
         if (href.startsWith('mailto:')) {
             return `<span class="text-xs text-zinc-300">${escapeHtml(href.replace(/^mailto:/, ''))}</span>`;
         }
-        return `<a href="${escapeHtml(href)}" class="text-accent underline" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+        return `<a href="${escapeAttr(href)}" class="text-accent underline" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
     });
 
     // 11. Unordered lists
@@ -93,7 +93,7 @@ export function markdownToHtml(md) {
     // --- Post-processing ---
     html = html.replace(/\n{3,}/g, '\n\n');
 
-    return html.trim();
+    return sanitizeHtml(html.trim());
 }
 
 // ---------------------------------------------------------------------------

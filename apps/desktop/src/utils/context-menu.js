@@ -1,5 +1,5 @@
 // @ts-check
-import { escapeHtml } from './sanitize.js';
+import { escapeHtml, sanitizeHtml } from './sanitize.js';
 /**
  * Shared context menu utility.
  *
@@ -118,10 +118,11 @@ export function showContextMenu(e, items) {
         }
 
         // Custom HTML item (for complex widgets like checkboxes)
+        // SECURITY: sanitize HTML to prevent XSS while preserving allowed tags
         if (item.html) {
             const wrapper = document.createElement('div');
             wrapper.className = item.className || '';
-            wrapper.innerHTML = item.html;
+            wrapper.innerHTML = sanitizeHtml(item.html);
             if (item.action) {
                 wrapper.addEventListener('click', (ev) => {
                     ev.stopPropagation();
