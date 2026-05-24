@@ -49,7 +49,7 @@ jobs:
           cp main/packages/shared/src/index.js dist/app/_shared/index.js
 
           # 3. Inject demo bootstrap and mock-api loader using Python
-          python3 demo-branch/inject-demo.py dist/app demo-branch
+          python3 demo-branch/inject-demo.py dist/app/index.html dist/app/main.js
 
           # 4. Copy demo-specific files to dist/
           cp demo-branch/landing.html dist/index.html
@@ -67,11 +67,16 @@ jobs:
           cp demo-branch/fonts/* dist/fonts/
 
           # Icons
-          cp main/apps/desktop/src-tauri/icons/icon.png dist/app/app-icon.png
-          cp main/apps/desktop/src-tauri/icons/icon.png dist/app-icon.png
+          cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
+          cp demo-branch/app-icon.png dist/app-icon.png 2>/dev/null || true
+          cp demo-branch/dark-icon.png dist/dark-icon.png 2>/dev/null || true
 
           # JS-YAML library
           cp main/apps/desktop/src/js-yaml.min.js dist/app/ 2>/dev/null || true
+
+          # CodeMirror 6 bundle (referenced as ../../cm6.bundle.js from app/ui/)
+          cp main/apps/desktop/src/cm6.bundle.js dist/cm6.bundle.js 2>/dev/null || true
 
           # 4. Verify
           echo "=== Verifying ==="
@@ -89,8 +94,6 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
