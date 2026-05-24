@@ -18,6 +18,7 @@ use clash_prism_script::limits::ScriptLimits;
 use clash_prism_script::{KvStore, SandboxConfig};
 use clash_prism_smart::SmartConfig;
 
+use crate::backend_event::{codes, lock_critical, BackendModule};
 use crate::core_manager::ensure_app_storage;
 
 // ---------------------------------------------------------------------------
@@ -177,7 +178,7 @@ impl PrismState {
     where
         F: FnOnce(&PrismExtension<host::ZephyrPrismHost>) -> Result<R, String>,
     {
-        let lock = self.inner.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let lock = lock_critical(&self.inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
         let ext = lock
             .extension
             .as_ref()
@@ -215,7 +216,7 @@ impl PrismState {
 
     /// Acquire the inner mutex guard.
     pub(crate) fn lock_inner(&self) -> Result<std::sync::MutexGuard<'_, PrismInner>, String> {
-        self.inner.lock().map_err(|e| format!("Lock failed: {e}"))
+        lock_critical(&self.inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)
     }
 
     /// Check rate limit for a command. Returns `Ok(())` if allowed,

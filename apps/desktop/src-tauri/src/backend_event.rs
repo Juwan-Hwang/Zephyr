@@ -168,6 +168,7 @@ pub mod codes {
     pub const CORE_CRASHED: u16 = 1004;
     pub const CORE_CACHE_LOCKED: u16 = 1005;
     pub const CORE_RELOAD_FAILED: u16 = 1006;
+    pub const CORE_LOCK_FAILED: u16 = 1007;
 
     // Subscription: 2000-2999
     pub const SUB_UPDATE_FAILED: u16 = 2001;
@@ -175,39 +176,48 @@ pub mod codes {
     pub const SUB_PARSE_FAILED: u16 = 2003;
     pub const SUB_ALL_FAILED: u16 = 2004;
     pub const SUB_UPDATE_SUCCESS: u16 = 2005;
+    pub const SUB_LOCK_FAILED: u16 = 2006;
 
     // Prism: 3000-3999
     pub const PRISM_APPLY_FAILED: u16 = 3001;
     pub const PRISM_SCRIPT_ERROR: u16 = 3002;
     pub const PRISM_HOT_RELOAD_FAILED: u16 = 3003;
+    pub const PRISM_LOCK_FAILED: u16 = 3004;
 
     // Config: 4000-4999
     pub const CONFIG_SAVE_FAILED: u16 = 4001;
     pub const CONFIG_PARSE_FAILED: u16 = 4002;
     pub const CONFIG_DELETE_FAILED: u16 = 4003;
     pub const CONFIG_CREATED_DEFAULT: u16 = 4004;
+    pub const CONFIG_LOCK_FAILED: u16 = 4005;
 
     // Plugin: 5000-5999
     pub const PLUGIN_LOAD_FAILED: u16 = 5001;
     pub const PLUGIN_EXEC_ERROR: u16 = 5002;
+    pub const PLUGIN_LOCK_FAILED: u16 = 5003;
 
     // System: 6000-6999
     pub const SYS_PROXY_FAILED: u16 = 6001;
     pub const SYS_TUN_FAILED: u16 = 6002;
     pub const SYS_DNS_FAILED: u16 = 6003;
+    pub const SYS_LOCK_FAILED: u16 = 6004;
 
     // Updater: 7000-7999
     pub const UPDATE_CHECK_FAILED: u16 = 7001;
     pub const UPDATE_DOWNLOAD_FAILED: u16 = 7002;
+    pub const UPDATE_LOCK_FAILED: u16 = 7003;
 
     // Override: 8000-8999
     pub const OVERRIDE_APPLY_FAILED: u16 = 8001;
+    pub const OVERRIDE_LOCK_FAILED: u16 = 8002;
 
     // Rule: 9000-9999
     pub const RULE_PARSE_FAILED: u16 = 9001;
+    pub const RULE_LOCK_FAILED: u16 = 9002;
 
     // Smart: 10000-10999
     pub const SMART_SELECT_FAILED: u16 = 10001;
+    pub const SMART_LOCK_FAILED: u16 = 10002;
 }
 
 // ── Global Emitter ──────────────────────────────────────────────────────────
@@ -307,6 +317,63 @@ macro_rules! emit_error {
             )
         )
     };
+}
+
+// ── Mutex Lock Utilities ─────────────────────────────────────────────────────
+
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// Lock a mutex for critical paths where data consistency is important.
+///
+/// Returns `Err` if the mutex is poisoned (another thread panicked while holding it).
+/// Also emits an error event to notify the frontend.
+///
+/// # Arguments
+/// * `mutex` - The mutex to lock
+/// * `module` - The module for error event (e.g., `BackendModule::Core`)
+/// * `code` - The error code (e.g., `codes::CORE_LOCK_FAILED`)
+///
+/// # Returns
+/// * `Ok(MutexGuard)` - Successfully acquired lock
+/// * `Err(String)` - Lock failed, with error message
+///
+/// # Example
+/// ```ignore
+/// let guard = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+/// ```
+pub fn lock_critical<T>(
+    mutex: &Mutex<T>,
+    module: BackendModule,
+    code: u16,
+) -> Result<MutexGuard<'_, T>, String> {
+    mutex.lock().map_err(|e| {
+        let msg = format!("Lock failed: {e}");
+        emit_backend_event(&BackendEvent::error(module, code, &msg));
+        msg
+    })
+}
+
+/// Lock a mutex for non-critical paths where best-effort access is acceptable.
+///
+/// If the mutex is poisoned (another thread panicked while holding it),
+/// this still returns the guard with potentially inconsistent data.
+/// Use this only when:
+/// - The data is read-only or can tolerate inconsistency
+/// - Missing the operation is worse than using potentially stale data
+/// - You want to avoid propagating errors
+///
+/// # Arguments
+/// * `mutex` - The mutex to lock
+///
+/// # Returns
+/// * `MutexGuard` - Always returns a guard (never fails)
+///
+/// # Example
+/// ```ignore
+/// let guard = lock_best_effort(&state.0);
+/// ```
+pub fn lock_best_effort<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[macro_export]

@@ -4,6 +4,7 @@ use tauri::Manager as _;
 
 use clash_prism_extension::{ApplyStatus, CoreInfo, PrismEvent, PrismHost, ProfileInfo};
 
+use crate::backend_event::{codes, lock_best_effort, lock_critical, BackendModule};
 use crate::core_manager::core::config_sanitizer::validate_path_within_dir;
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
 use crate::core_manager::{ensure_app_storage, write_file_secure, MihomoState};
@@ -112,7 +113,7 @@ impl PrismHost for ZephyrPrismHost {
         // Hot-reload via mihomo REST API (PUT for full config replacement)
         let (port, secret) = {
             let state = self.app.state::<MihomoState>();
-            let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
+            let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
             (
                 lock.last_port().unwrap_or(9090),
                 lock.last_secret().to_owned(),
@@ -199,7 +200,7 @@ impl PrismHost for ZephyrPrismHost {
 
     fn get_core_info(&self) -> Result<CoreInfo, String> {
         let state = self.app.state::<MihomoState>();
-        let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         Ok(CoreInfo {
             version: String::from("unknown"), // async get_core_version unavailable in sync trait
             api_port: lock.last_port().unwrap_or(9090),
@@ -209,14 +210,8 @@ impl PrismHost for ZephyrPrismHost {
     }
 
     fn get_current_profile(&self) -> Option<String> {
-        let path = self
-            .app
-            .state::<MihomoState>()
-            .0
-            .lock()
-            .ok()?
-            .last_config_path()?
-            .to_owned();
+        let state = self.app.state::<MihomoState>();
+        let path = lock_best_effort(&state.0).last_config_path()?.to_owned();
         let stem = std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())

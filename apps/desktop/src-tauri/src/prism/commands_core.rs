@@ -7,6 +7,7 @@ use tauri::State;
 use clash_prism_extension::{ApplyOptions, PrismExtension, RuleInsertPosition};
 
 use super::types::MAX_INPUT_SIZE;
+use crate::backend_event::{codes, lock_best_effort, lock_critical, BackendModule};
 use crate::core_manager::core::core_process;
 use crate::prism::PrismState;
 
@@ -47,7 +48,7 @@ pub async fn prism_apply(
     // This allows other invoke() calls (e.g. proxy toggle, settings) to proceed
     // while Prism compiles large rule sets.
     tokio::task::spawn_blocking(move || {
-        let mut lock = inner.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let mut lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
         let ext = lock
             .extension
             .as_ref()
@@ -245,7 +246,7 @@ pub async fn prism_rebuild(
     // (AppHandle::state() is not available inside spawn_blocking closures)
     let (raw_profile, current_secret, global_prefs) = {
         let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
-        let lock = mihomo.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         let config_path = lock
             .last_config_path()
             .ok_or_else(|| "No active profile".to_owned())?
@@ -260,10 +261,7 @@ pub async fn prism_rebuild(
 
         // Read global preferences for injection
         let settings_state = tauri::Manager::state::<crate::SettingsState>(&app);
-        let settings_lock = settings_state
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let settings_lock = lock_best_effort(&settings_state.0);
         let prefs = settings_lock.to_global_prefs();
         drop(settings_lock);
 
@@ -289,7 +287,7 @@ pub async fn prism_rebuild(
         }
 
         // Step 2: Apply all patches on the clean base
-        let lock = inner.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
         let ext = lock
             .extension
             .as_ref()
