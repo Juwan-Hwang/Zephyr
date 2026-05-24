@@ -69,8 +69,8 @@ jobs:
           # Icons
           cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
-          cp demo-branch/app-icon.png dist/app-icon.png 2>/dev/null || true
-          cp demo-branch/dark-icon.png dist/dark-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/app-icon.png dist/app-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/dark-icon.png dist/dark-icon.png 2>/dev/null || true
 
           # JS-YAML library
           cp main/apps/desktop/src/js-yaml.min.js dist/app/ 2>/dev/null || true
