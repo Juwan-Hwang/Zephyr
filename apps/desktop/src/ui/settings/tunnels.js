@@ -71,16 +71,18 @@ export function initTunnelSettings({
         if (!tunnelsList) return;
 
         if (!currentTunnels || currentTunnels.length === 0) {
-            tunnelsList.innerHTML = '';
-            if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
+ 
+tunnelsList.innerHTML = '';
+if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
             if (tunnelsEmpty) tunnelsEmpty.style.display = 'block';
             return;
         }
 
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
-        tunnelsList.innerHTML = '';
+ 
+tunnelsList.innerHTML = '';
 
-        currentTunnels.forEach((tunnel, index) => {
+currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
             item.className = 'flex items-center justify-between bg-black/20 border border-white/5 rounded-lg p-3 hover:border-white/10 transition-all';
 
@@ -112,7 +114,8 @@ export function initTunnelSettings({
 
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
-            delBtn.innerHTML = SVG_ICONS.trash;
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+delBtn.innerHTML = SVG_ICONS.trash;
             delBtn.onclick = async () => {
                 const deleted = currentTunnels[index];
                 currentTunnels.splice(index, 1);

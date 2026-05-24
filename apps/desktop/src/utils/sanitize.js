@@ -52,7 +52,7 @@ const DEFAULT_ALLOWED_TAGS = new Set([
     'strong', 'em', 'b', 'i', 'u', 'br', 'span', 'p', 'div',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
-    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del',
+    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del', 'ins',
     // Form elements (needed for modal custom content)
     'input', 'label', 'button', 'textarea', 'select', 'option',
 ]);
@@ -106,7 +106,7 @@ const NBSP_RE = /&nbsp;|&#160;|&#xA0;/gi;
  * when the tag itself is removed. These can contain executable or
  * dangerous content that must not leak into the document as text.
  */
-const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet']);
+const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
  * Check whether a URL is safe (not javascript: or disallowed data:).
