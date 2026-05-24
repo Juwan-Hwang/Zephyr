@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
-use crate::backend_event::redact_error_message;
+use crate::backend_event::{codes, lock_critical, redact_error_message, BackendModule};
 #[allow(unused_imports)]
 use crate::{emit_error, emit_info, emit_warn};
 
@@ -1095,7 +1095,7 @@ pub async fn start_core(
     // If the requested config differs from the current one, we must restart to apply it.
     // Also extract port/secret for drain before killing.
     let drain_info: Option<(u16, String)> = {
-        let lock = state.0.lock().map_err(|e| format!("Lock failed: {e}"))?;
+        let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         if lock.process().is_some() {
             let same_config = lock
                 .last_config_path()
@@ -1243,12 +1243,13 @@ pub async fn start_core(
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
 
-    let mut lock = if let Ok(l) = state.0.lock() {
-        l
-    } else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("Failed to lock state".to_owned());
+    let mut lock = match lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED) {
+        Ok(l) => l,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
     };
     lock.set_process(Some(child));
     lock.set_last_secret(resolved_secret.clone());
