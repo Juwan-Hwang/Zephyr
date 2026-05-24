@@ -52,7 +52,7 @@ const DEFAULT_ALLOWED_TAGS = new Set([
     'strong', 'em', 'b', 'i', 'u', 'br', 'span', 'p', 'div',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
-    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del',
+    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del', 'ins',
     // Form elements (needed for modal custom content)
     'input', 'label', 'button', 'textarea', 'select', 'option',
 ]);
@@ -98,15 +98,15 @@ const JS_URI_RE = /^\s*javascript\s*:/i;
 /** Regex matching data: URIs */
 const DATA_URI_RE = /^\s*data\s*:/i;
 
-/** NBSP entity pattern */
-const NBSP_RE = /&nbsp;|&#160;|&#xA0;/gi;
+/** NBSP entity pattern (includes \u00A0 for browser-decoded entities) */
+const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
 
 /**
  * Tags whose content should always be fully discarded (not promoted)
  * when the tag itself is removed. These can contain executable or
  * dangerous content that must not leak into the document as text.
  */
-const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet']);
+const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
  * Check whether a URL is safe (not javascript: or disallowed data:).
