@@ -5,7 +5,7 @@
 use tauri::State;
 
 use crate::core_manager::core::config_sanitizer::remove_dangerous_keys;
-use crate::core_manager::core::subscription::validate_subscription_url_with_ip;
+use crate::core_manager::core::fetch_util::fetch_url_content;
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
 use crate::core_manager::write_file_secure;
 use crate::prism::types::{
@@ -372,55 +372,9 @@ pub async fn rule_import_url(
     name: String,
 ) -> Result<String, String> {
     state.check_rate_limit("rule_import_url")?;
-    // C-3: Validate URL scheme and resolve DNS to prevent SSRF (rebinding/TOCTOU)
-    let (validated_host, resolved_addr, user_entered_private) =
-        validate_subscription_url_with_ip(&url)?;
 
-    // For user-entered private addresses, skip DNS pinning.
-    // For public addresses, pin resolved IP to prevent DNS rebinding.
-    let resolve_pin = if user_entered_private {
-        None
-    } else {
-        resolved_addr.map(|addr| (validated_host, addr))
-    };
-
-    // M-3: Add connection and read timeouts (async client)
-    let client = crate::core_manager::core::subscription::build_http_client(None, resolve_pin)
-        .map_err(|e| format!("HTTP client build failed: {e}"))?;
-
-    let res = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to download: {e}"))?;
-
-    if !res.status().is_success() {
-        return Err(format!("HTTP error: {}", res.status()));
-    }
-
-    // M-4: Check Content-Length header before reading body, reject if > 10MB
-    if let Some(len) = res.content_length() {
-        if usize::try_from(len).unwrap_or(0) > MAX_RESPONSE_SIZE {
-            return Err(format!(
-                "Response body exceeds maximum size of {MAX_RESPONSE_SIZE} bytes"
-            ));
-        }
-    }
-
-    // Read response with byte limit
-    let bytes = res
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response body: {e}"))?;
-
-    if bytes.len() > MAX_RESPONSE_SIZE {
-        return Err(format!(
-            "Response body exceeds maximum size of {MAX_RESPONSE_SIZE} bytes"
-        ));
-    }
-
-    let raw = String::from_utf8(bytes.to_vec())
-        .map_err(|e| format!("Response body is not valid UTF-8: {e}"))?;
+    // Use unified fetch function for consistent security measures
+    let raw = fetch_url_content(&url, None).await?;
 
     let content = normalize_to_prism_yaml(&raw);
     if content.is_empty() {
