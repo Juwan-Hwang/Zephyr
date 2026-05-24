@@ -72,13 +72,9 @@ Zephyr/
 
 2. **WebView2 (Windows)**：便携版依赖系统已安装的 WebView2 Runtime。如果无法启动，请从微软官网下载安装 [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)。
 
-3. **多实例**：便携版可以复制到多个位置同时运行，但注意：
-   - 系统代理端口（默认 7890）会冲突
-   - TUN 模式同一时间只能有一个实例启用
+3. **U 盘性能**：mihomo 核心会频繁读写 `cache.db`，在低速 U 盘上可能影响性能。
 
-4. **U 盘性能**：mihomo 核心会频繁读写 `cache.db`，在低速 U 盘上可能影响性能。
-
-5. **路径限制**：避免将便携版放在含中文或空格的路径下，可能导致 mihomo 核心启动失败。
+4. **路径限制**：避免将便携版放在含中文或空格的路径下，可能导致 mihomo 核心启动失败。
 
 ## 从安装版迁移到便携版
 
