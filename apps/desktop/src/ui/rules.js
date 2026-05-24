@@ -180,6 +180,7 @@ async function renderRulesList(searchQuery = '') {
         }
 
         // SECURITY FIX: use setAttribute for title instead of innerHTML with escaped value
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         item.innerHTML = `
             <div class="flex items-center gap-4 flex-1">
                 <div class="type-badge text-zinc-500">${escapeHtml(type)}</div>
@@ -286,6 +287,7 @@ async function saveRules() {
     const btn = /** @type {HTMLButtonElement} */ (document.getElementById('save-rules-btn'));
     if (!btn) return;
     const originalContent = btn.innerHTML;
+    // eslint-disable-next-line no-unsanitized/property -- static SVG constant
     btn.innerHTML = SVG_ICONS.loadingSmall2;
     btn.disabled = true;
 
@@ -329,6 +331,7 @@ async function saveRules() {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
         rulesLogger.error('Save failed', err);
     } finally {
+        // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
         btn.innerHTML = originalContent;
         btn.disabled = false;
     }

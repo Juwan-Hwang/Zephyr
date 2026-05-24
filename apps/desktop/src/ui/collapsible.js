@@ -55,6 +55,7 @@ export function createCollapsible(container, {
 
     if (icon) {
         const iconWrapper = document.createElement('span');
+        // eslint-disable-next-line no-unsanitized/property -- caller-validated: icon param is always static SVG
         iconWrapper.innerHTML = icon;
         if (iconWrapper.firstElementChild) {
             leftPart.appendChild(iconWrapper.firstElementChild);

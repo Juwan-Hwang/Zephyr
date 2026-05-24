@@ -511,6 +511,7 @@ function renderConfigItem(key, value, fullKey) {
         const setBtn = document.createElement('button');
         setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
         setBtn.title = "Set value";
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
         setBtn.innerHTML = SVG_ICONS.plus;
         setBtn.onclick = (e) => {
             e.stopPropagation();

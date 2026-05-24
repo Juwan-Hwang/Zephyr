@@ -47,24 +47,18 @@ export function escapeAttr(str) {
 
 const IS_BROWSER = typeof document !== 'undefined';
 
-/** @type {DOMParser|null} Shared singleton parser */
-let _sharedParser = null;
-
-function getParser() {
-    if (!_sharedParser && IS_BROWSER) {
-        _sharedParser = new DOMParser();
-    }
-    return _sharedParser;
-}
-
 /** Default allowed tags — conservative, security-first whitelist */
 const DEFAULT_ALLOWED_TAGS = new Set([
     'strong', 'em', 'b', 'i', 'u', 'br', 'span', 'p', 'div',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
-    'table', 'tr', 'td', 'th', 'hr', 'blockquote',
+    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del', 'ins',
     // Form elements (needed for modal custom content)
     'input', 'label', 'button', 'textarea', 'select', 'option',
+    // SVG elements (used extensively for icons)
+    'svg', 'path', 'circle', 'line', 'polyline', 'polygon',
+    'rect', 'ellipse', 'g', 'use', 'defs', 'clippath',
+    'text', 'tspan', 'stop', 'lineargradient', 'radialgradient',
 ]);
 
 /** Default per-tag attribute whitelist */
@@ -97,6 +91,24 @@ const DEFAULT_ALLOWED_ATTRS = {
     textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols']),
     select: new Set(['id', 'name', 'class', 'disabled', 'multiple']),
     option: new Set(['value', 'selected', 'disabled']),
+    // SVG attributes
+    svg:    new Set(['class', 'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'xmlns', 'style']),
+    path:   new Set(['d', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin']),
+    circle: new Set(['cx', 'cy', 'r', 'fill', 'stroke', 'stroke-width']),
+    line:   new Set(['x1', 'y1', 'x2', 'y2', 'stroke', 'stroke-width', 'stroke-linecap']),
+    polyline: new Set(['points', 'fill', 'stroke', 'stroke-width', 'stroke-linejoin']),
+    polygon: new Set(['points', 'fill', 'stroke', 'stroke-width', 'stroke-linejoin']),
+    rect:   new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'fill', 'stroke', 'stroke-width']),
+    ellipse: new Set(['cx', 'cy', 'rx', 'ry', 'fill', 'stroke', 'stroke-width']),
+    g:      new Set(['class', 'id', 'fill', 'stroke', 'stroke-width', 'transform']),
+    use:    new Set(['href', 'xlink:href', 'width', 'height']),
+    defs:   new Set(['id']),
+    clippath: new Set(['id']),
+    text:   new Set(['x', 'y', 'fill', 'font-size', 'class']),
+    tspan:  new Set(['x', 'y', 'fill', 'font-size', 'class']),
+    stop:   new Set(['offset', 'stop-color', 'stop-opacity']),
+    lineargradient: new Set(['id', 'x1', 'y1', 'x2', 'y2']),
+    radialgradient: new Set(['id', 'cx', 'cy', 'r']),
 };
 
 /** Regex matching any on* event handler attribute */
@@ -108,8 +120,15 @@ const JS_URI_RE = /^\s*javascript\s*:/i;
 /** Regex matching data: URIs */
 const DATA_URI_RE = /^\s*data\s*:/i;
 
-/** NBSP entity pattern */
-const NBSP_RE = /&nbsp;|&#160;|&#xA0;/gi;
+/** NBSP entity pattern (includes \u00A0 for browser-decoded entities) */
+const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
+
+/**
+ * Tags whose content should always be fully discarded (not promoted)
+ * when the tag itself is removed. These can contain executable or
+ * dangerous content that must not leak into the document as text.
+ */
+const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
  * Check whether a URL is safe (not javascript: or disallowed data:).
@@ -173,10 +192,15 @@ export function sanitizeHtml(input, options = {}) {
     const removeNbsp   = !!options.removeNbsp;
     const allowDataImg = !!options.allowDataImages;
 
-    // Parse with shared DOMParser
-    const parser = getParser();
-    if (!parser) return '';
-    const doc = parser.parseFromString(normalized, 'text/html');
+    // Parse with <template> element to preserve table fragments
+    // (DOMParser.parseFromString with 'text/html' wraps content in <body>,
+    //  causing the parser to discard orphan <tr>/<td>/<th>/<li> elements
+    //  that lack their required parent context. <template>.content is a
+    //  DocumentFragment that accepts any HTML without structural correction.)
+    const template = document.createElement('template');
+    // eslint-disable-next-line no-unsanitized/property -- sanitizer core: <template> is inert, no script execution
+    template.innerHTML = normalized;
+    const fragment = template.content;
 
     // Recursive sanitizer — walks the tree depth-first
     /** @param {Node} node */
@@ -200,10 +224,20 @@ export function sanitizeHtml(input, options = {}) {
 
         // If tag is not whitelisted, remove it (optionally keeping children)
         if (!allowedTags.has(tag)) {
-            if (keepChildren) {
-                // Move children up before removing the node
-                while (el.firstChild) {
-                    el.parentNode?.insertBefore(el.firstChild, el);
+            // Security-sensitive tags: always discard content entirely
+            // (e.g., <script> source code must not leak as visible text)
+            const stripContent = STRIP_CONTENT_TAGS.has(tag);
+            if (keepChildren && !stripContent) {
+                // Move children up before removing the node AND sanitize them.
+                // The parent's child loop uses a static snapshot, so moved children
+                // would otherwise be skipped — a security bypass vector.
+                const parent = el.parentNode;
+                if (parent) {
+                    while (el.firstChild) {
+                        const child = el.firstChild;
+                        parent.insertBefore(child, el);
+                        sanitizeNode(child);
+                    }
                 }
             }
             if (el.parentNode) el.parentNode.removeChild(el);
@@ -261,11 +295,97 @@ export function sanitizeHtml(input, options = {}) {
         }
     }
 
-    // Sanitize all top-level nodes in body
-    const bodyChildren = Array.from(doc.body.childNodes);
-    for (const child of bodyChildren) {
+    // Sanitize all top-level nodes in fragment
+    const fragmentChildren = Array.from(fragment.childNodes);
+    for (const child of fragmentChildren) {
         sanitizeNode(child);
     }
 
-    return doc.body.innerHTML;
+    // Serialize: template.innerHTML getter reads from template.content,
+    // which now contains the sanitized DOM tree.
+    return template.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// Safe HTML Template Literal
+// ---------------------------------------------------------------------------
+
+/**
+ * Escape a single value for safe interpolation inside an HTML template.
+ * Arrays are flattened recursively; null/undefined produce empty strings.
+ *
+ * @param {any} v - Value to escape
+ * @returns {string} HTML-safe string
+ */
+function _htmlEscape(v) {
+    if (Array.isArray(v)) return v.map(_htmlEscape).join('');
+    return (v !== null && v !== undefined) ? escapeAttr(String(v)) : '';
+}
+
+/**
+ * Normalize a single value for safeHtml interpolation (no escaping —
+ * the final result passes through sanitizeHtml whitelist filtering).
+ * Arrays are flattened recursively; null/undefined produce empty strings.
+ *
+ * @param {any} v - Value to normalize
+ * @returns {string} Raw string (will be sanitized later)
+ */
+function _htmlRaw(v) {
+    if (Array.isArray(v)) return v.map(_htmlRaw).join('');
+    return (v === null || v === undefined) ? '' : String(v);
+}
+
+/**
+ * Safe HTML template literal tag.
+ * Automatically escapes all ${} interpolations to prevent XSS.
+ * Uses escapeAttr to ensure safety in both text and attribute contexts.
+ * Arrays are flattened recursively without comma separators.
+ *
+ * ⚠ Limitations:
+ *   - Not suitable for URL attributes (href, src) — escapeAttr does NOT
+ *     block javascript:/data: URIs. Use safeHtml for attributes that
+ *     accept URLs, or validate the URL before interpolation.
+ *   - Does NOT support nesting — `html\`${html\`...\`}\`` will double-escape.
+ *     For HTML composition, use safeHtml instead.
+ *
+ * Usage:
+ *   import { html } from './utils/sanitize.js';
+ *   element.innerHTML = html`<div>${userInput}</div>`;  // userInput is auto-escaped
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values
+ * @returns {string} HTML-safe string with all values escaped
+ */
+export function html(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(_htmlEscape(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return result.join('');
+}
+
+/**
+ * Safe HTML template literal tag that also sanitizes the result.
+ * Use this when template variables contain HTML structure that needs to be
+ * preserved (e.g., rich text with allowed tags). All interpolations pass
+ * through the whitelist-based sanitizeHtml filter, which strips disallowed
+ * tags, event handlers, and javascript: URIs.
+ * Arrays are flattened recursively without comma separators.
+ *
+ * Usage:
+ *   import { safeHtml } from './utils/sanitize.js';
+ *   element.innerHTML = safeHtml`<div>${htmlContent}</div>`;
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values (may contain HTML)
+ * @returns {string} Sanitized HTML string
+ */
+export function safeHtml(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        result.push(_htmlRaw(values[i]));
+        result.push(strings[i + 1]);
+    }
+    return sanitizeHtml(result.join(''));
 }
