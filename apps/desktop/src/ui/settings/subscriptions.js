@@ -121,6 +121,7 @@ async function showEditPanel(configInfo) {
     modal.id = 'edit-subscription-modal';
     modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
     // Escape all translation strings for XSS safety
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5">
             <div class="flex items-center justify-between">
@@ -597,6 +598,7 @@ export function initSubscriptionSettings({
         // --- "Edit" item ---
         const editItem = document.createElement('div');
         editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
@@ -613,6 +615,7 @@ export function initSubscriptionSettings({
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
         extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
@@ -821,6 +824,7 @@ export function initSubscriptionSettings({
                 for (const [groupName, groupFiles] of grouped) {
                     const groupHeader = document.createElement('div');
                     groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-zinc-500 uppercase tracking-wider font-bold';
+                    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                     groupHeader.innerHTML = `<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${escapeHtml(groupName)}`;
                     menu.appendChild(groupHeader);
 
@@ -1090,6 +1094,7 @@ export function initSubscriptionSettings({
             // Delete button
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash;
             delBtn.title = t.delete;
             delBtn.onclick = async (e) => {
@@ -1122,6 +1127,7 @@ export function initSubscriptionSettings({
             if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
                 updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-zinc-500 hover:text-accent transition-all';
+                // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh;
                 updateBtn.title = t.update;
                 updateBtn.onclick = async (e) => {
@@ -1206,6 +1212,7 @@ export function initSubscriptionSettings({
 
                     const textRow = document.createElement('div');
                     textRow.className = 'flex justify-between text-2xs text-zinc-500 mb-1.5 px-0.5 uppercase tracking-wider font-bold';
+                    // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
                     textRow.innerHTML = `<span>${formatFileSize(used)} ${t.usedSpace || 'used'}</span><span>${formatFileSize(total)} ${t.totalSpace || 'total'}</span>`;
 
                     const barBg = document.createElement('div');

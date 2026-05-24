@@ -1399,6 +1399,7 @@ export async function initSettings() {
             const modal = document.createElement('div');
             modal.id = 'smart-config-modal';
             modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">

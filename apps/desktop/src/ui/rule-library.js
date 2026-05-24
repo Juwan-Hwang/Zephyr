@@ -154,6 +154,7 @@ async function updateStatusBar() {
             if (isError) stateLabel = t.ruleLibraryStatusError || 'Error';
             else if (isCompiling) stateLabel = t.ruleLibraryStatusCompiling || 'Compiling';
             else stateLabel = t.ruleLibraryStatusReady || 'Ready';
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
             statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} mr-1.5"></span>${escapeHtml(stateLabel)}`;
         }
 
@@ -166,6 +167,7 @@ async function updateStatusBar() {
         // Fallback to local computation
         if (statusEl) {
             const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>';
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
             statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready');
         }
         if (statsEl) {
@@ -198,6 +200,7 @@ function render() {
     // (e.g. after import, language change, etc.).
     let tabContent = document.getElementById('rl-tab-content');
     if (!tabContent) {
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
                 <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-all duration-200 ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'}">
@@ -274,6 +277,7 @@ function renderRuleSets(container) {
 
     // Empty state
     if (ruleFiles.length === 0) {
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
@@ -357,6 +361,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     // Group header
     const header = document.createElement('div');
     header.className = 'flex items-center justify-between py-2 px-3 rounded-xl bg-white/60 dark:bg-zinc-800/40 cursor-pointer group hover:bg-white/60 dark:hover:bg-zinc-800/60 transition-all duration-200';
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     header.innerHTML = `
         <div class="flex items-center gap-2">
             ${SVG_ICONS.collapseArrow}
@@ -408,6 +413,7 @@ function buildFileCard(file, _fileMap) {
 
     const sourceBadge = getSourceBadge(file.source);
 
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="flex flex-col gap-0.5 min-w-0">
@@ -486,6 +492,7 @@ function renderActiveRules(container) {
             activeRulesResizeObs.disconnect();
             activeRulesResizeObs = null;
         }
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         ct.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
@@ -543,6 +550,7 @@ function renderActiveRules(container) {
     // Toolbar
     const toolbar = document.createElement('div');
     toolbar.className = 'flex items-center justify-between mb-4 shrink-0';
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     toolbar.innerHTML = `
         <div class="flex items-center gap-2">
             <span id="arl-groups-count" class="text-xs text-zinc-500">${escapeHtml(String(activeRules.length))} ${t.ruleLibraryActiveGroups || 'groups'}</span>
@@ -607,6 +615,7 @@ function renderActiveRules(container) {
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
                 header.className = 'flex items-center justify-between p-2 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/60 cursor-pointer select-none';
+                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 header.innerHTML = `
                     <div class="flex items-center gap-3">
                         <svg class="w-3 h-3 text-zinc-500 collapse-arrow transition-transform duration-200 ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
@@ -639,6 +648,7 @@ function renderActiveRules(container) {
                 const el = document.createElement('div');
                 el.setAttribute('data-line-idx', String(idx));
                 el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-200';
+                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 el.innerHTML = `
                     <div class="flex items-center gap-4 flex-1 min-w-0">
                         <span class="text-xs text-zinc-600 w-6 shrink-0">${localIndex}</span>
@@ -1138,6 +1148,7 @@ async function handleEditRule(filename) {
             item.style.webkitUserDrag = 'element';
             item.dataset.ruleIndex = String(index);
 
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr
             item.innerHTML = `
                 <div class="flex items-center gap-4 flex-1">
                     <span class="text-xs text-zinc-600 w-6 shrink-0 cursor-grab active:cursor-grabbing select-none" title="${escapeAttr(t.ruleLibraryDragToReorder || 'Drag to reorder')}">${index + 1}</span>

@@ -941,6 +941,7 @@ function updateOverrideCardContent(card, item) {
         toggleBtn.title = item.enabled
             ? t('overrideDisable')
             : t('overrideEnable');
+        // eslint-disable-next-line no-unsanitized/property -- static SVG icon
         toggleBtn.innerHTML = item.enabled
             ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
             : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
@@ -989,6 +990,7 @@ function buildOverrideCard(item) {
         ? t('overrideEnabled')
         : t('overrideDisabled');
 
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${summaryText}"></div>
@@ -1448,6 +1450,7 @@ async function runFullscreenEditor() {
     if (!source) return;
 
     if (output) {
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
         output.innerHTML = '<div class="text-zinc-500">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
     }
 
@@ -1523,6 +1526,7 @@ async function runFullscreenEditor() {
 function clearFullscreenOutput() {
     const output = document.getElementById('fullscreen-editor-output');
     if (output) {
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
         output.innerHTML = '<div class="text-zinc-600 italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
         output.className = 'flex-1 p-4 text-sm font-mono text-zinc-400 whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
     }

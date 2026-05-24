@@ -168,6 +168,7 @@ export function initConnectionsPage() {
 
     // Inject template if not already present
     if (!document.getElementById('conn-stats-bar')) {
+        // eslint-disable-next-line no-unsanitized/property -- static HTML template (PAGE_HTML is a hardcoded string)
         container.innerHTML = PAGE_HTML;
         // Apply i18n translations to newly injected DOM elements
         applyTranslations();
@@ -500,6 +501,7 @@ function renderConnectionList(connections, mode, _searchQuery) {
         });
     }
 
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in buildConnectionRow
     container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join('');
 
     // Bind row click → open detail panel
@@ -845,6 +847,7 @@ function showConnDetail(conn, mode) {
         document.body.appendChild(bg);
     }
 
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in showConnDetail
     bg.innerHTML = panelHtml;
     bg.classList.remove('hidden');
     bg.classList.add('flex');
@@ -1090,6 +1093,7 @@ function setButtonLoading(btn, t, loadingText) {
 function resetButton(btn, iconSvg, text) {
     if (!btn) return;
     /** @type {HTMLButtonElement} */ (btn).disabled = false;
+    // eslint-disable-next-line no-unsanitized/property -- caller-validated: iconSvg/text are hardcoded SVG + i18n
     btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`;
 }
 

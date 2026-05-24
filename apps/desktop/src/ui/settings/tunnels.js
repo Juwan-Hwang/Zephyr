@@ -112,6 +112,7 @@ export function initTunnelSettings({
 
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash;
             delBtn.onclick = async () => {
                 const deleted = currentTunnels[index];
