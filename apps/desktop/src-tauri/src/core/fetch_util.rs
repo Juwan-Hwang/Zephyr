@@ -100,67 +100,6 @@ fn format_host_port(host: &str, port: u16) -> String {
     }
 }
 
-/// Validate a URL for SSRF protection.
-///
-/// Returns:
-/// - `Ok((host, resolved_addr, user_entered_private))` if valid
-/// - `Err(String)` if invalid or SSRF detected
-///
-/// Security:
-/// - Only allows http/https schemes
-/// - Blocks public domains that resolve to private IPs (DNS rebinding)
-/// - Allows user-entered private addresses (for local networks)
-pub fn validate_url(url: &str) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
-
-    // Only allow http and https schemes
-    let scheme = parsed_url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err("Only HTTP and HTTPS URLs are allowed".to_owned());
-    }
-
-    // Extract host
-    let host = parsed_url
-        .host_str()
-        .ok_or("URL must have a host")?
-        .to_owned();
-
-    // Check if user explicitly entered a private/local host
-    let user_entered_private = is_private_host(&host);
-
-    if user_entered_private {
-        // User explicitly typed a private address
-        // Allow it, but return None for resolved_addr (no DNS pinning)
-        return Ok((host, None, true));
-    }
-
-    // Host is a public domain — resolve and verify all IPs are public
-    let port = parsed_url
-        .port()
-        .unwrap_or(if scheme == "https" { 443 } else { 80 });
-    let host_port = format_host_port(&host, port);
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&host_port)
-        .map_err(|e| format!("Failed to resolve host: {e}"))?
-        .collect();
-
-    let mut resolved_addr = None;
-    for addr in &addrs {
-        if is_private_ip(addr.ip()) {
-            // Public domain resolving to a private IP = SSRF, always block
-            return Err("Access to private/local resolved addresses is not allowed".to_owned());
-        }
-        if resolved_addr.is_none() {
-            resolved_addr = Some(*addr);
-        }
-    }
-
-    if resolved_addr.is_none() {
-        return Err("Could not resolve any IP address for the host".to_owned());
-    }
-
-    Ok((host, resolved_addr, false))
-}
-
 /// Build an HTTP client with security settings.
 ///
 /// Features:
@@ -252,48 +191,133 @@ pub fn build_http_client(config: HttpClientConfig) -> Result<reqwest::Client, St
 /// - Response size limiting
 /// - Timeout handling
 ///
+/// Download strategy (aligned with subscription.rs):
+/// 1. Try direct connection first (with DNS pinning for public addresses)
+/// 2. If direct fails and proxy is available, try proxy (without DNS pinning)
+///
+/// The proxy path skips DNS pre-resolve pinning to let the proxy handle DNS
+/// resolution. This avoids issues with CDN / geo-balanced IPs and split-horizon
+/// DNS where only the proxy can resolve the domain.
+///
 /// # Arguments
 /// * `url` - The URL to fetch
-/// * `proxy_port` - Optional local proxy port (for proxied downloads)
+/// * `proxy_port` - Optional local proxy port (for proxied downloads as fallback)
 ///
 /// # Returns
 /// * `Ok(String)` - The fetched content as UTF-8 string
 /// * `Err(String)` - Error message if fetch failed
 pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
-    // Validate URL (SSRF protection + DNS resolution)
-    let (host, resolved_addr, user_entered_private) = validate_url(url)?;
+    // Basic URL validation (scheme, host format) without DNS resolution
+    // DNS resolution is deferred to allow proxy to handle it
+    let (host, user_entered_private) = validate_url_basic(url)?;
 
-    // Configure DNS pinning for public addresses
-    let resolve_pin = if user_entered_private {
-        None
-    } else {
-        resolved_addr.map(|addr| (host, addr))
-    };
+    // Try direct connection first (with DNS pinning for public addresses)
+    let direct_result = try_direct_download(url, &host, user_entered_private).await;
 
-    // Try proxied download first if proxy port is provided
-    if let Some(port) = proxy_port.filter(|&p| p > 0) {
-        let proxy_url = format!("http://127.0.0.1:{port}");
-        let config = HttpClientConfig {
-            proxy_url: Some(proxy_url),
-            resolve_pin: resolve_pin.clone(),
-            ..Default::default()
-        };
-        let client = build_http_client(config)?;
+    match direct_result {
+        Ok(content) => Ok(content),
+        Err(direct_err) => {
+            eprintln!("[fetch_url_content] Direct download failed: {direct_err}");
 
-        match fetch_body(&client, url).await {
-            Ok(content) => return Ok(content),
-            Err(proxy_err) => {
-                // Log proxy failure and fall back to direct download
-                eprintln!(
-                    "[fetch_url_content] Proxy download failed ({proxy_err}), retrying direct..."
-                );
+            // Try proxy fallback if available
+            if let Some(port) = proxy_port.filter(|&p| p > 0) {
+                eprintln!("[fetch_url_content] Retrying with proxy...");
+                match try_proxy_download(url, port).await {
+                    Ok(content) => Ok(content),
+                    Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+                }
+            } else {
+                Err(direct_err)
             }
         }
     }
+}
 
-    // Direct download (fallback or default)
+/// Basic URL validation without DNS resolution.
+///
+/// Returns `(host, user_entered_private)` for further processing.
+fn validate_url_basic(url: &str) -> Result<(String, bool), String> {
+    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+
+    // Only allow http and https schemes
+    let scheme = parsed_url.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err("Only HTTP and HTTPS URLs are allowed".to_owned());
+    }
+
+    // Extract host
+    let host = parsed_url
+        .host_str()
+        .ok_or("URL must have a host")?
+        .to_owned();
+
+    // Check if user explicitly entered a private/local host
+    let user_entered_private = is_private_host(&host);
+
+    Ok((host, user_entered_private))
+}
+
+/// Try direct download with DNS pinning for public addresses.
+async fn try_direct_download(
+    url: &str,
+    host: &str,
+    user_entered_private: bool,
+) -> Result<String, String> {
+    // For user-entered private addresses, skip DNS resolution
+    // For public addresses, resolve and pin to prevent DNS rebinding
+    let resolve_pin = if user_entered_private {
+        None
+    } else {
+        resolve_and_pin(host)
+            .await?
+            .map(|addr| (host.to_owned(), addr))
+    };
+
     let config = HttpClientConfig {
         resolve_pin,
+        ..Default::default()
+    };
+    let client = build_http_client(config)?;
+    fetch_body(&client, url).await
+}
+
+/// Resolve host and return first valid public address for DNS pinning.
+async fn resolve_and_pin(host: &str) -> Result<Option<std::net::SocketAddr>, String> {
+    let port = 80u16; // Port doesn't matter for resolution, just for format
+    let host_port = format_host_port(host, port);
+
+    let addrs: Vec<std::net::SocketAddr> = tokio::task::spawn_blocking(move || {
+        std::net::ToSocketAddrs::to_socket_addrs(&host_port)
+            .map(std::iter::Iterator::collect)
+            .map_err(|e| format!("Failed to resolve host: {e}"))
+    })
+    .await
+    .map_err(|e| format!("DNS resolution task failed: {e}"))??;
+
+    // Find first public address
+    for addr in addrs {
+        if !is_private_ip(addr.ip()) {
+            return Ok(Some(addr));
+        }
+    }
+
+    // All resolved addresses are private - SSRF attempt
+    Err("Access to private/local resolved addresses is not allowed".to_owned())
+}
+
+/// Try proxy download without DNS pinning.
+///
+/// SSRF protection for proxy path:
+/// - Initial URL host validated (private host check)
+/// - Redirect policy blocks redirects to private hosts/IPs
+/// - Proxy-side SSRF is NOT preventable client-side — inherent to proxy architecture
+async fn try_proxy_download(url: &str, proxy_port: u16) -> Result<String, String> {
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+
+    // No DNS pinning for proxy - let proxy handle DNS resolution
+    let config = HttpClientConfig {
+        proxy_url: Some(proxy_url),
+        resolve_pin: None,
         ..Default::default()
     };
     let client = build_http_client(config)?;
