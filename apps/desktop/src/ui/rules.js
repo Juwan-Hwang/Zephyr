@@ -153,9 +153,10 @@ async function loadRules() {
 async function renderRulesList(searchQuery = '') {
     const container = document.getElementById('rules-list');
     if (!container) return;
-    container.innerHTML = '';
+ 
+container.innerHTML = '';
 
-    const query = searchQuery.toLowerCase();
+const query = searchQuery.toLowerCase();
 
     for (let i = 0; i < currentConfigRules.length; i++) {
         const rule = currentConfigRules[i];
@@ -179,8 +180,9 @@ async function renderRulesList(searchQuery = '') {
             item.title = 'This rule is managed by Prism Engine';
         }
 
-        // SECURITY FIX: use setAttribute for title instead of innerHTML with escaped value
-        item.innerHTML = `
+// SECURITY FIX: use setAttribute for title instead of innerHTML with escaped value
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+item.innerHTML = `
             <div class="flex items-center gap-4 flex-1">
                 <div class="type-badge text-zinc-500">${escapeHtml(type)}</div>
                 <div class="text-xs text-zinc-300 font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
@@ -285,8 +287,9 @@ async function importSRRules() {
 async function saveRules() {
     const btn = /** @type {HTMLButtonElement} */ (document.getElementById('save-rules-btn'));
     if (!btn) return;
-    const originalContent = btn.innerHTML;
-    btn.innerHTML = SVG_ICONS.loadingSmall2;
+const originalContent = btn.innerHTML;
+// eslint-disable-next-line no-unsanitized/property -- static SVG constant
+btn.innerHTML = SVG_ICONS.loadingSmall2;
     btn.disabled = true;
 
     try {
@@ -329,7 +332,8 @@ async function saveRules() {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
         rulesLogger.error('Save failed', err);
     } finally {
-        btn.innerHTML = originalContent;
+        // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
+btn.innerHTML = originalContent;
         btn.disabled = false;
     }
 }

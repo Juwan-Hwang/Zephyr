@@ -52,7 +52,7 @@ const DEFAULT_ALLOWED_TAGS = new Set([
     'strong', 'em', 'b', 'i', 'u', 'br', 'span', 'p', 'div',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
-    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del',
+    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del', 'ins',
     // Form elements (needed for modal custom content)
     'input', 'label', 'button', 'textarea', 'select', 'option',
 ]);

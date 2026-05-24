@@ -168,6 +168,7 @@ export function initConnectionsPage() {
 
     // Inject template if not already present
     if (!document.getElementById('conn-stats-bar')) {
+        // eslint-disable-next-line no-unsanitized/property -- static HTML template (PAGE_HTML is a hardcoded string)
         container.innerHTML = PAGE_HTML;
         // Apply i18n translations to newly injected DOM elements
         applyTranslations();
@@ -247,7 +248,8 @@ function switchConnTab(tab) {
         if (actionBtn) {
             actionBtn.className = 'btn-danger';
             actionBtn.disabled = false;
-            if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'; }
+             
+if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'; }
             if (actionText) { actionText.textContent = t.closeAll || 'Close All'; actionText.setAttribute('data-i18n', 'closeAll'); }
         }
     } else {
@@ -259,7 +261,8 @@ function switchConnTab(tab) {
         if (actionBtn) {
             actionBtn.className = 'btn-warning';
             actionBtn.disabled = false;
-            if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'; }
+             
+if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'; }
             if (actionText) { actionText.textContent = t.clearAll || 'Clear All'; actionText.setAttribute('data-i18n', 'clearAll'); }
         }
     }
@@ -469,8 +472,9 @@ function renderConnectionList(connections, mode, _searchQuery) {
     }
 
     if (filtered.length === 0) {
-        container.innerHTML = '';
-        const tpl = mode === 'active' ? emptyState : closedEmptyState;
+     
+    container.innerHTML = '';
+    const tpl = mode === 'active' ? emptyState : closedEmptyState;
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
@@ -500,7 +504,8 @@ function renderConnectionList(connections, mode, _searchQuery) {
         });
     }
 
-    container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join('');
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in buildConnectionRow
+container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join('');
 
     // Bind row click → open detail panel
     for (const row of container.querySelectorAll('.conn-row')) {
@@ -845,6 +850,7 @@ function showConnDetail(conn, mode) {
         document.body.appendChild(bg);
     }
 
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in showConnDetail
     bg.innerHTML = panelHtml;
     bg.classList.remove('hidden');
     bg.classList.add('flex');
@@ -1071,7 +1077,8 @@ function setButtonLoading(btn, t, loadingText) {
     const text = btn.querySelector('#action-btn-text');
     if (icon) {
         icon.classList.add('animate-spin');
-        icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>';
+         
+icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>';
     }
     if (text) text.textContent = t[loadingText] || loadingText;
 }
@@ -1089,8 +1096,9 @@ function setButtonLoading(btn, t, loadingText) {
  */
 function resetButton(btn, iconSvg, text) {
     if (!btn) return;
-    /** @type {HTMLButtonElement} */ (btn).disabled = false;
-    btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`;
+/** @type {HTMLButtonElement} */ (btn).disabled = false;
+// eslint-disable-next-line no-unsanitized/property -- caller-validated: iconSvg/text are hardcoded SVG + i18n
+btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`;
 }
 
 /**

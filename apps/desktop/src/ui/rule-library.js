@@ -154,7 +154,8 @@ async function updateStatusBar() {
             if (isError) stateLabel = t.ruleLibraryStatusError || 'Error';
             else if (isCompiling) stateLabel = t.ruleLibraryStatusCompiling || 'Compiling';
             else stateLabel = t.ruleLibraryStatusReady || 'Ready';
-            statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} mr-1.5"></span>${escapeHtml(stateLabel)}`;
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} mr-1.5"></span>${escapeHtml(stateLabel)}`;
         }
 
         if (statsEl) {
@@ -166,7 +167,8 @@ async function updateStatusBar() {
         // Fallback to local computation
         if (statusEl) {
             const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>';
-            statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready');
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready');
         }
         if (statsEl) {
             const totalRules = ruleFiles.reduce((sum, f) => sum + (f.rule_count || 0), 0);
@@ -198,7 +200,8 @@ function render() {
     // (e.g. after import, language change, etc.).
     let tabContent = document.getElementById('rl-tab-content');
     if (!tabContent) {
-        content.innerHTML = `
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
                 <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-all duration-200 ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'}">
                     ${escapeHtml(t.ruleLibraryManageFiles || 'Manage Rule Files')}
@@ -274,8 +277,9 @@ function renderRuleSets(container) {
 
     // Empty state
     if (ruleFiles.length === 0) {
-        container.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-20 gap-4">
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+container.innerHTML = `
+<div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
                 </svg>
@@ -316,9 +320,10 @@ function renderRuleSets(container) {
     // Build a set of files that belong to a group
     const groupedFiles = new Set(groups.flatMap((g) => g.files));
 
-    container.innerHTML = '';
+ 
+container.innerHTML = '';
 
-    // Render each group as a collapsible section
+// Render each group as a collapsible section
     groups.forEach((group) => {
         const groupFiles = group.files
             .map((name) => fileMap.get(name))
@@ -357,8 +362,9 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     // Group header
     const header = document.createElement('div');
     header.className = 'flex items-center justify-between py-2 px-3 rounded-xl bg-white/60 dark:bg-zinc-800/40 cursor-pointer group hover:bg-white/60 dark:hover:bg-zinc-800/60 transition-all duration-200';
-    header.innerHTML = `
-        <div class="flex items-center gap-2">
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+header.innerHTML = `
+<div class="flex items-center gap-2">
             ${SVG_ICONS.collapseArrow}
             <span class="text-sm font-medium text-zinc-700 dark:text-zinc-300">${escapeHtml(group.name)}</span>
             <span class="text-xs text-zinc-400 dark:text-zinc-600">${files.length} ${t.ruleLibraryFiles || 'files'}  ${totalRules} ${t.ruleLibraryRules || 'rules'}</span>
@@ -408,7 +414,8 @@ function buildFileCard(file, _fileMap) {
 
     const sourceBadge = getSourceBadge(file.source);
 
-    card.innerHTML = `
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="flex flex-col gap-0.5 min-w-0">
                 <span class="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">${escapeHtml(file.filename.replace(/\.prism\.ya?ml$/i, ''))}</span>
@@ -486,8 +493,9 @@ function renderActiveRules(container) {
             activeRulesResizeObs.disconnect();
             activeRulesResizeObs = null;
         }
-        ct.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-20 gap-4">
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+ct.innerHTML = `
+<div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
                     <path d="m9 12 2 2 4-4"/>
@@ -538,12 +546,14 @@ function renderActiveRules(container) {
     }
 
     // ── Build DOM structure (first time only) ──
-    ct.innerHTML = '';
+ 
+ct.innerHTML = '';
 
-    // Toolbar
+// Toolbar
     const toolbar = document.createElement('div');
     toolbar.className = 'flex items-center justify-between mb-4 shrink-0';
-    toolbar.innerHTML = `
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+toolbar.innerHTML = `
         <div class="flex items-center gap-2">
             <span id="arl-groups-count" class="text-xs text-zinc-500">${escapeHtml(String(activeRules.length))} ${t.ruleLibraryActiveGroups || 'groups'}</span>
             <span class="text-xs text-zinc-600">|</span>
@@ -563,7 +573,8 @@ function renderActiveRules(container) {
     // Virtual scroll container
     const scrollBox = document.createElement('div');
     scrollBox.className = 'overflow-y-auto custom-scrollbar pr-1';
-    scrollBox.innerHTML = '<div id="arl-vs-spacer-top" style="height:0"></div><div id="arl-vs-lines" class="space-y-1"></div><div id="arl-vs-spacer-bottom" style="height:0"></div>';
+     
+scrollBox.innerHTML = '<div id="arl-vs-spacer-top" style="height:0"></div><div id="arl-vs-lines" class="space-y-1"></div><div id="arl-vs-spacer-bottom" style="height:0"></div>';
     ct.appendChild(scrollBox);
 
     // Compute available height using the page container (which has constrained height)
@@ -607,8 +618,9 @@ function renderActiveRules(container) {
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
                 header.className = 'flex items-center justify-between p-2 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/60 cursor-pointer select-none';
-                header.innerHTML = `
-                    <div class="flex items-center gap-3">
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+header.innerHTML = `
+<div class="flex items-center gap-3">
                         <svg class="w-3 h-3 text-zinc-500 collapse-arrow transition-transform duration-200 ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                         <span class="text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
                         <span class="text-[10px] text-zinc-500">${ruleCount} rules</span>
@@ -639,8 +651,9 @@ function renderActiveRules(container) {
                 const el = document.createElement('div');
                 el.setAttribute('data-line-idx', String(idx));
                 el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-200';
-                el.innerHTML = `
-                    <div class="flex items-center gap-4 flex-1 min-w-0">
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+el.innerHTML = `
+<div class="flex items-center gap-4 flex-1 min-w-0">
                         <span class="text-xs text-zinc-600 w-6 shrink-0">${localIndex}</span>
                         <div class="type-badge text-zinc-500 shrink-0">${escapeHtml(type)}</div>
                         <div class="text-xs text-zinc-700 dark:text-zinc-300 font-mono truncate max-w-[300px]" title="${escapeAttr(value)}">${escapeHtml(value)}</div>
@@ -1138,7 +1151,8 @@ async function handleEditRule(filename) {
             item.style.webkitUserDrag = 'element';
             item.dataset.ruleIndex = String(index);
 
-            item.innerHTML = `
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr
+item.innerHTML = `
                 <div class="flex items-center gap-4 flex-1">
                     <span class="text-xs text-zinc-600 w-6 shrink-0 cursor-grab active:cursor-grabbing select-none" title="${escapeAttr(t.ruleLibraryDragToReorder || 'Drag to reorder')}">${index + 1}</span>
                     <div class="type-badge text-zinc-500">${escapeHtml(type)}</div>
@@ -1262,8 +1276,9 @@ async function handleEditRule(filename) {
                 toggleBtn.textContent = t.ruleLibrarySwitchToVisual || 'Visual Editor';
                 // Create CM6 editor
                 if (ruleEditorView) { ruleEditorView.destroy(); ruleEditorView = null; }
-                cm6Container.innerHTML = '';
-                ruleEditorView = createEditor({
+ 
+cm6Container.innerHTML = '';
+ruleEditorView = createEditor({
                     parent: cm6Container,
                     content: textContent,
                     language: 'yaml',

@@ -826,7 +826,8 @@ async function loadOverrides() {
         });
     }
 
-    pluginList.innerHTML = '';
+     
+pluginList.innerHTML = '';
 
     try {
         overrideItems = (await overrideList()) ?? [];
@@ -848,8 +849,9 @@ function renderOverrideCards(container, items, filter) {
 
     // Empty state
     if (filtered.length === 0) {
-        container.innerHTML = '';
-        const empty = document.createElement('div');
+ 
+    container.innerHTML = '';
+    const empty = document.createElement('div');
         empty.className = 'text-center text-zinc-500 text-sm py-12';
         empty.textContent = filter
             ? (t('overrideNoMatch') ?? 'No overrides match your search')
@@ -888,8 +890,9 @@ function renderOverrideCards(container, items, filter) {
         });
     } else {
         // Full rebuild (first render or items added/removed)
-        container.innerHTML = '';
-        for (const item of filtered) {
+ 
+    container.innerHTML = '';
+    for (const item of filtered) {
             const card = buildOverrideCard(item);
             container.appendChild(card);
         }
@@ -941,7 +944,8 @@ function updateOverrideCardContent(card, item) {
         toggleBtn.title = item.enabled
             ? t('overrideDisable')
             : t('overrideEnable');
-        toggleBtn.innerHTML = item.enabled
+    // eslint-disable-next-line no-unsanitized/property -- static SVG icon
+    toggleBtn.innerHTML = item.enabled
             ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
             : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
     }
@@ -989,6 +993,7 @@ function buildOverrideCard(item) {
         ? t('overrideEnabled')
         : t('overrideDisabled');
 
+// eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${summaryText}"></div>
@@ -1113,7 +1118,8 @@ async function openEditor(id, name, ext) {
     // Build CM6 editor
     if (scriptEditorView) { scriptEditorView.destroy(); scriptEditorView = null; }
     if (scriptCm6) {
-        scriptCm6.innerHTML = '';
+         
+scriptCm6.innerHTML = '';
         scriptEditorView = createEditor({
             parent: scriptCm6,
             content: content || '',
@@ -1336,7 +1342,8 @@ function openFullscreenEditor() {
         fullscreenEditorView = null;
     }
 
-    cm6Container.innerHTML = '';
+     
+cm6Container.innerHTML = '';
     fullscreenEditorView = createEditor({
         parent: cm6Container,
         content: content,
@@ -1375,7 +1382,8 @@ function closeFullscreenEditor() {
             // Update small editor content
             const scriptCm6 = document.getElementById('plugin-script-cm6');
             if (scriptCm6) {
-                scriptCm6.innerHTML = '';
+                 
+scriptCm6.innerHTML = '';
                 scriptEditorView.destroy();
                 scriptEditorView = createEditor({
                     parent: scriptCm6,
@@ -1448,7 +1456,8 @@ async function runFullscreenEditor() {
     if (!source) return;
 
     if (output) {
-        output.innerHTML = '<div class="text-zinc-500">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+output.innerHTML = '<div class="text-zinc-500">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
     }
 
     stopSmartAutoTest();
@@ -1523,7 +1532,8 @@ async function runFullscreenEditor() {
 function clearFullscreenOutput() {
     const output = document.getElementById('fullscreen-editor-output');
     if (output) {
-        output.innerHTML = '<div class="text-zinc-600 italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+output.innerHTML = '<div class="text-zinc-600 italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
         output.className = 'flex-1 p-4 text-sm font-mono text-zinc-400 whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
     }
 }

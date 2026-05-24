@@ -311,6 +311,7 @@ function showLatencyLoadingForAllCards() {
         const latVal = card.querySelector('[id^="latency-"]');
         if (latVal) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             latVal.innerHTML = latencyLoadingIcon;
         }
     });
@@ -788,7 +789,8 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     // Info icon
     const icon = document.createElement('span');
     icon.className = 'text-amber-400 text-sm flex-shrink-0';
-    icon.innerHTML = '&#9888;';
+     
+icon.innerHTML = '&#9888;';
 
     // Explanation text — use t() for fallback chain support
     const text = document.createElement('span');
@@ -838,7 +840,8 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     // Dismiss button
     const dismiss = document.createElement('button');
     dismiss.className = 'text-zinc-600 hover:text-zinc-400 ml-2 flex-shrink-0';
-    dismiss.innerHTML = '&times;';
+     
+dismiss.innerHTML = '&times;';
     dismiss.title = t('dismiss');
     dismiss.onclick = () => {
         _dismissedMismatchKey = mismatchKey;
@@ -895,7 +898,8 @@ _groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border bor
     const menu = _groupMenuElement;
 
     // Build menu items
-    menu.innerHTML = '';
+     
+menu.innerHTML = '';
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -987,6 +991,7 @@ btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[18px] te
  * @param {string} loadingText
  */
 function renderProxiesLoading(container, loadingText) {
+ 
     container.innerHTML = '';
     const loading = document.createElement('div');
     loading.className = 'col-span-full text-center py-10 text-zinc-500 flex flex-col items-center gap-4';
@@ -1179,6 +1184,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         latVal.id = `latency-${CSS.escape(name)}`;
         if (isPending) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             latVal.innerHTML = latencyLoadingIcon;
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
         } else {
@@ -1214,19 +1220,21 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             abortLatencyTests();
 
             card.classList.add('opacity-50', 'pointer-events-none');
-            const originalLatContent = latVal ? latVal.innerHTML : '';
-            if (latVal) {
-                latVal.innerHTML = SVG_ICONS.loadingSmall;
+const originalLatContent = latVal ? latVal.innerHTML : '';
+if (latVal) {
+// eslint-disable-next-line no-unsanitized/property -- static SVG constant
+latVal.innerHTML = SVG_ICONS.loadingSmall;
             }
 
             try {
                 const success = await switchProxy(mainGroup, name);
                 invalidateProxiesCache();
 
-                card.classList.remove('opacity-50', 'pointer-events-none');
-                if (latVal) {
-                    latVal.innerHTML = originalLatContent;
-                }
+card.classList.remove('opacity-50', 'pointer-events-none');
+if (latVal) {
+// eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
+latVal.innerHTML = originalLatContent;
+}
 
                 if (success) {
                     setActiveNode(card, container);
@@ -1252,10 +1260,11 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     showNotification(t.proxySwitchFailed || 'Failed to switch proxy', 'error');
                 }
             } catch (err) {
-                card.classList.remove('opacity-50', 'pointer-events-none');
-                if (latVal) {
-                    latVal.innerHTML = originalLatContent;
-                }
+card.classList.remove('opacity-50', 'pointer-events-none');
+if (latVal) {
+// eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
+latVal.innerHTML = originalLatContent;
+}
                 showNotification(String(err), 'error');
             }
         };
@@ -1329,8 +1338,9 @@ export async function renderProxies() {
     ]);
 
     if (!data || !data.proxies) {
-        container.innerHTML = '';
-        const err = document.createElement('div');
+ 
+    container.innerHTML = '';
+    const err = document.createElement('div');
         err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20';
         err.textContent = t.failedToConnect;
         container.appendChild(err);
@@ -1341,7 +1351,8 @@ export async function renderProxies() {
         container.innerHTML = '';
         const prompt = document.createElement('div');
         prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-lg border border-white/5 flex flex-col items-center gap-4';
-        prompt.innerHTML = `
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+    prompt.innerHTML = `
             ${SVG_ICONS.externalLink}
             <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>
         `;
@@ -1358,10 +1369,11 @@ export async function renderProxies() {
         preferredGroupName,
     });
     if (!proxyGroupsResult) {
-        container.innerHTML = '';
-        const empty = document.createElement('div');
-        empty.className = 'col-span-full text-center py-10 text-zinc-500';
-        empty.textContent = t.noGroupsFound;
+ 
+    container.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'col-span-full text-center py-10 text-zinc-500';
+    empty.textContent = t.noGroupsFound;
         container.appendChild(empty);
         return;
     }
@@ -1382,10 +1394,11 @@ export async function renderProxies() {
     // If no writable group was found, show a clean empty state instead of
     // rendering actionable buttons that would fail on PUT /proxies/{group}
     if (!proxyGroupsResult.uiGroupName) {
-        container.innerHTML = '';
-        const empty = document.createElement('div');
-        empty.className = 'col-span-full text-center py-10 text-zinc-500';
-        empty.textContent = t.noGroupsFound || 'No switchable proxy groups found';
+ 
+    container.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'col-span-full text-center py-10 text-zinc-500';
+    empty.textContent = t.noGroupsFound || 'No switchable proxy groups found';
         container.appendChild(empty);
         return;
     }
@@ -1443,8 +1456,9 @@ export async function renderProxies() {
     }
 
     const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName);
-    container.innerHTML = '';
-    container.appendChild(fragment);
+ 
+container.innerHTML = '';
+container.appendChild(fragment);
 
     // Sync _activeCard with the actual current node
     const currentWrapper = container.querySelector('[data-selected="1"]');
