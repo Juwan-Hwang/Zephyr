@@ -7,6 +7,7 @@ use tauri::{Manager as _, State};
 
 use clash_prism_extension::ApplyOptions;
 
+use crate::core_manager::core::fetch_util::fetch_url_content;
 use crate::core_manager::write_file_secure;
 use crate::prism::overrides::overrides_model::{
     LogEntry, OverrideExt, OverrideItem, OverrideLog, OverrideType,
@@ -583,82 +584,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
 /// Download remote content with optional proxy and automatic direct fallback.
 ///
-/// If `proxy_port` is set, tries proxied download first. On failure (proxy down,
-/// timeout, connection refused), retries once without proxy. This ensures remote
-/// overrides can be refreshed even when the Mihomo core is not running.
+/// Uses the unified `fetch_url_content` function from `fetch_util` for consistent
+/// security measures (SSRF protection, DNS pinning, redirect validation).
 async fn download_remote_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
-    const MAX_REMOTE_SIZE: usize = 10 * 1024 * 1024; // 10 MB limit
-
-    // Build proxied client if port is configured
-    let proxied_client: Option<reqwest::Client> = if let Some(port) = proxy_port.filter(|&p| p > 0)
-    {
-        let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}"))
-            .map_err(|e| format!("Failed to create proxy: {e}"))?;
-        Some(
-            reqwest::Client::builder()
-                .proxy(proxy)
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .map_err(|e| format!("HTTP client error: {e}"))?,
-        )
-    } else {
-        None
-    };
-
-    // Try proxied first, then fall back to direct
-    if let Some(client) = &proxied_client {
-        match fetch_body(client, url, MAX_REMOTE_SIZE).await {
-            Ok(content) => {
-                check_input_size(&content, "Remote override content")?;
-                return Ok(content);
-            }
-            Err(proxy_err) => {
-                emit_warn!(
-                    Override,
-                    OVERRIDE_APPLY_FAILED,
-                    "Proxy download failed ({proxy_err}), retrying direct..."
-                );
-            }
-        }
-    }
-
-    // Direct download (fallback or default)
-    let direct_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
-    let content = fetch_body(&direct_client, url, MAX_REMOTE_SIZE).await?;
+    let content = fetch_url_content(url, proxy_port).await?;
     check_input_size(&content, "Remote override content")?;
     Ok(content)
-}
-
-/// Stream the response body with a hard byte limit.
-async fn fetch_body(
-    client: &reqwest::Client,
-    url: &str,
-    max_size: usize,
-) -> Result<String, String> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("Download returned {}", response.status()));
-    }
-
-    use futures_util::StreamExt as _;
-    let mut stream = response.bytes_stream();
-    let mut buf = Vec::with_capacity(4096);
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Failed to read response: {e}"))?;
-        if buf.len() + chunk.len() > max_size {
-            return Err(format!("Remote override content exceeds {max_size} bytes"));
-        }
-        buf.extend_from_slice(&chunk);
-    }
-
-    String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8 in remote override: {e}"))
 }
 
 // ═══════════════════════════════════════════════════════════════════════

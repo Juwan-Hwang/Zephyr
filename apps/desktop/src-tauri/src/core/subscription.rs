@@ -4,6 +4,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager as _, State};
 
 use super::config_sanitizer::remove_dangerous_keys;
+use super::fetch_util::fetch_url_content;
 
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
@@ -169,13 +170,6 @@ fn validate_subscription_name(name: &str) -> Result<String, String> {
         return Err("Subscription name cannot be empty".to_owned());
     }
     super::config_sanitizer::sanitize_base_filename(name)
-}
-
-pub(crate) fn build_http_client(
-    user_agent: Option<&str>,
-    resolve_pin: Option<(String, std::net::SocketAddr)>,
-) -> Result<reqwest::Client, String> {
-    build_http_client_with_proxy(user_agent, resolve_pin, None)
 }
 
 fn build_http_client_with_proxy(
@@ -846,27 +840,10 @@ pub struct BatchUpdateItem {
 
 #[tauri::command]
 pub async fn fetch_text(url: String) -> Result<String, String> {
-    let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
-    let resolve_pin = if user_entered_private {
-        None
-    } else {
-        resolved_addr.map(|addr| (host, addr))
-    };
-    let client = build_http_client(None, resolve_pin)?;
-
-    let resp = client.get(&url).send().await.map_err(|e| {
+    fetch_url_content(&url, None).await.map_err(|e| {
         println!("Fetch failed: {e}");
         "Network error occurred during fetch".to_owned()
-    })?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        println!("Fetch failed with status: {status}");
-        return Err("Fetch failed with error status".to_owned());
-    }
-
-    let bytes = read_response_body(resp).await?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    })
 }
 
 #[cfg(test)]
