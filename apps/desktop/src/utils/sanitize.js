@@ -269,3 +269,57 @@ export function sanitizeHtml(input, options = {}) {
 
     return doc.body.innerHTML;
 }
+
+// ---------------------------------------------------------------------------
+// Safe HTML Template Literal
+// ---------------------------------------------------------------------------
+
+/**
+ * Safe HTML template literal tag.
+ * Automatically escapes all ${} interpolations to prevent XSS.
+ * Uses escapeAttr to ensure safety in both text and attribute contexts.
+ *
+ * Usage:
+ *   import { html } from './utils/sanitize.js';
+ *   element.innerHTML = html`<div>${userInput}</div>`;  // userInput is auto-escaped
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values
+ * @returns {string} HTML-safe string with all values escaped
+ */
+export function html(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        const value = values[i];
+        if (value !== undefined && value !== null) {
+            // Use escapeAttr for safety in both text and attribute contexts
+            result.push(escapeAttr(String(value)));
+        }
+        result.push(strings[i + 1]);
+    }
+    return result.join('');
+}
+
+/**
+ * Safe HTML template literal tag that also sanitizes the result.
+ * Use this when the template may contain HTML tags that need to be preserved.
+ * Note: Variables are NOT escaped before sanitization, allowing safe HTML tags
+ * in variables to be preserved. Only use with trusted input.
+ *
+ * Usage:
+ *   import { safeHtml } from './utils/sanitize.js';
+ *   element.innerHTML = safeHtml`<div>${trustedHtml}</div>`;
+ *
+ * @param {TemplateStringsArray} strings - Template strings
+ * @param {...any} values - Interpolated values (may contain safe HTML)
+ * @returns {string} Sanitized HTML string
+ */
+export function safeHtml(strings, ...values) {
+    const result = [strings[0]];
+    for (let i = 0; i < values.length; i++) {
+        const value = values[i];
+        result.push((value === undefined || value === null) ? '' : String(value));
+        result.push(strings[i + 1]);
+    }
+    return sanitizeHtml(result.join(''));
+}
