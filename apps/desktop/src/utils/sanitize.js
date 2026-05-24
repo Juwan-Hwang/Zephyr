@@ -52,9 +52,13 @@ const DEFAULT_ALLOWED_TAGS = new Set([
     'strong', 'em', 'b', 'i', 'u', 'br', 'span', 'p', 'div',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'a', 'img', 'code', 'pre',
-    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del',
+    'table', 'tr', 'td', 'th', 'hr', 'blockquote', 'del', 'ins',
     // Form elements (needed for modal custom content)
     'input', 'label', 'button', 'textarea', 'select', 'option',
+    // SVG elements (used extensively for icons)
+    'svg', 'path', 'circle', 'line', 'polyline', 'polygon',
+    'rect', 'ellipse', 'g', 'use', 'defs', 'clippath',
+    'text', 'tspan', 'stop', 'lineargradient', 'radialgradient',
 ]);
 
 /** Default per-tag attribute whitelist */
@@ -87,6 +91,24 @@ const DEFAULT_ALLOWED_ATTRS = {
     textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols']),
     select: new Set(['id', 'name', 'class', 'disabled', 'multiple']),
     option: new Set(['value', 'selected', 'disabled']),
+    // SVG attributes
+    svg:    new Set(['class', 'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'xmlns', 'style']),
+    path:   new Set(['d', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin']),
+    circle: new Set(['cx', 'cy', 'r', 'fill', 'stroke', 'stroke-width']),
+    line:   new Set(['x1', 'y1', 'x2', 'y2', 'stroke', 'stroke-width', 'stroke-linecap']),
+    polyline: new Set(['points', 'fill', 'stroke', 'stroke-width', 'stroke-linejoin']),
+    polygon: new Set(['points', 'fill', 'stroke', 'stroke-width', 'stroke-linejoin']),
+    rect:   new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'fill', 'stroke', 'stroke-width']),
+    ellipse: new Set(['cx', 'cy', 'rx', 'ry', 'fill', 'stroke', 'stroke-width']),
+    g:      new Set(['class', 'id', 'fill', 'stroke', 'stroke-width', 'transform']),
+    use:    new Set(['href', 'xlink:href', 'width', 'height']),
+    defs:   new Set(['id']),
+    clippath: new Set(['id']),
+    text:   new Set(['x', 'y', 'fill', 'font-size', 'class']),
+    tspan:  new Set(['x', 'y', 'fill', 'font-size', 'class']),
+    stop:   new Set(['offset', 'stop-color', 'stop-opacity']),
+    lineargradient: new Set(['id', 'x1', 'y1', 'x2', 'y2']),
+    radialgradient: new Set(['id', 'cx', 'cy', 'r']),
 };
 
 /** Regex matching any on* event handler attribute */
@@ -98,15 +120,15 @@ const JS_URI_RE = /^\s*javascript\s*:/i;
 /** Regex matching data: URIs */
 const DATA_URI_RE = /^\s*data\s*:/i;
 
-/** NBSP entity pattern */
-const NBSP_RE = /&nbsp;|&#160;|&#xA0;/gi;
+/** NBSP entity pattern (includes \u00A0 for browser-decoded entities) */
+const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
 
 /**
  * Tags whose content should always be fully discarded (not promoted)
  * when the tag itself is removed. These can contain executable or
  * dangerous content that must not leak into the document as text.
  */
-const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet']);
+const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
  * Check whether a URL is safe (not javascript: or disallowed data:).

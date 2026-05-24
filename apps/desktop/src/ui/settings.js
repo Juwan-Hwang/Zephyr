@@ -699,7 +699,8 @@ export async function initSettings() {
 
                 // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
                 const proxyContainer = document.getElementById('proxies-list');
-                if (proxyContainer) proxyContainer.innerHTML = '';
+                 
+if (proxyContainer) proxyContainer.innerHTML = '';
                 Bus.emit(Events.CONFIG_UPDATED);
 
                 if (errors.length === 0) {
@@ -1124,7 +1125,8 @@ export async function initSettings() {
         );
         // Clear the container to force full re-render (in-place update won't update CSS classes)
         const container = document.getElementById('proxies-list');
-        if (container) container.innerHTML = '';
+         
+if (container) container.innerHTML = '';
         Bus.emit(Events.CONFIG_UPDATED);
     });
 
@@ -1399,6 +1401,7 @@ export async function initSettings() {
             const modal = document.createElement('div');
             modal.id = 'smart-config-modal';
             modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">

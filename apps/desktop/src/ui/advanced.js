@@ -251,10 +251,12 @@ export async function renderAdvancedSettings() {
             if (card) fragment.appendChild(card);
         }
 
+
         container.innerHTML = '';
         container.appendChild(fragment);
     } catch (err) {
         advancedLogger.error('Advanced settings render error', err);
+ 
         container.innerHTML = '';
         const errDiv = document.createElement('div');
         errDiv.className = 'p-8 text-center text-rose-400 text-xs font-bold';
@@ -511,7 +513,8 @@ function renderConfigItem(key, value, fullKey) {
         const setBtn = document.createElement('button');
         setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
         setBtn.title = "Set value";
-        setBtn.innerHTML = SVG_ICONS.plus;
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+setBtn.innerHTML = SVG_ICONS.plus;
         setBtn.onclick = (e) => {
             e.stopPropagation();
             const input = document.createElement('input');
@@ -531,13 +534,15 @@ function renderConfigItem(key, value, fullKey) {
                     }
                     handleConfigUpdate(fullKey, parsed);
                 } else if (ev.key === 'Escape') {
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(badge);
+ 
+wrapper.innerHTML = '';
+wrapper.appendChild(badge);
                     wrapper.appendChild(setBtn);
                 }
             };
-            wrapper.innerHTML = '';
-            wrapper.appendChild(input);
+ 
+wrapper.innerHTML = '';
+wrapper.appendChild(input);
             input.focus();
         };
         wrapper.appendChild(setBtn);
