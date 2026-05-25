@@ -40,7 +40,7 @@
 - **Config Sanitizer** — Recursive removal of dangerous YAML keys (`script`, `script-path`, 6 CFW legacy keys), provider path traversal prevention, Billion Laughs attack defense (MAX_YAML_DEPTH = 100)
 - **REALITY short-id Protection** — Quote hex values before YAML parsing to prevent scientific notation misinterpretation
 - **Input Validation** — Length limits, format checks, UTF-8 safe truncation across all IPC commands
-- **XSS Prevention** — `escapeHtml` (NFKC normalization + browser round-trip) and `escapeAttr` (additional `"`/`'` escaping) for all user input rendering
+- **XSS Prevention** — `escapeHtml` (NFKC + browser round-trip), `escapeAttr`, `sanitizeHtml` (whitelist + `<template>` parsing + `STRIP_CONTENT_TAGS`), `html`/`safeHtml` tagged template literals, `eslint-plugin-no-unsanitized` enforcement
 - **Rate Limiting** — Sliding-window rate limiter for sensitive commands (`script_execute`, `rule_import_url`, notifications, shortcuts)
 - **File Security** — Unix 0600 permissions / Windows ACL, UUID temp files, ZIP/TAR path traversal protection, symlink rejection, compression bomb detection
 - **Update Integrity** — SHA256 verification, trusted host allowlist (github.com only), asset name validation, atomic update with auto-rollback
