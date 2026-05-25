@@ -172,12 +172,14 @@ async function showEditPanel(configInfo) {
 
     document.body.appendChild(modal);
 
+    // Cache panel reference for animations
+    const panel = modal.querySelector('.glass-card');
+
     // Trigger enter animation (double rAF ensures browser paints initial state first)
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             if (!modal.isConnected || isClosing) return;
             modal.classList.remove('opacity-0', 'pointer-events-none');
-            const panel = modal.querySelector('.glass-card');
             if (panel) {
                 panel.style.opacity = '1';
                 panel.style.transform = 'scale(1)';
@@ -204,7 +206,6 @@ async function showEditPanel(configInfo) {
         isClosing = true;
         autoUpdateDropdown?.dispose();
         activeEditDropdown = null;
-        const panel = modal.querySelector('.glass-card');
         if (panel) {
             panel.style.opacity = '0';
             panel.style.transform = 'scale(0.95)';
@@ -219,6 +220,7 @@ async function showEditPanel(configInfo) {
 
     // Save handler
     document.getElementById('edit-modal-save')?.addEventListener('click', async () => {
+        if (isClosing) return;
         const newName = document.getElementById('edit-name')?.value.trim() || '';
         const newUrl = document.getElementById('edit-url')?.value.trim() || '';
         const newInterval = parseInt(document.getElementById('edit-auto-update')?.value || '0', 10);
