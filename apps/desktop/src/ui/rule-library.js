@@ -943,15 +943,20 @@ async function handleMoveToGroup(filename) {
         '',
         true,
         `<div class="space-y-1">${optionsHtml}</div>`,
+        // onReady: bind click handlers — clicking a group button immediately closes and returns it
+        (contentArea, close) => {
+            contentArea.addEventListener('click', (e) => {
+                if (!(e.target instanceof Element)) return;
+                const btn = e.target.closest('[data-group-index]');
+                if (!(btn instanceof HTMLElement)) return;
+                close(btn);
+            });
+        },
     );
 
-    if (!result) return;
+    if (!result || !(result instanceof HTMLElement)) return;
 
-    // Find which button was clicked
-    const clickedBtn = result.querySelector?.('[data-group-index]');
-    if (!clickedBtn) return;
-
-    const idx = parseInt(/** @type {string} */ (clickedBtn.dataset.groupIndex), 10);
+    const idx = parseInt(/** @type {string} */ (result.dataset.groupIndex), 10);
     const targetGroup = groupNames[idx];
     if (!targetGroup) return;
 
