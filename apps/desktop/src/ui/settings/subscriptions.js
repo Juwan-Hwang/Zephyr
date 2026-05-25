@@ -121,6 +121,7 @@ async function showEditPanel(configInfo) {
 
     // Create modal overlay (matching smart proxy config style)
     let isClosing = false;
+    let isSaving = false;
     const modal = document.createElement('div');
     modal.id = 'edit-subscription-modal';
     modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md opacity-0 pointer-events-none transition-opacity';
@@ -172,12 +173,14 @@ async function showEditPanel(configInfo) {
 
     document.body.appendChild(modal);
 
+    // Cache panel reference for animations
+    const panel = modal.querySelector('.glass-card');
+
     // Trigger enter animation (double rAF ensures browser paints initial state first)
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             if (!modal.isConnected || isClosing) return;
             modal.classList.remove('opacity-0', 'pointer-events-none');
-            const panel = modal.querySelector('.glass-card');
             if (panel) {
                 panel.style.opacity = '1';
                 panel.style.transform = 'scale(1)';
@@ -204,7 +207,6 @@ async function showEditPanel(configInfo) {
         isClosing = true;
         autoUpdateDropdown?.dispose();
         activeEditDropdown = null;
-        const panel = modal.querySelector('.glass-card');
         if (panel) {
             panel.style.opacity = '0';
             panel.style.transform = 'scale(0.95)';
@@ -219,6 +221,7 @@ async function showEditPanel(configInfo) {
 
     // Save handler
     document.getElementById('edit-modal-save')?.addEventListener('click', async () => {
+        if (isClosing || isSaving) return;
         const newName = document.getElementById('edit-name')?.value.trim() || '';
         const newUrl = document.getElementById('edit-url')?.value.trim() || '';
         const newInterval = parseInt(document.getElementById('edit-auto-update')?.value || '0', 10);
@@ -227,6 +230,8 @@ async function showEditPanel(configInfo) {
             showNotification(t.subscriptionNameRequired || 'Subscription name is required', 'error');
             return;
         }
+
+        isSaving = true;
 
         try {
             // Update URL and interval on the current name first.
@@ -257,6 +262,7 @@ async function showEditPanel(configInfo) {
             // Force fresh render to get updated metadata
             moduleRenderConfigs?.(true);
         } catch (err) {
+            isSaving = false;
             showNotification(String(err), 'error');
         }
     });
