@@ -450,6 +450,7 @@ body {
   transform-origin: top left;
   width: calc(100% / var(--ui-scale));
   height: calc(100% / var(--ui-scale));
+  clip-path: inset(0 round 24px);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
