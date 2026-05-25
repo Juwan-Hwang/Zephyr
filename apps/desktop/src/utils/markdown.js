@@ -32,14 +32,22 @@ export function markdownToHtml(md) {
 
     let html = processed;
 
+    // Use placeholders for code blocks and inline code so that escapeHtml
+    // in subsequent steps doesn't double-escape the generated HTML tags.
+    const placeholders = [];
+
     // 1. Code blocks (```...```) — must be first to prevent inner content from being parsed
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
-        return `<pre class="bg-black/30 rounded-lg p-3 my-3 text-xs overflow-x-auto leading-relaxed"><code>${escapeHtml(code.trimEnd())}</code></pre>`;
+        const idx = placeholders.length;
+        placeholders.push(`<pre class="bg-black/30 rounded-lg p-3 my-3 text-xs overflow-x-auto leading-relaxed"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+        return `\x00CODEBLOCK_${idx}\x00`;
     });
 
     // 2. Inline code — before bold/italic to avoid matching inside code
     html = html.replace(/`([^`]+)`/g, (_, code) => {
-        return `<code class="bg-black/20 px-2 py-0.5 rounded text-xs align-middle">${escapeHtml(code)}</code>`;
+        const idx = placeholders.length;
+        placeholders.push(`<code class="bg-black/20 px-2 py-0.5 rounded text-xs align-middle">${escapeHtml(code)}</code>`);
+        return `\x00INLINECODE_${idx}\x00`;
     });
 
     // 3. Headings (h1 > h2 > h3 to avoid h3 regex matching h2/h1)
@@ -79,7 +87,6 @@ export function markdownToHtml(md) {
     });
 
     // 11. Unordered lists
-    // NOTE: Do NOT escapeHtml the list item content — it already contains HTML from steps 1-10
     html = html.replace(/^(\s*)[-*] (.+)$/gm, (_, indent, t) => `${indent}<li class="ml-4 list-disc text-xs text-zinc-300 leading-relaxed py-0.5">${t}</li>`);
     html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="my-3 space-y-2">$1</ul>');
 
@@ -87,8 +94,13 @@ export function markdownToHtml(md) {
     html = html.replace(/^\d+\. (.+)$/gm, (_, t) => `<li class="ml-4 list-decimal text-xs text-zinc-300 leading-relaxed py-0.5">${t}</li>`);
 
     // 13. Paragraphs: wrap remaining loose lines that aren't already HTML tags
-    // NOTE: Do NOT escapeHtml — content may already contain HTML from earlier steps
     html = html.replace(/^(?!<[a-z/])(.*\S.*)$/gm, (_, t) => `<p class="text-xs text-zinc-300 leading-relaxed my-2">${t}</p>`);
+
+    // --- Restore placeholders (before sanitizeHtml) ---
+    for (let i = 0; i < placeholders.length; i++) {
+        html = html.replace(`\x00CODEBLOCK_${i}\x00`, () => placeholders[i]);
+        html = html.replace(`\x00INLINECODE_${i}\x00`, () => placeholders[i]);
+    }
 
     // --- Post-processing ---
     html = html.replace(/\n{3,}/g, '\n\n');
