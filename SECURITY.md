@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in Zephyr, please report it responsibly by opening a GitHub Issue with the `security` label, or by contacting the maintainer directly:
 
-- Email: [你的邮箱]
+- Email: juwan.hwang@proton.me
 - GitHub: @Juwan-Hwang
 
 Please do not publicly disclose the vulnerability until it has been fixed and a release has been made available.
