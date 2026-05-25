@@ -946,8 +946,7 @@ async function handleMoveToGroup(filename) {
         // onReady: bind click handlers — clicking a group button immediately closes and returns it
         (contentArea, close) => {
             contentArea.querySelector('.space-y-1')?.addEventListener('click', (e) => {
-                if (!(e.target instanceof Element)) return;
-                const btn = e.target.closest('[data-group-index]');
+                const btn = (e.target instanceof Element ? e.target : e.target.parentElement)?.closest('[data-group-index]');
                 if (!(btn instanceof HTMLElement)) return;
                 close(btn);
             });
