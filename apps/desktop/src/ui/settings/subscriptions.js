@@ -119,11 +119,11 @@ async function showEditPanel(configInfo) {
     // Create modal overlay (matching smart proxy config style)
     const modal = document.createElement('div');
     modal.id = 'edit-subscription-modal';
-    modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+    modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md opacity-0 transition-opacity duration-300';
     // Escape all translation strings for XSS safety
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     modal.innerHTML = `
-        <div class="glass-card w-[440px] p-6 space-y-5">
+        <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
                 <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
                 <button id="edit-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
@@ -167,6 +167,19 @@ async function showEditPanel(configInfo) {
 
     document.body.appendChild(modal);
 
+    // Trigger enter animation (double rAF ensures browser paints initial state first)
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (!modal.isConnected) return;
+            modal.classList.remove('opacity-0');
+            const panel = modal.querySelector('.glass-card');
+            if (panel) {
+                panel.style.opacity = '1';
+                panel.style.transform = 'scale(1)';
+            }
+        });
+    });
+
     // Set input value via DOM property (safe from XSS — no innerHTML interpolation)
     const editNameInput = /** @type {HTMLInputElement} */ (modal.querySelector('#edit-name'));
     if (editNameInput) editNameInput.value = currentStem;
@@ -181,32 +194,17 @@ async function showEditPanel(configInfo) {
     });
     activeEditDropdown = autoUpdateDropdown;
 
-    // Animate in (matching smart proxy config)
-    requestAnimationFrame(() => {
-        const panel = modal.querySelector('.glass-card');
-        if (panel) {
-            panel.style.transform = 'scale(0.96)';
-            panel.style.opacity = '0';
-            requestAnimationFrame(() => {
-                panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
-                panel.style.transform = 'scale(1)';
-                panel.style.opacity = '1';
-            });
-        }
-    });
-
     const closeModal = () => {
         autoUpdateDropdown?.dispose();
         activeEditDropdown = null;
         const panel = modal.querySelector('.glass-card');
         if (panel) {
-            panel.style.transition = 'all 0.15s ease-in';
-            panel.style.transform = 'scale(0.96)';
+            panel.style.transition = 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
             panel.style.opacity = '0';
-            setTimeout(() => modal.remove(), 150);
-        } else {
-            modal.remove();
+            panel.style.transform = 'scale(0.95)';
         }
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => modal.remove(), 300);
     };
 
     // Close handlers
