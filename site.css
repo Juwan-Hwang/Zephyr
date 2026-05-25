@@ -1385,7 +1385,7 @@ a:hover {
   display: none;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-xl);
+  border-radius: 24px;
   overflow: hidden;
   background: var(--depth-0-void);
 }
