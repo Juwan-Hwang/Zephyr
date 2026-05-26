@@ -357,7 +357,9 @@ function bindEvents() {
         panelCore?.classList.add('flex', 'flex-col', 'gap-4');
         panelExt?.classList.add('hidden');
         panelExt?.classList.remove('flex', 'flex-col', 'gap-4');
+        invalidateFilter();
         updateLineCount();
+        render();
     };
 
     const switchToExtTab = () => {
@@ -491,9 +493,12 @@ async function fetchLogs() {
             _vs?.clearHeightCache();
         }
 
-        invalidateFilter();
-        updateLineCount();
-        render();
+        // Skip rendering when extension tab is active to avoid virtual scroll clearing DOM
+        if (!_extLogTabActive) {
+            invalidateFilter();
+            updateLineCount();
+            render();
+        }
     } catch {
         // Core not started yet or log file unavailable — ignore silently
     }
@@ -788,6 +793,9 @@ function renderExtLogEntry(entry) {
     const listEl = _container?.querySelector('#log-ext-list');
     if (!listEl) return;
 
+    // Update line count first (before filtering) to keep total count consistent
+    if (_extLogTabActive) updateExtLineCount();
+
     // Apply level filter (inclusive: selected level and above, same as core logs)
     if (_extLevelFilter !== 'all') {
         const minPriority = LEVEL_PRIORITY[_extLevelFilter];
@@ -908,6 +916,9 @@ function rebuildExtLogDOM() {
         frag.appendChild(createExtLogRow(entry));
     }
     listEl.appendChild(frag);
+
+    // Update line count if on Extension tab
+    if (_extLogTabActive) updateExtLineCount();
 
     // Scroll to bottom
     const extContent = _container?.querySelector('#log-ext-content');
