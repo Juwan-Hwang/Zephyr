@@ -359,7 +359,6 @@ function bindEvents() {
         panelExt?.classList.remove('flex', 'flex-col', 'gap-4');
         invalidateFilter();
         updateLineCount();
-        render();
     };
 
     const switchToExtTab = () => {
