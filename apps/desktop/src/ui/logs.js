@@ -492,7 +492,7 @@ async function fetchLogs() {
         }
 
         invalidateFilter();
-        updateLineCount();
+        if (!_extLogTabActive) updateLineCount();
         render();
     } catch {
         // Core not started yet or log file unavailable — ignore silently
@@ -788,6 +788,9 @@ function renderExtLogEntry(entry) {
     const listEl = _container?.querySelector('#log-ext-list');
     if (!listEl) return;
 
+    // Update line count first (before filtering) to keep total count consistent
+    if (_extLogTabActive) updateExtLineCount();
+
     // Apply level filter (inclusive: selected level and above, same as core logs)
     if (_extLevelFilter !== 'all') {
         const minPriority = LEVEL_PRIORITY[_extLevelFilter];
@@ -908,6 +911,9 @@ function rebuildExtLogDOM() {
         frag.appendChild(createExtLogRow(entry));
     }
     listEl.appendChild(frag);
+
+    // Update line count if on Extension tab
+    if (_extLogTabActive) updateExtLineCount();
 
     // Scroll to bottom
     const extContent = _container?.querySelector('#log-ext-content');
