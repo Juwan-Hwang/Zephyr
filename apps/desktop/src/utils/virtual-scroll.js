@@ -276,7 +276,6 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
         // If browser auto-adjusted scrollTop after spacer change, restore it.
         // Only restore when user is not actively scrolling (low velocity).
         if (Math.abs(container.scrollTop - scrollTopBeforeSpacer) > 0.5 && scrollEventVelocity < 10) {
-            console.log(`[vs] render: browser clamped scrollTop ${scrollTopBeforeSpacer} → ${container.scrollTop}, restoring`);
             suppressScroll = true;
             container.scrollTop = scrollTopBeforeSpacer;
             suppressScroll = false;
@@ -467,12 +466,9 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
         skipAutoScroll = true;
         anchorCorrectionPending = false;
         suppressScroll = true; // prevent onScroll from setting _autoScroll=false
-        try {
-            render();
-        } finally {
-            suppressScroll = false;
-            skipAutoScroll = false;
-        }
+        render();
+        suppressScroll = false;
+        skipAutoScroll = false;
 
         // Restore scroll position if user had scrolled
         if (savedScrollTop > 0 && container.scrollTop !== savedScrollTop) {
