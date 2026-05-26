@@ -74,6 +74,16 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
     /** Guard: suppress scroll events triggered by our own anchor correction. */
     let suppressScroll = false;
 
+    /** When true, skip onAutoScroll callback after render (used by invalidate). */
+    let skipAutoScroll = false;
+
+    /**
+     * When true, the next render() should apply anchor correction.
+     * Only set by scheduleRender() (content-change path).
+     * Scroll-driven renders and invalidate must NOT anchor-correct.
+     */
+    let anchorCorrectionPending = false;
+
     // ── Height estimation (frozen during render) ───────────────────────────
 
     /** Running average of measured heights */
@@ -256,17 +266,33 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
         const updatedTotal = offsetsArr[n];
 
         // Step 4: Set spacers
+        // Save scrollTop before setting spacers — browser may silently clamp
+        // scrollTop if it exceeds the new scrollHeight after spacer changes.
+        const scrollTopBeforeSpacer = container.scrollTop;
         const newSpacerTopH = newStart > 0 ? offsetsArr[newStart] : 0;
         spacerTop.style.height = `${newSpacerTopH}px`;
         spacerBottom.style.height = `${Math.max(0, updatedTotal - offsetsArr[newEnd])}px`;
 
-        // Step 5: Anchor correction.
-        const spacerDelta = newSpacerTopH - oldSpacerTopH;
-        const targetScrollTop = savedScrollTop + spacerDelta;
-        if (Math.abs(targetScrollTop - container.scrollTop) > 0.5) {
+        // If browser auto-adjusted scrollTop after spacer change, restore it.
+        // Only restore when user is not actively scrolling (low velocity).
+        if (Math.abs(container.scrollTop - scrollTopBeforeSpacer) > 0.5 && scrollEventVelocity < 10) {
+            console.log(`[vs] render: browser clamped scrollTop ${scrollTopBeforeSpacer} → ${container.scrollTop}, restoring`);
             suppressScroll = true;
-            container.scrollTop = targetScrollTop;
+            container.scrollTop = scrollTopBeforeSpacer;
             suppressScroll = false;
+        }
+
+        // Step 5: Anchor correction — ONLY when explicitly requested via scheduleRender().
+        // Scroll-driven renders and invalidate must NOT anchor-correct.
+        if (anchorCorrectionPending) {
+            anchorCorrectionPending = false;
+            const spacerDelta = newSpacerTopH - oldSpacerTopH;
+            const targetScrollTop = savedScrollTop + spacerDelta;
+            if (Math.abs(targetScrollTop - container.scrollTop) > 0.5) {
+                suppressScroll = true;
+                container.scrollTop = targetScrollTop;
+                suppressScroll = false;
+            }
         }
         lastRenderedScrollTop = container.scrollTop;
 
@@ -328,10 +354,11 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
         prevStart = newStart;
         prevEnd = newEnd;
 
-        if (onAutoScroll) onAutoScroll();
+        if (onAutoScroll && !skipAutoScroll) onAutoScroll();
     }
 
     function scheduleRender() {
+        anchorCorrectionPending = true;
         if (renderRAF !== null) return;
         renderRAF = requestAnimationFrame(() => { renderRAF = null; render(); });
     }
@@ -416,13 +443,45 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
         const n = itemCount();
         for (const key of heightCache.keys()) { if (key >= n) heightCache.delete(key); }
         mountedSet.clear();
+
+        const savedScrollTop = container.scrollTop;
+
         linesContainer.innerHTML = '';
+        spacerTop.style.height = '0';
+        spacerBottom.style.height = '0';
+
         lastRenderedScrollTop = -1;
         prevStart = 0;
         prevEnd = 0;
         scrollEventVelocity = 0;
-        lastScrollEventTop = container.scrollTop;
-        scheduleRender();
+        lastScrollEventTop = 0;
+
+        if (renderRAF !== null) {
+            cancelAnimationFrame(renderRAF);
+            renderRAF = null;
+        }
+
+        // Render synchronously (not via RAF) because invalidate is called rapidly
+        // (every ~1s by fetchLogs). Using RAF causes each invalidate to cancel the
+        // previous one's RAF, so the callback never executes.
+        skipAutoScroll = true;
+        anchorCorrectionPending = false;
+        suppressScroll = true; // prevent onScroll from setting _autoScroll=false
+        try {
+            render();
+        } finally {
+            suppressScroll = false;
+            skipAutoScroll = false;
+        }
+
+        // Restore scroll position if user had scrolled
+        if (savedScrollTop > 0 && container.scrollTop !== savedScrollTop) {
+            container.scrollTop = savedScrollTop;
+            lastRenderedScrollTop = savedScrollTop;
+        }
+
+        // Trigger onAutoScroll after render (for initial load, scrolls to bottom)
+        if (onAutoScroll) onAutoScroll();
     }
 
     function destroy() {
