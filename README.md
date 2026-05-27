@@ -17,7 +17,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-1.92+-orange)](https://www.rust-lang.org/)
 [![Release](https://img.shields.io/github/v/release/Juwan-Hwang/Zephyr)](https://github.com/Juwan-Hwang/Zephyr/releases)
-[![Total Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total)](https://github.com/Juwan-Hwang/Zephyr/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Security](https://img.shields.io/badge/Security-CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy-green)](#安全设计)
 [![Rust Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/rust-tests.json&query=$.message&label=Rust%20Tests&color=green)](https://github.com/Juwan-Hwang/Zephyr/actions)
 [![JS Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/js-tests.json&query=$.message&label=JS%20Tests&color=brightgreen)](https://github.com/Juwan-Hwang/Zephyr/actions)
