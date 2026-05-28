@@ -758,13 +758,50 @@ export function initProxyControls() {
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
 
-function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, proxyMap) {
+/**
+ * Resolve a proxy entry to its leaf node name.
+ * If the entry is a group, recursively follow its `now` selection.
+ * @param {string} name - Proxy or group name
+ * @param {Object} proxyMap - Full proxy map
+ * @param {Set} [visited] - Internal set to detect cycles
+ * @returns {string|null} - Leaf node name or null
+ */
+function resolveLeafNode(name, proxyMap, visited = new Set()) {
+    if (!name || !proxyMap) return null;
+    if (visited.has(name)) return null; // Cycle detected
+    visited.add(name);
+
+    const entry = proxyMap[name];
+    if (!entry) return name;
+
+    // If it's a group with a 'now' selection, recurse if the selection is in proxyMap,
+    // otherwise the selection itself is the leaf/special node (e.g., DIRECT, REJECT)
+    if (entry.now) {
+        if (proxyMap[entry.now]) {
+            return resolveLeafNode(entry.now, proxyMap, visited);
+        }
+        return entry.now;
+    }
+
+    // Leaf node (or group without 'now')
+    return name;
+}
+
+function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, proxyMap) {
     const bar = document.getElementById('group-explanation-bar');
     if (!bar) return;
 
+    // Get the currently selected node in the UI group, resolving nested groups
+    const uiSelectedNode = resolveLeafNode(uiGroupName, proxyMap);
+
+    // Check if node names match (user's main concern)
+    // If observed node matches UI selected node, don't show mismatch even if group names differ
+    const nodeMatch = observedNodeName && uiSelectedNode && observedNodeName === uiSelectedNode;
+
     // Determine what to show: observedGroup mismatch takes priority over effectiveGroup mismatch
-    const showObserved = observedGroupName && observedGroupName !== uiGroupName;
-    const showEffective = !showObserved && effectiveGroupName && uiGroupName !== effectiveGroupName;
+    // But skip if node names match (the actual traffic goes to the same node user selected)
+    const showObserved = observedGroupName && observedGroupName !== uiGroupName && !nodeMatch;
+    const showEffective = !showObserved && effectiveGroupName && uiGroupName !== effectiveGroupName && !nodeMatch;
 
     if (!showObserved && !showEffective) {
         bar.classList.add('hidden');
@@ -1407,7 +1444,8 @@ export async function renderProxies() {
 
     // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
     const observedGroupName = appStore.get('observedGroupName');
-    renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, data?.proxies);
+    const observedNodeName = appStore.get('observedNodeName');
+    renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
 
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
@@ -1539,8 +1577,9 @@ document.addEventListener('visibilitychange', () => {
 Bus.on(Events.CONFIG_UPDATED, () => { resetObservedGroup(); });
 Bus.on(Events.CORE_RESTARTED, () => { resetObservedGroup(); });
 
-// Re-render explanation bar when observedGroupName changes (avoid full renderProxies)
-appStore.subscribe('observedGroupName', async () => {
+// Re-render explanation bar when observedGroupName or observedNodeName changes (avoid full renderProxies)
+// Debounced to batch sequential updates and prevent redundant DOM operations
+const _renderExplanationBarFromStore = debounce(async () => {
     const proxiesPage = document.querySelector('[data-page="proxies"]');
     if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
         try {
@@ -1548,10 +1587,13 @@ appStore.subscribe('observedGroupName', async () => {
             const uiGroupName = appStore.get('uiGroupName');
             const effectiveGroupName = appStore.get('effectiveGroupName');
             const observedGroupName = appStore.get('observedGroupName');
-            renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, data?.proxies);
+            const observedNodeName = appStore.get('observedNodeName');
+            renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
         } catch { /* ignore */ }
     }
-});
+}, 50);
+appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
+appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Smart Auto-Test Scheduler
