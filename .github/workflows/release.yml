@@ -101,13 +101,13 @@ jobs:
           case "$MIHOMO_EXT" in
             zip)
               unzip -q "mihomo.zip"
-              mv mihomo-windows-amd64-compatible.exe apps/desktop/src-tauri/bundled/mihomo.exe
+              mv mihomo-windows-amd64-compatible.exe apps/desktop/src-tauri/bundled/zephyr-mihomo.exe
               rm mihomo.zip
               ;;
             gz)
               gunzip -f "mihomo.gz"
               chmod +x mihomo
-              mv mihomo apps/desktop/src-tauri/bundled/mihomo
+              mv mihomo apps/desktop/src-tauri/bundled/zephyr-mihomo
               ;;
           esac
           
@@ -240,7 +240,7 @@ jobs:
           else
             exit 1
           fi
-          gunzip -f mihomo.gz && chmod +x mihomo && mv mihomo apps/desktop/src-tauri/bundled/mihomo
+          gunzip -f mihomo.gz && chmod +x mihomo && mv mihomo apps/desktop/src-tauri/bundled/zephyr-mihomo
           # Geo data (same as script)
           for file in geoip.dat geosite.dat Country.mmdb; do
             curl -sL -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
