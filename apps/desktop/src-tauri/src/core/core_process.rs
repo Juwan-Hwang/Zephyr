@@ -202,9 +202,6 @@ pub fn kill_mihomo() {
         let _ = std::process::Command::new("killall")
             .arg("-15") // SIGTERM
             .arg(exe_name)
-            .output();
-        let _ = std::process::Command::new("killall")
-            .arg("-15")
             .arg(legacy_name)
             .output();
 
@@ -231,9 +228,6 @@ pub fn kill_mihomo() {
             let _ = std::process::Command::new("killall")
                 .arg("-9")
                 .arg(exe_name)
-                .output();
-            let _ = std::process::Command::new("killall")
-                .arg("-9")
                 .arg(legacy_name)
                 .output();
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -244,11 +238,7 @@ pub fn kill_mihomo() {
         use std::os::windows::process::CommandExt as _;
         // Kill both new and legacy binary names for backward compatibility
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", exe_name])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", legacy_name])
+            .args(["/F", "/IM", exe_name, "/IM", legacy_name])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
     }

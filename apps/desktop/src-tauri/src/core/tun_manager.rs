@@ -229,7 +229,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
     let script = format!(
-        r#"do shell script "killall -9 zephyr-mihomo 2>/dev/null; killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
@@ -505,7 +505,7 @@ const fn has_root_mihomo() -> bool {
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     // Reduce MSL to 1s so TIME_WAIT expires quickly (default 15s = 30s TIME_WAIT)
     // Kill both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
-    let script = r#"do shell script "killall -9 zephyr-mihomo 2>/dev/null; killall -9 mihomo 2>/dev/null; sleep 0.3; sysctl -w net.inet.tcp.msl=1000; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
+    let script = r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; sysctl -w net.inet.tcp.msl=1000; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
