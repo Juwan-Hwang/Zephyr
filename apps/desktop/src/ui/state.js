@@ -362,6 +362,7 @@ export const appStore = createStore('zephyr.app', {
     uiPrimaryGroupName: null,
     effectiveGroupName: null,
     observedGroupName: null,
+    observedNodeName: null,
 
     // System state
     isSysProxyEnabled: false,
@@ -373,7 +374,7 @@ export const appStore = createStore('zephyr.app', {
     currentConfigName: null,
     currentCoreVersion: '',
 }, {
-    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName'],
+    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName'],
 });
 
 /** Tray state (replaces the old sealed TrayState) */
