@@ -37,7 +37,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zephyr-unsigned
-          path: apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
 
       - name: Sign with SignPath
         uses: signpath/github-action-submit-signing-request@v2
@@ -54,4 +56,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zephyr-signed
-          path: ./signed/*.msi
+          path: ./signed/*
