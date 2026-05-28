@@ -4,7 +4,9 @@ use tauri::AppHandle;
 #[cfg(not(target_os = "macos"))]
 use super::core_process::resolve_app_paths;
 #[cfg(target_os = "macos")]
-use super::core_process::{ensure_executable, generate_secret, resolve_app_paths};
+use super::core_process::{
+    ensure_executable, generate_secret, get_core_exe_path, resolve_app_paths,
+};
 use super::secure_io::write_file_secure;
 use super::{TUN_MODE_ACTIVE, TUN_TOGGLING};
 
@@ -143,7 +145,7 @@ fn extract_tun_enabled_from_yaml(content: &str) -> bool {
 #[cfg(target_os = "macos")]
 pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String, String> {
     let paths = resolve_app_paths(app)?;
-    let core_path = paths.core_dir.join("mihomo");
+    let core_path = get_core_exe_path(app)?;
     ensure_executable(&core_path)?;
 
     let config_dir_str = paths.core_dir.to_string_lossy();
@@ -218,8 +220,16 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let escaped_config_dir = config_dir_str.replace("'", "'\\''");
     let escaped_log_path = log_path.replace("'", "'\\''");
 
+    // Get binary name from resolved core_path to ensure backward compatibility
+    let binary_name = core_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Invalid core binary name".to_string())?;
+    let escaped_binary_name = binary_name.replace("'", "'\\''");
+    // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
+    // where a root-owned legacy process might still be running
     let script = format!(
-        r#"do shell script "killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './mihomo' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 zephyr-mihomo 2>/dev/null; killall -9 mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
@@ -464,6 +474,7 @@ mod tests {
 }
 
 /// Check if there's a root-owned mihomo process running
+/// Checks for both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
 #[cfg(target_os = "macos")]
 fn has_root_mihomo() -> bool {
     if let Ok(output) = std::process::Command::new("ps")
@@ -471,8 +482,11 @@ fn has_root_mihomo() -> bool {
         .output()
     {
         let text = String::from_utf8_lossy(&output.stdout);
-        text.lines()
-            .any(|line| line.trim_start().starts_with("root ") && line.contains("mihomo"))
+        text.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("root ")
+                && (trimmed.contains("zephyr-mihomo") || trimmed.contains("mihomo"))
+        })
     } else {
         false
     }
@@ -490,7 +504,8 @@ const fn has_root_mihomo() -> bool {
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     // Reduce MSL to 1s so TIME_WAIT expires quickly (default 15s = 30s TIME_WAIT)
-    let script = r#"do shell script "killall -9 mihomo 2>/dev/null; sleep 0.3; sysctl -w net.inet.tcp.msl=1000; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
+    // Kill both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
+    let script = r#"do shell script "killall -9 zephyr-mihomo 2>/dev/null; killall -9 mihomo 2>/dev/null; sleep 0.3; sysctl -w net.inet.tcp.msl=1000; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])
         .status()
