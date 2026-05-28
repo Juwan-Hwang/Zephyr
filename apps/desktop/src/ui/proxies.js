@@ -40,6 +40,45 @@ function isInvalidDelay(d) { return d == null || d <= 0 || d >= 999999; }
 
 const latencyLoadingIcon = SVG_ICONS.loading;
 
+/** Maps proxy type (uppercase) to its transport layer protocol. */
+const TRANSPORT_MAP = Object.freeze({
+    // QUIC-based protocols (UDP at transport layer)
+    'TUIC': 'QUIC',
+    'HYSTERIA': 'QUIC',
+    'HYSTERIA2': 'QUIC',
+    'JUICITY': 'QUIC',
+    'MASQUE': 'QUIC',
+    // UDP-based protocols
+    'WIREGUARD': 'UDP',
+    'KCP': 'UDP',
+    'KCPTUN': 'UDP',
+    // TCP-based protocols (including those using TLS on top of TCP)
+    'ANYTLS': 'TCP',
+    'TROJAN': 'TCP',
+    'VLESS': 'TCP',
+    'VMESS': 'TCP',
+    'SHADOWSOCKS': 'TCP',
+    'SHADOWSOCKSR': 'TCP',
+    'SNELL': 'TCP',
+    'HTTP': 'TCP',
+    'SOCKS5': 'TCP',
+    'SOCKS': 'TCP',
+    'SSH': 'TCP',
+    'MIERU': 'TCP',
+    'TRUSTTUNNEL': 'TCP',
+    'SUDOKU': 'TCP',
+    // Special/no transport
+    'DIRECT': '-',
+    'REJECT': '-',
+    'PASS': '-',
+    'COMPATIBLE': '-',
+    'SELECTOR': '-',
+    'URLTEST': '-',
+    'LOADBALANCE': '-',
+    'FALLBACK': '-',
+    'RELAY': '-'
+});
+
 // --- State ---
 
 /** @type {number|null} */
@@ -1197,18 +1236,22 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         top.appendChild(nameContainer);
         top.appendChild(typeSpan);
 
-        // --- Bottom row: UDP indicator + latency ---
+        // --- Bottom row: Transport protocol indicator + latency ---
+        const transport = TRANSPORT_MAP[(proxy.type || '').toUpperCase()] || 'TCP';
+
         const bottom = document.createElement('div');
         bottom.className = 'flex items-end justify-between mt-auto pointer-events-none';
         const left = document.createElement('div');
         left.className = 'flex items-center gap-2';
         const dot = document.createElement('div');
-        dot.className = `w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)] ${proxy.udp ? 'bg-green-500' : 'bg-zinc-600'}`;
-        const udpText = document.createElement('span');
-        udpText.className = 'text-2xs text-zinc-500 font-medium';
-        udpText.textContent = 'UDP';
+        // All indicators use green color as requested
+        const dotColor = 'bg-green-500';
+        dot.className = `w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)] ${dotColor}`;
+        const transportText = document.createElement('span');
+        transportText.className = 'text-2xs text-zinc-500 font-medium';
+        transportText.textContent = transport;
         left.appendChild(dot);
-        left.appendChild(udpText);
+        left.appendChild(transportText);
 
         const right = document.createElement('div');
         right.className = 'flex flex-col items-end';
