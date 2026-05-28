@@ -1,7 +1,7 @@
 name: Test Code Signing
 
 on:
-  workflow_dispatch:  # 手动触发测试
+  workflow_dispatch:
 
 jobs:
   sign:
@@ -15,7 +15,7 @@ jobs:
           node-version: 20
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
