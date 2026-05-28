@@ -1,0 +1,57 @@
+name: Test Code Signing
+
+on:
+  workflow_dispatch:  # 手动触发测试
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: |
+          cd apps/desktop
+          pnpm install
+
+      - name: Build Tauri
+        run: |
+          cd apps/desktop
+          pnpm tauri build
+
+      - name: Upload unsigned artifact
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: zephyr-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Sign with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: '480cc228-d09e-4d18-b654-4917b96a0611'
+          project-slug: 'Zephyr'
+          signing-policy-slug: 'test-signing'
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: './signed'
+
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zephyr-signed
+          path: ./signed/*.msi
