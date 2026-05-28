@@ -87,11 +87,11 @@ fn parse_version_output(stdout: &str) -> String {
 pub const fn core_binary_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
-        "mihomo.exe"
+        "zephyr-mihomo.exe"
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        "mihomo"
+        "zephyr-mihomo"
     }
 }
 
@@ -183,27 +183,40 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
     );
 }
 
-/// Kill all mihomo processes gracefully (SIGTERM first, SIGKILL after timeout).
+/// Kill all zephyr-mihomo processes gracefully (SIGTERM first, SIGKILL after timeout).
+/// Also kills legacy 'mihomo' processes for backward compatibility with Lite version users.
 ///
 /// On Unix: sends SIGTERM, waits up to 2s for exit, then SIGKILL.
 /// On Windows: uses taskkill /F (no graceful option).
 pub fn kill_mihomo() {
+    let exe_name = core_binary_name();
+    #[cfg(target_os = "windows")]
+    let legacy_name = "mihomo.exe";
+    #[cfg(not(target_os = "windows"))]
+    let legacy_name = "mihomo";
+
     #[cfg(unix)]
     {
         // Step 1: SIGTERM — allow mihomo to close connections gracefully
+        // Kill both new and legacy binary names for backward compatibility
         let _ = std::process::Command::new("killall")
             .arg("-15") // SIGTERM
-            .arg("mihomo")
+            .arg(exe_name)
+            .arg(legacy_name)
             .output();
 
         // Step 2: Wait up to 2s for graceful exit
         for _ in 0..20 {
             let output = std::process::Command::new("pgrep")
                 .arg("-x")
-                .arg("mihomo")
+                .arg(exe_name)
                 .output();
-            if let Ok(out) = output {
-                if out.stdout.is_empty() {
+            let legacy_output = std::process::Command::new("pgrep")
+                .arg("-x")
+                .arg(legacy_name)
+                .output();
+            if let (Ok(out), Ok(legacy_out)) = (output, legacy_output) {
+                if out.stdout.is_empty() && legacy_out.stdout.is_empty() {
                     return; // Process has exited gracefully
                 }
             }
@@ -214,7 +227,8 @@ pub fn kill_mihomo() {
         for _ in 0..3 {
             let _ = std::process::Command::new("killall")
                 .arg("-9")
-                .arg("mihomo")
+                .arg(exe_name)
+                .arg(legacy_name)
                 .output();
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -222,8 +236,9 @@ pub fn kill_mihomo() {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt as _;
+        // Kill both new and legacy binary names for backward compatibility
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "mihomo.exe"])
+            .args(["/F", "/IM", exe_name, "/IM", legacy_name])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
@@ -834,13 +849,24 @@ fn select_runtime_config(
 
 pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
     let binary_name = core_binary_name();
-    let core_path = ensure_app_storage(app)?.core_dir.join(binary_name);
+    let core_dir = ensure_app_storage(app)?.core_dir;
+    let core_path = core_dir.join(binary_name);
     if core_path.exists() {
         return Ok(core_path);
     }
 
+    // Fallback: check for legacy binary name (mihomo.exe / mihomo) for backward compatibility
+    #[cfg(target_os = "windows")]
+    let legacy_name = "mihomo.exe";
+    #[cfg(not(target_os = "windows"))]
+    let legacy_name = "mihomo";
+    let legacy_path = core_dir.join(legacy_name);
+    if legacy_path.exists() {
+        return Ok(legacy_path);
+    }
+
     Err(format!(
-        "Could not find {binary_name} in app data core directory"
+        "Could not find {binary_name} (or legacy {legacy_name}) in app data core directory"
     ))
 }
 
@@ -1332,9 +1358,9 @@ mod tests {
     fn test_core_binary_name() {
         let name = core_binary_name();
         #[cfg(target_os = "windows")]
-        assert_eq!(name, "mihomo.exe");
+        assert_eq!(name, "zephyr-mihomo.exe");
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(name, "mihomo");
+        assert_eq!(name, "zephyr-mihomo");
     }
 
     #[test]
