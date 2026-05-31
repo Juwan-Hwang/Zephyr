@@ -9,6 +9,18 @@
 
 import { detectSystemLanguage } from '../i18n.js';
 
+const hasLocalStorage = typeof localStorage !== 'undefined';
+
+function lsGet(key) {
+    if (!hasLocalStorage) return null;
+    try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function lsSet(key, value) {
+    if (!hasLocalStorage) return;
+    try { localStorage.setItem(key, value); } catch { /* ignore */ }
+}
+
 // ---------------------------------------------------------------------------
 // Store Factory
 // ---------------------------------------------------------------------------
@@ -74,7 +86,7 @@ export function createStore(storeName, initialState, { persist = true, transient
                 for (const key of _transient) {
                     delete toSave[key];
                 }
-                localStorage.setItem(storeName, JSON.stringify(toSave));
+                lsSet(storeName, JSON.stringify(toSave));
             } catch { /* quota exceeded — silently ignore */ }
             persistTimer = null;
         }, PERSIST_DEBOUNCE_MS);
@@ -301,7 +313,7 @@ export function createStore(storeName, initialState, { persist = true, transient
  */
 function hydrate(storeName, defaults, transientKeys) {
     try {
-        const raw = localStorage.getItem(storeName);
+        const raw = lsGet(storeName);
         if (raw) {
             const saved = JSON.parse(raw);
             // Merge saved values over defaults (don't add new keys)
@@ -346,13 +358,13 @@ export const appStore = createStore('zephyr.app', {
     isTestingLatency: false,
 
     // UI state
-    currentTheme: localStorage.getItem('appTheme') || 'purple',
-    currentLang: localStorage.getItem('lang') || detectSystemLanguage(),
+    currentTheme: lsGet('appTheme') || 'purple',
+    currentLang: lsGet('lang') || detectSystemLanguage(),
     currentPage: 'home',
     currentThemeMode: 'auto', // Actual value synced from settings.json in initSettings()
 
     // Proxy state
-    currentSortMode: localStorage.getItem('sortMode') || 'default',
+    currentSortMode: lsGet('sortMode') || 'default',
     currentOutboundMode: 'rule',
 
     // Proxy group resolver state
