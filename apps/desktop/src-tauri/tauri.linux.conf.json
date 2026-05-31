@@ -6,8 +6,8 @@
     "windows": [
       {
         "label": "main",
-        "decorations": true,
-        "transparent": false
+        "decorations": false,
+        "transparent": true
       }
     ]
   }
