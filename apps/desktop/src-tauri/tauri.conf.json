@@ -6,6 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev:css",
     "beforeBuildCommand": "pnpm run build:css",
+    "beforeBundleCommand": "cp ../../scripts/linuxdeploy-plugin-gtk.sh ${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-gtk.sh",
     "frontendDist": "../src"
   },
   "app": {
@@ -63,6 +64,11 @@
       },
       "wix": {
         "language": "zh-CN"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
       }
     }
   }
