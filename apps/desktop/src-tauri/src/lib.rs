@@ -530,6 +530,26 @@ fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<f64, String> {
 // This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
 #[allow(rust_analyzer::proc_macro_unresolved)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WEBKIT_FORCE_COMPOSITING_MODE").is_err() {
+            // SAFETY: Called at application startup before any threads are spawned.
+            unsafe {
+                std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1");
+            }
+        }
+
+        if (std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland"))
+            && std::env::var("GDK_BACKEND").is_err()
+        {
+            // SAFETY: Same as above, single-threaded context.
+            unsafe {
+                std::env::set_var("GDK_BACKEND", "wayland,x11");
+            }
+        }
+    }
+
     // Setup panic hook to cleanup child processes
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
