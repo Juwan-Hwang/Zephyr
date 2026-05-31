@@ -532,10 +532,32 @@ fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<f64, String> {
 pub fn run() {
     #[cfg(target_os = "linux")]
     {
-        if std::env::var("WEBKIT_FORCE_COMPOSITING_MODE").is_err() {
-            // SAFETY: Called at application startup before any threads are spawned.
+        let has_dri_access = std::fs::read_dir("/dev/dri")
+            .map(|mut entries| {
+                entries.any(|e| {
+                    e.map(|entry| {
+                        let path = entry.path();
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().starts_with("render"))
+                            .unwrap_or(false)
+                            && std::fs::File::open(&path).map(|_| true).unwrap_or(false)
+                    })
+                    .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if has_dri_access {
+            if std::env::var("WEBKIT_FORCE_COMPOSITING_MODE").is_err() {
+                // SAFETY: Called at application startup before any threads are spawned.
+                unsafe {
+                    std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1");
+                }
+            }
+        } else if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
+            // SAFETY: Same as above, single-threaded context.
             unsafe {
-                std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1");
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }
         }
 
