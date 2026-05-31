@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBundleCommand": "mkdir -p \"${XDG_CACHE_HOME:-$HOME/.cache}/tauri\" && cp \"$(git rev-parse --show-toplevel)/scripts/linuxdeploy-plugin-gtk.sh\" \"${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-gtk.sh\" && chmod +x \"${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-gtk.sh\""
+  },
   "app": {
     "windows": [
       {
