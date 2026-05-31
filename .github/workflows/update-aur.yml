@@ -1,0 +1,72 @@
+name: Update AUR
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-aur:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download deb and compute sha256
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          DEB_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_${VERSION}_amd64-full.deb"
+          curl -sfL -o package.deb "$DEB_URL"
+          SHA256=$(sha256sum package.deb | cut -d' ' -f1)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Clone and update AUR package
+        run: |
+          git clone ssh://aur@aur.archlinux.org/zephyr-clash-bin.git aur-repo
+          cd aur-repo
+
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${SHA256}')/" PKGBUILD
+
+          TAB=$'\t'
+          cat > .SRCINFO << EOF
+          pkgbase = zephyr-clash-bin
+          ${TAB}pkgdesc = A modern Mihomo GUI client
+          ${TAB}pkgver = ${VERSION}
+          ${TAB}pkgrel = 1
+          ${TAB}url = https://github.com/Juwan-Hwang/Zephyr
+          ${TAB}install = zephyr-clash-bin.install
+          ${TAB}arch = x86_64
+          ${TAB}license = MIT
+          ${TAB}depends = cairo
+          ${TAB}depends = desktop-file-utils
+          ${TAB}depends = gdk-pixbuf2
+          ${TAB}depends = glib2
+          ${TAB}depends = gtk3
+          ${TAB}depends = hicolor-icon-theme
+          ${TAB}depends = libsoup3
+          ${TAB}depends = pango
+          ${TAB}depends = webkit2gtk-4.1
+          ${TAB}depends = libayatana-appindicator
+          ${TAB}provides = zephyr-clash
+          ${TAB}conflicts = zephyr-clash
+          ${TAB}options = !strip
+          ${TAB}options = !debug
+          ${TAB}source_x86_64 = https://github.com/Juwan-Hwang/Zephyr/releases/download/v${VERSION}/Zephyr_${VERSION}_amd64-full.deb
+          ${TAB}sha256sums_x86_64 = ${SHA256}
+
+          pkgname = zephyr-clash-bin
+          EOF
+
+          git config user.name "Juwan"
+          git config user.email "juwan.hwang@proton.me"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Update to ${VERSION}"
+          git push
