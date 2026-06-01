@@ -224,7 +224,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let binary_name = core_path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| "Invalid core binary name".to_string())?;
+        .ok_or_else(|| "Invalid core binary name".to_owned())?;
     let escaped_binary_name = binary_name.replace("'", "'\\''");
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
@@ -653,4 +653,105 @@ pub async fn restart_core_as_root_cmd(
     _enable_tun: bool,
 ) -> Result<String, String> {
     Ok(String::new())
+}
+
+/// Grant `CAP_NET_ADMIN` capability to the mihomo binary on Linux and install
+/// a `PolicyKit` rule to allow DNS/route configuration without password prompts.
+/// Uses pkexec to prompt for authentication once, then runs setcap and
+/// installs the polkit rule file.
+#[tauri::command]
+#[cfg(target_os = "linux")]
+pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), String> {
+    use super::core_process::get_core_exe_path;
+    let core_path = get_core_exe_path(&app)?;
+    let core_path_str = core_path
+        .to_str()
+        .ok_or_else(|| "Core path contains invalid UTF-8".to_owned())?;
+
+    emit_info!(
+        System,
+        SYS_TUN_FAILED,
+        "Granting CAP_NET_ADMIN and installing polkit rule for: {core_path_str}"
+    );
+
+    let username = whoami().map_err(|e| format!("Failed to get username: {e}"))?;
+
+    let polkit_rule = format!(
+        r#"polkit.addRule(function(action, subject) {{
+    if ((action.id == "org.freedesktop.resolve1.set-domains" ||
+         action.id == "org.freedesktop.resolve1.set-default-route" ||
+         action.id == "org.freedesktop.resolve1.set-dns-servers" ||
+         action.id == "org.freedesktop.resolve1.revert" ||
+         action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+         action.id == "org.freedesktop.NetworkManager.network-control") &&
+        subject.user == "{username}") {{
+        return polkit.Result.YES;
+    }}
+}});
+"#
+    );
+
+    let script = format!(
+        r#"set -e
+export PATH="/usr/sbin:/sbin:$PATH"
+setcap cap_net_admin,cap_net_bind_service+ep "$1"
+mkdir -p /etc/polkit-1/rules.d
+printf '%s' '{polkit_rule_escaped}' > /etc/polkit-1/rules.d/50-zephyr-tun.rules
+chmod 644 /etc/polkit-1/rules.d/50-zephyr-tun.rules"#,
+        polkit_rule_escaped = polkit_rule.replace('\'', "'\\''"),
+    );
+
+    let output = std::process::Command::new("pkexec")
+        .args(["bash", "-c", &script, "bash", core_path_str])
+        .output()
+        .map_err(|e| format!("Failed to execute pkexec: {e}"))?;
+
+    if output.status.success() {
+        emit_info!(
+            System,
+            SYS_TUN_FAILED,
+            "CAP_NET_ADMIN granted and polkit rule installed successfully"
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Request dismissed")
+            || stderr.contains("canceled")
+            || stderr.contains("cancelled")
+        {
+            Err("canceled".to_owned())
+        } else {
+            Err(format!("permission grant failed: {stderr}"))
+        }
+    }
+}
+
+fn whoami() -> Result<String, String> {
+    let name = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .or_else(|_| {
+            let output = std::process::Command::new("whoami")
+                .output()
+                .map_err(|e| format!("Failed to execute whoami: {e}"))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("whoami failed: {stderr}"));
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        })?;
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '@')
+    {
+        return Err(format!("Invalid username for polkit rule: {name}"));
+    }
+    Ok(name)
+}
+
+/// On non-Linux platforms, this is a no-op
+#[tauri::command]
+#[cfg(not(target_os = "linux"))]
+pub async fn grant_linux_tun_permission(_app: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
 }
