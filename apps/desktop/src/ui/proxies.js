@@ -670,7 +670,7 @@ export function initProxyControls() {
                     }
 
                     // Report to failover engine if enabled
-                    if (appStore.get('failoverEnabled')) {
+                    if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
                         const failoverSuccess = delay > 0 && delay < 999999;
                         reportFailover(name, failoverSuccess);
                     }
@@ -1869,7 +1869,7 @@ const _autoTest = {
                             _smartBatcher.push(name, success ? delay : 999999, success);
                         }
                         // Report to failover engine if enabled
-                        if (appStore.get('failoverEnabled')) {
+                        if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
                             reportFailover(name, success);
                         }
                     } catch { /* skip individual failures */ }
