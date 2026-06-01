@@ -224,7 +224,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let binary_name = core_path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| "Invalid core binary name".to_string())?;
+        .ok_or_else(|| "Invalid core binary name".to_owned())?;
     let escaped_binary_name = binary_name.replace("'", "'\\''");
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
@@ -653,4 +653,59 @@ pub async fn restart_core_as_root_cmd(
     _enable_tun: bool,
 ) -> Result<String, String> {
     Ok(String::new())
+}
+
+/// Grant setuid root permission to the mihomo binary on Linux.
+/// Uses pkexec to prompt for authentication, then runs chown root + chmod +sx.
+/// setuid is required instead of setcap because TUN mode needs to configure
+/// DNS, routes, and domains via D-Bus (systemd-resolved/NetworkManager),
+/// which triggers `PolicyKit` prompts even with `CAP_NET_ADMIN`.
+#[tauri::command]
+#[cfg(target_os = "linux")]
+pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), String> {
+    use super::core_process::get_core_exe_path;
+    let core_path = get_core_exe_path(&app)?;
+    let core_path_str = core_path
+        .to_str()
+        .ok_or_else(|| "Core path contains invalid UTF-8".to_owned())?;
+
+    emit_info!(
+        System,
+        SYS_TUN_FAILED,
+        "Granting setuid permission for: {core_path_str}"
+    );
+
+    let output = std::process::Command::new("pkexec")
+        .args([
+            "bash",
+            "-c",
+            &format!(
+                "setcap -r '{core_path_str}' 2>/dev/null; chown root:root '{core_path_str}' && chmod +sx '{core_path_str}'"
+            ),
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute pkexec: {e}"))?;
+
+    if output.status.success() {
+        emit_info!(
+            System,
+            SYS_TUN_FAILED,
+            "setuid permission granted successfully"
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Request dismissed") || stderr.contains("canceled") {
+            Err("canceled".to_owned())
+        } else {
+            Err(format!("setuid failed: {stderr}"))
+        }
+    }
+}
+
+/// On non-Linux platforms, this is a no-op
+#[tauri::command]
+#[cfg(not(target_os = "linux"))]
+pub async fn grant_linux_tun_permission(_app: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
 }
