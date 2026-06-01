@@ -17,6 +17,7 @@ pub use core::{
     fetch_text,
     get_core_exe_path,
     get_core_version,
+    grant_linux_tun_permission,
     init_tun_mode_from_config,
     // crypto
     is_machine_key_persisted,
