@@ -26,8 +26,8 @@ const MIN_FREQ = 3;
 const MIN_RATIO = 0.3;
 /** Number of consecutive consistent observations to confirm. */
 const CONSECUTIVE_K = 3;
-/** Polling interval in ms. */
-const POLL_INTERVAL = 5000;
+/** Polling interval in ms (optimized for responsiveness). */
+const POLL_INTERVAL = 2000;
 
 let _timer = null;
 let _polling = false;

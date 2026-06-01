@@ -466,10 +466,19 @@ export async function syncCoreConfig() {
             if (currentUiGroup && proxyMap && !proxyMap[currentUiGroup]) {
                 appStore.set('uiGroupName', null);
             }
-        }
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) {
-            currentNodeEl.textContent = currentNode;
+
+            // Resolve to leaf node and display with suffix if needed
+            const leafNode = resolveLeafNode(currentNode, proxyMap);
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                // If leaf node differs from current display name, it means we're showing a group name
+                // Append the actual node name with a dash suffix
+                if (leafNode && leafNode !== currentNode) {
+                    currentNodeEl.textContent = `${currentNode} - ${leafNode}`;
+                } else {
+                    currentNodeEl.textContent = leafNode || currentNode;
+                }
+            }
         }
     } catch (e) {
         proxyLogger.warn('Failed to sync current node display', e);
@@ -1634,6 +1643,7 @@ const _renderExplanationBarFromStore = debounce(async () => {
             renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
         } catch { /* ignore */ }
     }
+    syncCoreConfig();
 }, 50);
 appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
 appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
