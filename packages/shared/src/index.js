@@ -69,6 +69,7 @@ export const TUN = Object.freeze({
     RESTART_AS_ROOT: "restart_core_as_root_cmd",
     KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
+    GRANT_LINUX_PERMISSION: "grant_linux_tun_permission",
 });
 
 // ---------------------------------------------------------------------------
