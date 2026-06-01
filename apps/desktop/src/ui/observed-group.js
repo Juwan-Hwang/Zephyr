@@ -10,7 +10,8 @@
  * @module ui/observed-group
  */
 
-import { getConnections, getProxies } from '../api.js';
+import { getConnections } from '../api.js';
+import { getProxiesCached } from './cache.js';
 import { isWritableGroupType } from './proxy-groups.js';
 import { appStore } from './state.js';
 import { observedGroupLogger } from '../utils/logger.js';
@@ -26,8 +27,8 @@ const MIN_FREQ = 3;
 const MIN_RATIO = 0.3;
 /** Number of consecutive consistent observations to confirm. */
 const CONSECUTIVE_K = 3;
-/** Polling interval in ms. */
-const POLL_INTERVAL = 5000;
+/** Polling interval in ms (optimized for responsiveness). */
+const POLL_INTERVAL = 2000;
 
 let _timer = null;
 let _polling = false;
@@ -214,7 +215,9 @@ async function _poll() {
 
 async function _getProxiesData() {
     try {
-        return await getProxies();
+        // Use cached proxy data to reduce API overhead
+        // Group structures and types are static, so caching is safe
+        return await getProxiesCached();
     } catch {
         return null;
     }

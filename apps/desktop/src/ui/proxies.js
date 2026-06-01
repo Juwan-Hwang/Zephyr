@@ -466,10 +466,25 @@ export async function syncCoreConfig() {
             if (currentUiGroup && proxyMap && !proxyMap[currentUiGroup]) {
                 appStore.set('uiGroupName', null);
             }
-        }
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) {
-            currentNodeEl.textContent = currentNode;
+
+            // Resolve to leaf node and display with suffix if needed
+            const leafNode = resolveLeafNode(currentNode, proxyMap);
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                // If leaf node differs from current display name, it means we're showing a group name
+                // Append the actual node name with a dash suffix
+                if (leafNode && leafNode !== currentNode) {
+                    currentNodeEl.textContent = `${currentNode} - ${leafNode}`;
+                } else {
+                    currentNodeEl.textContent = leafNode || currentNode;
+                }
+            }
+        } else {
+            // Fallback to Direct when no proxy groups available
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                currentNodeEl.textContent = 'Direct';
+            }
         }
     } catch (e) {
         proxyLogger.warn('Failed to sync current node display', e);
@@ -1634,9 +1649,38 @@ const _renderExplanationBarFromStore = debounce(async () => {
             renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
         } catch { /* ignore */ }
     }
+    // Removed syncCoreConfig() from here - it's already called on proxy switch events and config updates
+    // Calling it here would trigger unnecessary API requests every 2s when observed node changes
 }, 50);
 appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
 appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
+
+// Update capsule display when observed node changes (avoid full syncCoreConfig API calls)
+appStore.subscribe('observedNodeName', () => {
+    try {
+        const observedNodeName = appStore.get('observedNodeName');
+        const observedGroupName = appStore.get('observedGroupName');
+        if (!observedNodeName || !observedGroupName) return;
+        
+        const currentNodeEl = document.getElementById('current-node-name');
+        if (!currentNodeEl) return;
+        
+        // Get current display text
+        const currentText = currentNodeEl.textContent || '';
+        
+        // Only update if the current display shows the observed group
+        // This prevents showing "WrongGroup - ObservedNode" when groups don't match
+        const lastDashIndex = currentText.lastIndexOf(' - ');
+        if (lastDashIndex !== -1) {
+            const currentGroupName = currentText.substring(0, lastDashIndex);
+            // Only update if showing the observed group or a related auto-select group
+            if (currentGroupName === observedGroupName || currentGroupName.includes('自动') || currentGroupName.toLowerCase().includes('auto')) {
+                currentNodeEl.textContent = currentGroupName + ' - ' + observedNodeName;
+            }
+        }
+        // Otherwise, don't override - let syncCoreConfig handle it on next config update
+    } catch { /* ignore */ }
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Smart Auto-Test Scheduler
