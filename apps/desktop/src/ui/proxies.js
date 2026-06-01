@@ -668,6 +668,18 @@ export function initProxyControls() {
                         const success = delay > 0 && delay < 999999;
                         _smartBatcher.push(name, success ? delay : 999999, success);
                     }
+
+                    // Report to failover engine if enabled
+                    if (appStore.get('failoverEnabled')) {
+                        const success = delay > 0 && delay < 999999;
+                        try {
+                            const { failoverReport } = await import('./prism.js');
+                            const action = await failoverReport(name, success);
+                            if (action) {
+                                handleFailoverAction(action);
+                            }
+                        } catch { /* ignore failover IPC errors */ }
+                    }
                 };
 
                 const priorityQueue = buildLatencyPriorityQueue(data, validProxiesToTest);
@@ -807,6 +819,69 @@ export function initProxyControls() {
 // Resets automatically when the group pair changes.
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
+
+/**
+ * Handle a failover action returned by the failover engine.
+ * Switches to the best available node (lowest latency) in the current group.
+ * @param {{failedNode: string, failureCount: number, target: string}} action
+ */
+async function handleFailoverAction(action) {
+    const uiGroupName = appStore.get('uiGroupName');
+    if (!uiGroupName) return;
+
+    const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+    if (!proxyMap) return;
+
+    const group = proxyMap[uiGroupName];
+    if (!group?.all?.length) return;
+
+    const currentNode = group.now;
+    if (currentNode !== action.failedNode) return;
+
+    const candidates = group.all.filter(n => {
+        if (n === action.failedNode) return false;
+        const entry = proxyMap[n];
+        if (!entry) return false;
+        const t = entry.type?.toLowerCase() || '';
+        return t !== 'reject' && t !== 'compatible' && t !== 'pass';
+    });
+
+    if (candidates.length === 0) return;
+
+    let targetNode;
+    if (action.target !== 'next' && candidates.includes(action.target)) {
+        targetNode = action.target;
+    } else {
+        let bestNode = null;
+        let bestDelay = Infinity;
+        for (const name of candidates) {
+            const entry = proxyMap[name];
+            const history = entry?.history;
+            if (history && history.length > 0) {
+                const lastDelay = history[history.length - 1]?.delay;
+                if (lastDelay && lastDelay > 0 && lastDelay < bestDelay) {
+                    bestDelay = lastDelay;
+                    bestNode = name;
+                }
+            }
+        }
+        targetNode = bestNode || candidates[0];
+    }
+
+    const success = await switchProxy(uiGroupName, targetNode);
+    if (success) {
+        const t = translations[appStore.get('currentLang')] || {};
+        showNotification(
+            (t.failoverSwitched || 'Failover: switched from ${failed} to ${target}')
+                .replace('${failed}', action.failedNode)
+                .replace('${target}', targetNode),
+            'success'
+        );
+        await closeAllConnections();
+        syncCoreConfig();
+        renderProxies();
+    }
+}
 
 /**
  * Resolve a proxy entry to its leaf node name.
@@ -1756,6 +1831,16 @@ const _autoTest = {
                         const success = delay > 0 && delay < 999999;
                         if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
                             _smartBatcher.push(name, success ? delay : 999999, success);
+                        }
+                        // Report to failover engine if enabled
+                        if (appStore.get('failoverEnabled')) {
+                            try {
+                                const { failoverReport } = await import('./prism.js');
+                                const action = await failoverReport(name, success);
+                                if (action) {
+                                    handleFailoverAction(action);
+                                }
+                            } catch { /* ignore failover IPC errors */ }
                         }
                     } catch { /* skip individual failures */ }
                 }

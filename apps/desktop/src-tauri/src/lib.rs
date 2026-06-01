@@ -181,6 +181,9 @@ struct Settings {
     /// Node list scroll mode.
     #[serde(default)]
     node_scroll: Option<bool>,
+    /// Failover: auto-switch on consecutive proxy failures.
+    #[serde(default)]
+    failover_enabled: bool,
 }
 
 impl Settings {
@@ -693,6 +696,7 @@ pub fn run() {
                     theme_mode: None,
                     app_opacity: None,
                     node_scroll: None,
+                    failover_enabled: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

@@ -394,11 +394,13 @@ export async function isWatching() {
 //  Failover
 // ═══════════════════════════════════════════════════════════════════════
 
-/** Get the failover report.
- *  @returns {Promise<object>}
+/** Report a proxy test result to the failover engine.
+ *  @param {string} nodeName
+ *  @param {boolean} success
+ *  @returns {Promise<{failedNode: string, failureCount: number, target: string}|null>}
  */
-export async function failoverReport() {
-    return invoke(COMMANDS.FAILOVER.REPORT);
+export async function failoverReport(nodeName, success) {
+    return invoke(COMMANDS.FAILOVER.REPORT, { nodeName, success });
 }
 
 /** Get the current failover policy.
@@ -415,12 +417,12 @@ export async function failoverSetPolicy(policy) {
     return invoke(COMMANDS.FAILOVER.SET_POLICY, policy);
 }
 
-/** Get the failure count for a proxy group.
- *  @param {string} group
+/** Get the failure count for a node.
+ *  @param {string} nodeName
  *  @returns {Promise<number>}
  */
-export async function failoverFailureCount(group) {
-    return invoke(COMMANDS.FAILOVER.FAILURE_COUNT, { group });
+export async function failoverFailureCount(nodeName) {
+    return invoke(COMMANDS.FAILOVER.FAILURE_COUNT, { nodeName });
 }
 
 /** Reset all failover failure counts.
