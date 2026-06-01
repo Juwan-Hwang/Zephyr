@@ -671,22 +671,8 @@ export function initProxyControls() {
 
                     // Report to failover engine if enabled
                     if (appStore.get('failoverEnabled')) {
-                        const _uiGroupName = appStore.get('uiGroupName');
-                        const _proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
-                        const _currentNode = _proxyMap?.[_uiGroupName]?.now;
-                        const _activeLeaf = _currentNode ? resolveLeafNode(_currentNode, _proxyMap) : null;
-                        const _activeNode = _activeLeaf || _currentNode;
-                        if (_activeNode && (name === _activeNode || name === _currentNode)) {
-                            const success = delay > 0 && delay < 999999;
-                            (async () => {
-                                try {
-                                    const action = await failoverReport(name, success);
-                                    if (action) {
-                                        handleFailoverAction(action);
-                                    }
-                                } catch { /* ignore failover IPC errors */ }
-                            })();
-                        }
+                        const failoverSuccess = delay > 0 && delay < 999999;
+                        reportFailover(name, failoverSuccess);
                     }
                 };
 
@@ -827,6 +813,29 @@ export function initProxyControls() {
 // Resets automatically when the group pair changes.
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
+
+/**
+ * Report a proxy test result to the failover engine if the tested node
+ * is the currently active node (or its resolved leaf).
+ * Only active-node results are reported to avoid stale failure counts.
+ * @param {string} name - Tested proxy name
+ * @param {boolean} success - Whether the test succeeded
+ */
+async function reportFailover(name, success) {
+    if (!appStore.get('failoverEnabled')) return;
+    const uiGroupName = appStore.get('uiGroupName');
+    const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+    const currentNode = proxyMap?.[uiGroupName]?.now;
+    const activeLeaf = currentNode ? resolveLeafNode(currentNode, proxyMap) : null;
+    const activeNode = activeLeaf || currentNode;
+    if (!activeNode || (name !== activeNode && name !== currentNode)) return;
+    try {
+        const action = await failoverReport(name, success);
+        if (action) {
+            handleFailoverAction(action);
+        }
+    } catch { /* ignore failover IPC errors */ }
+}
 
 /** @type {boolean} */
 let _isFailovering = false;
@@ -1854,21 +1863,7 @@ const _autoTest = {
                         }
                         // Report to failover engine if enabled
                         if (appStore.get('failoverEnabled')) {
-                            const _uiGroupName = appStore.get('uiGroupName');
-                            const _proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
-                            const _currentNode = _proxyMap?.[_uiGroupName]?.now;
-                            const _activeLeaf = _currentNode ? resolveLeafNode(_currentNode, _proxyMap) : null;
-                            const _activeNode = _activeLeaf || _currentNode;
-                            if (_activeNode && (name === _activeNode || name === _currentNode)) {
-                                (async () => {
-                                    try {
-                                        const action = await failoverReport(name, success);
-                                        if (action) {
-                                            handleFailoverAction(action);
-                                        }
-                                    } catch { /* ignore failover IPC errors */ }
-                                })();
-                            }
+                            reportFailover(name, success);
                         }
                     } catch { /* skip individual failures */ }
                 }
