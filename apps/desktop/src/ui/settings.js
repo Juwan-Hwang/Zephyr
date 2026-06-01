@@ -355,6 +355,7 @@ export async function initSettings() {
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
+    const failoverToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-failover'));
     const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
     const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
     const versionText = document.getElementById('core-version-text');
@@ -514,6 +515,8 @@ export async function initSettings() {
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
     if (nodeScrollToggle) nodeScrollToggle.checked = !!settings.node_scroll;
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
+    if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
+    appStore.set('failoverEnabled', settings.failover_enabled || false);
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
     // Apply saved UI scale
@@ -597,6 +600,11 @@ export async function initSettings() {
                     nodeScrollToggle.checked = false;
                     settings.node_scroll = false;
                     successItems.push('nodeScroll');
+                }
+                if (failoverToggle) {
+                    failoverToggle.checked = false;
+                    settings.failover_enabled = false;
+                    appStore.set('failoverEnabled', false);
                 }
                 if (customArgsInput) {
                     customArgsInput.value = '';
@@ -726,6 +734,7 @@ export async function initSettings() {
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             if (hideTimeoutToggle) currentSettings.hide_timeout_nodes = hideTimeoutToggle.checked;
+            if (failoverToggle) currentSettings.failover_enabled = failoverToggle.checked;
             currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
@@ -751,6 +760,10 @@ export async function initSettings() {
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
+    });
+    failoverToggle?.addEventListener('change', async () => {
+        appStore.set('failoverEnabled', failoverToggle.checked);
+        await save();
     });
     if (!isPortable) {
         autostartToggle?.addEventListener('change', async () => {

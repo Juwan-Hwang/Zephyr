@@ -20,7 +20,7 @@ import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
 import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
-import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig } from './prism.js';
+import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig, failoverReport } from './prism.js';
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
@@ -668,6 +668,12 @@ export function initProxyControls() {
                         const success = delay > 0 && delay < 999999;
                         _smartBatcher.push(name, success ? delay : 999999, success);
                     }
+
+                    // Report to failover engine if enabled
+                    if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
+                        const failoverSuccess = delay > 0 && delay < 999999;
+                        reportFailover(name, failoverSuccess);
+                    }
                 };
 
                 const priorityQueue = buildLatencyPriorityQueue(data, validProxiesToTest);
@@ -807,6 +813,111 @@ export function initProxyControls() {
 // Resets automatically when the group pair changes.
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
+
+/**
+ * Report a proxy test result to the failover engine if the tested node
+ * is the currently active node (or its resolved leaf).
+ * Only active-node results are reported to avoid stale failure counts.
+ * @param {string} name - Tested proxy name
+ * @param {boolean} success - Whether the test succeeded
+ */
+async function reportFailover(name, success) {
+    if (!appStore.get('failoverEnabled')) return;
+    const uiGroupName = appStore.get('uiGroupName');
+    const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+    const currentNode = proxyMap?.[uiGroupName]?.now;
+    const activeLeaf = currentNode ? resolveLeafNode(currentNode, proxyMap) : null;
+    const activeNode = activeLeaf || currentNode;
+    if (!activeNode || (name !== activeNode && name !== currentNode)) return;
+    try {
+        const action = await failoverReport(name, success);
+        if (action) {
+            (async () => {
+                try { await handleFailoverAction(action); }
+                catch { /* ignore failover action errors */ }
+            })();
+        }
+    } catch { /* ignore failover IPC errors */ }
+}
+
+/** @type {boolean} */
+let _isFailovering = false;
+
+/**
+ * Handle a failover action returned by the failover engine.
+ * Switches to the best available node (lowest latency) in the current group.
+ * @param {{failedNode: string, failureCount: number, target: string}} action
+ */
+async function handleFailoverAction(action) {
+    if (_isFailovering) return;
+    _isFailovering = true;
+    try {
+        const uiGroupName = appStore.get('uiGroupName');
+        if (!uiGroupName) return;
+
+        const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+        if (!proxyMap) return;
+
+        const group = proxyMap[uiGroupName];
+        if (!group?.all?.length) return;
+
+        const currentNode = group.now;
+        const activeLeaf = resolveLeafNode(currentNode, proxyMap);
+        if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
+
+        const candidates = group.all.filter(n => {
+            if (n === action.failedNode) return false;
+            const entry = proxyMap[n];
+            if (!entry) return false;
+            const nodeType = entry.type?.toLowerCase() || '';
+            if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
+            const leaf = resolveLeafNode(n, proxyMap);
+            if (leaf === action.failedNode) return false;
+            return true;
+        });
+
+        if (candidates.length === 0) return;
+
+        let targetNode;
+        if (action.target !== 'next' && candidates.includes(action.target)) {
+            targetNode = action.target;
+        } else {
+            let bestNode = null;
+            let bestDelay = Infinity;
+            for (const name of candidates) {
+                const leaf = resolveLeafNode(name, proxyMap);
+                const lookupEntry = leaf ? proxyMap[leaf] : proxyMap[name];
+                const history = lookupEntry?.history;
+                if (history && history.length > 0) {
+                    const lastDelay = history[history.length - 1]?.delay;
+                    if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
+                        bestDelay = lastDelay;
+                        bestNode = name;
+                    }
+                }
+            }
+            targetNode = bestNode || candidates[0];
+        }
+
+        const success = await switchProxy(uiGroupName, targetNode);
+        if (success) {
+            showNotification(
+                t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
+                'success'
+            );
+            (async () => {
+                try {
+                    await closeAllConnections();
+                    invalidateProxiesCache();
+                    await syncCoreConfig();
+                    await renderProxies();
+                } catch { /* ignore post-failover errors */ }
+            })();
+        }
+    } finally {
+        _isFailovering = false;
+    }
+}
 
 /**
  * Resolve a proxy entry to its leaf node name.
@@ -1756,6 +1867,10 @@ const _autoTest = {
                         const success = delay > 0 && delay < 999999;
                         if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
                             _smartBatcher.push(name, success ? delay : 999999, success);
+                        }
+                        // Report to failover engine if enabled
+                        if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
+                            reportFailover(name, success);
                         }
                     } catch { /* skip individual failures */ }
                 }
