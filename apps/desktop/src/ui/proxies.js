@@ -671,15 +671,22 @@ export function initProxyControls() {
 
                     // Report to failover engine if enabled
                     if (appStore.get('failoverEnabled')) {
-                        const success = delay > 0 && delay < 999999;
-                        (async () => {
-                            try {
-                                const action = await failoverReport(name, success);
-                                if (action) {
-                                    handleFailoverAction(action);
-                                }
-                            } catch { /* ignore failover IPC errors */ }
-                        })();
+                        const _uiGroupName = appStore.get('uiGroupName');
+                        const _proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+                        const _currentNode = _proxyMap?.[_uiGroupName]?.now;
+                        const _activeLeaf = _currentNode ? resolveLeafNode(_currentNode, _proxyMap) : null;
+                        const _activeNode = _activeLeaf || _currentNode;
+                        if (_activeNode && (name === _activeNode || name === _currentNode)) {
+                            const success = delay > 0 && delay < 999999;
+                            (async () => {
+                                try {
+                                    const action = await failoverReport(name, success);
+                                    if (action) {
+                                        handleFailoverAction(action);
+                                    }
+                                } catch { /* ignore failover IPC errors */ }
+                            })();
+                        }
                     }
                 };
 
@@ -821,64 +828,78 @@ export function initProxyControls() {
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
 
+/** @type {boolean} */
+let _isFailovering = false;
+
 /**
  * Handle a failover action returned by the failover engine.
  * Switches to the best available node (lowest latency) in the current group.
  * @param {{failedNode: string, failureCount: number, target: string}} action
  */
 async function handleFailoverAction(action) {
-    const uiGroupName = appStore.get('uiGroupName');
-    if (!uiGroupName) return;
+    if (_isFailovering) return;
+    _isFailovering = true;
+    try {
+        const uiGroupName = appStore.get('uiGroupName');
+        if (!uiGroupName) return;
 
-    const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
-    if (!proxyMap) return;
+        const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+        if (!proxyMap) return;
 
-    const group = proxyMap[uiGroupName];
-    if (!group?.all?.length) return;
+        const group = proxyMap[uiGroupName];
+        if (!group?.all?.length) return;
 
-    const currentNode = group.now;
-    const activeLeaf = resolveLeafNode(currentNode, proxyMap);
-    if ((activeLeaf || currentNode) !== action.failedNode) return;
+        const currentNode = group.now;
+        const activeLeaf = resolveLeafNode(currentNode, proxyMap);
+        if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
 
-    const candidates = group.all.filter(n => {
-        if (n === action.failedNode) return false;
-        const entry = proxyMap[n];
-        if (!entry) return false;
-        const t = entry.type?.toLowerCase() || '';
-        return t !== 'reject' && t !== 'compatible' && t !== 'pass';
-    });
+        const candidates = group.all.filter(n => {
+            if (n === action.failedNode) return false;
+            const entry = proxyMap[n];
+            if (!entry) return false;
+            const nodeType = entry.type?.toLowerCase() || '';
+            return nodeType !== 'reject' && nodeType !== 'compatible' && nodeType !== 'pass';
+        });
 
-    if (candidates.length === 0) return;
+        if (candidates.length === 0) return;
 
-    let targetNode;
-    if (action.target !== 'next' && candidates.includes(action.target)) {
-        targetNode = action.target;
-    } else {
-        let bestNode = null;
-        let bestDelay = Infinity;
-        for (const name of candidates) {
-            const entry = proxyMap[name];
-            const history = entry?.history;
-            if (history && history.length > 0) {
-                const lastDelay = history[history.length - 1]?.delay;
-                if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
-                    bestDelay = lastDelay;
-                    bestNode = name;
+        let targetNode;
+        if (action.target !== 'next' && candidates.includes(action.target)) {
+            targetNode = action.target;
+        } else {
+            let bestNode = null;
+            let bestDelay = Infinity;
+            for (const name of candidates) {
+                const entry = proxyMap[name];
+                const history = entry?.history;
+                if (history && history.length > 0) {
+                    const lastDelay = history[history.length - 1]?.delay;
+                    if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
+                        bestDelay = lastDelay;
+                        bestNode = name;
+                    }
                 }
             }
+            targetNode = bestNode || candidates[0];
         }
-        targetNode = bestNode || candidates[0];
-    }
 
-    const success = await switchProxy(uiGroupName, targetNode);
-    if (success) {
-        showNotification(
-            t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
-            'success'
-        );
-        await closeAllConnections();
-        syncCoreConfig();
-        renderProxies();
+        const success = await switchProxy(uiGroupName, targetNode);
+        if (success) {
+            showNotification(
+                t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
+                'success'
+            );
+            (async () => {
+                try {
+                    await closeAllConnections();
+                    invalidateProxiesCache();
+                    syncCoreConfig();
+                    renderProxies();
+                } catch { /* ignore post-failover errors */ }
+            })();
+        }
+    } finally {
+        _isFailovering = false;
     }
 }
 
@@ -1833,14 +1854,21 @@ const _autoTest = {
                         }
                         // Report to failover engine if enabled
                         if (appStore.get('failoverEnabled')) {
-                            (async () => {
-                                try {
-                                    const action = await failoverReport(name, success);
-                                    if (action) {
-                                        handleFailoverAction(action);
-                                    }
-                                } catch { /* ignore failover IPC errors */ }
-                            })();
+                            const _uiGroupName = appStore.get('uiGroupName');
+                            const _proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+                            const _currentNode = _proxyMap?.[_uiGroupName]?.now;
+                            const _activeLeaf = _currentNode ? resolveLeafNode(_currentNode, _proxyMap) : null;
+                            const _activeNode = _activeLeaf || _currentNode;
+                            if (_activeNode && (name === _activeNode || name === _currentNode)) {
+                                (async () => {
+                                    try {
+                                        const action = await failoverReport(name, success);
+                                        if (action) {
+                                            handleFailoverAction(action);
+                                        }
+                                    } catch { /* ignore failover IPC errors */ }
+                                })();
+                            }
                         }
                     } catch { /* skip individual failures */ }
                 }
