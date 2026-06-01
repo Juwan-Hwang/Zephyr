@@ -2,37 +2,42 @@
 
 <img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - Modern Mihomo GUI Client Logo" width="128" height="128">
 
-# Zephyr - Modern Lightweight  Mihomo / Clash Meta GUI Client 
+# Zephyr
 
-**Security First · Minimalist Aesthetics · Lightweight & Efficient**
+**Secure by Design · Light by Nature · Beautiful by Choice**
 
-> A modern, security-focused Mihomo (Clash Meta) GUI client with built-in Prism Engine rule engine.
->
-> Built with Tauri v2, Rust, native JavaScript, Tailwind CSS, and Prism Engine.
+*A Mihomo GUI.*
 
-[English](README_en.md) | [简体中文](README.md)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Juwan-Hwang/Zephyr?style=social)](https://github.com/Juwan-Hwang/Zephyr/stargazers)
+[![Release](https://img.shields.io/github/v/release/Juwan-Hwang/Zephyr?color=blue)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#installation)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.92+-orange)](https://www.rust-lang.org/)
-[![Release](https://img.shields.io/github/v/release/Juwan-Hwang/Zephyr)](https://github.com/Juwan-Hwang/Zephyr/releases)
-[![Security](https://img.shields.io/badge/Security-CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy-green)](#security-features)
+[![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![Security](https://img.shields.io/badge/Security-CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy-green)](#security-design)
 [![Rust Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/rust-tests.json&query=$.message&label=Rust%20Tests&color=green)](https://github.com/Juwan-Hwang/Zephyr/actions)
 [![JS Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/js-tests.json&query=$.message&label=JS%20Tests&color=brightgreen)](https://github.com/Juwan-Hwang/Zephyr/actions)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-1.92+-orange)](https://www.rust-lang.org/)
 
+[English](README_en.md) | [简体中文](README.md)
 
 </div>
 
 ---
 
-## Project Status
+## Quick Start
 
-Zephyr was created for a simple reason: I couldn't find a Mihomo GUI that matched my aesthetic preferences, so I built one.
+**5 minutes to get started:**
 
-This project primarily serves my personal use cases. It pursues two things: a more pleasing desktop proxy management interface, and clearer security boundaries—including subscription downloads, configuration handling, file writes, script execution, deep link imports, and update verification.
+1. **Download** — Get the latest release from [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases)
+2. **Install** — Run the installer (or extract Portable version)
+3. **Import** — Add your subscription via URL or file
+4. **Select** — Choose a proxy node from the list
+5. **Enable** — Toggle System Proxy or TUN Mode
 
-**All content in this project is AI-generated** (including this text). Security, stability, and performance should not be assumed to be fully verified. Please assess risks before use. If you discover security issues or bugs, feel free to submit an Issue. PRs are not guaranteed to be merged—if you have specific needs, forking and modifying directly is usually faster.
+That's it. Your traffic is now routed through the selected proxy.
+
+> **Transparency Notice**: All content in this project is AI-generated (including this text). Security measures are implemented—see [Security Design](#security-design)—but should not be assumed to be fully verified. Please assess risks before use. Security issue reports are welcome.
 
 ---
 
@@ -43,9 +48,9 @@ This project primarily serves my personal use cases. It pursues two things: a mo
 <details>
 <summary>More Screenshots</summary>
 
-| Settings Page | Dark Mode |
+| Dark Mode | Settings |
 |:---:|:---:|
-| ![Zephyr Settings - System Proxy and TUN Configuration](apps/desktop/assets/screenshot-settings.png) | ![Zephyr Dark Mode - Proxy Node Management Interface](apps/desktop/assets/screenshot-dark.png) |
+| ![Zephyr Dark Mode - Proxy Node Management Interface](apps/desktop/assets/screenshot-dark.png) | ![Zephyr Settings - System Proxy & TUN Configuration](apps/desktop/assets/screenshot-settings.png) |
 
 </details>
 
@@ -53,17 +58,21 @@ This project primarily serves my personal use cases. It pursues two things: a mo
 
 ## Why Zephyr?
 
-Zephyr is not a "more features is better" client. It focuses on three directions:
+Zephyr was born from frustration. Every Mihomo GUI I found looked like a temporary tool. So I vibe coded one.
 
-- **Visual Experience**: Glassmorphism cards, gradient icons, dark mode, animation details, and restrained typography—making proxy clients feel less like temporary tools.
-- **Security Boundaries**: Clear restrictions on subscriptions, configurations, scripts, files, updates, and deep link entry points—reducing common attack surfaces in proxy clients.
-- **Rule Capabilities**: Built-in Prism Engine extends Mihomo configuration capabilities with declarative rule patches, rule libraries, smart node selection, and script sandboxing.
+**Visual Experience.** Frosted glass cards. Gradient icons. Dark mode. Animation details. Typography that breathes. A proxy client that feels designed, not assembled.
+
+**Security Boundaries.** Explicit constraints on subscriptions, configs, scripts, files, updates, and deep links. Defense in depth.
+
+**Rule Capabilities.** Prism Engine brings declarative rule patches, smart node selection, and script sandbox. More power, less complexity.
 
 See [FEATURES.md](FEATURES.md) for the complete feature list.
 
-## Community Growth
+---
 
-Zephyr is gaining traction among developers and users.
+## Growing Community
+
+Zephyr is gaining attention from developers and users.
 
 <a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=timeline&legend=top-left">
   <picture>
@@ -75,44 +84,49 @@ Zephyr is gaining traction among developers and users.
 
 ---
 
-
 ## Features
 
 ### Core Capabilities
 
-- **Mihomo Core Management**: Start, stop, restart proxy core
-- **Multi-Configuration Management**: Create, edit, switch YAML configurations
-- **Subscription Management**: URL, file, QR code, drag-and-drop import, and Base64 auto-decoding
-- **Proxy Mode Switching**: Rule, Global, Direct modes
-- **System Proxy**: Native system proxy management for Windows / macOS / Linux
-- **TUN Mode**: System-wide transparent proxy
-- **Connections & Traffic**: Real-time connection list, connection closing, up/down speeds, and historical trends
+- **Mihomo Core Management** — Start, stop, restart the proxy core
+- **Multi-Config Management** — Create, edit, switch YAML configurations
+- **Subscription Management** — URL, file, drag-and-drop import, Base64 auto-decoding
+- **Proxy Mode Switching** — Rule, Global, Direct modes
+- **System Proxy** — Native system proxy management for Windows / macOS / Linux
+- **TUN Mode** — System-level proxy
+- **Connections & Traffic** — Real-time connection list, connection termination, up/down speeds, historical trends
 
 ### Prism Engine
 
-Zephyr includes a rule engine based on `clash-prism-*` crates to enhance Mihomo configuration management:
+Zephyr includes a rule engine based on `clash-prism-*` crates to enhance Mihomo configuration:
 
-- **Declarative Rule Patches**: `.prism.yaml` supports `$prepend`, `$append`, `$filter`, `$override`, and `__when__` conditions
-- **Rule Library Management**: Rule file CRUD, grouping, import, auto-apply, and file watching
-- **Smart Node Selection**: EMA scoring and adaptive scheduling based on latency, success rate, and stability
-- **Failover**: Automatic node switching on failure, with threshold, cooldown, and fallback strategies
-- **Script Sandbox**: QuickJS execution environment with time, memory, string length, loop, and recursion resource limits
-- **Plugin System**: Plugin discovery, loading, lifecycle hooks, and fine-grained permission control
-- **KV Storage**: Persistent key-value storage capability
+| Feature | Description |
+|---------|-------------|
+| **Declarative Rule Patches** | `.prism.yaml` supports `$prepend`, `$append`, `$filter`, `$override`, and `__when__` conditions |
+| **Rule Library Management** | CRUD operations, grouping, import, auto-apply, file watching |
+| **Smart Node Selection** | EMA scoring and adaptive scheduling based on latency, success rate, stability |
+| **Failover** | Automatic node switching on failure, with thresholds, cooldown, and rollback strategies |
+| **Script Sandbox** | QuickJS execution environment with time, memory, string length, loop, and recursion limits |
+| **Plugin System** | Plugin discovery, loading, lifecycle hooks, and fine-grained permission control |
+| **KV Storage** | Persistent key-value storage capabilities |
 
-### Security Features
+### Security Design
 
-- **Machine-Bound Encryption**: Configuration encryption uses hardware fingerprint-derived keys
-- **SSRF Protection**: DNS verification before subscription/rule URL downloads; redirects to private IPs are blocked (user-initiated private address input is allowed)
-- **DNS Leak Prevention**: TUN mode auto-injects `dns-hijack` to hijack all DNS traffic to Mihomo
-- **Configuration Sanitization**: Recursively removes dangerous YAML fields, limits provider path traversal
-- **Script Permission Control**: Script execution constrained by resource limits and permission restrictions
-- **Input Validation**: Length, format, and UTF-8 safety checks at IPC command entry points
-- **Rate Limiting**: Dual throttling—fixed cooldown for original commands + sliding window for Prism commands
-- **File Security**: Secure permissions, UUID temp files, archive path traversal protection, symlink rejection, compression bomb detection
-- **Update Integrity**: SHA256 verification, trusted host restrictions, resource name validation, atomic updates with automatic rollback
-- **Deep Link Security**: Restricted `clash://` protocol entry and URL scheme handling
-- **CSP & Build Hardening**: Restricted script and connection sources, release builds with LTO, strip, `panic=abort`
+Zephyr implements defense-in-depth security measures:
+
+| Layer | Protection | Implementation |
+|-------|------------|----------------|
+| **Encryption** | Machine-bound encryption | Hardware fingerprint-derived keys for subscription metadata; proxy configs (YAML) stored in plaintext |
+| **Network** | SSRF Protection | DNS validation before subscription/rule URL downloads; redirects to private addresses blocked |
+| **Network** | DNS Leak Prevention | TUN mode auto-injects `dns-hijack`, capturing all DNS traffic to Mihomo |
+| **Config** | Config Sanitization | Recursive removal of dangerous YAML fields, provider path traversal limits |
+| **Script** | Permission Control | Script execution constrained by resource limits and permission restrictions |
+| **Input** | Input Validation | IPC command entry points with length, format, and UTF-8 safety checks |
+| **Rate Limit** | Dual Rate Limiting | Fixed cooldown for standard commands + sliding window for Prism commands |
+| **File** | File Security | Secure permissions, UUID temp files, archive path traversal protection, symlink rejection, zip bomb detection |
+| **Update** | Update Integrity | SHA256 verification, trusted host restrictions, atomic updates with auto-rollback |
+| **Deep Link** | Deep Link Security | Restricted `clash://` protocol entry points and URL schemes |
+| **Build** | CSP & Hardening | Limited script and connection sources; release builds with LTO, strip, `panic=abort` |
 
 ### System Integration
 
@@ -121,18 +135,18 @@ Zephyr includes a rule engine based on `clash-prism-*` crates to enhance Mihomo 
 - `clash://` deep link subscription import
 - Windows UWP loopback exemption
 - Mihomo core, GeoIP/GeoSite data, and Zephyr client updates
-- Auto-start on boot, system notifications, config directory opening
+- Auto-start on boot, system notifications, config directory access
 
 ### UI / UX
 
 - Transparent frameless window with custom title bar
-- **UI Scaling**: 0.5x - 2.0x interface scaling for different resolutions
-- Virtual scroll logs with level filtering and regex search
+- **UI Scaling**: 1x - 1.5x interface scaling for different resolutions
+- Virtual scrolling logs with level filtering and regex search
 - CodeMirror 6 editor with Prism DSL highlighting and completion
 - Proxy node card 3D interaction effects
-- Theme system: Preset themes and custom colors
-- i18n: English base, complete Chinese translation, Japanese/Korean are skeleton translations that fall back to English
-- Frontend event bus, centralized state, and cache layer
+- Theme system: preset themes and custom colors
+- i18n: English baseline, complete Chinese translation, Japanese/Korean partial (fallback to English)
+- Frontend event bus, centralized state, and caching layer
 
 ---
 
@@ -153,26 +167,34 @@ Zephyr includes a rule engine based on `clash-prism-*` crates to enhance Mihomo 
 
 ## Installation
 
-Download the appropriate package for your platform from [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases).
+### System Requirements
 
-Zephyr releases come in three types:
+| Platform | Minimum Version |
+|:--------:|----------------|
+| Windows | Windows 10 1809+ |
+| macOS | macOS 10.15 (Catalina)+ |
+| Linux | glibc 2.31+ (Ubuntu 20.04+, Debian 11+, Fedora 34+) |
+
+**Hardware**: ~300MB RAM, ~50MB disk space (Full version)
+
+### Download
+
+Get the appropriate package from [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases).
 
 | Type | Description | Use Case |
 |:---:|------|---------|
 | **Full** | Includes Mihomo core and GeoIP/GeoSite data | First-time install, offline use |
-| **Lite** | Smaller size, no core resources included | Users with existing local core resources |
-| **Portable** | Extract and run, data stored in program directory | USB drive, multi-device use |
+| **Lite** | Smaller size, no core resources | Already have local core resources |
+| **Portable** | Unzip and run, data stored in program directory | USB drive use, multi-device use |
 
 ### Portable Version Usage
 
 1. Download `Zephyr-windows-portable.zip` or `Zephyr-linux-portable.tar.gz`
 2. Extract to any directory
-3. Ensure `.portable` marker file exists in the directory
+3. Create an empty file named `.portable` in the directory (or it will be auto-created on first run)
 4. Run the executable
 
-> **Portable Limitations**: No auto-start on boot, no in-client updates. See [PORTABLE.md](PORTABLE.md) for details.
-
-Platform support is subject to actual Release artifacts.
+> **Portable Limitations**: No auto-start on boot or in-client updates. See [PORTABLE.md](PORTABLE.md) for details.
 
 ---
 
@@ -198,7 +220,7 @@ pnpm run dev
 pnpm run build
 ```
 
-### Common Verification Commands
+### Verification Commands
 
 ```bash
 pnpm run typecheck
@@ -207,7 +229,7 @@ pnpm run lint
 pnpm run check:i18n
 ```
 
-Desktop package can also be run separately:
+Desktop package commands:
 
 ```bash
 pnpm --filter @zephyr/desktop typecheck
@@ -245,11 +267,42 @@ cargo clippy --all-targets --all-features
 
 ---
 
+## FAQ
+
+<details>
+<summary><strong>Is it safe to use?</strong></summary>
+
+Zephyr implements defense-in-depth security: SSRF protection, script sandboxing, update integrity verification, and more. The codebase is scanned by CodeQL and Semgrep in CI. See [Security Design](#security-design) for details.
+
+However, all content is AI-generated. Security, stability, and performance should not be assumed to be fully verified—please assess risks before use. If you discover security issues, please refer to [SECURITY.md](https://github.com/Juwan-Hwang/Zephyr/blob/main/SECURITY.md).
+</details>
+
+<details>
+<summary><strong>Will my PR be merged?</strong></summary>
+
+This project serves personal use cases first. PRs are not guaranteed to be merged. If you have different needs, forking and modifying directly is usually faster.
+</details>
+
+<details>
+<summary><strong>What's the difference between Full and Lite?</strong></summary>
+
+**Full** includes Mihomo core and GeoIP/GeoSite data—ready for first-time install or offline use. **Lite** is smaller but requires existing local core resources.
+</details>
+
+---
+
+## Community
+
+- [GitHub Issues](https://github.com/Juwan-Hwang/Zephyr/issues) — Bug reports & feature requests
+- [GitHub Releases](https://github.com/Juwan-Hwang/Zephyr/releases) — Changelog & download
+
+> **Note**: This project serves personal use cases first. PRs are not guaranteed to be merged. For specific needs, forking is often faster.
+
+---
+
 ## Contributing
 
-This project primarily serves personal use cases, so not all PRs are guaranteed to be merged. If you have different needs, the most direct approach is usually to fork and modify according to your usage.
-
-Welcome submissions:
+Welcome contributions:
 
 - Reproducible bug reports
 - Security issue feedback
@@ -260,24 +313,20 @@ Welcome submissions:
 
 ## License
 
-This project uses the [MIT License](LICENSE).
+This project uses [MIT License](LICENSE).
 
 ---
 
 ## Acknowledgments
 
-- [Mihomo](https://github.com/MetaCubeX/mihomo)
-- [Tauri](https://tauri.app)
-- [Tailwind CSS](https://tailwindcss.com)
-- [CodeMirror](https://codemirror.net)
-- [clash-prism-*](https://github.com/Juwan-Hwang/Clash-Prism-Engine) — Declarative rule engine for Clash
+- [Mihomo](https://github.com/MetaCubeX/mihomo) — the core
+- [Tauri](https://tauri.app) — the framework
+- [Tailwind CSS](https://tailwindcss.com) — the style
+- [CodeMirror](https://codemirror.net) — the editor
+- [clash-prism-*](https://github.com/Juwan-Hwang/Clash-Prism-Engine) — the rules
 
 ---
 
-<div align="center">
-
 **Conjured by Juwan**
 
-[Back to Top](#zephyr---modern-lightweight-mihomo-gui-client)
-
-</div>
+[Back to Top](#zephyr)
