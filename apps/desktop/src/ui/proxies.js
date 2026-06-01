@@ -832,7 +832,10 @@ async function reportFailover(name, success) {
     try {
         const action = await failoverReport(name, success);
         if (action) {
-            handleFailoverAction(action);
+            (async () => {
+                try { await handleFailoverAction(action); }
+                catch { /* ignore failover action errors */ }
+            })();
         }
     } catch { /* ignore failover IPC errors */ }
 }
@@ -902,8 +905,8 @@ async function handleFailoverAction(action) {
                 try {
                     await closeAllConnections();
                     invalidateProxiesCache();
-                    syncCoreConfig();
-                    renderProxies();
+                    await syncCoreConfig();
+                    await renderProxies();
                 } catch { /* ignore post-failover errors */ }
             })();
         }

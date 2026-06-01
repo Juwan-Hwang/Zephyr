@@ -388,6 +388,9 @@ export const appStore = createStore('zephyr.app', {
     isCoreRunning: false,
     isDnsRewriteEnabled: true, // Actual value synced from settings.json in initDnsRewriteToggle()
 
+    // Failover
+    failoverEnabled: false, // Actual value synced from settings.json in initSettings()
+
     // Config
     currentConfigName: null,
     currentCoreVersion: '',
