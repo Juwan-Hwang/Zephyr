@@ -15,11 +15,11 @@ use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     delete_config, disable_tun_cmd, download_sub, download_sub_batch, ensure_app_storage,
-    fetch_text, get_core_version, init_tun_mode_from_config, kill_all_mihomo_as_root_cmd,
-    kill_mihomo, list_configs, open_config_folder, read_config_file, rename_config,
-    restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root, start_core,
-    stop_core, update_config_url, update_subscription_interval, write_config_file, CoreData,
-    MihomoState,
+    fetch_text, get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
+    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
+    rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
+    start_core, stop_core, update_config_url, update_subscription_interval, write_config_file,
+    CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -834,6 +834,7 @@ pub fn run() {
             set_tun_enabled,
             kill_all_mihomo_as_root_cmd,
             disable_tun_cmd,
+            grant_linux_tun_permission,
             // Re-export tray commands
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
