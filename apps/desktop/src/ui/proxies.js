@@ -870,7 +870,10 @@ async function handleFailoverAction(action) {
             const entry = proxyMap[n];
             if (!entry) return false;
             const nodeType = entry.type?.toLowerCase() || '';
-            return nodeType !== 'reject' && nodeType !== 'compatible' && nodeType !== 'pass';
+            if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
+            const leaf = resolveLeafNode(n, proxyMap);
+            if (leaf === action.failedNode) return false;
+            return true;
         });
 
         if (candidates.length === 0) return;
@@ -882,8 +885,9 @@ async function handleFailoverAction(action) {
             let bestNode = null;
             let bestDelay = Infinity;
             for (const name of candidates) {
-                const entry = proxyMap[name];
-                const history = entry?.history;
+                const leaf = resolveLeafNode(name, proxyMap);
+                const lookupEntry = leaf ? proxyMap[leaf] : proxyMap[name];
+                const history = lookupEntry?.history;
                 if (history && history.length > 0) {
                     const lastDelay = history[history.length - 1]?.delay;
                     if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
