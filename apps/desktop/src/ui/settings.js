@@ -601,6 +601,11 @@ export async function initSettings() {
                     settings.node_scroll = false;
                     successItems.push('nodeScroll');
                 }
+                if (failoverToggle) {
+                    failoverToggle.checked = false;
+                    settings.failover_enabled = false;
+                    appStore.set('failoverEnabled', false);
+                }
                 if (customArgsInput) {
                     customArgsInput.value = '';
                     settings.custom_args = [];

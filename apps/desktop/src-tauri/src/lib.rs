@@ -282,6 +282,7 @@ fn patch_settings(
             patch_field!(theme_mode);
             patch_field!(app_opacity);
             patch_field!(node_scroll);
+            patch_field!(failover_enabled);
         }
         if !modified {
             return Ok(());
