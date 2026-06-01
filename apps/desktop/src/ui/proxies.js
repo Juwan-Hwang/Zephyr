@@ -466,10 +466,27 @@ export async function syncCoreConfig() {
             if (currentUiGroup && proxyMap && !proxyMap[currentUiGroup]) {
                 appStore.set('uiGroupName', null);
             }
-        }
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) {
-            currentNodeEl.textContent = currentNode;
+
+            // Resolve to leaf node and display with suffix if needed
+            const leafNode = resolveLeafNode(currentNode, proxyMap);
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                // Store the group name in data attribute for robust observed node updates
+                currentNodeEl.dataset.group = currentNode;
+                // If leaf node differs from current display name, it means we're showing a group name
+                // Append the actual node name with a dash suffix
+                if (leafNode && leafNode !== currentNode) {
+                    currentNodeEl.textContent = currentNode + ' - ' + leafNode;
+                } else {
+                    currentNodeEl.textContent = leafNode || currentNode;
+                }
+            }
+        } else {
+            // Fallback to Direct when no proxy groups available
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                currentNodeEl.textContent = 'Direct';
+            }
         }
     } catch (e) {
         proxyLogger.warn('Failed to sync current node display', e);
@@ -1634,9 +1651,35 @@ const _renderExplanationBarFromStore = debounce(async () => {
             renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
         } catch { /* ignore */ }
     }
+    // Removed syncCoreConfig() from here - it's already called on proxy switch events and config updates
+    // Calling it here would trigger unnecessary API requests every 2s when observed node changes
 }, 50);
 appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
 appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
+
+// Update capsule display when observed node changes (avoid full syncCoreConfig API calls)
+appStore.subscribe('observedNodeName', () => {
+    try {
+        const observedNodeName = appStore.get('observedNodeName');
+        const observedGroupName = appStore.get('observedGroupName');
+        if (!observedNodeName || !observedGroupName) return;
+        
+        const currentNodeEl = document.getElementById('current-node-name');
+        if (!currentNodeEl) return;
+        
+        // Use data-group attribute to get the current group name (immune to dashes in node names)
+        const currentGroupName = currentNodeEl.dataset.group;
+        if (currentGroupName) {
+            // Only update if showing the observed group or a related auto-select group
+            if (currentGroupName === observedGroupName || currentGroupName.includes('自动') || currentGroupName.toLowerCase().includes('auto')) {
+                // Ensure we only update if the element is currently displaying this group's node
+                if (currentNodeEl.textContent.startsWith(currentGroupName + ' - ')) {
+                    currentNodeEl.textContent = currentGroupName + ' - ' + observedNodeName;
+                }
+            }
+        }
+    } catch { /* ignore */ }
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Smart Auto-Test Scheduler
