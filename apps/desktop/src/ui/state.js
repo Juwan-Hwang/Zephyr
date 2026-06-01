@@ -171,7 +171,7 @@ export function createStore(storeName, initialState, { persist = true, transient
             if (typeof keyOrPartial === 'object' && keyOrPartial !== null) {
                 // Batch update — '*' key, always notify
                 for (const k of Object.keys(keyOrPartial)) {
-                    if (Object.hasOwn(state, k)) {
+                    if (Object.prototype.hasOwnProperty.call(state, k)) {
                         state[k] = keyOrPartial[k];
                         scheduleNotify(k);
                     } else {
@@ -180,7 +180,7 @@ export function createStore(storeName, initialState, { persist = true, transient
                 }
             } else {
                 const key = keyOrPartial;
-                if (Object.hasOwn(state, key)) {
+                if (Object.prototype.hasOwnProperty.call(state, key)) {
                     // Skip notification when value is unchanged
                     if (!Object.is(state[key], value)) {
                         state[key] = value;
@@ -205,7 +205,7 @@ export function createStore(storeName, initialState, { persist = true, transient
          */
         update(key, updater) {
             if (frozen) return;
-            if (!Object.hasOwn(state, key)) {
+            if (!Object.prototype.hasOwnProperty.call(state, key)) {
                 storeLogger.warn(`update() ignored unknown key "${key}" — not in initial state`);
                 return;
             }
