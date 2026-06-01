@@ -20,7 +20,7 @@ import { createRovingTabindex } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
 import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
-import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig } from './prism.js';
+import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig, failoverReport } from './prism.js';
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
@@ -672,13 +672,14 @@ export function initProxyControls() {
                     // Report to failover engine if enabled
                     if (appStore.get('failoverEnabled')) {
                         const success = delay > 0 && delay < 999999;
-                        try {
-                            const { failoverReport } = await import('./prism.js');
-                            const action = await failoverReport(name, success);
-                            if (action) {
-                                handleFailoverAction(action);
-                            }
-                        } catch { /* ignore failover IPC errors */ }
+                        (async () => {
+                            try {
+                                const action = await failoverReport(name, success);
+                                if (action) {
+                                    handleFailoverAction(action);
+                                }
+                            } catch { /* ignore failover IPC errors */ }
+                        })();
                     }
                 };
 
@@ -836,7 +837,8 @@ async function handleFailoverAction(action) {
     if (!group?.all?.length) return;
 
     const currentNode = group.now;
-    if (currentNode !== action.failedNode) return;
+    const activeLeaf = resolveLeafNode(currentNode, proxyMap);
+    if ((activeLeaf || currentNode) !== action.failedNode) return;
 
     const candidates = group.all.filter(n => {
         if (n === action.failedNode) return false;
@@ -859,7 +861,7 @@ async function handleFailoverAction(action) {
             const history = entry?.history;
             if (history && history.length > 0) {
                 const lastDelay = history[history.length - 1]?.delay;
-                if (lastDelay && lastDelay > 0 && lastDelay < bestDelay) {
+                if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
                     bestDelay = lastDelay;
                     bestNode = name;
                 }
@@ -870,11 +872,8 @@ async function handleFailoverAction(action) {
 
     const success = await switchProxy(uiGroupName, targetNode);
     if (success) {
-        const t = translations[appStore.get('currentLang')] || {};
         showNotification(
-            (t.failoverSwitched || 'Failover: switched from ${failed} to ${target}')
-                .replace('${failed}', action.failedNode)
-                .replace('${target}', targetNode),
+            t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
             'success'
         );
         await closeAllConnections();
@@ -1834,13 +1833,14 @@ const _autoTest = {
                         }
                         // Report to failover engine if enabled
                         if (appStore.get('failoverEnabled')) {
-                            try {
-                                const { failoverReport } = await import('./prism.js');
-                                const action = await failoverReport(name, success);
-                                if (action) {
-                                    handleFailoverAction(action);
-                                }
-                            } catch { /* ignore failover IPC errors */ }
+                            (async () => {
+                                try {
+                                    const action = await failoverReport(name, success);
+                                    if (action) {
+                                        handleFailoverAction(action);
+                                    }
+                                } catch { /* ignore failover IPC errors */ }
+                            })();
                         }
                     } catch { /* skip individual failures */ }
                 }
