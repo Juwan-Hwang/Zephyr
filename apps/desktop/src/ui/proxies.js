@@ -466,10 +466,21 @@ export async function syncCoreConfig() {
             if (currentUiGroup && proxyMap && !proxyMap[currentUiGroup]) {
                 appStore.set('uiGroupName', null);
             }
-        }
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) {
-            currentNodeEl.textContent = currentNode;
+
+            // Resolve to leaf node and display with suffix if needed
+            const leafNode = resolveLeafNode(currentNode, proxyMap);
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                // Store the group name in data attribute for robust observed node updates
+                currentNodeEl.dataset.group = currentNode;
+                currentNodeEl.textContent = formatNodeDisplayName(currentNode, leafNode);
+            }
+        } else {
+            // Fallback to Direct when no proxy groups available
+            const currentNodeEl = document.getElementById('current-node-name');
+            if (currentNodeEl) {
+                currentNodeEl.textContent = 'Direct';
+            }
         }
     } catch (e) {
         proxyLogger.warn('Failed to sync current node display', e);
@@ -1634,9 +1645,69 @@ const _renderExplanationBarFromStore = debounce(async () => {
             renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
         } catch { /* ignore */ }
     }
+    // Removed syncCoreConfig() from here - it's already called on proxy switch events and config updates
+    // Calling it here would trigger unnecessary API requests every 2s when observed node changes
 }, 50);
 appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
 appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
+
+// Helper to format the display name with an optional suffix
+function formatNodeDisplayName(group, leaf) {
+    return (leaf && leaf !== group) ? `${group} - ${leaf}` : (leaf || group);
+}
+
+// Check if observed node is in the current group (supports nested groups)
+const isNodeInGroup = (node, group, proxyMap, visited = new Set()) => {
+    if (!group || !proxyMap || visited.has(group)) return false;
+    visited.add(group);
+    const entry = proxyMap[group];
+    if (!entry || !entry.all) return false;
+    if (entry.all.includes(node)) return true;
+    return entry.all.some(member => isNodeInGroup(node, member, proxyMap, visited));
+};
+
+// Update capsule display when observed node or group changes (avoid full syncCoreConfig API calls)
+const updateCapsuleDisplay = () => {
+    const observedNodeName = appStore.get('observedNodeName');
+    const observedGroupName = appStore.get('observedGroupName');
+    
+    const currentNodeEl = document.getElementById('current-node-name');
+    if (!currentNodeEl) return;
+    
+    const currentGroupName = currentNodeEl.dataset.group;
+    if (!currentGroupName) return;
+
+    getProxiesCached().then(data => {
+        // Verify the group hasn't changed during the async API call to prevent race conditions
+        if (currentNodeEl.dataset.group !== currentGroupName) return;
+
+        const proxyMap = data?.proxies;
+        
+        // If no observed node or group, revert to default leaf node display
+        if (!observedNodeName || !observedGroupName) {
+            const leafNode = resolveLeafNode(currentGroupName, proxyMap);
+            currentNodeEl.textContent = formatNodeDisplayName(currentGroupName, leafNode);
+            return;
+        }
+
+        // Check if observed node is related to current group
+        // Only use exact group match or membership check
+        const isRelated = currentGroupName === observedGroupName ||
+            (proxyMap && isNodeInGroup(observedNodeName, currentGroupName, proxyMap));
+
+        if (isRelated) {
+            // Dynamically append observed node name when it differs from group name
+            currentNodeEl.textContent = formatNodeDisplayName(currentGroupName, observedNodeName);
+        } else {
+            // Revert to default leaf node display if not related
+            const leafNode = resolveLeafNode(currentGroupName, proxyMap);
+            currentNodeEl.textContent = formatNodeDisplayName(currentGroupName, leafNode);
+        }
+    }).catch(() => {});
+};
+
+appStore.subscribe('observedNodeName', updateCapsuleDisplay);
+appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Smart Auto-Test Scheduler
