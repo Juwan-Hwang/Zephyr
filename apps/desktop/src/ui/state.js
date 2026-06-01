@@ -8,6 +8,9 @@
  */
 
 import { detectSystemLanguage } from '../i18n.js';
+import { createLogger } from '../utils/logger.js';
+
+const storeLogger = createLogger('Store', 'warn');
 
 function lsGet(key) {
     try {
@@ -171,6 +174,8 @@ export function createStore(storeName, initialState, { persist = true, transient
                     if (k in state) {
                         state[k] = keyOrPartial[k];
                         scheduleNotify(k);
+                    } else {
+                        storeLogger.warn(`set() ignored unknown key "${k}" — not in initial state`);
                     }
                 }
             } else {
@@ -181,6 +186,8 @@ export function createStore(storeName, initialState, { persist = true, transient
                         state[key] = value;
                         scheduleNotify(key);
                     }
+                } else {
+                    storeLogger.warn(`set() ignored unknown key "${key}" — not in initial state`);
                 }
             }
 
@@ -198,7 +205,10 @@ export function createStore(storeName, initialState, { persist = true, transient
          */
         update(key, updater) {
             if (frozen) return;
-            if (!(key in state)) return;
+            if (!(key in state)) {
+                storeLogger.warn(`update() ignored unknown key "${key}" — not in initial state`);
+                return;
+            }
 
             const prev = state[key];
             const next = updater(prev);
