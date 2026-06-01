@@ -247,6 +247,10 @@ pub fn kill_mihomo() {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn ensure_executable(path: &Path) -> Result<(), String> {
     let metadata = fs::metadata(path).map_err(|e| format!("Failed to read core metadata: {e}"))?;
+    let mode = metadata.permissions().mode();
+    if mode & 0o100 != 0 {
+        return Ok(());
+    }
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)
