@@ -125,8 +125,7 @@ export function initTunToggle() {
             if (spinner) spinner.classList.add('hidden');
             appStore.set('isNetworkUpdating', false);
             try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
-            // Reactive: subscribe() in initReactiveBindings() handles tray updates
-        } catch {
+        } catch (_err) {
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
             if (statusText) {
@@ -134,10 +133,64 @@ export function initTunToggle() {
                 statusText.classList.remove('text-accent');
             }
             if (spinner) spinner.classList.add('hidden');
-            showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
+
+            const isLinux = navigator.userAgent.toLowerCase().includes('linux');
+            if (isLinux && enable) {
+                const grantPermission = confirm(
+                    t.tunLinuxPermissionPrompt ||
+                    'TUN mode requires network capabilities and polkit rules.\nGrant permission now?'
+                );
+                if (grantPermission) {
+                    let permissionGranted = false;
+                    try {
+                        await invoke(COMMANDS.GRANT_LINUX_PERMISSION);
+                        permissionGranted = true;
+                    } catch (grantErr) {
+                        if (grantErr === 'canceled') {
+                            showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+                        } else {
+                            showNotification(t.tunLinuxPermissionFailed || 'Failed to grant permission', 'error');
+                        }
+                    }
+
+                    if (permissionGranted) {
+                        try {
+                            showNotification(t.tunLinuxPermissionGranted || 'Permission granted. Restarting core...', 'success');
+                            await saveSetting('tun_enabled', true);
+                            try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
+                            const settings = await invoke(COMMANDS.GET_SETTINGS);
+                            const currentConfig = settings.last_config || 'config.yaml';
+                            const customArgs = settings.custom_args || [];
+                            const coreResult = await restartCore(currentConfig, customArgs);
+                            if (coreResult?.secret) {
+                                setSecret(coreResult.secret);
+                                setWsSecret(coreResult.secret);
+                            }
+                            await closeAllConnections();
+
+                            appStore.set('isTunEnabled', true);
+                            toggle.checked = true;
+                            if (statusText) {
+                                statusText.textContent = t.proxyActive;
+                                statusText.classList.add('text-accent');
+                            }
+                            showNotification(t.configSuccess, 'success');
+                            appStore.set('isNetworkUpdating', false);
+                            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
+                            return;
+                        } catch (retryErr) {
+                            tunLogger.error('TUN retry failed after permission grant', retryErr);
+                            await saveSetting('tun_enabled', false);
+                            showNotification(t.tunFailed || 'TUN mode failed after permission grant', 'error');
+                        }
+                    }
+                }
+            } else {
+                showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
+            }
+
             appStore.set('isNetworkUpdating', false);
             try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
-            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         }
     };
 }
