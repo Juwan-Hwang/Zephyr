@@ -17,6 +17,10 @@
 - **Proxy Modes** — Rule-based routing, Global proxy, Direct connection
 - **System Proxy** — Cross-platform (Windows/macOS/Linux with GNOME/KDE/XFCE support), automatic bypass for private networks
 - **TUN Mode** — Virtual network interface (Windows/macOS/Linux), atomic lock, auto-recovery on failure, auto-inject dns-hijack
+- **Linux GPU Acceleration** — WebKitGTK GPU compositing with Wayland support, hardware-accelerated rendering
+- **Linux AppImage** — linuxdeploy-plugin-gtk packaging for improved GTK/WebKitGTK compatibility
+- **Linux Custom Titlebar** — Borderless window with custom traffic light buttons (close/minimize/maximize), consistent with Windows/macOS
+- **AUR Auto-Update** — Automatic Arch User Repository package update on release publish
 - **Connection Management** — Real-time connection list with details and close capability
 - **Traffic Statistics** — Real-time upload/download speed and historical trends
 - **Portable Mode** — Extract-and-run, data stored in program directory, `.portable` marker file
