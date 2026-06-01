@@ -88,19 +88,24 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
             nodeWheelLogger.warn('Failed to save proxy selection', e);
         }
 
-        const updatedNode = await waitForCurrentNode(targetGroup, name);
-        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) currentNodeEl.textContent = updatedNode || name;
-        const proxiesPage = document.querySelector('[data-page="proxies"]');
-        if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
-            import('./proxies.js').then(m => m.renderProxies());
-        }
+        // Wait for node switch to complete, then let syncCoreConfig() handle display
+        // Run as non-blocking IIFE to prevent UI lag
+        (async () => {
+            try {
+                await waitForCurrentNode(targetGroup, name);
+                // Let syncCoreConfig() handle the display update with leaf node resolution
+                const m = await import('./proxies.js');
+                await m.syncCoreConfig();
+                const proxiesPage = document.querySelector('[data-page="proxies"]');
+                if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+                    await m.renderProxies();
+                }
+            } catch (error) {
+                nodeWheelLogger.error('Failed to update UI after node switch:', error);
+            }
+        })();
     } else {
-        import('./proxies.js').then(m => m.syncCoreConfig());
-        const revertedNode = await waitForCurrentNode(targetGroup, null);
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl && revertedNode) currentNodeEl.textContent = revertedNode;
+        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
     }
 }
 
