@@ -285,10 +285,8 @@ export async function initTrayEventListeners() {
                 }
 
                 await closeAllConnections();
-                import('./proxies.js').then(m => m.syncCoreConfig());
-
-                const currentNodeEl = document.getElementById('current-node-name');
-                if (currentNodeEl) currentNodeEl.textContent = proxy;
+                // Let syncCoreConfig() handle the display update with leaf node resolution
+                import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
 
                 const proxiesPage = document.querySelector('[data-page="proxies"]');
                 if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {

@@ -10,10 +10,12 @@
  * @module ui/observed-group
  */
 
-import { getConnections, getProxies } from '../api.js';
+import { getConnections } from '../api.js';
+import { getProxiesCached } from './cache.js';
 import { isWritableGroupType } from './proxy-groups.js';
 import { appStore } from './state.js';
 import { observedGroupLogger } from '../utils/logger.js';
+import { Bus, Events } from './events.js';
 
 /** Special groups to exclude from observed group detection (DIRECT, REJECT, etc.) */
 const SPECIAL_GROUPS = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE', '🎯 DIRECT']);
@@ -26,14 +28,20 @@ const MIN_FREQ = 3;
 const MIN_RATIO = 0.3;
 /** Number of consecutive consistent observations to confirm. */
 const CONSECUTIVE_K = 3;
-/** Polling interval in ms. */
-const POLL_INTERVAL = 5000;
+/** Polling interval in ms (optimized for responsiveness). */
+const POLL_INTERVAL = 2000;
 
 let _timer = null;
 let _polling = false;
 let _active = false;
 let _consecutiveCount = 0;
 let _lastCandidate = null;
+/** Module-level cache for static proxy group structures */
+let _staticProxiesCache = null;
+
+// Invalidate cache on config/core changes
+Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
+Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
 
 /**
  * Compute the observed group and node from active connections.
@@ -213,8 +221,12 @@ async function _poll() {
 }
 
 async function _getProxiesData() {
+    if (_staticProxiesCache) return _staticProxiesCache;
     try {
-        return await getProxies();
+        // Cache proxy data at module level to avoid redundant API calls during 2s polling
+        // Proxy group structures are static and only change on config/core updates
+        _staticProxiesCache = await getProxiesCached();
+        return _staticProxiesCache;
     } catch {
         return null;
     }
