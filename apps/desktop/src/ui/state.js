@@ -8,6 +8,9 @@
  */
 
 import { detectSystemLanguage } from '../i18n.js';
+import { createLogger } from '../utils/logger.js';
+
+const storeLogger = createLogger('Store', 'warn');
 
 function lsGet(key) {
     try {
@@ -168,19 +171,23 @@ export function createStore(storeName, initialState, { persist = true, transient
             if (typeof keyOrPartial === 'object' && keyOrPartial !== null) {
                 // Batch update — '*' key, always notify
                 for (const k of Object.keys(keyOrPartial)) {
-                    if (k in state) {
+                    if (Object.prototype.hasOwnProperty.call(state, k)) {
                         state[k] = keyOrPartial[k];
                         scheduleNotify(k);
+                    } else {
+                        storeLogger.warn(`[${storeName}] set() ignored unknown key "${k}" — not in initial state`);
                     }
                 }
             } else {
                 const key = keyOrPartial;
-                if (key in state) {
+                if (Object.prototype.hasOwnProperty.call(state, key)) {
                     // Skip notification when value is unchanged
                     if (!Object.is(state[key], value)) {
                         state[key] = value;
                         scheduleNotify(key);
                     }
+                } else {
+                    storeLogger.warn(`[${storeName}] set() ignored unknown key "${key}" — not in initial state`);
                 }
             }
 
@@ -198,7 +205,10 @@ export function createStore(storeName, initialState, { persist = true, transient
          */
         update(key, updater) {
             if (frozen) return;
-            if (!(key in state)) return;
+            if (!Object.prototype.hasOwnProperty.call(state, key)) {
+                storeLogger.warn(`[${storeName}] update() ignored unknown key "${key}" — not in initial state`);
+                return;
+            }
 
             const prev = state[key];
             const next = updater(prev);
