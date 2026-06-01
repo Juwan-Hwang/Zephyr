@@ -8,7 +8,7 @@ import { getProxies, switchProxy, abortLatencyTests, closeAllConnections } from 
 import { nodeWheelLogger } from '../utils/logger.js';
 import { translations, currentLang } from '../i18n.js';
 import { fetchProxyGroups } from './proxy-groups.js';
-import { sortProxiesByLatency } from './proxies.js';
+import { sortProxiesByLatency, syncCoreConfig, renderProxies } from './proxies.js';
 import { appStore } from './state.js';
 import { invalidateProxiesCache, getSettingsCached } from './cache.js';
 import { saveProxySelection } from './proxy-memory.js';
@@ -70,6 +70,13 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     closeWheel();
     abortLatencyTests();
 
+    // Use session counter to prevent race conditions on rapid switches
+    // Increment BEFORE async operations to maintain click order
+    if (!handleWheelProxySwitch.sessionCounter) {
+        handleWheelProxySwitch.sessionCounter = 0;
+    }
+    const currentSession = ++handleWheelProxySwitch.sessionCounter;
+
     // Use uiGroupName from appStore for accurate group targeting
     const targetGroup = appStore.get('uiGroupName') || mainGroup;
     const success = await switchProxy(targetGroup, name);
@@ -88,19 +95,25 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
             nodeWheelLogger.warn('Failed to save proxy selection', e);
         }
 
-        const updatedNode = await waitForCurrentNode(targetGroup, name);
-        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl) currentNodeEl.textContent = updatedNode || name;
-        const proxiesPage = document.querySelector('[data-page="proxies"]');
-        if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
-            import('./proxies.js').then(m => m.renderProxies());
-        }
+        // Wait for node switch to complete, then let syncCoreConfig() handle display
+        // Run as non-blocking IIFE to prevent UI lag
+        (async () => {
+            try {
+                await waitForCurrentNode(targetGroup, name);
+                if (handleWheelProxySwitch.sessionCounter !== currentSession) return;
+                // Let syncCoreConfig() handle the display update with leaf node resolution
+                await syncCoreConfig();
+                if (handleWheelProxySwitch.sessionCounter !== currentSession) return;
+                const proxiesPage = document.querySelector('[data-page="proxies"]');
+                if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+                    await renderProxies();
+                }
+            } catch (error) {
+                nodeWheelLogger.error('Failed to update UI after node switch:', error);
+            }
+        })();
     } else {
-        import('./proxies.js').then(m => m.syncCoreConfig());
-        const revertedNode = await waitForCurrentNode(targetGroup, null);
-        const currentNodeEl = document.getElementById('current-node-name');
-        if (currentNodeEl && revertedNode) currentNodeEl.textContent = revertedNode;
+        syncCoreConfig().catch(() => {});
     }
 }
 
