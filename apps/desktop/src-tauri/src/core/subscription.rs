@@ -828,10 +828,26 @@ fn redact_url_in_string(s: &str) -> String {
         };
         let start = start_idx + offset;
         // Find end of URL (whitespace or end of string)
-        let url_end = result[start..]
+        let mut url_end = result[start..]
             .find(|c: char| c.is_whitespace())
             .map(|pos| start + pos)
             .unwrap_or(result.len());
+        // Trim trailing punctuation/delimiters that are likely not part of the URL
+        while url_end > start {
+            let last_char = result[..url_end].chars().next_back();
+            if let Some(c) = last_char {
+                if matches!(
+                    c,
+                    ')' | ']' | '}' | '>' | '"' | '\'' | ',' | '.' | ';' | ':'
+                ) {
+                    url_end -= c.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
         let url_str = &result[start..url_end];
         if let Ok(mut url) = reqwest::Url::parse(url_str) {
             url.set_query(None);
