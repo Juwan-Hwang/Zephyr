@@ -58,7 +58,9 @@ import { Bus, Events } from './ui/events.js';
 /** @type {any} */
 const _win = /** @type {any} */ (window);
 
+/** @type {{ close: Function, reconnect: Function, isMaxRetriesReached: Function } | null} */
 let _trafficWsHandle = null;
+/** @type {Function | null} */
 let _configParseErrorListener = null;
 
 // ═══════════════════════════════════════════════════════════════════

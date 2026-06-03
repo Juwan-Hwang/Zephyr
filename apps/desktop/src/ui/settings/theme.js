@@ -22,7 +22,7 @@ import { saveSetting } from '../settings-helpers.js';
  * @param {string|null} opts.savedThemeMode - The theme mode from backend settings ("light", "dark", "auto").
  * @param {number|null} opts.savedOpacity - The opacity value from backend settings (0-100).
  * @param {HTMLElement|null} opts.appMainContainer - The main app container element.
- * @param {HTMLElement|null} opts.appTitleIcon - The app title icon element.
+ * @param {HTMLImageElement|null} opts.appTitleIcon - The app title icon element.
  * @param {NodeListOf<HTMLElement>} opts.themeCircles - All [data-theme] circle elements.
  * @param {HTMLInputElement|null} opts.customColorInput - The custom theme color input.
  * @param {HTMLInputElement|null} opts.opacitySlider - The opacity slider input.
@@ -166,13 +166,15 @@ export function initThemeSettings({
         }
     };
     // Only register once -- prevent duplicate listeners on re-init
-    if (!systemThemeMedia._zephyrBound) {
-        if (typeof systemThemeMedia.addEventListener === 'function') {
-            systemThemeMedia.addEventListener('change', systemThemeListener);
-        } else if (typeof systemThemeMedia.addListener === 'function') {
-            systemThemeMedia.addListener(systemThemeListener);
+    /** @type {MediaQueryList & { _zephyrBound?: boolean }} */
+    const media = systemThemeMedia;
+    if (!media._zephyrBound) {
+        if (typeof media.addEventListener === 'function') {
+            media.addEventListener('change', systemThemeListener);
+        } else if (typeof media.addListener === 'function') {
+            media.addListener(systemThemeListener);
         }
-        systemThemeMedia._zephyrBound = true;
+        media._zephyrBound = true;
     }
 
     applyColorTheme(savedTheme);
