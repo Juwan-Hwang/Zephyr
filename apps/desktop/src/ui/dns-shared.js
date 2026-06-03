@@ -272,7 +272,7 @@ export async function initDnsRewriteToggle() {
                 // Animate in
                 requestAnimationFrame(() => {
                     const inner = modal.querySelector('.glass-card');
-                    if (inner) {
+                    if (inner instanceof HTMLElement) {
                         inner.style.transform = 'scale(0.96)';
                         inner.style.opacity = '0';
                         requestAnimationFrame(() => {
@@ -291,7 +291,7 @@ export async function initDnsRewriteToggle() {
     function closeModal() {
         if (!modal) return;
         const inner = modal.querySelector('.glass-card');
-        if (inner) {
+        if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';
             inner.style.transform = 'scale(0.96)';
             inner.style.opacity = '0';

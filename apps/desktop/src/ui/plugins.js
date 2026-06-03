@@ -34,7 +34,7 @@ import { t } from '../i18n.js';
 import { showNotification, showModal } from './notifications.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
 import { escapeAttr } from '../utils/sanitize.js';
-import { EditorView, StateEffect } from '../../cm6.bundle.js';
+import { EditorView, StateEffect } from '../cm6.bundle.js';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Internal helpers
@@ -44,9 +44,11 @@ import { EditorView, StateEffect } from '../../cm6.bundle.js';
  * Get override card elements that are direct children of the list container.
  * IMPORTANT: Cards contain buttons with data-id, so querySelectorAll('[data-id]')
  * would match those too (4 matches per card). We must only select top-level cards.
+ * @param {HTMLElement} container
+ * @returns {HTMLElement[]}
  */
 function getOverrideCards(container) {
-    return [...container.children].filter(c => c.dataset?.id);
+    return /** @type {HTMLElement[]} */ ([...container.children].filter(c => c instanceof HTMLElement && c.dataset?.id));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -59,22 +61,25 @@ let activeOverrideId = '';
 /** Currently active override name (for editor title). */
 let activeOverrideName = '';
 
-/** Current override items list (for reorder). */
+/**
+ * Current override items list (for reorder).
+ * @type {Array<{id: string, enabled?: boolean, name?: string, ext?: string, global?: boolean, profileIds?: string[], type?: string}>}
+ */
 let overrideItems = [];
 
-/** Drag state for mouse-based reorder (HTML5 DnD unreliable in Tauri WebView). */
+/** Drag state for mouse-based reorder (HTML5 DnD unreliable in Tauri WebView). @type {null|{el: HTMLElement, id: string, startY: number, moved: boolean, elHeight?: number, offsetY?: number, clone?: HTMLElement, currentIndex?: number, cardMids?: number[], cards?: HTMLElement[], targetIndex?: number}} */
 let _dragState = null;
 
-/** CodeMirror EditorView for the override script editor (null when not active). */
+/** CodeMirror EditorView for the override script editor (null when not active). @type {EditorView|null} */
 let scriptEditorView = null;
 
-/** CodeMirror EditorView for the fullscreen editor (null when not active). */
+/** CodeMirror EditorView for the fullscreen editor (null when not active). @type {EditorView|null} */
 let fullscreenEditorView = null;
 
-/** Search filter string. */
+/** Search filter string. @type {string} */
 let searchFilter = '';
 
-/** Current active override extension for fullscreen editor. */
+/** Current active override extension for fullscreen editor. @type {string} */
 let activeOverrideExt = '';
 
 /** Whether fullscreen editor is currently open. */
@@ -101,6 +106,7 @@ export function initPlugins() {
     const scriptOutputChevron = document.getElementById('plugin-script-output-chevron');
     // ── Script output collapsible ────────────────────────────
     scriptOutputToggle?.addEventListener('click', () => {
+        if (!scriptOutput) return;
         const isHidden = scriptOutput.style.display === 'none';
         scriptOutput.style.display = isHidden ? '' : 'none';
         if (scriptOutputChevron) {
@@ -126,7 +132,7 @@ export function initPlugins() {
         // Animate in
         requestAnimationFrame(() => {
             const inner = panel.querySelector('.plugin-panel');
-            if (inner) {
+            if (inner instanceof HTMLElement) {
                 inner.style.transform = 'scale(0.96)';
                 inner.style.opacity = '0';
                 requestAnimationFrame(() => {
@@ -141,7 +147,7 @@ export function initPlugins() {
 
     const closePanel = () => {
         const inner = panel.querySelector('.plugin-panel');
-        if (inner) {
+        if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';
             inner.style.transform = 'scale(0.96)';
             inner.style.opacity = '0';
@@ -157,8 +163,12 @@ export function initPlugins() {
     // ── Header: search ──────────────────────────────────────────────
     const searchInput = document.getElementById('plugin-search-input');
     searchInput?.addEventListener('input', (e) => {
-        searchFilter = e.target.value?.toLowerCase() ?? '';
-        renderOverrideCards(pluginList, overrideItems, searchFilter);
+        if (e.target instanceof HTMLInputElement) {
+            searchFilter = e.target.value.toLowerCase();
+        } else {
+            searchFilter = '';
+        }
+        if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
     });
 
     // ── Header: new override dropdown ─────────────────────────────
@@ -182,7 +192,7 @@ export function initPlugins() {
     // ── Script validate ─────────────────────────────────────────────
     scriptValidateBtn?.addEventListener('click', async () => {
         if (!scriptStatus) return;
-        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : (scriptEditor?.value ?? '')).trim();
+        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : ((scriptEditor instanceof HTMLInputElement || scriptEditor instanceof HTMLTextAreaElement) ? scriptEditor.value : '')).trim();
         if (!source) return;
 
         scriptStatus.textContent = t('overrideValidating') ?? 'Validating...';
@@ -214,7 +224,7 @@ export function initPlugins() {
     // ── Script run (save + execute) ──────────────────────────────
     scriptRunBtn?.addEventListener('click', async () => {
         if (!scriptOutput || !activeOverrideId) return;
-        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : (scriptEditor?.value ?? '')).trim();
+        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : ((scriptEditor instanceof HTMLInputElement || scriptEditor instanceof HTMLTextAreaElement) ? scriptEditor.value : '')).trim();
         if (!source) return;
 
         scriptOutput.textContent = '';
@@ -300,6 +310,9 @@ export function initPlugins() {
 //  New override dropdown
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {HTMLElement} _panel
+ */
 function setupNewOverrideDropdown(_panel) {
     const newBtn = document.getElementById('plugin-new-btn');
     const dropdown = document.getElementById('plugin-new-dropdown');
@@ -318,7 +331,10 @@ function setupNewOverrideDropdown(_panel) {
     dropdown.addEventListener('click', (e) => {
         e.stopPropagation();
         // Use closest() to handle clicks on nested elements (e.g., <span> inside <button>)
-        const action = e.target.closest('[data-action]')?.dataset.action;
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+        const actionEl = target.closest('[data-action]');
+        const action = actionEl instanceof HTMLElement ? actionEl.dataset.action : undefined;
         if (action === 'new-js') createNewOverride('js');
         else if (action === 'new-prism') createNewOverride('prism.yaml');
         else if (action === 'import-url') importFromUrl();
@@ -328,6 +344,9 @@ function setupNewOverrideDropdown(_panel) {
     });
 }
 
+/**
+ * @param {'js' | 'prism.yaml'} ext
+ */
 async function createNewOverride(ext) {
     const name = await showModal(
         t('overrideNamePrompt') ?? 'Enter override name:',
@@ -529,16 +548,16 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     // Auto-detect: if all profiles are checked, switch to global mode
     const checkAllSelected = () => {
-        const allCbs = [...profileContainer.querySelectorAll('.profile-scope-cb')];
+        const allCbs = /** @type {HTMLInputElement[]} */ ([...profileContainer.querySelectorAll('.profile-scope-cb')]);
         if (allCbs.length === 0) return;
-        const allChecked = allCbs.every(cb => cb.checked);
+        const allChecked = allCbs.every(cb => cb instanceof HTMLInputElement && cb.checked);
         if (allChecked && !globalCheck.checked) {
             globalCheck.checked = true;
             updateVisibility();
         }
     };
     profileContainer.addEventListener('change', (e) => {
-        if (/** @type {HTMLInputElement} */(e.target).classList.contains('profile-scope-cb')) {
+        if (e.target instanceof HTMLInputElement && e.target.classList.contains('profile-scope-cb')) {
             checkAllSelected();
         }
     });
@@ -557,8 +576,8 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
         cancelBtn.disabled = true;
 
         // Collect selected profiles; auto-upgrade to global if all are checked
-        const allCbs = [...profileContainer.querySelectorAll('.profile-scope-cb')];
-        const selectedProfiles = allCbs.filter(cb => cb.checked).map(cb => cb.dataset.profileName);
+        const allCbs = /** @type {HTMLInputElement[]} */ ([...profileContainer.querySelectorAll('.profile-scope-cb')]);
+        const selectedProfiles = allCbs.filter(cb => cb.checked).map(cb => cb.dataset.profileName ?? '');
         const isGlobal = globalCheck.checked || selectedProfiles.length === allCbs.length;
 
         try {
@@ -595,6 +614,9 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 //  Bulk toggle
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {boolean} enabled
+ */
 async function bulkToggle(enabled) {
     try {
         for (const item of overrideItems) {
@@ -618,8 +640,8 @@ async function loadOverrides() {
 
     // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
     // Bind document-level listeners only once
-    if (!pluginList._dragBound) {
-        pluginList._dragBound = true;
+    if (!(/** @type {Record<string, any>} */ (pluginList)._dragBound)) {
+        /** @type {Record<string, any>} */ (pluginList)._dragBound = true;
 
         // body has transform: scale(var(--ui-scale)), so CSS pixel values
         // are scaled when rendered. getBoundingClientRect/clientY return
@@ -629,11 +651,13 @@ async function loadOverrides() {
             parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
 
         pluginList.addEventListener('mousedown', (e) => {
-            const card = e.target.closest('[data-id]');
-            if (!card || e.button !== 0) return;
+            const target = e.target;
+            if (!(target instanceof Element)) return;
+            const card = target.closest('[data-id]');
+            if (!(card instanceof HTMLElement) || e.button !== 0) return;
             // Don't start drag from buttons
-            if (e.target.closest('button')) return;
-            _dragState = { el: card, id: card.dataset.id, startY: e.clientY, moved: false };
+            if (target.closest('button')) return;
+            _dragState = { el: card, id: card.dataset.id ?? '', startY: e.clientY, moved: false };
         });
 
         // space-y-2 = 0.5rem = 8px (CSS pixels, not viewport pixels)
@@ -642,6 +666,8 @@ async function loadOverrides() {
         document.addEventListener('mousemove', (e) => {
             if (!_dragState) return;
             if (!_dragState.moved && Math.abs(e.clientY - _dragState.startY) < 5) return;
+
+            const curIdx = _dragState.currentIndex ?? getOverrideCards(pluginList).indexOf(_dragState.el);
 
             // First move — create floating clone & cache card positions
             if (!_dragState.moved) {
@@ -654,7 +680,7 @@ async function loadOverrides() {
                 _dragState.el.style.opacity = '0';
                 _dragState.el.style.pointerEvents = 'none';
 
-                const clone = _dragState.el.cloneNode(true);
+                const clone = /** @type {HTMLElement} */ (_dragState.el.cloneNode(true));
                 clone.style.cssText = `
                     position: fixed;
                     left: ${rect.left / uiScale}px;
@@ -684,14 +710,15 @@ async function loadOverrides() {
 
                 // Apply transition to all non-dragged cards once
                 cards.forEach((card, i) => {
-                    if (i === _dragState.currentIndex) return;
+                    if (i === curIdx) return;
                     card.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0.2, 1)';
                 });
             }
 
             // Move clone with mouse (e.clientY is viewport px → convert to CSS px)
+            if (!_dragState.clone) return;
             const uiScale = getUiScale();
-            const cloneY = (e.clientY / uiScale) - _dragState.offsetY;
+            const cloneY = (e.clientY / uiScale) - (_dragState.offsetY ?? 0);
             _dragState.clone.style.top = cloneY + 'px';
 
             // Calculate insert position using cached midpoints
@@ -700,22 +727,24 @@ async function loadOverrides() {
             const relativeY = (e.clientY - listRect.top) / uiScale + pluginList.scrollTop;
 
             let insertAfter = -1;
-            for (let i = 0; i < _dragState.cardMids.length; i++) {
-                if (i === _dragState.currentIndex) continue;
-                if (relativeY > _dragState.cardMids[i]) {
+            const cardMids = _dragState.cardMids ?? [];
+            for (let i = 0; i < cardMids.length; i++) {
+                if (i === curIdx) continue;
+                if (relativeY > cardMids[i]) {
                     insertAfter = i;
                 }
             }
             _dragState.targetIndex = insertAfter;
 
             // Animate cards to make room — only update transform (not transition)
-            _dragState.cards.forEach((card, i) => {
-                if (i === _dragState.currentIndex) return;
+            const elHeight = _dragState.elHeight ?? 0;
+            _dragState.cards?.forEach((card, i) => {
+                if (i === curIdx) return;
                 let offset = 0;
-                if (_dragState.currentIndex < i && i <= insertAfter) {
-                    offset = -(_dragState.elHeight + gap);
-                } else if (insertAfter < i && i < _dragState.currentIndex) {
-                    offset = _dragState.elHeight + gap;
+                if (curIdx < i && i <= insertAfter) {
+                    offset = -(elHeight + gap);
+                } else if (insertAfter < i && i < curIdx) {
+                    offset = elHeight + gap;
                 }
                 card.style.transform = `translateY(${offset}px)`;
             });
@@ -723,7 +752,9 @@ async function loadOverrides() {
 
         document.addEventListener('mouseup', async (e) => {
             if (!_dragState) return;
-            const { el, moved, clone, targetIndex, currentIndex, cards } = _dragState;
+            const { el, moved, clone, cards = [] } = _dragState;
+            const targetIndex = _dragState.targetIndex ?? -1;
+            const currentIndex = _dragState.currentIndex ?? -1;
             _dragState = null;
 
             if (!moved) {
@@ -750,7 +781,7 @@ async function loadOverrides() {
                     el.remove();
                     if (insertAfter === -1) {
                         const firstCard = cards[0];
-                        if (firstCard) {
+                        if (firstCard && firstCard.parentElement) {
                             firstCard.parentElement.insertBefore(el, firstCard);
                         } else {
                             pluginList.appendChild(el);
@@ -758,11 +789,13 @@ async function loadOverrides() {
                     } else {
                         const anchor = cards[insertAfter];
                         const parent = anchor.parentElement;
-                        const next = anchor.nextSibling;
-                        if (next) {
-                            parent.insertBefore(el, next);
-                        } else {
-                            parent.appendChild(el);
+                        if (parent) {
+                            const next = anchor.nextSibling;
+                            if (next) {
+                                parent.insertBefore(el, next);
+                            } else {
+                                parent.appendChild(el);
+                            }
                         }
                     }
 
@@ -793,7 +826,8 @@ async function loadOverrides() {
 
                         // Save new order
                         const newIds = getOverrideCards(pluginList)
-                            .map(c => c.dataset.id);
+                            .map(c => c.dataset.id)
+                            .filter(/** @param {string|undefined} id */ (id) => id !== undefined);
 
                         // Update in-memory order to match DOM
                         const newItems = [];
@@ -841,6 +875,11 @@ async function loadOverrides() {
 //  renderOverrideCards — build card grid (with in-place diff for no flash)
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {HTMLElement} container
+ * @param {Array<{id: string, name?: string, enabled?: boolean, [key: string]: any}>} items
+ * @param {string} filter
+ */
 function renderOverrideCards(container, items, filter) {
     const filtered = items.filter(item =>
         !filter || item.name?.toLowerCase().includes(filter)
@@ -860,7 +899,7 @@ function renderOverrideCards(container, items, filter) {
 
     // Get existing cards
     const existingCards = getOverrideCards(container);
-    const existingIds = new Set(existingCards.map(c => c.dataset.id));
+    const existingIds = new Set(existingCards.map(c => c.dataset.id).filter(/** @param {string|undefined} id */ (id) => id !== undefined));
     const newIds = new Set(filtered.map(i => i.id));
 
     // Check if we can do in-place update (same items, just reorder or update)
@@ -904,7 +943,7 @@ function renderOverrideCards(container, items, filter) {
 function updateOverrideCardContent(card, item) {
     // Update status indicator
     const statusDot = card.querySelector('.rounded-full[title]');
-    if (statusDot) {
+    if (statusDot instanceof HTMLElement) {
         const statusColor = item.enabled ? 'bg-emerald-400' : 'bg-zinc-600';
         const summaryText = item.enabled
             ? t('overrideEnabled')
@@ -936,7 +975,7 @@ function updateOverrideCardContent(card, item) {
 
     // Update toggle button
     const toggleBtn = card.querySelector('.override-toggle-btn');
-    if (toggleBtn) {
+    if (toggleBtn instanceof HTMLElement) {
         toggleBtn.dataset.enabled = String(item.enabled);
         toggleBtn.title = item.enabled
             ? t('overrideDisable')
@@ -962,6 +1001,10 @@ function updateOverrideCardContent(card, item) {
 //  buildOverrideCard — create a single override card
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {{id: string, enabled?: boolean, name?: string, ext?: string, global?: boolean, profileIds?: string[], type?: string}} item
+ * @returns {HTMLElement}
+ */
 function buildOverrideCard(item) {
     const card = document.createElement('div');
     card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-300 cursor-pointer';
@@ -1027,7 +1070,7 @@ function buildOverrideCard(item) {
 
     // ── Click: card body → edit ─────────────────────────────────
     card.addEventListener('click', () => {
-        openEditor(item.id, item.name ?? '', item.ext);
+        openEditor(item.id, item.name ?? '', item.ext ?? 'js');
     });
 
     // ── Click: delete ──────────────────────────────────────────
@@ -1061,7 +1104,7 @@ function buildOverrideCard(item) {
     // ── Click: scope badge → edit scope ───────────────────────
     card.querySelector('[data-action="edit-scope"]')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        openScopeEditor(item.id, item.global, item.profileIds || []);
+        openScopeEditor(item.id, item.global ?? false, item.profileIds || []);
     });
 
     return card;
@@ -1071,6 +1114,11 @@ function buildOverrideCard(item) {
 //  Editor
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string} id
+ * @param {string} name
+ * @param {string} ext
+ */
 async function openEditor(id, name, ext) {
     const pluginList = document.getElementById('plugin-list');
     const scriptArea = document.getElementById('plugin-script-area');
@@ -1129,6 +1177,10 @@ async function openEditor(id, name, ext) {
 //  Toggle
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string} id
+ * @param {boolean} enabled
+ */
 async function toggleOverride(id, enabled) {
     // Update in memory first for instant UI feedback
     const item = overrideItems.find(i => i.id === id);
@@ -1139,14 +1191,14 @@ async function toggleOverride(id, enabled) {
 
     // Update UI immediately
     const pluginList = document.getElementById('plugin-list');
-    renderOverrideCards(pluginList, overrideItems, searchFilter);
+    if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
 
     try {
         await overrideToggle(id, enabled);
     } catch (err) {
         // Revert on error
         item.enabled = oldEnabled;
-        renderOverrideCards(pluginList, overrideItems, searchFilter);
+        if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
         showNotification(String(err), 'error');
     }
 }
@@ -1155,6 +1207,10 @@ async function toggleOverride(id, enabled) {
 //  Reorder
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string} id
+ * @param {number} direction
+ */
 async function reorderItem(id, direction) {
     const idx = overrideItems.findIndex(i => i.id === id);
     if (idx < 0) return;
@@ -1169,7 +1225,7 @@ async function reorderItem(id, direction) {
 
     // Update UI immediately without full reload
     const pluginList = document.getElementById('plugin-list');
-    renderOverrideCards(pluginList, overrideItems, searchFilter);
+    if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
 
     // Persist the NEW order to backend
     try {
@@ -1177,15 +1233,21 @@ async function reorderItem(id, direction) {
     } catch (err) {
         // Revert on error
         [overrideItems[idx], overrideItems[newIdx]] = [overrideItems[newIdx], overrideItems[idx]];
-        renderOverrideCards(pluginList, overrideItems, searchFilter);
+        if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
         showNotification(String(err), 'error');
     }
 }
 
+/**
+ * @param {string} id
+ */
 function isFirst(id) {
     return overrideItems[0]?.id === id;
 }
 
+/**
+ * @param {string} id
+ */
 function isLast(id) {
     return overrideItems[overrideItems.length - 1]?.id === id;
 }
@@ -1350,7 +1412,7 @@ function openFullscreenEditor() {
     setupFullscreenEditorStatus();
 
     // Focus editor
-    fullscreenEditorView.focus();
+    /** @type {{focus: function(): void}} */ (/** @type {unknown} */ (fullscreenEditorView)).focus();
 
     // Clear output
     clearFullscreenOutput();
@@ -1535,6 +1597,8 @@ function clearFullscreenOutput() {
 /**
  * Convert script error line numbers to user-friendly format.
  * The wrapper script adds ~23 lines of preamble before user script.
+ * @param {string|null} error
+ * @returns {string|null}
  */
 function formatScriptError(error) {
     if (!error) return error;
@@ -1553,13 +1617,13 @@ function formatScriptError(error) {
         
         if (userLine > 0) {
             return ((t('overrideScriptLine') ?? 'Script line @@line@@, column @@col@@')
-                .replace('@@line@@', userLine)
-                .replace('@@col@@', colNum));
+                .replace('@@line@@', String(userLine))
+                .replace('@@col@@', String(colNum)));
         }
         // If line is within wrapper, just show original with note
         return ((t('overrideEngineInternal') ?? 'Engine internal (eval_script:@@line@@:@@col@@)')
-            .replace('@@line@@', lineNum)
-            .replace('@@col@@', colNum));
+            .replace('@@line@@', String(lineNum))
+            .replace('@@col@@', String(colNum)));
     });
 }
 
@@ -1622,7 +1686,7 @@ function setupFullscreenEditorStatus() {
     const charCount = document.getElementById('fullscreen-editor-char-count');
 
     // Inject an updateListener extension into the existing editor
-    const listener = EditorView.updateListener.of((update) => {
+    const listener = EditorView.updateListener.of((/** @type {import('../cm6.bundle.js').ViewUpdate} */ update) => {
         if (!update.selectionSet && !update.docChanged) return;
 
         // Update cursor position
@@ -1630,14 +1694,14 @@ function setupFullscreenEditorStatus() {
             const pos = update.state.selection.main.head;
             const line = update.state.doc.lineAt(pos);
             cursorPos.textContent = (t('overrideLineCol') ?? 'Line @@line@@, Col @@col@@')
-                .replace('@@line@@', line.number)
-                .replace('@@col@@', pos - line.from + 1);
+                .replace('@@line@@', String(line.number))
+                .replace('@@col@@', String(pos - line.from + 1));
         }
 
         // Update character count
         if (charCount && update.docChanged) {
             charCount.textContent = (t('overrideCharCount') ?? '@@count@@ chars')
-                .replace('@@count@@', update.state.doc.length);
+                .replace('@@count@@', String(update.state.doc.length));
         }
     });
 
@@ -1702,6 +1766,10 @@ function initResizer() {
 //  Utilities
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string} str
+ * @returns {string}
+ */
 function escapeHtml(str) {
     return str
         .replace(/&/g, '&amp;')
