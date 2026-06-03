@@ -36,11 +36,14 @@ export { switchPage } from './navigation.js';
 export const DELAY_INFINITE = 1000000;
 
 /** Returns true if the given delay value means "not tested" or "timeout". Catches -1 (API failure), 0, and >= 999999. */
+/** @param {number|null|undefined} d */
 function isInvalidDelay(d) { return d == null || d <= 0 || d >= 999999; }
 
 const latencyLoadingIcon = SVG_ICONS.loading;
 
-/** Maps proxy type (uppercase) to its transport layer protocol. */
+/** Maps proxy type (uppercase) to its transport layer protocol.
+ * @type {Record<string, string>}
+ */
 const TRANSPORT_MAP = Object.freeze({
     // QUIC-based protocols (UDP at transport layer)
     'TUIC': 'QUIC',
@@ -168,12 +171,16 @@ const queueLatencySort = debounce(() => {
 
 /** Concurrency-limited smart score updater: max N concurrent IPC calls. */
 class SmartScoreBatcher {
+    /** @param {number} maxConcurrency */
     constructor(maxConcurrency) {
+        /** @type {Array<{name: string, latencyMs: number, success: boolean}>} */
         this._queue = [];
         this._running = 0;
         this._max = maxConcurrency;
+        /** @type {Array<Function>} */
         this._waiters = [];
     }
+    /** @param {string} name @param {number} latencyMs @param {boolean} success */
     push(name, latencyMs, success) {
         this._queue.push({ name, latencyMs, success });
         this._flush();
@@ -181,6 +188,7 @@ class SmartScoreBatcher {
     _flush() {
         while (this._running < this._max && this._queue.length > 0) {
             const item = this._queue.shift();
+            if (!item) break;
             this._running++;
             updateSmartScore(item.name, item.latencyMs, item.success).finally(() => {
                 this._running--;
@@ -228,7 +236,9 @@ async function updateSmartScore(nodeName, latencyMs, success) {
     }
 }
 
-/** Backfill smart score badges from backend after render. */
+/** Backfill smart score badges from backend after render.
+ * @param {HTMLElement} container
+ */
 async function backfillSmartScores(container) {
     try {
         // Check smart enabled state directly (CSS var may not be set yet due to async init)
@@ -236,7 +246,7 @@ async function backfillSmartScores(container) {
         if (!smartEnabled) {
             try {
                 const config = await smartConfig();
-                smartEnabled = config.enabled ?? false;
+                smartEnabled = !!(/** @type {any} */ (config)).enabled;
                 // Sync CSS variable so badge visibility stays consistent
                 if (smartEnabled) {
                     document.documentElement.style.setProperty('--smart-enabled', '1');
@@ -249,8 +259,9 @@ async function backfillSmartScores(container) {
         if (!Array.isArray(rankings) || rankings.length === 0) return;
         const scoreMap = new Map(rankings.map((r) => [r.name, Math.round(r.score)]));
         container.querySelectorAll('[data-name]').forEach((wrapper) => {
+            if (!(wrapper instanceof HTMLElement)) return;
             const name = wrapper.dataset.name;
-            const score = scoreMap.get(name);
+            const score = scoreMap.get(name || '');
             if (score === undefined || score === 0) return;
             const badge = wrapper.querySelector('[data-score-badge]');
             if (!badge) return;
@@ -370,7 +381,7 @@ let _activeCard = null;
  * Apply active-node styling to a card and remove it from all others in the same container.
  *
  * @param {HTMLElement} card - The card to mark as active
- * @param {HTMLElement} container - The parent container holding all cards
+ * @param {HTMLElement} _container - The parent container holding all cards
  */
 function setActiveNode(card, _container) {
     // Fast path: same card already active
@@ -378,16 +389,17 @@ function setActiveNode(card, _container) {
 
     // Remove active styling from previous card only
     if (_activeCard && _activeCard.isConnected) {
-        ACTIVE_CARD_CLASSES.forEach(cls => _activeCard.classList.remove(cls));
-        _activeCard.classList.add(INACTIVE_HOVER_CLASS);
-        const dot = _activeCard.querySelector('.active-dot');
+        const prevCard = _activeCard;
+        ACTIVE_CARD_CLASSES.forEach(cls => prevCard.classList.remove(cls));
+        prevCard.classList.add(INACTIVE_HOVER_CLASS);
+        const dot = prevCard.querySelector('.active-dot');
         if (dot) dot.remove();
     }
 
     // Update wrapper selected state for previous card
     if (_activeCard) {
         const oldWrapper = _activeCard.closest('div[data-name]');
-        if (oldWrapper) oldWrapper.dataset.selected = '0';
+        if (oldWrapper instanceof HTMLElement) oldWrapper.dataset.selected = '0';
     }
 
     // Apply active styling to target card
@@ -402,7 +414,7 @@ function setActiveNode(card, _container) {
 
     // Update new wrapper
     const newWrapper = card.closest('div[data-name]');
-    if (newWrapper) newWrapper.dataset.selected = '1';
+    if (newWrapper instanceof HTMLElement) newWrapper.dataset.selected = '1';
 
     _activeCard = card;
 }
@@ -424,7 +436,7 @@ export async function syncCoreConfig() {
 
     // Sync TUN
     const tunToggle = document.getElementById('tun-proxy-toggle');
-    if (tunToggle && (/** @type {any} */ (config)).tun) {
+    if (tunToggle instanceof HTMLInputElement && (/** @type {any} */ (config)).tun) {
         const tunEnable = (/** @type {any} */ (config)).tun.enable;
         appStore.set('isTunEnabled', tunEnable);
         tunToggle.checked = tunEnable;
@@ -448,7 +460,7 @@ export async function syncCoreConfig() {
         if (proxyGroupsResult) {
             // Use the resolved uiGroupName for accurate current node display
             const uiGroupName = proxyGroupsResult.uiGroupName || proxyGroupsResult.mainGroup;
-            const proxyMap = proxyGroupsResult.data?.proxies;
+            const proxyMap = /** @type {Record<string, any>} */ (/** @type {any} */ (proxyGroupsResult.data)?.proxies);
             if (proxyMap && uiGroupName && proxyMap[uiGroupName]) {
                 currentNode = proxyMap[uiGroupName].now || 'Direct';
             } else {
@@ -652,7 +664,8 @@ export function initProxyControls() {
                     if (hideTimeoutEnabled && isInvalidDelay(delay)) {
                         // Don't hide if this is the currently active node
                         // Use _activeCard to get real-time active node (prevents mis-hiding during node switch)
-                        const activeName = _activeCard?.closest('[data-name]')?.dataset.name;
+                        const activeWrapper = _activeCard?.closest('[data-name]');
+                        const activeName = activeWrapper instanceof HTMLElement ? activeWrapper.dataset.name : undefined;
                         if (name !== activeName) {
                             const container = document.getElementById('proxies-list');
                             const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
@@ -855,7 +868,7 @@ async function handleFailoverAction(action) {
         const uiGroupName = appStore.get('uiGroupName');
         if (!uiGroupName) return;
 
-        const proxyMap = await getProxiesCached().then(d => d?.proxies).catch(() => null);
+        const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(d => d?.proxies).catch(() => null));
         if (!proxyMap) return;
 
         const group = proxyMap[uiGroupName];
@@ -865,7 +878,7 @@ async function handleFailoverAction(action) {
         const activeLeaf = resolveLeafNode(currentNode, proxyMap);
         if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
 
-        const candidates = group.all.filter(n => {
+        const candidates = group.all.filter(/** @param {string} n */ n => {
             if (n === action.failedNode) return false;
             const entry = proxyMap[n];
             if (!entry) return false;
@@ -923,8 +936,8 @@ async function handleFailoverAction(action) {
  * Resolve a proxy entry to its leaf node name.
  * If the entry is a group, recursively follow its `now` selection.
  * @param {string} name - Proxy or group name
- * @param {Object} proxyMap - Full proxy map
- * @param {Set} [visited] - Internal set to detect cycles
+ * @param {Record<string, any>} proxyMap - Full proxy map
+ * @param {Set<string>} [visited] - Internal set to detect cycles
  * @returns {string|null} - Leaf node name or null
  */
 function resolveLeafNode(name, proxyMap, visited = new Set()) {
@@ -948,6 +961,7 @@ function resolveLeafNode(name, proxyMap, visited = new Set()) {
     return name;
 }
 
+/** @param {string} uiGroupName @param {string|null} effectiveGroupName @param {string|null} observedGroupName @param {string|null} observedNodeName @param {Record<string, any>} proxyMap */
 function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, proxyMap) {
     const bar = document.getElementById('group-explanation-bar');
     if (!bar) return;
@@ -1002,7 +1016,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Quick-switch button
     const btn = document.createElement('button');
-    const targetGroup = showObserved ? observedGroupName : effectiveGroupName;
+    const targetGroup = (showObserved ? observedGroupName : effectiveGroupName) || '';
     const targetType = proxyMap?.[targetGroup]?.type || '';
     const targetIsWritable = isWritableGroupType(targetType);
 
@@ -1278,7 +1292,7 @@ async function updateProxiesInPlace(container, proxies, data, current) {
     // Sync _activeCard with the actual current node
     const currentWrapper = container.querySelector('[data-selected="1"]');
     if (currentWrapper) {
-        _activeCard = currentWrapper.firstElementChild || null;
+        _activeCard = /** @type {HTMLElement|null} */ (currentWrapper.firstElementChild);
     } else {
         _activeCard = null;
     }
@@ -1458,7 +1472,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         syncCoreConfig();
                     });
                 } else {
-                    const t = translations[appStore.get('currentLang')] || {};
+                    const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
                     showNotification(t.proxySwitchFailed || 'Failed to switch proxy', 'error');
                 }
             } catch (err) {
@@ -1591,7 +1605,7 @@ export async function renderProxies() {
     const effectiveGroupName = proxyGroupsResult.effectiveGroupName;
 
     // Render group selector dropdown
-    renderGroupSelector(proxyGroupsResult.groups || [], uiGroupName);
+    renderGroupSelector(proxyGroupsResult.groups || [], uiGroupName || '');
 
     // If no writable group was found, show a clean empty state instead of
     // rendering actionable buttons that would fail on PUT /proxies/{group}
@@ -1610,7 +1624,7 @@ export async function renderProxies() {
     // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
     const observedGroupName = appStore.get('observedGroupName');
     const observedNodeName = appStore.get('observedNodeName');
-    renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
+    renderGroupExplanationBar(uiGroupName || '', effectiveGroupName, observedGroupName, observedNodeName, /** @type {Record<string, any>} */ (data?.proxies));
 
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
@@ -1658,14 +1672,14 @@ export async function renderProxies() {
         existingObserver.disconnect();
     }
 
-    const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName);
+    const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName || '');
      
     container.innerHTML = '';
     container.appendChild(fragment);
 
     // Sync _activeCard with the actual current node
     const currentWrapper = container.querySelector('[data-selected="1"]');
-    _activeCard = currentWrapper ? (currentWrapper.firstElementChild || null) : null;
+    _activeCard = currentWrapper ? /** @type {HTMLElement|null} */ (currentWrapper.firstElementChild) : null;
 
     // Backfill existing smart scores from backend (avoids showing '--' when scores exist)
     await backfillSmartScores(container);
@@ -1688,7 +1702,7 @@ async function syncSmartUiVisibility() {
         const config = await smartConfig();
         // Backend only returns `enabled` if smart.toml has the key.
         // Fallback to localStorage for migration scenarios.
-        enabled = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
+        enabled = (/** @type {any} */ (config)).enabled ?? localStorage.getItem('smartEnabled') === 'true';
     } catch {
         // Fallback to localStorage on error
         enabled = localStorage.getItem('smartEnabled') === 'true';
@@ -1763,18 +1777,20 @@ appStore.subscribe('observedGroupName', _renderExplanationBarFromStore);
 appStore.subscribe('observedNodeName', _renderExplanationBarFromStore);
 
 // Helper to format the display name with an optional suffix
+/** @param {string} group @param {string|null} leaf */
 function formatNodeDisplayName(group, leaf) {
     return (leaf && leaf !== group) ? `${group} - ${leaf}` : (leaf || group);
 }
 
 // Check if observed node is in the current group (supports nested groups)
+/** @param {string} node @param {string} group @param {Record<string, any>} proxyMap @param {Set<string>} [visited] */
 const isNodeInGroup = (node, group, proxyMap, visited = new Set()) => {
     if (!group || !proxyMap || visited.has(group)) return false;
     visited.add(group);
     const entry = proxyMap[group];
     if (!entry || !entry.all) return false;
     if (entry.all.includes(node)) return true;
-    return entry.all.some(member => isNodeInGroup(node, member, proxyMap, visited));
+    return entry.all.some(/** @param {string} member */ member => isNodeInGroup(node, member, proxyMap, visited));
 };
 
 // Update capsule display when observed node or group changes (avoid full syncCoreConfig API calls)
@@ -1883,7 +1899,7 @@ const _autoTest = {
             }
 
             // Schedule next cycle using adaptive interval
-            const config = await smartConfig().catch(() => null);
+            const config = /** @type {any} */ (await smartConfig().catch(() => null));
             const minInterval = config?.min_interval_secs ?? 60;
             const maxInterval = config?.max_interval_secs ?? 600;
             // Use average score of all tested nodes as network quality
@@ -1901,7 +1917,8 @@ const _autoTest = {
         }
     },
 
-    /** Schedule the next auto-test. */
+    /** Schedule the next auto-test.
+     * @param {number} ms */
     _scheduleNext(ms) {
         this._stop();
         if (!this._isEnabled()) {

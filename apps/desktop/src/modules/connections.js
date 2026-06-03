@@ -228,7 +228,7 @@ function switchConnTab(tab) {
     currentConnTab = tab;
     const activeTab = document.getElementById('conn-tab-active');
     const closedTab = document.getElementById('conn-tab-closed');
-    const actionBtn = document.getElementById('close-all-conns-btn');
+    const actionBtn = document.querySelector('button#close-all-conns-btn');
     const actionIcon = document.getElementById('action-btn-icon');
     const actionText = document.getElementById('action-btn-text');
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
@@ -245,7 +245,7 @@ function switchConnTab(tab) {
         closedTab?.classList.remove('text-accent', 'border-accent');
         closedTab?.classList.add('text-zinc-500', 'border-transparent');
 
-        if (actionBtn) {
+        if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-danger';
             actionBtn.disabled = false;
             if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'; }
@@ -257,7 +257,7 @@ function switchConnTab(tab) {
         activeTab?.classList.remove('text-accent', 'border-accent');
         activeTab?.classList.add('text-zinc-500', 'border-transparent');
 
-        if (actionBtn) {
+        if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-warning';
             actionBtn.disabled = false;
             if (actionIcon) { actionIcon.classList.remove('animate-spin'); actionIcon.innerHTML = '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'; }
@@ -447,9 +447,8 @@ const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 /**
  * @param {any[]} connections
  * @param {string} mode
- * @param {string} [searchQuery]
  */
-function renderConnectionList(connections, mode, _searchQuery) {
+function renderConnectionList(connections, mode) {
     const container = document.getElementById('connections-list');
     const emptyState = document.getElementById('connections-empty');
     const closedEmptyState = document.getElementById('connections-closed-empty');
@@ -635,8 +634,7 @@ function bindHeaderSortEvents() {
             // Re-render current tab with new sort
             renderConnectionList(
                 currentConnTab === 'active' ? cachedConnections : closedConnections,
-                currentConnTab,
-                connectionsSearchQuery
+                currentConnTab
             );
         });
     }

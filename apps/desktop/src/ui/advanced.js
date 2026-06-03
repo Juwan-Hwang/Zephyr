@@ -327,7 +327,7 @@ function renderObjectContent(container, obj, parentKey, depth) {
  * @param {HTMLElement} container
  * @param {Array<*>} arr
  * @param {string} parentKey
- * @param {number} depth
+ * @param {number} _depth
  */
 function renderArrayContent(container, arr, parentKey, _depth) {
     if (arr.length === 0) {
