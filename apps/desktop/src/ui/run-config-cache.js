@@ -73,15 +73,17 @@ export async function getRunConfigCached({ force = false } = {}) {
             // On failure, return stale data if available, otherwise null
             if (_cached) return _cached.data;
             return null;
-        } finally {
-            // Only clear _pending if it still refers to this promise,
-            // so we don't accidentally wipe a newer request started after invalidation.
-            if (_pending === p) {
-                _pending = null;
-            }
         }
     })();
     _pending = p;
+
+    // Clean up _pending when this promise settles, but only
+    // if a newer request hasn't been started in the meantime
+    p.finally(() => {
+        if (_pending === p) {
+            _pending = null;
+        }
+    });
 
     return _pending;
 }

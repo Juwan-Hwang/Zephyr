@@ -64,7 +64,7 @@ export function saveSettings(patch) {
  *
  * @template T
  * @param {string} key          - Field name in the Settings struct.
- * @param {T}      [fallback]   - Value returned when the field is `null` / `undefined`.
+ * @param {T}      fallback     - Value returned when the field is `null` / `undefined`.
  * @returns {Promise<T>} The stored value, or `fallback` if absent.
  */
 export async function getSetting(key, fallback) {

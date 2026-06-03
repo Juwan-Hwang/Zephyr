@@ -342,6 +342,9 @@ jobs:
       - name: Lint JavaScript (ESLint)
         run: pnpm --filter @zephyr/desktop lint
 
+      - name: TypeScript/JSDoc typecheck
+        run: pnpm --filter @zephyr/desktop typecheck
+
       - name: Build CSS
         run: pnpm --filter @zephyr/desktop build:css
 

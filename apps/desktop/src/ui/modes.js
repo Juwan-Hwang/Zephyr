@@ -60,8 +60,10 @@ export function initModeSelector() {
                     if (resultAfter && resultAfter.proxies.includes(nodeToInherit)) {
                         // Use uiGroupName from resolver for accurate group targeting
                         const targetGroup = resultAfter.uiGroupName || resultAfter.mainGroup;
-                        await switchProxy(targetGroup, nodeToInherit);
-                        appStore.set('uiGroupName', targetGroup);
+                        if (targetGroup) {
+                            await switchProxy(targetGroup, nodeToInherit);
+                            appStore.set('uiGroupName', targetGroup);
+                        }
                     }
                 }
 
