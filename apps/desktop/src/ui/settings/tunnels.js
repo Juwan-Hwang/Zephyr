@@ -202,7 +202,7 @@ export function initTunnelSettings({
             renderTunnels();
         },
         /** Update tunnels from external source and re-render */
-        setTunnels(tunnels) {
+        setTunnels(/** @type {Array<object>} */ tunnels) {
             currentTunnels = tunnels;
             renderTunnels();
         },

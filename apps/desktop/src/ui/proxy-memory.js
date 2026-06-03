@@ -23,9 +23,7 @@ const READY_RETRY_DELAY = 100;
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
  * Invalidates settings cache to ensure subsequent reads get fresh data.
  * @param {string} profileName - Profile filename (e.g., "my-sub.yaml")
- * @param {object} selection
- * @param {string} selection.node - Selected proxy node name
- * @param {string} [selection.group] - Group name where the node was selected
+ * @param {{ node?: string, group?: string }} [selection]
  */
 export async function saveProxySelection(profileName, { node, group } = {}) {
     try {
@@ -157,10 +155,10 @@ export async function restoreProxySelection(profileName) {
         // keyword-guessed mainGroup.  This fixes the core bug where the
         // restored selection was applied to the wrong group.
         const uiGroupName = proxyGroupsResult.uiGroupName
-            || proxyGroupsResult.mainGroup;
+            || proxyGroupsResult.mainGroup || '';
 
         // Try the resolved uiGroupName first
-        if (proxyGroupsResult.proxies && proxyGroupsResult.proxies.includes(saved.node)) {
+        if (uiGroupName && proxyGroupsResult.proxies && proxyGroupsResult.proxies.includes(saved.node)) {
             const success = await switchProxy(uiGroupName, saved.node);
             if (success) {
                 appStore.set('uiGroupName', uiGroupName);
@@ -171,7 +169,8 @@ export async function restoreProxySelection(profileName) {
         // Fallback: search all writable groups for the saved node.
         // After profile/core switches, the saved node may belong to a different
         // selector group than the resolved primary.
-        const proxyMap = proxyGroupsResult.data?.proxies;
+        /** @type {Record<string, any>|undefined} */
+        const proxyMap = /** @type {any} */ (proxyGroupsResult.data)?.proxies;
         if (proxyMap) {
             for (const groupName of Object.keys(proxyMap)) {
                 const group = proxyMap[groupName];

@@ -32,6 +32,9 @@ export function initPluginsSmartPages() {
     initSmartPage();
 }
 
+/**
+ * @param {string} pageId
+ */
 function navigateToPage(pageId) {
     document.querySelectorAll('[data-page]').forEach(p => p.classList.add('hidden'));
     const target = document.querySelector(`[data-page="${pageId}"]`);
@@ -51,7 +54,7 @@ function navigateToPage(pageId) {
 function initPluginsPage() {
     // Discover
     const discoverBtn = document.getElementById('plugin-discover-btn');
-    if (discoverBtn) {
+    if (discoverBtn instanceof HTMLButtonElement) {
         discoverBtn.addEventListener('click', async () => {
             discoverBtn.disabled = true;
             try {
@@ -91,6 +94,9 @@ function initPluginsPage() {
     loadPermissionsList();
 }
 
+/**
+ * @param {Array<{id?: string, name?: string, description?: string, version?: string}>} plugins
+ */
 async function renderPluginsList(plugins) {
     const container = document.getElementById('plugins-list');
     if (!container) return;
@@ -102,7 +108,7 @@ async function renderPluginsList(plugins) {
 
     // Also load the list of currently loaded plugins to determine state
     let loadedIds = [];
-    try { const loaded = await prism.pluginListLoaded(); loadedIds = loaded.map(p => p.id); } catch {}
+    try { const loaded = await prism.pluginListLoaded(); loadedIds = loaded.map((/** @type {{id: string}} */ p) => p.id); } catch {}
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
     container.innerHTML = plugins.map(p => {
@@ -134,9 +140,11 @@ async function renderPluginsList(plugins) {
     }).join('');
 
     container.querySelectorAll('.p-action-btn').forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
         btn.addEventListener('click', async () => {
             const id = btn.dataset.id;
             const action = btn.dataset.action;
+            if (!id || !action) return;
             try {
                 if (action === 'load') {
                     await prism.pluginLoad(id);
@@ -167,7 +175,7 @@ async function loadHooksList() {
     const container = document.getElementById('hooks-list');
     if (!container) return;
     try {
-        const hooks = await prism.pluginListHooks();
+        const hooks = /** @type {Array<{name: string, isHighFrequency?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListHooks('*')));
         if (!hooks || hooks.length === 0) {
              
     container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-2">No hooks available</div>';
@@ -185,11 +193,13 @@ async function loadHooksList() {
         `).join('');
 
         container.querySelectorAll('.hook-trigger-btn').forEach(btn => {
+            if (!(btn instanceof HTMLElement)) return;
             btn.addEventListener('click', async () => {
                 const hookName = btn.dataset.hook;
+                if (!hookName) return;
                 try {
-                    const results = await prism.pluginExecuteHook(hookName, {}, {});
-                    const succeeded = results.filter(r => r.success).length;
+                    const results = await prism.pluginExecuteHook(hookName, {});
+                    const succeeded = results.filter((/** @type {{success: boolean}} */ r) => r.success).length;
                     showNotification(`Hook "${hookName}": ${succeeded}/${results.length} plugins responded`, 'success');
                 } catch (e) { showNotification(String(e), 'error'); }
             });
@@ -206,7 +216,7 @@ async function loadPermissionsList() {
     const container = document.getElementById('permissions-list');
     if (!container) return;
     try {
-        const perms = await prism.pluginListPermissions();
+        const perms = /** @type {Array<{name: string, displayName: string, allowedForConfigPlugin?: boolean, allowedForUiExtension?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListPermissions('*')));
         if (!perms || perms.length === 0) {
              
     container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-2">No permissions</div>';
@@ -263,10 +273,13 @@ async function loadKvStore() {
         `).join('');
 
         container.querySelectorAll('.kv-delete-key-btn').forEach(btn => {
+            if (!(btn instanceof HTMLElement)) return;
             btn.addEventListener('click', async () => {
+                const key = btn.dataset.key;
+                if (!key) return;
                 try {
-                    await prism.kvDelete(btn.dataset.key);
-                    showNotification(`Deleted: ${btn.dataset.key}`, 'success');
+                    await prism.kvDelete(key);
+                    showNotification(`Deleted: ${key}`, 'success');
                     loadKvStore();
                 } catch (e) { showNotification(String(e), 'error'); }
             });
@@ -274,8 +287,10 @@ async function loadKvStore() {
 
         // kv_set — edit button opens inline edit
         container.querySelectorAll('.kv-edit-btn').forEach(btn => {
+            if (!(btn instanceof HTMLElement)) return;
             btn.addEventListener('click', async () => {
                 const key = btn.dataset.key;
+                if (!key) return;
                 const current = await prism.kvGet(key);
                 const newVal = prompt(`Edit value for "${key}":`, JSON.stringify(current ?? null, null, 2));
                 if (newVal === null) return;
@@ -299,16 +314,18 @@ async function loadKvStore() {
 function initScriptsSection() {
     // Run script
     const runBtn = document.getElementById('script-run-btn');
-    if (runBtn) {
+    if (runBtn instanceof HTMLButtonElement) {
         runBtn.addEventListener('click', async () => {
-            const code = document.getElementById('script-editor')?.value || '';
-            const name = document.getElementById('script-name')?.value || 'untitled';
+            const scriptEditor = /** @type {HTMLInputElement|HTMLTextAreaElement|null} */ (document.getElementById('script-editor'));
+            const scriptNameEl = /** @type {HTMLInputElement|HTMLTextAreaElement|null} */ (document.getElementById('script-name'));
+            const code = scriptEditor?.value || '';
+            const name = scriptNameEl?.value || 'untitled';
             if (!code.trim()) { showNotification('Script is empty', 'error'); return; }
             runBtn.disabled = true;
             try {
                 const result = await prism.scriptExecute(code, name);
                 const logArea = document.getElementById('script-output');
-                if (logArea) {
+                if (logArea instanceof HTMLTextAreaElement || logArea instanceof HTMLInputElement) {
                     logArea.value = result.logs.map(l => `[${l.level}] ${l.message}`).join('\n') +
                         (result.error ? `\nERROR: ${result.error}` : '') +
                         `\n\nDuration: ${result.duration_us}µs — ${result.success ? 'OK' : 'FAILED'}`;
@@ -323,7 +340,8 @@ function initScriptsSection() {
     const validateBtn = document.getElementById('script-validate-btn');
     if (validateBtn) {
         validateBtn.addEventListener('click', async () => {
-            const code = document.getElementById('script-editor')?.value || '';
+            const scriptEditor = /** @type {HTMLInputElement|HTMLTextAreaElement|null} */ (document.getElementById('script-editor'));
+            const code = scriptEditor?.value || '';
             if (!code.trim()) return;
             try {
                 const safe = await prism.scriptValidate(code);
@@ -471,7 +489,8 @@ function initSmartPage() {
     const trimBtn = document.getElementById('smart-trim-btn');
     if (trimBtn) {
         trimBtn.addEventListener('click', async () => {
-            const max = parseInt(document.getElementById('smart-trim-max')?.value || '500', 10);
+            const trimMaxEl = /** @type {HTMLInputElement|HTMLTextAreaElement|null} */ (document.getElementById('smart-trim-max'));
+            const max = parseInt(trimMaxEl?.value || '500', 10);
             try {
                 await prism.smartTrimHistory(max);
                 showNotification(`History trimmed to ${max} records`, 'success');
@@ -486,7 +505,7 @@ function initSmartPage() {
 
 async function loadSmartConfig() {
     try {
-        const config = await prism.smartConfig();
+        const config = /** @type {Record<string, any>} */ (await prism.smartConfig());
         if (!config) return;
         const score = config.score || {};
         const weights = score.weights || {};
@@ -504,7 +523,7 @@ async function loadSmartConfig() {
 async function saveSmartConfig() {
     try {
         // Fetch current config to preserve the enabled state
-        const currentConfig = await prism.smartConfig().catch(() => ({}));
+        const currentConfig = /** @type {Record<string, any>} */ (await prism.smartConfig().catch(() => ({})));
         await prism.smartConfigSave({
             enabled: currentConfig.enabled ?? false,
             score: {
@@ -531,7 +550,7 @@ async function loadSchedulerConfig() {
     const container = document.getElementById('scheduler-info');
     if (!container) return;
     try {
-        const sc = await prism.smartSchedulerConfig();
+        const sc = /** @type {Record<string, any>} */ (await prism.smartSchedulerConfig());
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
     container.innerHTML = `            <div class="flex gap-4 text-2xs text-zinc-500">
                 <span>Base: ${sc.baseIntervalSecs}s</span>
@@ -544,7 +563,7 @@ async function loadSchedulerConfig() {
 
 async function loadFailoverPolicy() {
     try {
-        const policy = await prism.failoverGetPolicy();
+        const policy = /** @type {Record<string, any>} */ (await prism.failoverGetPolicy());
         if (!policy) return;
         setCheckboxValue('failover-enabled-toggle', policy.enabled ?? false);
         setInputValue('failover-threshold', policy.threshold ?? 3);
@@ -600,14 +619,59 @@ async function loadSmartRankings() {
 //  Helpers
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string} str
+ */
 function esc(str) {
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
 }
 
-function setInputValue(id, value) { const el = document.getElementById(id); if (el) el.value = value; }
-function getStringInput(id) { return document.getElementById(id)?.value?.trim() || ''; }
-function getNumberInput(id, fb) { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? fb : v; }
-function getCheckboxValue(id) { return document.getElementById(id)?.checked ?? false; }
-function setCheckboxValue(id, value) { const el = document.getElementById(id); if (el) el.checked = !!value; }
+/**
+ * @param {string} id
+ * @param {string|number} value
+ */
+function setInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) el.value = String(value);
+}
+
+/**
+ * @param {string} id
+ * @returns {string}
+ */
+function getStringInput(id) {
+    const el = document.getElementById(id);
+    return (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ? (el.value?.trim() || '') : '';
+}
+
+/**
+ * @param {string} id
+ * @param {number} fb
+ * @returns {number}
+ */
+function getNumberInput(id, fb) {
+    const el = document.getElementById(id);
+    if (!(el instanceof HTMLInputElement)) return fb;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? fb : v;
+}
+
+/**
+ * @param {string} id
+ * @returns {boolean}
+ */
+function getCheckboxValue(id) {
+    const el = document.getElementById(id);
+    return el instanceof HTMLInputElement ? el.checked : false;
+}
+
+/**
+ * @param {string} id
+ * @param {boolean} value
+ */
+function setCheckboxValue(id, value) {
+    const el = document.getElementById(id);
+    if (el instanceof HTMLInputElement) el.checked = !!value;
+}

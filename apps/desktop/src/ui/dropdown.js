@@ -131,10 +131,12 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     });
 
     // Close on outside click / Escape
+    /** @param {MouseEvent} e */
     const onDocClick = (e) => {
         if (!(e.target instanceof Element)) return;
         if (!e.target.closest(`#${wrapId}`) && !e.target.closest(`#${menuId}`)) closeMenu();
     };
+    /** @param {KeyboardEvent} e */
     const onDocKeydown = (e) => {
         if (e.key === 'Escape') closeMenu();
     };

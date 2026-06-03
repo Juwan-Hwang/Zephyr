@@ -72,15 +72,19 @@ export function attachContextMenuCloseHandlers(menu) {
     });
 
     // Close handlers — use non-once listeners that auto-cleanup when menu is removed
+    /** @param {MouseEvent} [ev] */
     const close = (ev) => {
         // Don't close if the click originated inside the menu
         // (e.g. checkbox toggle, which handles its own close via stopPropagation)
-        if (ev && menu.contains(ev.target)) return;
+        if (ev && menu.contains(/** @type {Node} */(ev.target))) return;
         removeContextMenu();
     };
 
+    /** @param {MouseEvent} ev */
     const onClick = (ev) => close(ev);
+    /** @param {MouseEvent} ev */
     const onContext = (ev) => close(ev);
+    /** @param {KeyboardEvent} ev */
     const onKey = (ev) => { if (ev.key === 'Escape') close(); };
 
     document.addEventListener('click', onClick);
@@ -127,7 +131,7 @@ export function showContextMenu(e, items) {
                 wrapper.addEventListener('click', (ev) => {
                     ev.stopPropagation();
                     removeContextMenu();
-                    item.action();
+                    item.action?.();
                 });
             }
             menu.appendChild(wrapper);

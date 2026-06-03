@@ -77,9 +77,11 @@ function formatLastUpdated(timestamp, t) {
 
 // ---- Module-level renderConfigs for use before init ----
 // This is set by initSubscriptionSettings and used by showEditPanel
+/** @type {any} */
 let moduleRenderConfigs = null;
 
 /** Track active edit modal dropdown for proper cleanup. */
+/** @type {any} */
 let activeEditDropdown = null;
 
 /**
@@ -87,7 +89,7 @@ let activeEditDropdown = null;
  * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null}} configInfo
  */
 async function showEditPanel(configInfo) {
-    const t = translations[appStore.get('currentLang')] || {};
+    const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
 
     const currentStem = configInfo.name.replace(/\.(yaml|yml)$/i, '');
 
@@ -174,7 +176,7 @@ async function showEditPanel(configInfo) {
     document.body.appendChild(modal);
 
     // Cache panel reference for animations
-    const panel = modal.querySelector('.glass-card');
+    const panel = /** @type {HTMLElement | null} */ (modal.querySelector('.glass-card'));
 
     // Trigger enter animation (double rAF ensures browser paints initial state first)
     requestAnimationFrame(() => {
@@ -222,9 +224,12 @@ async function showEditPanel(configInfo) {
     // Save handler
     document.getElementById('edit-modal-save')?.addEventListener('click', async () => {
         if (isClosing || isSaving) return;
-        const newName = document.getElementById('edit-name')?.value.trim() || '';
-        const newUrl = document.getElementById('edit-url')?.value.trim() || '';
-        const newInterval = parseInt(document.getElementById('edit-auto-update')?.value || '0', 10);
+        const editNameEl = document.getElementById('edit-name');
+        const newName = (editNameEl instanceof HTMLInputElement ? editNameEl.value : '').trim() || '';
+        const editUrlEl = document.getElementById('edit-url');
+        const newUrl = (editUrlEl instanceof HTMLInputElement ? editUrlEl.value : '').trim() || '';
+        const editIntervalEl = document.getElementById('edit-auto-update');
+        const newInterval = parseInt((editIntervalEl instanceof HTMLSelectElement ? editIntervalEl.value : '0'), 10);
 
         if (!newName) {
             showNotification(t.subscriptionNameRequired || 'Subscription name is required', 'error');
@@ -317,7 +322,6 @@ export function initSubscriptionSettings({
         subAddBtn.onclick = async () => {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            // @ts-expect-error showModal signature mismatch
             const url = /** @type {string} */ (await showModal(t.addSubscription, t.urlPlaceholder || "Subscription URL"));
             if (!url) return;
             /** @type {any} */
@@ -379,7 +383,7 @@ export function initSubscriptionSettings({
 
             // Build batch items: only names needed, URLs resolved internally by backend
             const userAgent = getSubscriptionUserAgent();
-            const batchItems = subConfigs.map(c => ({ name: c.name }));
+            const batchItems = subConfigs.map(/** @param {any} c */ (c) => ({ name: c.name }));
 
             // Single batch call — no per-item rate limiting
             /** @type {Array<{name: string, success: boolean, error?: string}>} */
@@ -481,7 +485,7 @@ export function initSubscriptionSettings({
         const lines = content.split('\n');
         let inWhen = false;
         let whenIndent = 0;
-        const result = { enabled: true, profiles: [] };
+        const result = { enabled: true, profiles: /** @type {string[]} */ ([]) };
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -898,12 +902,14 @@ export function initSubscriptionSettings({
 
         // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
         // Bind document-level listeners only once
-        if (!configsList._dragBound) {
-            configsList._dragBound = true;
+        if (!(/** @type {HTMLElement & {_dragBound?: boolean}} */ (configsList))._dragBound) {
+            /** @type {HTMLElement & {_dragBound?: boolean}} */ (configsList)._dragBound = true;
+            /** @type {any} */
             let dragState = null;
 
             configsList.addEventListener('mousedown', (e) => {
-                const card = e.target.closest('[data-config-name]');
+                if (!(e.target instanceof Element)) return;
+                const card = /** @type {HTMLElement} */ (e.target.closest('[data-config-name]'));
                 if (!card || e.button !== 0) return;
                 dragState = { el: card, name: card.dataset.configName, startY: e.clientY, moved: false };
             });
@@ -948,7 +954,7 @@ export function initSubscriptionSettings({
                 dragState.clone.style.top = cloneY + 'px';
 
                 // Calculate which position we're hovering over
-                const cards = [...configsList.querySelectorAll('[data-config-name]')];
+                const cards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
                 const listRect = configsList.getBoundingClientRect();
                 const relativeY = e.clientY - listRect.top + configsList.scrollTop;
 
@@ -1000,7 +1006,7 @@ export function initSubscriptionSettings({
                 e.stopImmediatePropagation();
 
                 if (clone) {
-                    const cards = [...configsList.querySelectorAll('[data-config-name]')];
+                    const cards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
                     const targetCard = cards[targetIndex];
 
                     if (targetCard && targetCard !== el) {
@@ -1043,8 +1049,8 @@ export function initSubscriptionSettings({
 
                             // 5. Save order (with error handling)
                             try {
-                                const newOrder = [...configsList.querySelectorAll('[data-config-name]')]
-                                    .map(c => c.dataset.configName);
+                                const saveCards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
+                                const newOrder = saveCards.map(c => c.dataset.configName);
                                 const s = await invoke(COMMANDS.GET_SETTINGS);
                                 s.config_order = newOrder;
                                 await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
@@ -1246,7 +1252,7 @@ export function initSubscriptionSettings({
             }
 
             // URL and last updated time in same row
-            const t3 = translations[appStore.get('currentLang')] || {};
+            const t3 = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
             const lastUpdatedText = formatLastUpdated(configInfo.last_updated, t3);
             const hasUrl = !!configInfo.url_display;
             const hasTime = lastUpdatedText !== (t3.lastUpdatedNever || 'Never');

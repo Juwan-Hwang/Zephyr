@@ -50,7 +50,7 @@ const MAX_MOUNTED     = 300;    // Hard cap on simultaneously mounted DOM nodes
 const ROW_HEIGHT_EST  = 18;     // Estimated line height in px (text-2xs + leading-relaxed)
 const STICKY_THRESHOLD = 40;    // Pixels from bottom to consider "at bottom"
 
-/** Level → color mapping (dark mode) */
+/** @type {Readonly<Record<string, string>>} Level → color mapping (dark mode) */
 const LEVEL_COLORS_DARK = Object.freeze({
     debug: '#6b7280',
     info:  '#60a5fa',
@@ -59,7 +59,7 @@ const LEVEL_COLORS_DARK = Object.freeze({
     fatal: '#dc2626',
 });
 
-/** Level → color mapping (light mode) */
+/** @type {Readonly<Record<string, string>>} Level → color mapping (light mode) */
 const LEVEL_COLORS_LIGHT = Object.freeze({
     debug: '#9ca3af',
     info:  '#3b82f6',
@@ -68,7 +68,7 @@ const LEVEL_COLORS_LIGHT = Object.freeze({
     fatal: '#991b1b',
 });
 
-/** Level → numeric priority for filtering */
+/** @type {Readonly<Record<string, number>>} Level → numeric priority for filtering */
 const LEVEL_PRIORITY = Object.freeze({
     debug: 0,
     info:  1,
@@ -123,7 +123,7 @@ let _spacerBottom = null;
 let _lineCountEl = null;
 /** @type {HTMLElement|null} */
 let _autoScrollBtn = null;
-/** @type {number} */
+/** @type {number|null} */
 let _debounceTimer = null;
 /** @type {number} */
 let _lastRenderedFilterHash = -1;
@@ -139,7 +139,7 @@ let _extLogTabActive = false;
 let _extLevelFilter = 'all';
 /** @type {string} Search query for app logs */
 let _extSearchQuery = '';
-/** @type {number|null} Debounce timer for app log search */
+/** @type {number|null} */
 let _extDebounceTimer = null;
 /** @type {boolean} Auto scroll for app logs */
 let _extAutoScroll = true;
@@ -553,12 +553,14 @@ function rebuildFilteredIndices() {
 
 function createVirtualScrollInstance() {
     if (!_logContent || !_spacerTop || !_spacerBottom || !_container) return;
+    const linesContainer = _container.querySelector('#log-lines-container');
+    if (!(linesContainer instanceof HTMLElement)) return;
 
     _vs = createVirtualScroll({
         container: _logContent,
         spacerTop: _spacerTop,
         spacerBottom: _spacerBottom,
-        linesContainer: _container.querySelector('#log-lines-container'),
+        linesContainer,
         itemCount: () => _filteredIndices.length,
         renderItem: (idx, fragment) => {
             const lineIdx = _filteredIndices[idx];
@@ -637,7 +639,7 @@ function updateExtLineCount() {
 
 // ── Extension Logs Rendering ────────────────────────────────────────────────
 
-/** 事件类型 → 颜色映射（覆盖全部 6 种 PrismEvent 类型） */
+/** @type {Readonly<Record<string, string>>} 事件类型 → 颜色映射（覆盖全部 6 种 PrismEvent 类型） */
 const EXT_EVENT_COLORS = Object.freeze({
     PatchApplied:   '#60a5fa',
     PatchFailed:    '#ef4444',
@@ -657,12 +659,13 @@ const EXT_EVENT_COLORS = Object.freeze({
  *   - ConfigReloaded: 显示 success/fail + message
  *   - WatcherEvent:   显示 file + change_type
  *
- * @param {{ type: string, message: string, timestamp: string }} entry
+ * @param {{ type: string, message: string, timestamp: string, source?: string }} entry
  * @returns {string} 安全的 HTML 片段
  */
 function formatExtLogMessage(entry) {
     // Backend events: render with level-colored dot
     if (entry.source === 'backend') {
+        /** @type {Record<string, string>} */
         const levelColor = {
             error: 'var(--color-red-400, #ef4444)',
             fatal: 'var(--color-red-400, #ef4444)',
@@ -764,6 +767,7 @@ function formatExtLogMessage(entry) {
                 const file = payload.file ?? payload.path ?? '';
                 const changeType = payload.change_type ?? payload.kind ?? payload.event ?? 'unknown';
                 // 变更类型颜色映射
+                /** @type {Record<string, string>} */
                 const changeColors = {
                     create: '#34d399', created: '#34d399', add: '#34d399',
                     modify: '#f59e0b', modified: '#f59e0b', change: '#f59e0b',
@@ -784,7 +788,7 @@ function formatExtLogMessage(entry) {
 /**
  * 渲染单条扩展日志到 ext-log 列表。
 * 支持 6 种 PrismEvent 类型的富文本渲染。
-* @param {{ type: string, message: string, timestamp: string }} entry
+* @param {{ type: string, message: string, timestamp: string, source?: string }} entry
 */
 function renderExtLogEntry(entry) {
     // When the page is not mounted, skip DOM rendering — the event is
@@ -816,7 +820,7 @@ function renderExtLogEntry(entry) {
 
     // Hide empty placeholder
     const emptyEl = _container?.querySelector('#log-ext-empty');
-    if (emptyEl) emptyEl.style.display = 'none';
+    if (emptyEl instanceof HTMLElement) emptyEl.style.display = 'none';
 
     listEl.appendChild(createExtLogRow(entry));
 
@@ -830,7 +834,7 @@ function renderExtLogEntry(entry) {
 /**
  * Create a DOM row element for an extension log entry.
  * Shared by both incremental `renderExtLogEntry` and batch `rebuildExtLogDOM`.
- * @param {{ type: string, message: string, timestamp: string }} entry
+ * @param {{ type: string, message: string, timestamp: string, source?: string }} entry
  * @returns {HTMLDivElement}
  */
 function createExtLogRow(entry) {
@@ -903,12 +907,12 @@ function rebuildExtLogDOM() {
 
     if (events.length === 0) {
         const emptyEl = _container?.querySelector('#log-ext-empty');
-        if (emptyEl) emptyEl.style.display = 'flex';
+        if (emptyEl instanceof HTMLElement) emptyEl.style.display = 'flex';
         return;
     }
 
-    const emptyEl = _container?.querySelector('#log-ext-empty');
-    if (emptyEl) emptyEl.style.display = 'none';
+    const emptyEl2 = _container?.querySelector('#log-ext-empty');
+    if (emptyEl2 instanceof HTMLElement) emptyEl2.style.display = 'none';
 
     const frag = document.createDocumentFragment();
     for (const entry of events) {

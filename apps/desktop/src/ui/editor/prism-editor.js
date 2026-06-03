@@ -193,7 +193,7 @@ export function createEditor(options) {
 
     // onChange callback
     if (onChange) {
-        extensions.push(EditorView.updateListener.of((update) => {
+        extensions.push(EditorView.updateListener.of((/** @type {import('../../cm6.bundle.js').ViewUpdate} */ update) => {
             if (update.docChanged) {
                 onChange(update.state.doc.toString());
             }
