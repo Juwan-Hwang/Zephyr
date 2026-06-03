@@ -435,8 +435,20 @@ fn resolve_url_from_metadata(
     super::config_manager::get_config_url(app, name)
 }
 
-#[allow(clippy::cognitive_complexity)]
 pub(crate) async fn download_sub_inner(
+    app: &AppHandle,
+    url: String,
+    name: String,
+    user_agent: Option<String>,
+    overwrite: bool,
+) -> Result<String, String> {
+    download_sub_inner_raw(app, url, name, user_agent, overwrite)
+        .await
+        .map_err(|e| redact_url_in_string(&e))
+}
+
+#[allow(clippy::cognitive_complexity)]
+async fn download_sub_inner_raw(
     app: &AppHandle,
     url: String,
     name: String,
@@ -557,8 +569,10 @@ pub(crate) async fn download_sub_inner(
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        last_error =
-                            format!("{} | Proxy: {}", direct_error.as_deref().unwrap_or(""), e);
+                        last_error = match direct_error.as_deref() {
+                            Some(de) => format!("{de} | Proxy: {e}"),
+                            None => format!("Proxy: {e}"),
+                        };
                     }
                 }
             }
@@ -817,24 +831,36 @@ fn redact_url_in_string(s: &str) -> String {
         let remaining = &result[start_idx..];
         let found_http = remaining.find("http://");
         let found_https = remaining.find("https://");
-        let found_offset = match (found_http, found_https) {
-            (Some(h), Some(hs)) => Some(h.min(hs)),
-            (Some(h), None) => Some(h),
-            (None, Some(hs)) => Some(hs),
-            (None, None) => None,
-        };
+        let found_offset = found_http.into_iter().chain(found_https).min();
         let Some(offset) = found_offset else {
             break;
         };
         let start = start_idx + offset;
         // Find end of URL (whitespace or end of string)
-        let url_end = result[start..]
+        let mut url_end = result[start..]
             .find(|c: char| c.is_whitespace())
             .map(|pos| start + pos)
             .unwrap_or(result.len());
+        // Trim trailing punctuation/delimiters that are likely not part of the URL
+        while url_end > start {
+            let last_char = result[..url_end].chars().next_back();
+            if let Some(c) = last_char {
+                if matches!(
+                    c,
+                    ')' | ']' | '}' | '>' | '"' | '\'' | ',' | '.' | ';' | ':'
+                ) {
+                    url_end -= c.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
         let url_str = &result[start..url_end];
         if let Ok(mut url) = reqwest::Url::parse(url_str) {
             url.set_query(None);
+            url.set_fragment(None);
             let _ = url.set_username("");
             let _ = url.set_password(None);
             let redacted = url.to_string();
@@ -883,7 +909,7 @@ pub async fn download_sub(
         log_sub_update_failure(&name, e);
     }
 
-    result.map_err(|e| redact_url_in_string(&e))
+    result
 }
 
 /// Batch update result for a single subscription.
@@ -930,7 +956,7 @@ pub async fn download_sub_batch(
                 results.push(BatchUpdateResult {
                     name,
                     success: false,
-                    error: Some(redact_url_in_string(&e)),
+                    error: Some(e),
                 });
             }
         }
