@@ -31,7 +31,7 @@ import { parseRulesFromYaml, rebuildYamlWithRules, wrapRulesAsPrismYaml } from '
 /** @type {'rule-sets'|'active-rules'} */
 let activeTab = 'rule-sets';
 
-/** CodeMirror EditorView for the rule text editor (null when not active). */
+/** @type {any|null} CodeMirror EditorView for the rule text editor (null when not active). */
 let ruleEditorView = null;
 
 /** @type {{filename: string, rule_count: number, source: string}[]} */
@@ -51,7 +51,8 @@ let activeRulesResizeObs = null;
 let activeRulesContainer = null;
 
 /** Flattened view items for active rules virtual scroll.
- *  Each item is either { kind: 'group-header', group, ruleCount } or { kind: 'rule', raw, index, groupId } */
+ *  Each item is either { kind: 'group-header', group, ruleCount } or { kind: 'rule', raw, index, groupId }
+ *  @type {any[]} */
 let activeRulesFlat = [];
 /** @type {Set<string>} Collapsed group IDs */
 const collapsedGroups = new Set();
@@ -102,8 +103,11 @@ export async function initRuleLibraryPage() {
 //  Data layer
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {{loadActiveRules?: boolean}} [options]
+ */
 async function refreshData(options) {
-    const { loadActiveRules = activeTab === 'active-rules' } = options || {};
+    const { loadActiveRules = activeTab === 'active-rules' } = /** @type {{loadActiveRules?: boolean}} */ (options || {});
     try {
         const promises = [
             invoke(COMMANDS.RULE_LIST),
@@ -132,7 +136,7 @@ async function refreshData(options) {
 }
 
 async function updateStatusBar() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const statusEl = document.getElementById('rl-status');
     const statsEl = document.getElementById('rl-stats');
 
@@ -184,7 +188,7 @@ async function updateStatusBar() {
 function render() {
     const content = document.getElementById('rl-content');
     if (!content) return;
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // Active rules tab uses its own virtual scroll — disable outer overflow to avoid double scrollbar
     if (activeTab === 'active-rules') {
@@ -219,7 +223,7 @@ function render() {
                 e.stopPropagation();
                 const newTab = /** @type {string} */ (/** @type {HTMLElement} */ (btn).dataset.rlTab);
                 if (newTab === activeTab) return;
-                activeTab = newTab;
+                activeTab = /** @type {'rule-sets'|'active-rules'} */ (newTab);
                 // Always refresh active rules when switching to that tab
                 if (activeTab === 'active-rules') {
                     await refreshData({ loadActiveRules: true });
@@ -272,8 +276,11 @@ function render() {
 //  Rule Sets tab
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {HTMLElement} container
+ */
 function renderRuleSets(container) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // Empty state
     if (ruleFiles.length === 0) {
@@ -324,9 +331,9 @@ function renderRuleSets(container) {
 
     // Render each group as a collapsible section
     groups.forEach((group) => {
-        const groupFiles = group.files
+        const groupFiles = /** @type {(typeof ruleFiles)[number][]} */ (group.files
             .map((name) => fileMap.get(name))
-            .filter(Boolean);
+            .filter(Boolean));
 
         container.appendChild(buildGroupSection(group, groupFiles, fileMap));
     });
@@ -352,7 +359,7 @@ function renderRuleSets(container) {
  * @returns {HTMLElement}
  */
 function buildGroupSection(group, files, fileMap, isUngrouped = false) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const section = document.createElement('div');
     section.className = 'space-y-2';
 
@@ -387,7 +394,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
         const isCollapsed = body.style.display === 'none';
         body.style.display = isCollapsed ? '' : 'none';
         const arrow = header.querySelector('.collapse-arrow');
-        if (arrow) arrow.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
+        if (arrow instanceof HTMLElement) arrow.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
     });
 
     // File cards
@@ -403,11 +410,11 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 /**
  * Build a file card element.
  * @param {(typeof ruleFiles)[number]} file
- * @param {Map<string, (typeof ruleFiles)[number]>} fileMap
+ * @param {Map<string, (typeof ruleFiles)[number]>} _fileMap
  * @returns {HTMLElement}
  */
 function buildFileCard(file, _fileMap) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const card = document.createElement('div');
     card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-300 cursor-pointer';
 
@@ -446,7 +453,7 @@ function buildFileCard(file, _fileMap) {
  * @returns {{cls: string, label: string}}
  */
 function getSourceBadge(source) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const s = (source || '').toLowerCase();
     if (s.includes('extract') || s.includes('subscription')) {
         return { cls: 'bg-blue-500/15 text-blue-400', label: t.ruleLibraryExtracted || 'Extracted' };
@@ -474,9 +481,10 @@ function getSourceBadge(source) {
  * 每条 rule 显示：序号 + type badge + value + 来源标签 + policy。
  * Prism 规则加来源徽章（label 名称），非 Prism 规则无徽章。
  * 列表顶部有"插入规则"按钮。
+ * @param {HTMLElement} [container]
  */
 function renderActiveRules(container) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // Cache container for collapse/expand re-renders
     if (container) activeRulesContainer = container;
@@ -637,7 +645,7 @@ function renderActiveRules(container) {
                 fragment.appendChild(header);
             } else {
                 const { raw, index, localIndex, groupLabel } = item;
-                const parts = raw.split(',').map((s) => s.trim());
+                const parts = raw.split(',').map((/** @type {string} */ s) => s.trim());
                 if (parts.length < 2) return;
 
                 const type = parts[0];
@@ -707,7 +715,7 @@ function getGroupBadgeColor(label) {
  * 插入规则 — 支持字符串格式和 JSON 格式，支持 4 种位置策略。
  */
 async function handleInsertRule() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // ── 第一步：输入规则内容 ──
     const ruleStr = await showModal(
@@ -796,7 +804,7 @@ async function handleInsertRule() {
  * @param {string} groupName
  */
 function showGroupContextMenu(e, groupName) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     showContextMenu(e, [
         {
@@ -816,7 +824,7 @@ function showGroupContextMenu(e, groupName) {
  * @param {(typeof ruleFiles)[number]} file
  */
 function showFileContextMenu(e, file) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     /** @type {{label: string, action: () => void}[]} */
     const items = [
@@ -856,7 +864,7 @@ function showFileContextMenu(e, file) {
  * @param {number} index
  */
 function showActiveRuleContextMenu(e, rule, index) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     showContextMenu(e, [
         {
@@ -871,7 +879,7 @@ function showActiveRuleContextMenu(e, rule, index) {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function handleNewGroup() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const name = await showModal(
         t.ruleLibraryGroupName || 'Group Name',
         t.ruleLibraryGroupNamePlaceholder || 'Enter group name',
@@ -888,8 +896,11 @@ async function handleNewGroup() {
     }
 }
 
+/**
+ * @param {string} oldName
+ */
 async function handleRenameGroup(oldName) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const newName = await showModal(
         t.ruleLibraryEditGroup || 'Edit Group Name',
         t.ruleLibraryGroupNamePlaceholder || 'Enter group name',
@@ -907,8 +918,11 @@ async function handleRenameGroup(oldName) {
     }
 }
 
+/**
+ * @param {string} name
+ */
 async function handleDeleteGroup(name) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const confirmed = await showConfirmModal(
         t.ruleLibraryDeleteTitle || 'Delete Group',
         name,
@@ -925,8 +939,11 @@ async function handleDeleteGroup(name) {
     }
 }
 
+/**
+ * @param {string} filename
+ */
 async function handleMoveToGroup(filename) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // Build submenu with group names
     const groupNames = groups.map((g) => g.name);
@@ -946,7 +963,9 @@ async function handleMoveToGroup(filename) {
         // onReady: bind click handlers — clicking a group button immediately closes and returns it
         (contentArea, close) => {
             contentArea.querySelector('.space-y-1')?.addEventListener('click', (e) => {
-                const btn = (e.target instanceof Element ? e.target : e.target.parentElement)?.closest('[data-group-index]');
+                const target = e.target;
+                if (!(target instanceof Element)) return;
+                const btn = target.closest('[data-group-index]');
                 if (!(btn instanceof HTMLElement)) return;
                 close(btn);
             });
@@ -974,7 +993,7 @@ async function handleMoveToGroup(filename) {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function handleCreateRuleFile() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const name = await showModal(
         t.ruleLibraryCreateFile || 'Create Rule File',
         t.ruleLibraryGroupNamePlaceholder || 'Enter file name',
@@ -995,8 +1014,11 @@ async function handleCreateRuleFile() {
     }
 }
 
+/**
+ * @param {string} oldFilename
+ */
 async function handleRenameRule(oldFilename) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const displayName = oldFilename.replace(/\.prism\.ya?ml$/i, '');
     const newName = await showModal(
         t.ruleLibraryRenameRule || 'Rename',
@@ -1018,8 +1040,11 @@ async function handleRenameRule(oldFilename) {
     }
 }
 
+/**
+ * @param {string} filename
+ */
 async function handleDeleteRule(filename) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const confirmed = await showConfirmModal(
         t.ruleLibraryDeleteTitle || 'Delete Rule Set',
         t.ruleLibraryDeleteConfirm || 'Are you sure you want to delete this rule set?',
@@ -1073,8 +1098,11 @@ function buildEditorHtml(t) {
     `;
 }
 
+/**
+ * @param {string} filename
+ */
 async function handleEditRule(filename) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     let content = '';
     try {
@@ -1094,7 +1122,7 @@ async function handleEditRule(filename) {
     // The Promise resolves when the modal closes (user clicks confirm/cancel).
     await showModal(filename, '', '', true, buildEditorHtml(t), (contentArea, closeEditor) => {
         // Wire up editor controls
-        const visualContainer = contentArea.querySelector('#rl-editor-visual');
+        const visualContainer = /** @type {HTMLElement} */ (contentArea.querySelector('#rl-editor-visual'));
         const textContainer = contentArea.querySelector('#rl-editor-text');
         const textarea = /** @type {HTMLTextAreaElement} */ (contentArea.querySelector('#rl-editor-textarea'));
         const cm6Container = /** @type {HTMLElement} */ (contentArea.querySelector('#rl-editor-cm6'));
@@ -1106,13 +1134,14 @@ async function handleEditRule(filename) {
 
         textarea.value = content;
 
+        /** @type {number|null} */
         let dragSourceIndex = null;
 
         // ── Virtual scroll for rule editor (shared module) ──
         const VS_ROW_EST = 72;
-        const vsSpacerTop = visualContainer.querySelector('#rl-vs-spacer-top');
-        const vsLinesContainer = visualContainer.querySelector('#rl-vs-lines');
-        const vsSpacerBottom = visualContainer.querySelector('#rl-vs-spacer-bottom');
+        const vsSpacerTop = /** @type {HTMLElement} */ (visualContainer.querySelector('#rl-vs-spacer-top'));
+        const vsLinesContainer = /** @type {HTMLElement} */ (visualContainer.querySelector('#rl-vs-lines'));
+        const vsSpacerBottom = /** @type {HTMLElement} */ (visualContainer.querySelector('#rl-vs-spacer-bottom'));
 
         const ruleVs = createVirtualScroll({
             container: visualContainer,
@@ -1135,9 +1164,11 @@ async function handleEditRule(filename) {
 
         /**
          * Create a single rule card element.
+         * @param {string} rule
+         * @param {number} index
          */
         function createRuleCard(rule, index) {
-            const parts = rule.split(',').map((s) => s.trim());
+            const parts = rule.split(',').map((/** @type {string} */ s) => s.trim());
             if (parts.length < 2) return null;
 
             const type = parts[0];
@@ -1149,7 +1180,7 @@ async function handleEditRule(filename) {
             const item = document.createElement('div');
             item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-300 cursor-pointer';
             item.draggable = true;
-            item.style.webkitUserDrag = 'element';
+            item.style.setProperty('-webkit-user-drag', 'element');
             item.dataset.ruleIndex = String(index);
 
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr
@@ -1204,10 +1235,12 @@ async function handleEditRule(filename) {
             });
 
             // Drag & Drop
-            item.addEventListener('dragstart', (ev) => {
+            item.addEventListener('dragstart', (/** @type {DragEvent} */ ev) => {
                 dragSourceIndex = index;
-                ev.dataTransfer.effectAllowed = 'move';
-                ev.dataTransfer.setData('text/plain', String(index));
+                if (ev.dataTransfer) {
+                    ev.dataTransfer.effectAllowed = 'move';
+                    ev.dataTransfer.setData('text/plain', String(index));
+                }
                 item.style.transform = 'none';
                 requestAnimationFrame(() => item.classList.add('opacity-40'));
             });
@@ -1216,13 +1249,13 @@ async function handleEditRule(filename) {
                 item.classList.remove('opacity-40');
                 item.style.transform = '';
                 dragSourceIndex = null;
-                vsLinesContainer.querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
+                /** @type {HTMLElement} */ (vsLinesContainer).querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
             });
 
-            item.addEventListener('dragover', (ev) => {
+            item.addEventListener('dragover', (/** @type {DragEvent} */ ev) => {
                 ev.preventDefault();
-                ev.dataTransfer.dropEffect = 'move';
-                vsLinesContainer.querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
+                if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+                /** @type {HTMLElement} */ (vsLinesContainer).querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
                 const rect = item.getBoundingClientRect();
                 const midY = rect.top + (rect.height / 2);
                 const indicator = document.createElement('div');
@@ -1236,7 +1269,7 @@ async function handleEditRule(filename) {
 
             item.addEventListener('drop', (ev) => {
                 ev.preventDefault();
-                vsLinesContainer.querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
+                /** @type {HTMLElement} */ (vsLinesContainer).querySelectorAll('.rl-drop-indicator').forEach((el) => el.remove());
                 if (dragSourceIndex === null || dragSourceIndex === index) return;
                 const rect = item.getBoundingClientRect();
                 const midY = rect.top + (rect.height / 2);
@@ -1319,7 +1352,7 @@ async function handleEditRule(filename) {
  * @param {string} filename
  */
 async function handleViewChanges(filename) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     try {
         // Use cached trace from last apply() — no recompilation needed.
         // Fallback to apply() on first use (cache is empty).
@@ -1335,7 +1368,7 @@ async function handleViewChanges(filename) {
             showNotification(`${filename}: ${t.ruleLibraryNoPatch || 'No patch data found'}`, 'warning');
             return;
         }
-        const diff = await prism.previewRules(match.patch_id);
+        const diff = await prism.previewRules(/** @type {any} */ (match).patch_id);
 
         const added = Array.isArray(diff?.added) ? diff.added : [];
         const removed = Array.isArray(diff?.removed) ? diff.removed : [];
@@ -1354,7 +1387,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span class="text-xs font-medium text-emerald-400">+${added.length} ${t.ruleLibraryDiffAdded || 'added'}</span>
                 </div>
-                ${added.map((r) => `<div class="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${added.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (removed.length > 0) {
@@ -1363,7 +1396,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-rose-400"></span>
                     <span class="text-xs font-medium text-rose-400">-${removed.length} ${t.ruleLibraryDiffRemoved || 'removed'}</span>
                 </div>
-                ${removed.map((r) => `<div class="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${removed.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (modified.length > 0) {
@@ -1372,7 +1405,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
                     <span class="text-xs font-medium text-amber-400">~${modified.length} ${t.ruleLibraryDiffModified || 'modified'}</span>
                 </div>
-                ${modified.map((r) => `<div class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${modified.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
 
@@ -1446,7 +1479,7 @@ async function handleSaveRules(t, filename, rawContent, rules, originalContent) 
 // ═══════════════════════════════════════════════════════════════════════
 
 async function handleImportRules() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     /** @type {'paste'|'file'|'url'} */
     let importMode = 'paste';
@@ -1577,7 +1610,7 @@ async function handleImportRules() {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function handleExtractFromSubscription() {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     // 列出所有可用 profile
     let profiles = [];
@@ -1618,7 +1651,7 @@ async function handleExtractFromSubscription() {
             `<div class="space-y-1">${profileOptionsHtml}</div>`,
             (contentArea, close) => {
                 contentArea.querySelectorAll('[data-profile-id]').forEach((btn) => {
-                    btn.addEventListener('click', () => close(btn));
+                    btn.addEventListener('click', () => close(/** @type {HTMLElement} */ (btn)));
                 });
             },
         );
@@ -1663,7 +1696,7 @@ async function handleExtractFromSubscription() {
  * @param {number} index
  */
 async function handleTraceRule(rule, index) {
-    const t = /** @type {Record<string, string>} */ (translations[currentLang]);
+    const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
     try {
         const report = await prism.traceReportText();

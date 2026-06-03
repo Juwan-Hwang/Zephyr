@@ -112,12 +112,12 @@ function unlockScroll() {
  * @param {string} defaultValue
  * @param {boolean} isCustomContent
  * @param {string} customHtml
- * @param {(contentArea: HTMLElement, close: (val?: string|HTMLElement|null) => void) => void} [onReady]
+ * @param {(contentArea: HTMLElement, close: (val: string|HTMLElement|null) => void) => void} [onReady]
  * @returns {Promise<string|HTMLElement|null>}
  */
 let _modalOpen = false;
 
-export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', onReady) {
+export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', /** @type {((contentArea: HTMLElement, close: (val: string|HTMLElement|null) => void) => void)|undefined} */ onReady = undefined) {
     if (_modalOpen) return Promise.resolve(null);
     _modalOpen = true;
     return new Promise((resolve) => {

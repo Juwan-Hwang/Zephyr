@@ -49,6 +49,9 @@ const waitForCurrentNode = async (groupName, expectedName, maxRetries = 10, inte
     return finalCurrent || expectedName;
 };
 
+/** @type {number} Session counter to prevent race conditions on rapid switches */
+let _switchSessionCounter = 0;
+
 /**
  * Handle proxy switch within the wheel, including UI updates and recovery.
  * @param {HTMLElement} trigger
@@ -72,10 +75,10 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
 
     // Use session counter to prevent race conditions on rapid switches
     // Increment BEFORE async operations to maintain click order
-    if (!handleWheelProxySwitch.sessionCounter) {
-        handleWheelProxySwitch.sessionCounter = 0;
+    if (!_switchSessionCounter) {
+        _switchSessionCounter = 0;
     }
-    const currentSession = ++handleWheelProxySwitch.sessionCounter;
+    const currentSession = ++_switchSessionCounter;
 
     // Use uiGroupName from appStore for accurate group targeting
     const targetGroup = appStore.get('uiGroupName') || mainGroup;
@@ -100,10 +103,10 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
         (async () => {
             try {
                 await waitForCurrentNode(targetGroup, name);
-                if (handleWheelProxySwitch.sessionCounter !== currentSession) return;
+                if (_switchSessionCounter !== currentSession) return;
                 // Let syncCoreConfig() handle the display update with leaf node resolution
                 await syncCoreConfig();
-                if (handleWheelProxySwitch.sessionCounter !== currentSession) return;
+                if (_switchSessionCounter !== currentSession) return;
                 const proxiesPage = document.querySelector('[data-page="proxies"]');
                 if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
                     await renderProxies();
@@ -141,7 +144,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
 
         // Use the resolver's uiGroupName for wheel display
         const uiGroupName = proxyGroupsResult.uiGroupName
-            || proxyGroupsResult.mainGroup;
+            || proxyGroupsResult.mainGroup || '';
         const { data, current } = proxyGroupsResult;
         /** @type {string[]} */
         const proxies = [...proxyGroupsResult.proxies];
@@ -274,7 +277,7 @@ export function initNodeWheel() {
     const list = document.getElementById('node-wheel-list');
     const container = document.getElementById('node-wheel-container');
 
-    if (!trigger || !dropdown || !list || !container) return;
+    if (!trigger || !dropdown || !list || !container || !scrollContainer) return;
 
     const getWheelItems = () => Array.from(list.children);
 
