@@ -34,6 +34,7 @@ export function markdownToHtml(md) {
 
     // Use placeholders for code blocks and inline code so that escapeHtml
     // in subsequent steps doesn't double-escape the generated HTML tags.
+    /** @type {string[]} */
     const placeholders = [];
 
     // 1. Code blocks (```...```) — must be first to prevent inner content from being parsed

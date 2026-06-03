@@ -62,6 +62,7 @@ import { initTunnelSettings } from './settings/tunnels.js';
 import { initSubscriptionSettings } from './settings/subscriptions.js';
 
 let __langDropdown = null;
+/** @type {(() => void) | null} */
 let _dropUnlisten = null;
 
 // ---------------------------------------------------------------------------
@@ -234,8 +235,8 @@ function initFakeClient() {
 
     function updateVisibility() {
         if (toggle.checked) {
-            optionsContainer.classList.remove('max-h-0', 'opacity-0', 'overflow-hidden');
-            optionsContainer.classList.add('max-h-40', 'opacity-100');
+            /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-0', 'opacity-0', 'overflow-hidden');
+            /** @type {HTMLElement} */ (optionsContainer).classList.add('max-h-40', 'opacity-100');
             if (select.value === 'custom' && customContainer) {
                 customContainer.classList.remove('hidden');
             } else if (customContainer) {
@@ -245,8 +246,8 @@ function initFakeClient() {
                 fetchLatestVersions();
             }
         } else {
-            optionsContainer.classList.remove('max-h-40', 'opacity-100');
-            optionsContainer.classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
+            /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-40', 'opacity-100');
+            /** @type {HTMLElement} */ (optionsContainer).classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
             setTimeout(() => { if (customContainer) customContainer.classList.add('hidden'); }, 300);
         }
     }
@@ -351,6 +352,7 @@ export async function initSettings() {
     const addTunnelBtn = document.getElementById('add-tunnel-btn');
     const tunnelsList = document.getElementById('tunnels-list');
     const tunnelsEmpty = document.getElementById('tunnels-empty');
+    /** @type {NodeListOf<HTMLElement>} */
     const themeCircles = document.querySelectorAll('[data-theme]');
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
@@ -372,6 +374,7 @@ export async function initSettings() {
     const appMainContainer = document.getElementById('app-main-container');
     const themeModeContainer = document.getElementById('setting-theme-mode-container');
     const themeModeSlider = document.getElementById('setting-theme-mode-slider');
+    /** @type {HTMLElement[]} */
     const themeModeButtons = Array.from(document.querySelectorAll('[data-theme-mode]'));
     const appTitleIcon = /** @type {HTMLImageElement} */ (document.getElementById('app-title-icon'));
 
@@ -462,7 +465,7 @@ export async function initSettings() {
 
     // ---- UI Scale buttons ----
     const uiScaleButtons = document.querySelectorAll('.ui-scale-btn');
-    const applyUiScale = (scale) => {
+    const applyUiScale = (/** @type {number} */ scale) => {
         // Update button states
         uiScaleButtons.forEach(btn => {
             btn.classList.remove('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
@@ -898,7 +901,7 @@ export async function initSettings() {
             // Animate in
             requestAnimationFrame(() => {
                 const inner = portModal.querySelector('.glass-card');
-                if (inner) {
+                if (inner instanceof HTMLElement) {
                     inner.style.transform = 'scale(0.96)';
                     inner.style.opacity = '0';
                     requestAnimationFrame(() => {
@@ -923,7 +926,7 @@ export async function initSettings() {
             portFocusTrap.deactivate();
         }
         const inner = portModal.querySelector('.glass-card');
-        if (inner) {
+        if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';
             inner.style.transform = 'scale(0.96)';
             inner.style.opacity = '0';
@@ -1327,6 +1330,7 @@ export async function initSettings() {
         // Initialize from backend smart config, fallback to localStorage for migration
         const initSmartEnabled = async () => {
             try {
+                /** @type {any} */
                 const config = await prism.smartConfig();
                 smartToggle.checked = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
             } catch {
@@ -1340,6 +1344,7 @@ export async function initSettings() {
             // Always sync to localStorage as fallback for migration scenarios
             localStorage.setItem('smartEnabled', String(smartToggle.checked));
             try {
+                /** @type {any} */
                 const config = await prism.smartConfig();
                 config.enabled = smartToggle.checked;
                 await prism.smartConfigSave(config);
@@ -1385,9 +1390,16 @@ export async function initSettings() {
 
         // Re-sync when smart toggle changes (must be set after smartToggle.onchange)
         if (smartToggle) {
-            const origSmartOnChange = smartToggle.onchange;
-            smartToggle.onchange = async () => {
-                await origSmartOnChange?.call(smartToggle);
+            const origSmartOnChange = /** @type {((e?: Event) => any) | null | undefined} */ (smartToggle.onchange);
+            smartToggle.onchange = async (e) => {
+                if (origSmartOnChange) {
+                    try {
+                        await origSmartOnChange.call(smartToggle, e);
+                    } catch (err) {
+                        // eslint-disable-next-line no-console
+                        console.error('Error in smart toggle change handler:', err);
+                    }
+                }
                 syncAutoTestState();
             };
         }
@@ -1399,9 +1411,11 @@ export async function initSettings() {
             // Remove existing modal if any
             document.getElementById('smart-config-modal')?.remove();
 
-            const t = /** @type {Record<string, string>} */ (translations)[appStore.get('currentLang')] ?? {};
+            /** @type {Record<string, any>} */
+            const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
 
             // Load current config
+            /** @type {any} */
             let config = {};
             try {
                 config = await prism.smartConfig();
@@ -1458,7 +1472,7 @@ export async function initSettings() {
             // Animate in
             requestAnimationFrame(() => {
                 const panel = modal.querySelector('.glass-card');
-                if (panel) {
+                if (panel instanceof HTMLElement) {
                     panel.style.transform = 'scale(0.96)';
                     panel.style.opacity = '0';
                     requestAnimationFrame(() => {
@@ -1471,7 +1485,7 @@ export async function initSettings() {
 
             const closeModal = () => {
                 const panel = modal.querySelector('.glass-card');
-                if (panel) {
+                if (panel instanceof HTMLElement) {
                     panel.style.transition = 'all 0.15s ease-in';
                     panel.style.transform = 'scale(0.96)';
                     panel.style.opacity = '0';
@@ -1486,23 +1500,23 @@ export async function initSettings() {
             document.getElementById('smart-modal-done')?.addEventListener('click', closeModal);
 
             // Save on input change (debounced)
-            const inputs = modal.querySelectorAll('input[type="number"]');
+            const inputs = /** @type {NodeListOf<HTMLInputElement>} */ (modal.querySelectorAll('input[type="number"]'));
             const saveConfig = debounce(async () => {
                 try {
                     const configJson = {
-                        latency_weight: parseFloat(modal.querySelector('#smart-weight-latency')?.value || '0.4'),
-                        success_weight: parseFloat(modal.querySelector('#smart-weight-success')?.value || '0.4'),
-                        stability_weight: parseFloat(modal.querySelector('#smart-weight-stability')?.value || '0.2'),
-                        half_life_hours: parseFloat(modal.querySelector('#smart-half-life')?.value || '1.0'),
-                        min_interval_secs: parseInt(modal.querySelector('#smart-min-interval')?.value || '60', 10),
-                        max_interval_secs: parseInt(modal.querySelector('#smart-max-interval')?.value || '600', 10),
+                        latency_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-latency'))?.value || '0.4'),
+                        success_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-success'))?.value || '0.4'),
+                        stability_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-stability'))?.value || '0.2'),
+                        half_life_hours: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-half-life'))?.value || '1.0'),
+                        min_interval_secs: parseInt(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-min-interval'))?.value || '60', 10),
+                        max_interval_secs: parseInt(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-max-interval'))?.value || '600', 10),
                     };
                     await prism.smartConfigSave(configJson);
                 } catch (err) {
                     settingsLogger.error('[smart] Failed to save config:', err);
                 }
             }, 500);
-            inputs.forEach(input => input.addEventListener('input', saveConfig));
+            inputs.forEach(input => input.addEventListener('input', /** @type {EventListener} */ (saveConfig)));
         };
     }
 

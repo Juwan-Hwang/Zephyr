@@ -31,12 +31,14 @@ const CONSECUTIVE_K = 3;
 /** Polling interval in ms (optimized for responsiveness). */
 const POLL_INTERVAL = 2000;
 
+/** @type {ReturnType<typeof setTimeout>|null} */
 let _timer = null;
 let _polling = false;
 let _active = false;
 let _consecutiveCount = 0;
+/** @type {string|null} */
 let _lastCandidate = null;
-/** Module-level cache for static proxy group structures */
+/** @type {Record<string, any> | null} Module-level cache for static proxy group structures */
 let _staticProxiesCache = null;
 
 // Invalidate cache on config/core changes
@@ -52,8 +54,8 @@ Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
  * the final node name from the chain — keyed per group to ensure
  * the reported node actually belongs to the reported group.
  *
- * @param {Array} connections - Active connections from /connections API
- * @param {Object} proxiesData - Full proxy map from /proxies
+ * @param {Array<{ chains?: string[] }>} connections - Active connections from /connections API
+ * @param {Record<string, any>} proxiesData - Full proxy map from /proxies
  * @returns {{ name: string|null, node: string|null, freq: number, total: number, ratio: number }}
  */
 export function computeObservedGroup(connections, proxiesData) {
@@ -168,6 +170,7 @@ async function _poll() {
         ]);
 
         const connections = connData?.connections || connData || [];
+        /** @type {Record<string, any>} */
         const proxies = proxiesData?.proxies || proxiesData;
 
         const result = computeObservedGroup(connections, proxies);
