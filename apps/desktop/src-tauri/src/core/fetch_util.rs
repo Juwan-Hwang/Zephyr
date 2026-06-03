@@ -310,7 +310,10 @@ async fn resolve_and_pin(host: &str, port: u16) -> Result<std::net::SocketAddr, 
     for addr in &addrs {
         if is_private_ip(addr.ip()) {
             // Public domain resolving to a private IP = SSRF, always block.
-            return Err("Access to private/local resolved addresses is not allowed".to_owned());
+            return Err(format!(
+                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed",
+                host, addr.ip()
+            ));
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(*addr);

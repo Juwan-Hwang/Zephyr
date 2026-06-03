@@ -357,7 +357,7 @@ pub(crate) fn validate_subscription_url_with_ip(
     let default_port = if scheme == "https" { 443 } else { 80 };
     let addrs: Vec<std::net::SocketAddr> =
         std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
-            .map_err(|e| format!("Failed to resolve host: {e}"))?
+            .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
     validate_public_host_addrs(host, &addrs)
@@ -374,7 +374,11 @@ fn validate_public_host_addrs(
     for addr in addrs {
         if is_private_ip(addr.ip()) {
             // Public domain resolving to a private IP = SSRF, always block.
-            return Err("Access to private/local resolved addresses is not allowed".to_owned());
+            return Err(format!(
+                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed. \
+                 If this is a trusted internal subscription, enter the private address directly (e.g. http://192.168.x.x) instead of using a domain name.",
+                host, addr.ip()
+            ));
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(*addr);
@@ -469,12 +473,8 @@ pub(crate) async fn download_sub_inner(
 
         if !resp.status().is_success() {
             let status = resp.status();
-            emit_warn!(
-                Subscription,
-                SUB_UPDATE_FAILED,
-                "Download failed with status: {status}"
-            );
-            return Err("Download failed with error status".to_owned());
+            let url_display = resp.url().to_string();
+            return Err(format!("HTTP {status} from {url_display}"));
         }
 
         if let Some(content_length) = resp.content_length() {
@@ -517,19 +517,16 @@ pub(crate) async fn download_sub_inner(
     let mut result: Option<(Vec<u8>, String, String, Option<String>)> = None;
 
     // Try direct connection first
-    match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
+    let direct_error = match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
         Ok(client) => match do_download(client, url.clone()).await {
-            Ok(data) => result = Some(data),
-            Err(e) => {
-                println!("[download_sub] Direct connection failed: {e}");
-                last_error = e;
+            Ok(data) => {
+                result = Some(data);
+                None
             }
+            Err(e) => Some(format!("Direct: {e}")),
         },
-        Err(e) => {
-            println!("[download_sub] Failed to build direct client: {e}");
-            last_error = e;
-        }
-    }
+        Err(e) => Some(format!("Direct client build: {e}")),
+    };
 
     if result.is_none() {
         // Get proxy port from state, then immediately release the lock
@@ -559,8 +556,7 @@ pub(crate) async fn download_sub_inner(
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        println!("[download_sub] Mihomo proxy failed: {e}");
-                        last_error = e;
+                        last_error = format!("{} | Proxy: {}", direct_error.as_deref().unwrap_or(""), e);
                     }
                 }
             }
@@ -572,10 +568,12 @@ pub(crate) async fn download_sub_inner(
     // The Mihomo proxy path is trusted (user-configured), while system proxy
     // could be set by any application/malware on the system.
     let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
-        if last_error.is_empty() {
-            "Network error occurred during download".to_owned()
-        } else {
+        if !last_error.is_empty() {
             last_error
+        } else if let Some(de) = direct_error {
+            de
+        } else {
+            "Network error occurred during download".to_owned()
         }
     })?;
 
@@ -759,6 +757,36 @@ pub(crate) async fn download_sub_inner(
     Ok(format!("Config saved as {clean_name}"))
 }
 
+/// Determine the appropriate error code based on the error message content.
+fn classify_sub_error(e: &str) -> u16 {
+    use crate::backend_event::codes::{
+        SUB_DNS_FAILED, SUB_HTTP_ERROR, SUB_NAME_INVALID, SUB_NETWORK_ERROR,
+        SUB_RESPONSE_TOO_LARGE, SUB_SSRF_BLOCKED, SUB_UPDATE_FAILED, SUB_UPDATE_TIMEOUT,
+        SUB_URL_INVALID, SUB_YAML_INVALID,
+    };
+    if e.contains("SSRF protection") {
+        SUB_SSRF_BLOCKED
+    } else if e.contains("DNS resolution failed") {
+        SUB_DNS_FAILED
+    } else if e.starts_with("Invalid URL") || e.contains("Only HTTP") || e.contains("must have a host") {
+        SUB_URL_INVALID
+    } else if e.contains("Subscription name") {
+        SUB_NAME_INVALID
+    } else if e.starts_with("HTTP ") {
+        SUB_HTTP_ERROR
+    } else if e.contains("timeout") || e.contains("Timeout") {
+        SUB_UPDATE_TIMEOUT
+    } else if e.contains("Response too large") || e.contains("exceeded size limit") {
+        SUB_RESPONSE_TOO_LARGE
+    } else if e.contains("Invalid YAML") || e.contains("YAML structure") {
+        SUB_YAML_INVALID
+    } else if e.contains("Connection failed") || e.contains("Network error") || e.contains("Request error") {
+        SUB_NETWORK_ERROR
+    } else {
+        SUB_UPDATE_FAILED
+    }
+}
+
 /// Tauri command wrapper: single subscription download with rate limiting.
 /// If `url` is None, the URL is resolved internally from metadata.
 #[tauri::command]
@@ -772,14 +800,27 @@ pub async fn download_sub(
 ) -> Result<String, String> {
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
     let resolved_url = resolve_url_from_metadata(&app, &name, url)?;
-    download_sub_inner(
+    let result = download_sub_inner(
         &app,
         resolved_url,
-        name,
+        name.clone(),
         user_agent,
         overwrite.unwrap_or(false),
     )
-    .await
+    .await;
+
+    if let Err(e) = &result {
+        let code = classify_sub_error(e);
+        crate::backend_event::emit_backend_event(
+            &crate::backend_event::BackendEvent::error(
+                crate::backend_event::BackendModule::Subscription,
+                code,
+                format!("Failed to update '{name}': {e}"),
+            )
+        );
+    }
+
+    result
 }
 
 /// Batch update result for a single subscription.
@@ -804,6 +845,14 @@ pub async fn download_sub_batch(
         let resolved_url = match resolve_url_from_metadata(&app, &name, item.url) {
             Ok(u) => u,
             Err(e) => {
+                let code = classify_sub_error(&e);
+                crate::backend_event::emit_backend_event(
+                    &crate::backend_event::BackendEvent::error(
+                        crate::backend_event::BackendModule::Subscription,
+                        code,
+                        format!("Failed to update '{name}': {e}"),
+                    )
+                );
                 results.push(BatchUpdateResult {
                     name,
                     success: false,
@@ -820,11 +869,21 @@ pub async fn download_sub_batch(
                 success: true,
                 error: None,
             }),
-            Err(e) => results.push(BatchUpdateResult {
-                name,
-                success: false,
-                error: Some(e),
-            }),
+            Err(e) => {
+                let code = classify_sub_error(&e);
+                crate::backend_event::emit_backend_event(
+                    &crate::backend_event::BackendEvent::error(
+                        crate::backend_event::BackendModule::Subscription,
+                        code,
+                        format!("Failed to update '{name}': {e}"),
+                    )
+                );
+                results.push(BatchUpdateResult {
+                    name,
+                    success: false,
+                    error: Some(e),
+                });
+            }
         }
     }
     Ok(results)
