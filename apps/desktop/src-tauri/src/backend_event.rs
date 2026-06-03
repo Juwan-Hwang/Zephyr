@@ -177,6 +177,14 @@ pub mod codes {
     pub const SUB_ALL_FAILED: u16 = 2004;
     pub const SUB_UPDATE_SUCCESS: u16 = 2005;
     pub const SUB_LOCK_FAILED: u16 = 2006;
+    pub const SUB_SSRF_BLOCKED: u16 = 2007;
+    pub const SUB_NAME_INVALID: u16 = 2008;
+    pub const SUB_URL_INVALID: u16 = 2009;
+    pub const SUB_DNS_FAILED: u16 = 2010;
+    pub const SUB_HTTP_ERROR: u16 = 2011;
+    pub const SUB_NETWORK_ERROR: u16 = 2012;
+    pub const SUB_RESPONSE_TOO_LARGE: u16 = 2013;
+    pub const SUB_YAML_INVALID: u16 = 2014;
 
     // Prism: 3000-3999
     pub const PRISM_APPLY_FAILED: u16 = 3001;

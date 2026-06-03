@@ -357,7 +357,7 @@ pub(crate) fn validate_subscription_url_with_ip(
     let default_port = if scheme == "https" { 443 } else { 80 };
     let addrs: Vec<std::net::SocketAddr> =
         std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
-            .map_err(|e| format!("Failed to resolve host: {e}"))?
+            .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
     validate_public_host_addrs(host, &addrs)
@@ -374,7 +374,11 @@ fn validate_public_host_addrs(
     for addr in addrs {
         if is_private_ip(addr.ip()) {
             // Public domain resolving to a private IP = SSRF, always block.
-            return Err("Access to private/local resolved addresses is not allowed".to_owned());
+            return Err(format!(
+                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed. \
+                 If this is a trusted internal subscription, enter the private address directly (e.g. http://192.168.x.x) instead of using a domain name.",
+                host, addr.ip()
+            ));
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(*addr);
@@ -431,8 +435,20 @@ fn resolve_url_from_metadata(
     super::config_manager::get_config_url(app, name)
 }
 
-#[allow(clippy::cognitive_complexity)]
 pub(crate) async fn download_sub_inner(
+    app: &AppHandle,
+    url: String,
+    name: String,
+    user_agent: Option<String>,
+    overwrite: bool,
+) -> Result<String, String> {
+    download_sub_inner_raw(app, url, name, user_agent, overwrite)
+        .await
+        .map_err(|e| redact_url_in_string(&e))
+}
+
+#[allow(clippy::cognitive_complexity)]
+async fn download_sub_inner_raw(
     app: &AppHandle,
     url: String,
     name: String,
@@ -469,12 +485,8 @@ pub(crate) async fn download_sub_inner(
 
         if !resp.status().is_success() {
             let status = resp.status();
-            emit_warn!(
-                Subscription,
-                SUB_UPDATE_FAILED,
-                "Download failed with status: {status}"
-            );
-            return Err("Download failed with error status".to_owned());
+            let url_display = super::config_manager::mask_url(resp.url().as_ref());
+            return Err(format!("HTTP {status} from {url_display}"));
         }
 
         if let Some(content_length) = resp.content_length() {
@@ -517,19 +529,17 @@ pub(crate) async fn download_sub_inner(
     let mut result: Option<(Vec<u8>, String, String, Option<String>)> = None;
 
     // Try direct connection first
-    match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
-        Ok(client) => match do_download(client, url.clone()).await {
-            Ok(data) => result = Some(data),
-            Err(e) => {
-                println!("[download_sub] Direct connection failed: {e}");
-                last_error = e;
-            }
-        },
-        Err(e) => {
-            println!("[download_sub] Failed to build direct client: {e}");
-            last_error = e;
-        }
-    }
+    let direct_error =
+        match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
+            Ok(client) => match do_download(client, url.clone()).await {
+                Ok(data) => {
+                    result = Some(data);
+                    None
+                }
+                Err(e) => Some(format!("Direct: {e}")),
+            },
+            Err(e) => Some(format!("Direct client build: {e}")),
+        };
 
     if result.is_none() {
         // Get proxy port from state, then immediately release the lock
@@ -555,13 +565,21 @@ pub(crate) async fn download_sub_inner(
             //     Mitigate by only configuring trusted proxies.
             let client_mihomo =
                 build_http_client_with_proxy(user_agent.as_deref(), None, Some(proxy_url_val));
-            if let Ok(client) = client_mihomo {
-                match do_download(client, url.clone()).await {
+            match client_mihomo {
+                Ok(client) => match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        println!("[download_sub] Mihomo proxy failed: {e}");
-                        last_error = e;
+                        last_error = match direct_error.as_deref() {
+                            Some(de) => format!("{de} | Proxy: {e}"),
+                            None => format!("Proxy: {e}"),
+                        };
                     }
+                },
+                Err(e) => {
+                    last_error = match direct_error.as_deref() {
+                        Some(de) => format!("{de} | Proxy client build: {e}"),
+                        None => format!("Proxy client build: {e}"),
+                    };
                 }
             }
         }
@@ -572,10 +590,12 @@ pub(crate) async fn download_sub_inner(
     // The Mihomo proxy path is trusted (user-configured), while system proxy
     // could be set by any application/malware on the system.
     let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
-        if last_error.is_empty() {
-            "Network error occurred during download".to_owned()
-        } else {
+        if !last_error.is_empty() {
             last_error
+        } else if let Some(de) = direct_error {
+            de
+        } else {
+            "Network error occurred during download".to_owned()
         }
     })?;
 
@@ -759,6 +779,112 @@ pub(crate) async fn download_sub_inner(
     Ok(format!("Config saved as {clean_name}"))
 }
 
+/// Determine the appropriate error code based on the error message content.
+fn classify_sub_error(e: &str) -> u16 {
+    use crate::backend_event::codes::{
+        SUB_DNS_FAILED, SUB_HTTP_ERROR, SUB_NAME_INVALID, SUB_NETWORK_ERROR,
+        SUB_RESPONSE_TOO_LARGE, SUB_SSRF_BLOCKED, SUB_UPDATE_FAILED, SUB_UPDATE_TIMEOUT,
+        SUB_URL_INVALID, SUB_YAML_INVALID,
+    };
+    if e.contains("SSRF protection") {
+        SUB_SSRF_BLOCKED
+    } else if e.contains("DNS resolution failed") || e.contains("Could not resolve") {
+        SUB_DNS_FAILED
+    } else if e.contains("Invalid URL")
+        || e.contains("Only HTTP")
+        || e.contains("must have a host")
+        || e.contains("URL must not be empty")
+    {
+        SUB_URL_INVALID
+    } else if e.contains("Subscription name")
+        || e.contains("Path traversal detected")
+        || e.contains("Invalid character in filename")
+        || e.contains("Filename too long")
+        || e.contains("Reserved filename")
+        || e.contains("Invalid file type")
+    {
+        SUB_NAME_INVALID
+    } else if e.contains("HTTP ") {
+        SUB_HTTP_ERROR
+    } else if e.contains("timeout") || e.contains("Timeout") {
+        SUB_UPDATE_TIMEOUT
+    } else if e.contains("Response too large") || e.contains("exceeded size limit") {
+        SUB_RESPONSE_TOO_LARGE
+    } else if e.contains("Invalid YAML")
+        || e.contains("YAML structure")
+        || e.contains("neither a valid Clash YAML")
+    {
+        SUB_YAML_INVALID
+    } else if e.contains("Connection failed")
+        || e.contains("Network error")
+        || e.contains("Request error")
+        || e.contains("Direct:")
+        || e.contains("Proxy:")
+    {
+        SUB_NETWORK_ERROR
+    } else {
+        SUB_UPDATE_FAILED
+    }
+}
+
+fn redact_url_in_string(s: &str) -> String {
+    // Strip query parameters, username, and password from any http(s) URL in the string.
+    // This prevents leaking subscription tokens to logs and frontend.
+    // Reuses the same reqwest::Url parsing as config_manager::mask_url.
+    let mut result = s.to_owned();
+    let mut start_idx = 0;
+    while start_idx < result.len() {
+        let remaining = &result[start_idx..];
+        let found_http = remaining.find("http://");
+        let found_https = remaining.find("https://");
+        let found_offset = found_http.into_iter().chain(found_https).min();
+        let Some(offset) = found_offset else {
+            break;
+        };
+        let start = start_idx + offset;
+        // Find end of URL (whitespace or end of string)
+        let mut url_end = result[start..]
+            .find(|c: char| c.is_whitespace())
+            .map(|pos| start + pos)
+            .unwrap_or(result.len());
+        // Trim trailing punctuation/delimiters that are likely not part of the URL
+        while url_end > start {
+            let last_char = result[..url_end].chars().next_back();
+            if let Some(c) = last_char {
+                if matches!(
+                    c,
+                    ')' | ']' | '}' | '>' | '"' | '\'' | ',' | '.' | ';' | ':'
+                ) {
+                    url_end -= c.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        let url_str = &result[start..url_end];
+        if reqwest::Url::parse(url_str).is_ok() {
+            let redacted = super::config_manager::mask_url(url_str);
+            result.replace_range(start..url_end, &redacted);
+            start_idx = start + redacted.len();
+        } else {
+            start_idx = start + 4; // Skip past "http" to avoid infinite loop
+        }
+    }
+    result
+}
+
+fn log_sub_update_failure(name: &str, err: &str) {
+    let code = classify_sub_error(err);
+    let redacted_err = redact_url_in_string(err);
+    crate::backend_event::emit_backend_event(&crate::backend_event::BackendEvent::error(
+        crate::backend_event::BackendModule::Subscription,
+        code,
+        format!("Failed to update '{name}': {redacted_err}"),
+    ));
+}
+
 /// Tauri command wrapper: single subscription download with rate limiting.
 /// If `url` is None, the URL is resolved internally from metadata.
 #[tauri::command]
@@ -771,15 +897,27 @@ pub async fn download_sub(
     rate_limiter: State<'_, crate::RateLimiter>,
 ) -> Result<String, String> {
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
-    let resolved_url = resolve_url_from_metadata(&app, &name, url)?;
-    download_sub_inner(
+    let resolved_url = match resolve_url_from_metadata(&app, &name, url) {
+        Ok(u) => u,
+        Err(e) => {
+            log_sub_update_failure(&name, &e);
+            return Err(e);
+        }
+    };
+    let result = download_sub_inner(
         &app,
         resolved_url,
-        name,
+        name.clone(),
         user_agent,
         overwrite.unwrap_or(false),
     )
-    .await
+    .await;
+
+    if let Err(e) = &result {
+        log_sub_update_failure(&name, e);
+    }
+
+    result
 }
 
 /// Batch update result for a single subscription.
@@ -804,10 +942,11 @@ pub async fn download_sub_batch(
         let resolved_url = match resolve_url_from_metadata(&app, &name, item.url) {
             Ok(u) => u,
             Err(e) => {
+                log_sub_update_failure(&name, &e);
                 results.push(BatchUpdateResult {
                     name,
                     success: false,
-                    error: Some(e),
+                    error: Some(redact_url_in_string(&e)),
                 });
                 continue;
             }
@@ -820,11 +959,14 @@ pub async fn download_sub_batch(
                 success: true,
                 error: None,
             }),
-            Err(e) => results.push(BatchUpdateResult {
-                name,
-                success: false,
-                error: Some(e),
-            }),
+            Err(e) => {
+                log_sub_update_failure(&name, &e);
+                results.push(BatchUpdateResult {
+                    name,
+                    success: false,
+                    error: Some(e),
+                });
+            }
         }
     }
     Ok(results)
@@ -1012,7 +1154,7 @@ mod tests {
         let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("attacker.com", &addrs);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("private/local resolved"));
+        assert!(result.unwrap_err().contains("SSRF protection"));
     }
 
     #[test]
