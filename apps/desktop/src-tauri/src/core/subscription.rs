@@ -557,8 +557,10 @@ pub(crate) async fn download_sub_inner(
                 match do_download(client, url.clone()).await {
                     Ok(data) => result = Some(data),
                     Err(e) => {
-                        last_error =
-                            format!("{} | Proxy: {}", direct_error.as_deref().unwrap_or(""), e);
+                        last_error = match direct_error.as_deref() {
+                            Some(de) => format!("{de} | Proxy: {e}"),
+                            None => format!("Proxy: {e}"),
+                        };
                     }
                 }
             }
@@ -828,13 +830,30 @@ fn redact_url_in_string(s: &str) -> String {
         };
         let start = start_idx + offset;
         // Find end of URL (whitespace or end of string)
-        let url_end = result[start..]
+        let mut url_end = result[start..]
             .find(|c: char| c.is_whitespace())
             .map(|pos| start + pos)
             .unwrap_or(result.len());
+        // Trim trailing punctuation/delimiters that are likely not part of the URL
+        while url_end > start {
+            let last_char = result[..url_end].chars().next_back();
+            if let Some(c) = last_char {
+                if matches!(
+                    c,
+                    ')' | ']' | '}' | '>' | '"' | '\'' | ',' | '.' | ';' | ':'
+                ) {
+                    url_end -= c.len_utf8();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
         let url_str = &result[start..url_end];
         if let Ok(mut url) = reqwest::Url::parse(url_str) {
             url.set_query(None);
+            url.set_fragment(None);
             let _ = url.set_username("");
             let _ = url.set_password(None);
             let redacted = url.to_string();
