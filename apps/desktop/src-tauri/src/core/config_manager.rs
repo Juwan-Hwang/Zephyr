@@ -54,7 +54,8 @@ fn validate_config_for_update(
 }
 
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
-pub(super) fn mask_url(url: &str) -> String {
+#[must_use]
+pub fn mask_url(url: &str) -> String {
     if let Ok(parsed) = reqwest::Url::parse(url) {
         let host = parsed.host_str().unwrap_or("???");
         let masked_host = if host.len() > 6 {
