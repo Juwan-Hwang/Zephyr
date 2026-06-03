@@ -77,7 +77,7 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
         }
     }
 }, {
-    decorations: (v) => v.decorations,
+    decorations: (/** @type {import('../../cm6.bundle.js').EditorView} */ v) => v.decorations,
 });
 
 export { prismHighlightPlugin };

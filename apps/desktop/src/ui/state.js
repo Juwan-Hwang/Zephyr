@@ -12,6 +12,10 @@ import { createLogger } from '../utils/logger.js';
 
 const storeLogger = createLogger('Store', 'warn');
 
+/**
+ * @param {string} key
+ * @returns {string | null}
+ */
 function lsGet(key) {
     try {
         if (typeof localStorage === 'undefined') return null;
@@ -21,6 +25,10 @@ function lsGet(key) {
     }
 }
 
+/**
+ * @param {string} key
+ * @param {string} value
+ */
 function lsSet(key, value) {
     try {
         if (typeof localStorage === 'undefined') return;
@@ -55,6 +63,7 @@ const PERSIST_DEBOUNCE_MS = 100;
  * @param {Record<string, any>}   initialState       - Default state values
  * @param {Object}   [options]
  * @param {boolean}  [options.persist=true]  - Auto-persist to localStorage
+ * @param {string[]} [options.transientKeys=[]] - Keys that are never persisted to localStorage
  * @returns {Store}
  */
 export function createStore(storeName, initialState, { persist = true, transientKeys = [] } = {}) {
@@ -325,6 +334,7 @@ export function createStore(storeName, initialState, { persist = true, transient
 /**
  * @param {string} storeName
  * @param {Record<string, any>} defaults
+ * @param {Set<string>} transientKeys
  * @returns {Record<string, any>}
  */
 function hydrate(storeName, defaults, transientKeys) {

@@ -47,9 +47,9 @@ class Logger {
 
     /**
      * Template method — subclasses override this to produce actual output.
-     * @param {'debug'|'info'|'warn'|'error'} level
-     * @param {string} prefix
-     * @param {*[]} args
+     * @param {'debug'|'info'|'warn'|'error'} _level
+     * @param {string} _prefix
+     * @param {*[]} _args
      * @protected
      */
     _write(_level, _prefix, _args) {
