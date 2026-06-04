@@ -313,6 +313,16 @@ IMPORT: "override_import",
 });
 
 // ---------------------------------------------------------------------------
+// Network Optimization
+// ---------------------------------------------------------------------------
+
+export const NETWORK_OPTIM = Object.freeze({
+    APPLY_NET_OPTIM: "apply_network_optimizations",
+    REVERT_NET_OPTIM: "revert_network_optimizations",
+    CHECK_NET_OPTIM_STATUS: "check_network_optimizations_status",
+});
+
+// ---------------------------------------------------------------------------
 // Convenience: all command names in one flat object
 // ---------------------------------------------------------------------------
 
@@ -338,9 +348,10 @@ export const COMMANDS = Object.freeze({
     ...KV,
     ...TRACE_ADVANCED,
     ...OVERRIDE,
+    ...NETWORK_OPTIM,
     // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
     CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
     UPDATER, SHORTCUTS, SCHEDULER, SETTINGS, MISC, CRYPTO,
     SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
-    FAILOVER, KV, TRACE_ADVANCED, OVERRIDE,
+    FAILOVER, KV, TRACE_ADVANCED, OVERRIDE, NETWORK_OPTIM,
 });
