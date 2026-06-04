@@ -10,6 +10,7 @@ import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { t } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
+import { toError } from '../types/guards.js';
 
 let isApplied = false;
 let isLoading = false;
@@ -151,7 +152,14 @@ async function showApplyModal() {
     if (result === null) return; // User canceled
 
     // Use the closure variable instead of querying DOM (element is removed after modal closes)
-    saveSetting('network_optim_auto_apply', autoApplyValue);
+    (async () => {
+        try {
+            await saveSetting('network_optim_auto_apply', autoApplyValue);
+        } catch (e) {
+    // eslint-disable-next-line no-console -- logging save failure is intentional
+            console.error('Failed to save network_optim_auto_apply setting:', e);
+        }
+    })();
     appStore.set('networkOptimAutoApply', autoApplyValue);
 
     // Apply optimizations
@@ -181,8 +189,9 @@ async function applyOptimizations() {
         isApplied = true;
         showNotification(t('networkOptimApplied'), 'success');
     } catch (e) {
-        const msg = e?.toString() || '';
-        if (msg.includes('canceled') || msg.includes('cancelled')) {
+        const error = toError(e);
+        const msg = error.message || error.toString();
+        if (msg.toLowerCase().includes('canceled') || msg.toLowerCase().includes('cancelled')) {
             showNotification(t('networkOptimCanceled'), 'info');
         } else {
             showNotification(`${t('networkOptimApplyFailed')}: ${msg}`, 'error');
@@ -204,8 +213,9 @@ async function revertOptimizations() {
         isApplied = false;
         showNotification(t('networkOptimReverted'), 'success');
     } catch (e) {
-        const msg = e?.toString() || '';
-        if (msg.includes('canceled') || msg.includes('cancelled')) {
+        const error = toError(e);
+        const msg = error.message || error.toString();
+        if (msg.toLowerCase().includes('canceled') || msg.toLowerCase().includes('cancelled')) {
             showNotification(t('networkOptimCanceled'), 'info');
         } else {
             showNotification(`${t('networkOptimRevertFailed')}: ${msg}`, 'error');
