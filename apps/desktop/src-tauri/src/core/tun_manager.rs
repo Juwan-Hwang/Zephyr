@@ -706,6 +706,9 @@ pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), Str
     // TCP optimizations (safe for WAN/residential networks):
     //   1. tcp_fastopen=3 — enable TCP Fast Open for both client and server
     //   2. tcp_ecn=1 — enable ECN for congestion signaling without drops
+    //   3. hystart_detect=2 — disable unreliable ACK train detection in HyStart,
+    //      keeping RTT delay detection only. Prevents premature slow-start exit
+    //      on WAN paths. (Windows HyStart++ already removed ACK train by default)
     // Note: FQ, slow-start-after-idle, and MinRTO tuning are intentionally
     // omitted — they target intra-datacenter networks and can degrade WAN
     // performance or override distro qdisc preferences (fq_codel, cake).
@@ -722,6 +725,12 @@ setcap cap_net_admin,cap_net_bind_service+ep "$1"
 # or override the user's distro qdisc preferences (e.g. fq_codel, cake).
 sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
 sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
+
+# Disable HyStart ACK train detection (value 2 = RTT delay only, no ACK train).
+# ACK train detection is an unreliable congestion signal that can cause
+# premature exit from TCP slow start, limiting throughput on WAN paths.
+# Windows HyStart++ already removed ACK train by default since 2021.
+echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
 
 # Install polkit rule for passwordless DNS/route operations
 mkdir -p /etc/polkit-1/rules.d
