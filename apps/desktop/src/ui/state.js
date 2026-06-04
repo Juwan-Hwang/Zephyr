@@ -411,6 +411,9 @@ export const appStore = createStore('zephyr.app', {
     // Failover
     failoverEnabled: false, // Actual value synced from settings.json in initSettings()
 
+    // Network Optimization
+    networkOptimAutoApply: false,
+
     // Config
     currentConfigName: null,
     currentCoreVersion: '',

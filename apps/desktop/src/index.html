@@ -692,6 +692,27 @@
 
                             <div class="h-px bg-white/5"></div>
 
+                            <!-- Network Optimization -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-zinc-400">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-zinc-200" data-i18n="networkOptim">Network Optimization</p>
+                                        <p class="text-2xs text-zinc-500" data-i18n="networkOptimDesc">Optimize TCP parameters for better throughput</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div id="network-optim-status-dot" class="w-2 h-2 rounded-full bg-zinc-600 transition-all"></div>
+                                    <button id="network-optim-btn" class="btn-ghost">
+                                        <span data-i18n="networkOptimApply">Apply</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-white/5"></div>
+
                             <!-- DNS Rewrite -->
                             <div class="flex items-center justify-between">
                                 <div class="flex-1">
