@@ -352,9 +352,14 @@ pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
             for line in text.lines() {
                 let lower = line.to_lowercase();
                 if lower.contains("auto") && lower.contains("tun") {
-                    backup_lines.push(format!("autotuninglevel={line}"));
+                    // Extract the value after the colon (e.g. "normal", "restricted")
+                    if let Some(val) = line.rsplit(':').next() {
+                        backup_lines.push(format!("autotuninglevel={}", val.trim()));
+                    }
                 } else if lower.contains("heuristics") {
-                    backup_lines.push(format!("heuristics={line}"));
+                    if let Some(val) = line.rsplit(':').next() {
+                        backup_lines.push(format!("heuristics={}", val.trim()));
+                    }
                 }
             }
         }
@@ -453,72 +458,104 @@ pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
 
     // Try to restore from backup; fall back to system defaults
     let backup_path = std::env::temp_dir().join("zephyr").join("tcp-backup.txt");
-    let reverts: [(&str, &[&str]); 5] = if backup_path.exists() {
-        // Parse backup and build revert commands
-        // For simplicity, use system defaults for netsh commands
-        // and restore registry values from backup
-        let _ = std::fs::read_to_string(&backup_path);
-        // Restore registry values from backup
-        {
-            use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_WRITE};
-            use winreg::RegKey;
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(key) = hklm.open_subkey_with_flags(
-                r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
-                KEY_WRITE,
-            ) {
-                if let Ok(content) = std::fs::read_to_string(&backup_path) {
-                    for line in content.lines() {
-                        if let Some((k, v)) = line.split_once('=') {
-                            if let Ok(val) = v.trim().parse::<u32>() {
-                                let _ = key.set_value(k.trim(), &val);
-                            }
-                        }
+    let backup_content = if backup_path.exists() {
+        std::fs::read_to_string(&backup_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Restore registry values from backup
+    if !backup_content.is_empty() {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_WRITE};
+        use winreg::RegKey;
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(key) = hklm.open_subkey_with_flags(
+            r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
+            KEY_WRITE,
+        ) {
+            for line in backup_content.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    if let Ok(val) = v.trim().parse::<u32>() {
+                        let _ = key.set_value(k.trim(), &val);
                     }
                 }
             }
         }
+    }
+
+    // Parse backup for netsh values; fall back to system defaults
+    let mut auto_level = "normal";
+    let mut heuristics = "enabled";
+    let mut fastopen = "disabled";
+    let mut ecncapability = "disabled";
+    let mut initial_rto: u32 = 3000;
+    for line in backup_content.lines() {
+        let lower = line.to_lowercase();
+        if lower.starts_with("autotuninglevel=") {
+            if let Some(val) = line.split_once('=') {
+                auto_level = val.1.trim();
+            }
+        } else if lower.starts_with("heuristics=") {
+            if let Some(val) = line.split_once('=') {
+                heuristics = val.1.trim();
+            }
+        } else if lower.starts_with("tcpfastopen=") {
+            // TcpFastOpen registry: 0=disabled, >=1=enabled
+            if let Some(val) = line.split_once('=') {
+                if val.1.trim().parse::<u32>().unwrap_or(0) >= 1 {
+                    fastopen = "enabled";
+                }
+            }
+        } else if lower.starts_with("ecncapability=") {
+            // EcnCapability registry: 1=enabled, 0=disabled, 2=default
+            if let Some(val) = line.split_once('=') {
+                match val.1.trim().parse::<u32>().unwrap_or(0) {
+                    1 => ecncapability = "enabled",
+                    2 => ecncapability = "default",
+                    _ => ecncapability = "disabled",
+                }
+            }
+        } else if lower.starts_with("tcpinitialrto=") {
+            if let Some(val) = line.split_once('=') {
+                if let Ok(v) = val.1.trim().parse::<u32>() {
+                    initial_rto = v;
+                }
+            }
+        }
+    }
+
+    if !backup_content.is_empty() {
         let _ = std::fs::remove_file(&backup_path);
-        [
-            (
-                "autotuninglevel",
-                &["int", "tcp", "set", "global", "autotuninglevel=normal"],
-            ),
-            ("heuristics", &["int", "tcp", "set", "heuristics", "enabled"]),
-            (
-                "initialRto",
-                &["int", "tcp", "set", "global", "initialRto=1000"],
-            ),
-            (
-                "fastopen",
-                &["int", "tcp", "set", "global", "fastopen=disabled"],
-            ),
-            (
-                "ecncapability",
-                &["int", "tcp", "set", "global", "ecncapability=disabled"],
-            ),
-        ]
-    } else {
-        [
-            (
-                "autotuninglevel",
-                &["int", "tcp", "set", "global", "autotuninglevel=normal"],
-            ),
-            ("heuristics", &["int", "tcp", "set", "heuristics", "enabled"]),
-            (
-                "initialRto",
-                &["int", "tcp", "set", "global", "initialRto=1000"],
-            ),
-            (
-                "fastopen",
-                &["int", "tcp", "set", "global", "fastopen=disabled"],
-            ),
-            (
-                "ecncapability",
-                &["int", "tcp", "set", "global", "ecncapability=disabled"],
-            ),
-        ]
-    };
+    }
+
+    // Build revert commands with backed-up or default values
+    let auto_level_arg = format!("autotuninglevel={auto_level}");
+    let heuristics_arg = heuristics.to_lowercase();
+    let fastopen_arg = format!("fastopen={fastopen}");
+    let ecncapability_arg = format!("ecncapability={ecncapability}");
+    let initial_rto_arg = format!("initialRto={initial_rto}");
+    let reverts: [(&str, Vec<&str>); 5] = [
+        (
+            "autotuninglevel",
+            vec!["int", "tcp", "set", "global", &auto_level_arg],
+        ),
+        (
+            "heuristics",
+            vec!["int", "tcp", "set", "heuristics", &heuristics_arg],
+        ),
+        (
+            "initialRto",
+            vec!["int", "tcp", "set", "global", &initial_rto_arg],
+        ),
+        (
+            "fastopen",
+            vec!["int", "tcp", "set", "global", &fastopen_arg],
+        ),
+        (
+            "ecncapability",
+            vec!["int", "tcp", "set", "global", &ecncapability_arg],
+        ),
+    ];
 
     let mut failed = Vec::new();
     for (name, args) in &reverts {
