@@ -723,6 +723,46 @@ pub fn prepare_runtime_config(
             );
         }
 
+        // keep-alive-idle: maximum idle time (seconds) before TCP keep-alive
+        // probes begin. Default is 15s which is too aggressive — connections
+        // are probed and potentially closed after just 15s of inactivity.
+        // Setting to 600 (10 minutes) keeps connections alive through typical
+        // web browsing pauses, reducing TCP+TLS handshake round-trips.
+        // (Google: persistent connections reduced TTFB from 230ms to 123ms)
+        let keep_alive_idle_key = serde_yaml::Value::String("keep-alive-idle".to_owned());
+        if !mapping.contains_key(&keep_alive_idle_key) {
+            mapping.insert(
+                keep_alive_idle_key,
+                serde_yaml::Value::Number(serde_yaml::Number::from(600)),
+            );
+        }
+
+        // profile.store-fake-ip: persist fake-ip mapping table to disk so
+        // that on restart, previously resolved domains reuse the same fake-ip
+        // address. This avoids DNS re-resolution and connection disruption,
+        // aligning with Google's recommendation to minimize DNS queries
+        // as a key latency contributor.
+        let profile_key = serde_yaml::Value::String("profile".to_owned());
+        let store_fake_ip_key = serde_yaml::Value::String("store-fake-ip".to_owned());
+        // Handle three cases: existing Mapping, existing Null/non-Mapping, or missing key
+        let needs_insert =
+            if let Some(serde_yaml::Value::Mapping(profile_map)) = mapping.get_mut(&profile_key) {
+                if !profile_map.contains_key(&store_fake_ip_key) {
+                    profile_map.insert(store_fake_ip_key, serde_yaml::Value::Bool(true));
+                }
+                false
+            } else {
+                true
+            };
+        if needs_insert {
+            let mut profile_map = serde_yaml::Mapping::new();
+            profile_map.insert(
+                serde_yaml::Value::String("store-fake-ip".to_owned()),
+                serde_yaml::Value::Bool(true),
+            );
+            mapping.insert(profile_key, serde_yaml::Value::Mapping(profile_map));
+        }
+
         // find-process-mode: always match the originating process for
         // each connection. Required for accurate rule-based routing in
         // TUN mode and better connection visibility.
@@ -810,7 +850,7 @@ pub fn prepare_runtime_config(
 fn build_minimal_runtime_config(secret: &str) -> (String, u16) {
     (
         format!(
-            "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\ntcp-concurrent: true\nkeep-alive-interval: 30\nfind-process-mode: always\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
+            "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\ntcp-concurrent: true\nkeep-alive-interval: 30\nkeep-alive-idle: 600\nfind-process-mode: always\nprofile:\n  store-fake-ip: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
         DEFAULT_API_PORT,
     )
@@ -1443,6 +1483,8 @@ mod tests {
         assert!(config.contains("unified-delay: true"));
         assert!(config.contains("tcp-concurrent: true"));
         assert!(config.contains("keep-alive-interval: 30"));
+        assert!(config.contains("keep-alive-idle: 600"));
+        assert!(config.contains("store-fake-ip: true"));
         assert!(config.contains("find-process-mode: always"));
     }
 
@@ -1494,6 +1536,36 @@ mod tests {
         let (config, _) = result.unwrap();
         assert!(config.contains("find-process-mode: off"));
         assert_eq!(config.matches("find-process-mode").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_keep_alive_idle() {
+        let content = "keep-alive-idle: 300\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("keep-alive-idle: 300"));
+        assert_eq!(config.matches("keep-alive-idle").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_store_fake_ip() {
+        let content = "profile:\n  store-fake-ip: false\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("store-fake-ip: false"));
+        assert_eq!(config.matches("store-fake-ip").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_empty_profile_key() {
+        // YAML "profile:" with no value parses as Null — should still inject store-fake-ip
+        let content = "profile:\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("store-fake-ip: true"));
     }
 
     #[test]
