@@ -31,6 +31,7 @@ import * as prism from './ui/prism.js';
 // --- UI module imports ---
 import { showNotification } from './ui/notifications.js';
 import { initSettings, initUwpExemption } from './ui/settings.js';
+import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation } from './ui/navigation.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
@@ -240,8 +241,9 @@ async function initApp() {
   initTunToggle();
   initProxyControls();
   initPlugins();
-  initSettings();
+  await initSettings();
   initUwpExemption();
+  await autoApplyIfNeeded();
   initNodeWheel();
   initShortcutSettings();
 
