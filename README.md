@@ -8,16 +8,16 @@
 
 *一款 Mihomo GUI。*
 
-[![GitHub stars](https://badgen.net/github/stars/Juwan-Hwang/Zephyr?label=Stars&icon=github)](https://github.com/Juwan-Hwang/Zephyr/stargazers)
-[![Release](https://badgen.net/github/release/Juwan-Hwang/Zephyr?label=Release)](https://github.com/Juwan-Hwang/Zephyr/releases)
-[![License](https://badgen.net/github/license/Juwan-Hwang/Zephyr?label=License)](https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE)
-[![Platform](https://badgen.net/badge/Platform/Windows%20%7C%20macOS%20%7C%20Linux/24c8db)](https://github.com/Juwan-Hwang/Zephyr/releases)
-[![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg?style=For-the-badge&label=Downloads)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![Stars](https://badgen.net/github/stars/Juwan-Hwang/Zephyr?icon=github&color=blue)](https://github.com/Juwan-Hwang/Zephyr/stargazers)
+[![Release](https://badgen.net/github/release/Juwan-Hwang/Zephyr?icon=git&color=cyan)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![License](https://badgen.net/github/license/Juwan-Hwang/Zephyr)](https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE)
+[![Platform](https://badgen.net/badge/Platform/Windows%20%7C%20macOS%20%7C%20Linux/08C)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg?style=flat&label=Downloads&color=08C&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Security](https://badgen.net/badge/Security/CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy/green)](https://github.com/Juwan-Hwang/Zephyr/wiki/Security)
-[![Rust Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/rust-tests.json&query=$.message&label=Rust%20Tests&color=green)](https://github.com/Juwan-Hwang/Zephyr/actions)
-[![JS Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/js-tests.json&query=$.message&label=JS%20Tests&color=brightgreen)](https://github.com/Juwan-Hwang/Zephyr/actions)
+[![Rust Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/rust-tests.json&query=$.message&label=Rust%20Tests&color=3C1&style=flat&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/actions)
+[![JS Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/js-tests.json&query=$.message&label=JS%20Tests&color=3C1&style=flat&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/actions)
 [![Tauri](https://badgen.net/badge/Tauri/v2/24c8db)](https://tauri.app)
-[![Rust](https://badgen.net/badge/Rust/1.92+/orange)](https://www.rust-lang.org/)
+[![Rust](https://badgen.net/badge/Rust/1.92+/dea584)](https://www.rust-lang.org/)
 
 [简体中文](README.md) | [English](README_en.md)
 
