@@ -709,6 +709,14 @@ pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), Str
     //   3. hystart_detect=2 — disable unreliable ACK train detection in HyStart,
     //      keeping RTT delay detection only. Prevents premature slow-start exit
     //      on WAN paths. (Windows HyStart++ already removed ACK train by default)
+    //   4. Increase TCP buffer limits (recommended safe defaults):
+    //      - rmem_max: 16MB, wmem_max: 32MB — match auto-tuned TCP maximums so
+    //        that applications using SO_RCVBUF/SO_SNDBUF can fully utilize them
+    //      - tcp_rmem: 4K/256K/16MB — auto-tuned receive buffer (max 16MB for high RTT)
+    //      - tcp_wmem: 4K/256K/32MB — auto-tuned send buffer (max 32MB for high RTT)
+    //      - tcp_notsent_lowat: 128KB — limit unsent data queue to prevent bufferbloat
+    //      These only affect high-RTT connections; low-RTT traffic uses minimal memory.
+    //      Safe for desktop use (Google: "little risk unless millions of connections").
     // Note: FQ, slow-start-after-idle, and MinRTO tuning are intentionally
     // omitted — they target intra-datacenter networks and can degrade WAN
     // performance or override distro qdisc preferences (fq_codel, cake).
@@ -733,6 +741,20 @@ sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
 # Ensure tcp_cubic module is loaded before writing its parameter.
 modprobe tcp_cubic 2>/dev/null || true
 echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
+
+# Increase TCP buffer limits (recommended safe defaults).
+# Default Linux tcp_rmem max is only 6MB, which limits throughput on high-RTT
+# paths (e.g. user far from proxy entry). Increasing to 16MB/32MB allows the
+# TCP stack to auto-tune larger windows when needed, while tcp_moderate_rcvbuf
+# (enabled by default) ensures low-RTT connections still use minimal memory.
+# rmem_max/wmem_max must match or exceed tcp_rmem/tcp_wmem maximums so that
+# applications using SO_RCVBUF/SO_SNDBUF can fully utilize the auto-tuned limits.
+# tcp_notsent_lowat: 128KB cap on unsent data queue to prevent bufferbloat.
+sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
+sysctl -w net.core.wmem_max=33554432 2>/dev/null || true
+sysctl -w "net.ipv4.tcp_rmem=4096 262144 16777216" 2>/dev/null || true
+sysctl -w "net.ipv4.tcp_wmem=4096 262144 33554432" 2>/dev/null || true
+sysctl -w net.ipv4.tcp_notsent_lowat=131072 2>/dev/null || true
 
 # Install polkit rule for passwordless DNS/route operations
 mkdir -p /etc/polkit-1/rules.d
