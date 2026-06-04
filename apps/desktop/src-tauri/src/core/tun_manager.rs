@@ -709,6 +709,13 @@ pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), Str
     //   3. hystart_detect=2 — disable unreliable ACK train detection in HyStart,
     //      keeping RTT delay detection only. Prevents premature slow-start exit
     //      on WAN paths. (Windows HyStart++ already removed ACK train by default)
+    //   4. Increase TCP buffer limits (Google Cloud recommended safe defaults):
+    //      - rmem_max/wmem_max: 4MB — allow applications to request larger buffers
+    //      - tcp_rmem: 4K/256K/16MB — auto-tuned receive buffer (max 16MB for high RTT)
+    //      - tcp_wmem: 4K/256K/32MB — auto-tuned send buffer (max 32MB for high RTT)
+    //      - tcp_notsent_lowat: 4MB — limit unsent data queue to prevent memory waste
+    //      These only affect high-RTT connections; low-RTT traffic uses minimal memory.
+    //      Safe for desktop use (Google: "little risk unless millions of connections").
     // Note: FQ, slow-start-after-idle, and MinRTO tuning are intentionally
     // omitted — they target intra-datacenter networks and can degrade WAN
     // performance or override distro qdisc preferences (fq_codel, cake).
@@ -733,6 +740,19 @@ sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
 # Ensure tcp_cubic module is loaded before writing its parameter.
 modprobe tcp_cubic 2>/dev/null || true
 echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
+
+# Increase TCP buffer limits (Google Cloud recommended safe defaults).
+# Default Linux tcp_rmem max is only 6MB, which limits throughput on high-RTT
+# paths (e.g. user far from proxy entry). Increasing to 16MB/32MB allows the
+# TCP stack to auto-tune larger windows when needed, while tcp_moderate_rcvbuf
+# (enabled by default) ensures low-RTT connections still use minimal memory.
+# rmem_max/wmem_max: 4MB upper bound for explicit SO_RCVBUF/SO_SNDBUF requests.
+# tcp_notsent_lowat: 4MB cap on unsent data queue to prevent memory waste.
+sysctl -w net.core.rmem_max=4194304 2>/dev/null || true
+sysctl -w net.core.wmem_max=4194304 2>/dev/null || true
+sysctl -w "net.ipv4.tcp_rmem=4096 262144 16777216" 2>/dev/null || true
+sysctl -w "net.ipv4.tcp_wmem=4096 262144 33554432" 2>/dev/null || true
+sysctl -w net.ipv4.tcp_notsent_lowat=4194304 2>/dev/null || true
 
 # Install polkit rule for passwordless DNS/route operations
 mkdir -p /etc/polkit-1/rules.d
