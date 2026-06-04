@@ -835,6 +835,7 @@ pub fn run() {
             kill_all_mihomo_as_root_cmd,
             disable_tun_cmd,
             grant_linux_tun_permission,
+            core_manager::core::tun_manager::apply_windows_tcp_optimizations,
             // Re-export tray commands
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
