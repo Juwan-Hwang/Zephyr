@@ -142,6 +142,7 @@ pub mod core_log;
 pub mod core_process;
 pub mod crypto;
 pub mod fetch_util;
+pub mod network_optim;
 pub mod secure_io;
 pub mod subscription;
 pub mod subscription_scheduler;
