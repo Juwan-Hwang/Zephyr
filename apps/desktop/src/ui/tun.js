@@ -114,6 +114,18 @@ export function initTunToggle() {
 
             await closeAllConnections();
 
+            // Apply Windows TCP optimizations when TUN is enabled
+            if (enable) {
+                const isWindows = navigator.platform.toLowerCase().includes('win');
+                if (isWindows) {
+                    try {
+                        await invoke(COMMANDS.APPLY_WINDOWS_TCP_OPTIMIZATIONS);
+                    } catch (e) {
+                        tunLogger.warn('Windows TCP optimization failed', e);
+                    }
+                }
+            }
+
             appStore.set('isTunEnabled', enable);
 
             showNotification(t.configSuccess, 'success');
