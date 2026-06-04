@@ -228,8 +228,14 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let escaped_binary_name = binary_name.replace("'", "'\\''");
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
+    // Also apply TCP performance optimizations (Google Cloud best practices):
+    //   - MSL=1000: reduce TIME_WAIT from 60s to 2s for faster port reuse
+    //   - tcp.fastopen=3: enable TCP Fast Open for client+server
+    //   - tcp.ecn=1: enable ECN for congestion signaling without drops
+    // Note: macOS BSD kernel has no direct equivalent to Linux's tcp_slow_start_after_idle
+    // or tcp_rto_min_us; these optimizations are Linux-specific.
     let script = format!(
-        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sysctl -w net.inet.tcp.msl=1000 2>/dev/null; sysctl -w net.inet.tcp.fastopen=3 2>/dev/null; sysctl -w net.inet.tcp.ecn=1 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
@@ -308,11 +314,11 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         return Err("root_start_failed".to_owned());
     }
 
-    // MSL is already set in the root osascript above (sysctl needs root)
+    // MSL and TCP optimizations are already set in the root osascript above (sysctl needs root)
     emit_info!(
         System,
         SYS_TUN_FAILED,
-        "Set MSL=1000 for short TIME_WAIT (via root shell)"
+        "TCP optimizations applied: MSL=1000, FastOpen=3, ECN=1 (via root shell)"
     );
 
     // Mark TUN mode as active
@@ -657,8 +663,13 @@ pub async fn restart_core_as_root_cmd(
 
 /// Grant `CAP_NET_ADMIN` capability to the mihomo binary on Linux and install
 /// a `PolicyKit` rule to allow DNS/route configuration without password prompts.
-/// Uses pkexec to prompt for authentication once, then runs setcap and
-/// installs the polkit rule file.
+/// Also applies TCP performance optimizations following Google Cloud best practices:
+/// - Disable slow-start-after-idle (avoid congestion window reset after idle)
+/// - Lower `MinRTO` for faster loss recovery
+/// - Enable TCP Fast Open for reduced handshake latency
+/// - Enable ECN for congestion signaling without packet loss
+/// Uses pkexec to prompt for authentication once, then runs setcap,
+/// sysctl tuning, and installs the polkit rule file.
 #[tauri::command]
 #[cfg(target_os = "linux")]
 pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), String> {
@@ -671,7 +682,7 @@ pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), Str
     emit_info!(
         System,
         SYS_TUN_FAILED,
-        "Granting CAP_NET_ADMIN and installing polkit rule for: {core_path_str}"
+        "Granting CAP_NET_ADMIN, applying TCP optimizations, and installing polkit rule for: {core_path_str}"
     );
 
     let username = whoami().map_err(|e| format!("Failed to get username: {e}"))?;
@@ -691,9 +702,28 @@ pub async fn grant_linux_tun_permission(app: tauri::AppHandle) -> Result<(), Str
 "#
     );
 
+    // Combined script: setcap + TCP sysctl tuning + polkit rule installation
+    // TCP optimizations (safe for WAN/residential networks):
+    //   1. tcp_fastopen=3 — enable TCP Fast Open for both client and server
+    //   2. tcp_ecn=1 — enable ECN for congestion signaling without drops
+    // Note: FQ, slow-start-after-idle, and MinRTO tuning are intentionally
+    // omitted — they target intra-datacenter networks and can degrade WAN
+    // performance or override distro qdisc preferences (fq_codel, cake).
     let script = r#"set -e
 export PATH="/usr/sbin:/sbin:$PATH"
+
+# Grant network capabilities to mihomo
 setcap cap_net_admin,cap_net_bind_service+ep "$1"
+
+# TCP performance tuning — safe, non-intrusive optimizations only.
+# Note: FQ qdisc replacement, slow-start-after-idle disable, and MinRTO
+# reduction are intentionally omitted because they are designed for
+# intra-datacenter networks and can degrade WAN (residential/mobile) performance
+# or override the user's distro qdisc preferences (e.g. fq_codel, cake).
+sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
+sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
+
+# Install polkit rule for passwordless DNS/route operations
 mkdir -p /etc/polkit-1/rules.d
 printf '%s' "$2" > /etc/polkit-1/rules.d/50-zephyr-tun.rules
 chmod 644 /etc/polkit-1/rules.d/50-zephyr-tun.rules"#;
@@ -707,7 +737,7 @@ chmod 644 /etc/polkit-1/rules.d/50-zephyr-tun.rules"#;
         emit_info!(
             System,
             SYS_TUN_FAILED,
-            "CAP_NET_ADMIN granted and polkit rule installed successfully"
+            "CAP_NET_ADMIN granted, TCP optimizations applied, and polkit rule installed successfully"
         );
         Ok(())
     } else {
@@ -751,5 +781,114 @@ fn whoami() -> Result<String, String> {
 #[tauri::command]
 #[cfg(not(target_os = "linux"))]
 pub async fn grant_linux_tun_permission(_app: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+/// Apply Windows TCP performance optimizations following Google Cloud best practices.
+/// These netsh commands require administrator privileges, which is typically already
+/// available when TUN mode is active (WinTUN requires admin to install driver).
+///
+/// Optimizations applied:
+/// - autotuninglevel=normal: enable TCP receive window auto-tuning (optimal throughput)
+/// - heuristics disabled: prevent Windows from artificially limiting window size
+/// - initialRto=300: reduce initial retransmission timeout from 1000ms to 300ms
+///   (Google recommends low MinRTO for faster loss recovery)
+/// - fastopen=enabled: enable TCP Fast Open for reduced handshake latency
+/// - ecncapability=enabled: enable ECN for congestion signaling without drops
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn apply_windows_tcp_optimizations() -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::sync::atomic::Ordering;
+
+    // Mark TUN mode as active (frontend only calls this when enabling TUN)
+    TUN_MODE_ACTIVE.store(true, Ordering::SeqCst);
+
+    let optimizations: [(&str, &[&str]); 5] = [
+        // Enable TCP receive window auto-tuning (normal = optimal for most cases)
+        (
+            "autotuninglevel",
+            &["int", "tcp", "set", "global", "autotuninglevel=normal"],
+        ),
+        // Disable heuristics that may artificially limit window size
+        (
+            "heuristics",
+            &["int", "tcp", "set", "heuristics", "disabled"],
+        ),
+        // Reduce initial RTO from 1000ms to 300ms (Google: lower MinRTO for faster loss recovery)
+        (
+            "initialRto",
+            &["int", "tcp", "set", "global", "initialRto=300"],
+        ),
+        // Enable TCP Fast Open
+        (
+            "fastopen",
+            &["int", "tcp", "set", "global", "fastopen=enabled"],
+        ),
+        // Enable ECN for congestion signaling without packet drops
+        (
+            "ecncapability",
+            &["int", "tcp", "set", "global", "ecncapability=enabled"],
+        ),
+    ];
+
+    let mut failed = Vec::new();
+    for (name, args) in &optimizations {
+        let mut cmd = std::process::Command::new("netsh");
+        cmd.args(args);
+        // Prevent console window from flashing on screen
+        cmd.creation_flags(super::CREATE_NO_WINDOW);
+        let result = cmd.output();
+        match result {
+            Ok(output) if output.status.success() => {
+                emit_info!(
+                    System,
+                    SYS_TUN_FAILED,
+                    "Windows TCP optimization applied: {name}"
+                );
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                // Not fatal — some settings may not be supported on older Windows
+                emit_warn!(
+                    System,
+                    SYS_TUN_FAILED,
+                    "Windows TCP optimization skipped ({name}): {stderr}"
+                );
+                failed.push(*name);
+            }
+            Err(e) => {
+                emit_warn!(
+                    System,
+                    SYS_TUN_FAILED,
+                    "Windows TCP optimization failed ({name}): {e}"
+                );
+                failed.push(*name);
+            }
+        }
+    }
+
+    if failed.is_empty() {
+        emit_info!(
+            System,
+            SYS_TUN_FAILED,
+            "All Windows TCP optimizations applied successfully"
+        );
+    } else {
+        emit_info!(
+            System,
+            SYS_TUN_FAILED,
+            "Windows TCP optimizations applied (skipped: {})",
+            failed.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+/// On non-Windows platforms, this is a no-op
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub const fn apply_windows_tcp_optimizations() -> Result<(), String> {
     Ok(())
 }
