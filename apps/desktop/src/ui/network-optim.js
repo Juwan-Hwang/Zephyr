@@ -152,14 +152,12 @@ async function showApplyModal() {
     if (result === null) return; // User canceled
 
     // Use the closure variable instead of querying DOM (element is removed after modal closes)
-    (async () => {
-        try {
-            await saveSetting('network_optim_auto_apply', autoApplyValue);
-        } catch (e) {
-    // eslint-disable-next-line no-console -- logging save failure is intentional
-            console.error('Failed to save network_optim_auto_apply setting:', e);
-        }
-    })();
+    try {
+        await saveSetting('network_optim_auto_apply', autoApplyValue);
+    } catch (e) {
+        showNotification(`${t('networkOptimApplyFailed')}: ${toError(e).message}`, 'error');
+        return;
+    }
     appStore.set('networkOptimAutoApply', autoApplyValue);
 
     // Apply optimizations

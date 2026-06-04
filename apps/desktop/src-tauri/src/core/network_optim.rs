@@ -1,10 +1,18 @@
 use serde::Serialize;
 use tauri::AppHandle;
+#[allow(unused_imports)] // Manager trait needed for app.path() on macOS/Windows
+use tauri::Manager as _;
 
 #[derive(Serialize)]
 pub struct NetworkOptimStatus {
     pub applied: bool,
     pub details: String,
+}
+
+/// Get the backup file path in the app's secure data directory.
+fn backup_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    Some(dir.join("tcp-backup.conf"))
 }
 
 // ---------------------------------------------------------------------------
@@ -25,8 +33,9 @@ pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
     let script = r#"set -e
 export PATH="/usr/sbin:/sbin:$PATH"
 
-# Backup current values before modifying
-mkdir -p /etc/sysctl.d 2>/dev/null || true
+# Backup current values before modifying (only if no backup exists)
+mkdir -p /etc/sysctl.d
+if [ ! -f /etc/sysctl.d/99-zephyr-tcp-backup.conf ]; then
 cat > /etc/sysctl.d/99-zephyr-tcp-backup.conf << BAKEOF
 # Zephyr TCP backup (pre-optimization values)
 net.ipv4.tcp_fastopen = $(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null || echo 1)
@@ -37,7 +46,8 @@ net.ipv4.tcp_rmem = $(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo "4096 1310
 net.ipv4.tcp_wmem = $(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo "4096 16384 4194304")
 net.ipv4.tcp_notsent_lowat = $(sysctl -n net.ipv4.tcp_notsent_lowat 2>/dev/null || echo 4294967295)
 BAKEOF
-chmod 644 /etc/sysctl.d/99-zephyr-tcp-backup.conf 2>/dev/null || true
+chmod 644 /etc/sysctl.d/99-zephyr-tcp-backup.conf
+fi
 
 # TCP Fast Open + ECN
 sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
@@ -167,18 +177,21 @@ echo 0 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true"#;
 #[cfg(target_os = "linux")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    // Check if backup exists (indicates optimizations were applied by Zephyr)
+    let backup = backup_path(&app);
+    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+
     let value = match std::fs::read_to_string("/proc/sys/net/ipv4/tcp_fastopen") {
         Ok(v) => v.trim().to_owned(),
         Err(_) => {
-            // File may be missing on older/custom kernels or restricted environments
             return Ok(NetworkOptimStatus {
-                applied: false,
+                applied: has_backup,
                 details: "tcp_fastopen not available".to_owned(),
             });
         }
     };
-    let applied = value == "3";
+    let applied = value == "3" || has_backup;
 
     Ok(NetworkOptimStatus {
         applied,
@@ -193,15 +206,64 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
+pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
     emit_info!(
         System,
         SYS_TUN_FAILED,
         "Applying network optimizations (macOS)..."
     );
 
-    // Backup current values, then apply optimizations
-    let script = r#"do shell script "msl=$(sysctl -n net.inet.tcp.msl); fopen=$(sysctl -n net.inet.tcp.fastopen); ecn=$(sysctl -n net.inet.tcp.ecn); mkdir -p /tmp/zephyr; echo \"$msl $fopen $ecn\" > /tmp/zephyr/tcp-backup.txt; sysctl -w net.inet.tcp.msl=1000; sysctl -w net.inet.tcp.fastopen=3; sysctl -w net.inet.tcp.ecn=1" with administrator privileges"#;
+    // Backup current values to app data directory (secure, not /tmp)
+    // Only create backup if one doesn't already exist (prevent overwriting original values)
+    let backup =
+        backup_path(&app).ok_or_else(|| "Failed to resolve app data directory".to_owned())?;
+    if !backup.exists() {
+        if let Some(parent) = backup.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create backup directory: {e}"))?;
+        }
+        let msl = std::process::Command::new("sysctl")
+            .args(["-n", "net.inet.tcp.msl"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "15000".to_owned());
+        let fopen = std::process::Command::new("sysctl")
+            .args(["-n", "net.inet.tcp.fastopen"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "3".to_owned());
+        let ecn = std::process::Command::new("sysctl")
+            .args(["-n", "net.inet.tcp.ecn"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "2".to_owned());
+        std::fs::write(&backup, format!("{msl} {fopen} {ecn}"))
+            .map_err(|e| format!("Failed to write backup file: {e}"))?;
+    }
+
+    // Apply optimizations via osascript
+    let script = r#"do shell script "sysctl -w net.inet.tcp.msl=1000; sysctl -w net.inet.tcp.fastopen=3; sysctl -w net.inet.tcp.ecn=1" with administrator privileges"#;
 
     let output = std::process::Command::new("osascript")
         .args(["-e", script])
@@ -231,15 +293,39 @@ pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
+pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
     emit_info!(
         System,
         SYS_TUN_FAILED,
         "Reverting network optimizations (macOS)..."
     );
 
-    // Restore from backup if available, otherwise use system defaults
-    let script = r#"do shell script "if [ -f /tmp/zephyr/tcp-backup.txt ]; then read msl fopen ecn < /tmp/zephyr/tcp-backup.txt; sysctl -w net.inet.tcp.msl=$msl; sysctl -w net.inet.tcp.fastopen=$fopen; sysctl -w net.inet.tcp.ecn=$ecn; rm -f /tmp/zephyr/tcp-backup.txt; else sysctl -w net.inet.tcp.msl=15000; sysctl -w net.inet.tcp.fastopen=3; sysctl -w net.inet.tcp.ecn=2; fi" with administrator privileges"#;
+    // Read backup from app data directory and validate values before using them
+    let backup =
+        backup_path(&app).ok_or_else(|| "Failed to resolve app data directory".to_owned())?;
+    let (msl, fopen, ecn) = if let Ok(content) = std::fs::read_to_string(&backup) {
+        let parts: Vec<&str> = content.trim().split_whitespace().collect();
+        let msl = parts
+            .first()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(15000);
+        let fopen = parts
+            .get(1)
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(3);
+        let ecn = parts
+            .get(2)
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(2);
+        (msl, fopen, ecn)
+    } else {
+        (15000u32, 3u32, 2u32)
+    };
+
+    // Use validated integer values to prevent command injection
+    let script = format!(
+        r#"do shell script "sysctl -w net.inet.tcp.msl={msl}; sysctl -w net.inet.tcp.fastopen={fopen}; sysctl -w net.inet.tcp.ecn={ecn}" with administrator privileges"#
+    );
 
     let output = std::process::Command::new("osascript")
         .args(["-e", script])
@@ -247,6 +333,8 @@ pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to run osascript: {e}"))?;
 
     if output.status.success() {
+        // Only delete backup after successful revert
+        let _ = std::fs::remove_file(&backup);
         emit_info!(
             System,
             SYS_TUN_FAILED,
@@ -271,7 +359,11 @@ pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    // Check if backup exists (indicates optimizations were applied by Zephyr)
+    let backup = backup_path(&app);
+    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+
     let output = match std::process::Command::new("sysctl")
         .args(["-n", "net.inet.tcp.msl"])
         .output()
@@ -279,7 +371,7 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
         Ok(o) => o,
         Err(_) => {
             return Ok(NetworkOptimStatus {
-                applied: false,
+                applied: has_backup,
                 details: "sysctl command not available".to_owned(),
             });
         }
@@ -287,14 +379,14 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
 
     if !output.status.success() {
         return Ok(NetworkOptimStatus {
-            applied: false,
+            applied: has_backup,
             details: "sysctl command failed".to_owned(),
         });
     }
 
     // Check msl=1000 (optimized) instead of fastopen=3 (which is the macOS default)
     let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let applied = value == "1000";
+    let applied = value == "1000" || has_backup;
 
     Ok(NetworkOptimStatus {
         applied,
@@ -309,7 +401,7 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
 #[cfg(target_os = "windows")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
+pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
 
     emit_info!(
@@ -318,48 +410,60 @@ pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
         "Applying network optimizations (Windows)..."
     );
 
-    // Backup current values from registry before modifying
-    let backup_dir = std::env::temp_dir().join("zephyr");
-    let _ = std::fs::create_dir_all(&backup_dir);
-    let backup_path = backup_dir.join("tcp-backup.txt");
-    let mut backup_lines = Vec::new();
-
-    {
-        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
-        use winreg::RegKey;
-        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        if let Ok(key) = hklm.open_subkey_with_flags(
-            r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
-            KEY_READ,
-        ) {
-            if let Ok(val) = key.get_value::<u32, _>("TcpFastOpen") {
-                backup_lines.push(format!("TcpFastOpen={val}"));
-            }
-            if let Ok(val) = key.get_value::<u32, _>("TcpInitialRto") {
-                backup_lines.push(format!("TcpInitialRto={val}"));
-            }
-            if let Ok(val) = key.get_value::<u32, _>("EcnCapability") {
-                backup_lines.push(format!("EcnCapability={val}"));
-            }
+    // Backup current values from registry before modifying (use app data dir, not temp)
+    // Only create backup if one doesn't already exist (prevent overwriting original values)
+    let backup =
+        backup_path(&app).ok_or_else(|| "Failed to resolve app data directory".to_owned())?;
+    if !backup.exists() {
+        if let Some(parent) = backup.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create backup directory: {e}"))?;
         }
-        // Also backup autotuninglevel and heuristics via netsh output
-        if let Ok(output) = std::process::Command::new("netsh")
-            .args(["int", "tcp", "show", "global"])
-            .creation_flags(super::CREATE_NO_WINDOW)
-            .output()
+        let mut backup_lines = Vec::new();
+
         {
-            let text = String::from_utf8_lossy(&output.stdout);
-            for line in text.lines() {
-                let lower = line.to_lowercase();
-                if lower.contains("auto") && lower.contains("tun") {
-                    backup_lines.push(format!("autotuninglevel={line}"));
-                } else if lower.contains("heuristics") {
-                    backup_lines.push(format!("heuristics={line}"));
+            use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
+            use winreg::RegKey;
+            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(key) = hklm.open_subkey_with_flags(
+                r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
+                KEY_READ,
+            ) {
+                if let Ok(val) = key.get_value::<u32, _>("TcpFastOpen") {
+                    backup_lines.push(format!("TcpFastOpen={val}"));
+                }
+                if let Ok(val) = key.get_value::<u32, _>("TcpInitialRto") {
+                    backup_lines.push(format!("TcpInitialRto={val}"));
+                }
+                if let Ok(val) = key.get_value::<u32, _>("EcnCapability") {
+                    backup_lines.push(format!("EcnCapability={val}"));
+                }
+            }
+            // Also backup autotuninglevel and heuristics via netsh output
+            if let Ok(output) = std::process::Command::new("netsh")
+                .args(["int", "tcp", "show", "global"])
+                .creation_flags(super::CREATE_NO_WINDOW)
+                .output()
+            {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    let lower = line.to_lowercase();
+                    if lower.contains("auto") && lower.contains("tun") {
+                        // Extract the value after the colon (e.g. "normal", "restricted")
+                        if let Some(val) = line.rsplit(':').next() {
+                            backup_lines.push(format!("autotuninglevel={}", val.trim()));
+                        }
+                    } else if lower.contains("heuristics") {
+                        if let Some(val) = line.rsplit(':').next() {
+                            backup_lines.push(format!("heuristics={}", val.trim()));
+                        }
+                    }
                 }
             }
         }
+        std::fs::write(&backup, backup_lines.join("\n"))
+            .map_err(|e| format!("Failed to write backup file: {e}"))?;
     }
-    let _ = std::fs::write(&backup_path, backup_lines.join("\n"));
 
     let optimizations: [(&str, &[&str]); 5] = [
         (
@@ -442,83 +546,122 @@ pub fn apply_network_optimizations(_app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
+pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
     emit_info!(
         System,
         SYS_TUN_FAILED,
         "Reverting network optimizations (Windows)..."
     );
 
-    // Try to restore from backup; fall back to system defaults
-    let backup_path = std::env::temp_dir().join("zephyr").join("tcp-backup.txt");
-    let reverts: [(&str, &[&str]); 5] = if backup_path.exists() {
-        // Parse backup and build revert commands
-        // For simplicity, use system defaults for netsh commands
-        // and restore registry values from backup
-        let _ = std::fs::read_to_string(&backup_path);
-        // Restore registry values from backup
-        {
-            use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_WRITE};
-            use winreg::RegKey;
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(key) = hklm.open_subkey_with_flags(
-                r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
-                KEY_WRITE,
-            ) {
-                if let Ok(content) = std::fs::read_to_string(&backup_path) {
-                    for line in content.lines() {
-                        if let Some((k, v)) = line.split_once('=') {
-                            if let Ok(val) = v.trim().parse::<u32>() {
-                                let _ = key.set_value(k.trim(), &val);
-                            }
-                        }
+    use std::os::windows::process::CommandExt;
+
+    // Try to restore from backup (app data dir, not temp); fall back to system defaults
+    let backup =
+        backup_path(&app).ok_or_else(|| "Failed to resolve app data directory".to_owned())?;
+    let backup_content = if backup.exists() {
+        std::fs::read_to_string(&backup).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Restore registry values from backup
+    if !backup_content.is_empty() {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_WRITE};
+        use winreg::RegKey;
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(key) = hklm.open_subkey_with_flags(
+            r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
+            KEY_WRITE,
+        ) {
+            for line in backup_content.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    if let Ok(val) = v.trim().parse::<u32>() {
+                        let _ = key.set_value(k.trim(), &val);
                     }
                 }
             }
         }
-        let _ = std::fs::remove_file(&backup_path);
-        [
-            (
-                "autotuninglevel",
-                &["int", "tcp", "set", "global", "autotuninglevel=normal"],
-            ),
-            ("heuristics", &["int", "tcp", "set", "heuristics", "enabled"]),
-            (
-                "initialRto",
-                &["int", "tcp", "set", "global", "initialRto=1000"],
-            ),
-            (
-                "fastopen",
-                &["int", "tcp", "set", "global", "fastopen=disabled"],
-            ),
-            (
-                "ecncapability",
-                &["int", "tcp", "set", "global", "ecncapability=disabled"],
-            ),
-        ]
-    } else {
-        [
-            (
-                "autotuninglevel",
-                &["int", "tcp", "set", "global", "autotuninglevel=normal"],
-            ),
-            ("heuristics", &["int", "tcp", "set", "heuristics", "enabled"]),
-            (
-                "initialRto",
-                &["int", "tcp", "set", "global", "initialRto=1000"],
-            ),
-            (
-                "fastopen",
-                &["int", "tcp", "set", "global", "fastopen=disabled"],
-            ),
-            (
-                "ecncapability",
-                &["int", "tcp", "set", "global", "ecncapability=disabled"],
-            ),
-        ]
-    };
+    }
+
+    // Parse backup for netsh values; fall back to system defaults
+    let mut auto_level = "normal".to_owned();
+    let mut heuristics = "enabled".to_owned();
+    let mut fastopen = "disabled";
+    let mut ecncapability = "disabled";
+    let mut initial_rto: u32 = 3000;
+    for line in backup_content.lines() {
+        let lower = line.to_lowercase();
+        if lower.starts_with("autotuninglevel=") {
+            if let Some(val) = line.split_once('=') {
+                auto_level = val.1.trim().to_owned();
+            }
+        } else if lower.starts_with("heuristics=") {
+            if let Some(val) = line.split_once('=') {
+                heuristics = val.1.trim().to_owned();
+            }
+        } else if lower.starts_with("tcpfastopen=") {
+            // TcpFastOpen registry: 0=disabled, >=1=enabled
+            if let Some(val) = line.split_once('=') {
+                if val.1.trim().parse::<u32>().unwrap_or(0) >= 1 {
+                    fastopen = "enabled";
+                }
+            }
+        } else if lower.starts_with("ecncapability=") {
+            // EcnCapability registry: 1=enabled, 0=disabled, 2=default
+            if let Some(val) = line.split_once('=') {
+                match val.1.trim().parse::<u32>().unwrap_or(0) {
+                    1 => ecncapability = "enabled",
+                    2 => ecncapability = "default",
+                    _ => ecncapability = "disabled",
+                }
+            }
+        } else if lower.starts_with("tcpinitialrto=") {
+            if let Some(val) = line.split_once('=') {
+                if let Ok(v) = val.1.trim().parse::<u32>() {
+                    initial_rto = v;
+                }
+            }
+        }
+    }
+
+    // Build revert commands with backed-up or default values
+    // Validate auto_level and heuristics against strict whitelists
+    const VALID_AUTO_LEVELS: &[&str] =
+        &["normal", "restricted", "highlyrestricted", "experimental"];
+    const VALID_HEURISTICS: &[&str] = &["enabled", "disabled"];
+    if !VALID_AUTO_LEVELS.contains(&auto_level.to_lowercase().as_str()) {
+        auto_level = "normal".to_owned();
+    }
+    if !VALID_HEURISTICS.contains(&heuristics.to_lowercase().as_str()) {
+        heuristics = "enabled".to_owned();
+    }
+    let auto_level_arg = format!("autotuninglevel={auto_level}");
+    let heuristics_arg = heuristics.to_lowercase();
+    let fastopen_arg = format!("fastopen={fastopen}");
+    let ecncapability_arg = format!("ecncapability={ecncapability}");
+    let initial_rto_arg = format!("initialRto={initial_rto}");
+    let reverts: [(&str, Vec<&str>); 5] = [
+        (
+            "autotuninglevel",
+            vec!["int", "tcp", "set", "global", &auto_level_arg],
+        ),
+        (
+            "heuristics",
+            vec!["int", "tcp", "set", "heuristics", &heuristics_arg],
+        ),
+        (
+            "initialRto",
+            vec!["int", "tcp", "set", "global", &initial_rto_arg],
+        ),
+        (
+            "fastopen",
+            vec!["int", "tcp", "set", "global", &fastopen_arg],
+        ),
+        (
+            "ecncapability",
+            vec!["int", "tcp", "set", "global", &ecncapability_arg],
+        ),
+    ];
 
     let mut failed = Vec::new();
     for (name, args) in &reverts {
@@ -561,6 +704,8 @@ pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
     }
 
     if failed.is_empty() {
+        // Only delete backup after successful revert
+        let _ = std::fs::remove_file(&backup);
         emit_info!(
             System,
             SYS_TUN_FAILED,
@@ -578,30 +723,33 @@ pub fn revert_network_optimizations(_app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    // Check if backup exists (indicates optimizations were applied by Zephyr)
+    let backup = backup_path(&app);
+    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+
     use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key_path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
 
-    let applied = match hklm.open_subkey_with_flags(key_path, KEY_READ) {
-        Ok(key) => {
-            // TCP Fast Open is enabled when TcpFastOpen = 1 (or 3 for client+server)
-            match key.get_value::<u32, _>("TcpFastOpen") {
-                Ok(val) => val >= 1,
-                Err(_) => false,
-            }
-        }
+    let tcp_fastopen_enabled = match hklm.open_subkey_with_flags(key_path, KEY_READ) {
+        Ok(key) => match key.get_value::<u32, _>("TcpFastOpen") {
+            Ok(val) => val >= 1,
+            Err(_) => false,
+        },
         Err(_) => false,
     };
+
+    let applied = tcp_fastopen_enabled || has_backup;
 
     Ok(NetworkOptimStatus {
         applied,
         details: if applied {
-            "TCP Fast Open is enabled".to_owned()
+            "TCP optimizations applied".to_owned()
         } else {
-            "TCP Fast Open is not enabled".to_owned()
+            "TCP optimizations not applied".to_owned()
         },
     })
 }
