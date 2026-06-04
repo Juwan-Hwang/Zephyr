@@ -8,7 +8,7 @@
 
 *一款 Mihomo GUI。*
 
-[![GitHub stars](https://img.shields.io/github/stars/Juwan-Hwang/Zephyr?style=Social&label=stars)](...)
+[![GitHub stars](https://img.shields.io/github/stars/Juwan-Hwang/Zephyr?style=For-the-badge&label=stars)](...)
 [![Release](https://img.shields.io/github/v/release/Juwan-Hwang/Zephyr?color=blue&style=For-the-badge&label=Release)](...)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#安装)
