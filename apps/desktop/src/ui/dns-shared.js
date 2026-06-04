@@ -186,7 +186,32 @@ export async function buildDnsRewritePayload() {
             ipv6: false,
             'enhanced-mode': 'fake-ip',
             'fake-ip-range': '198.18.0.1/16',
-            'fake-ip-filter': ['*.lan', 'localhost.ptlogin2.qq.com'],
+            // Domains that must resolve to real IPs (not fake-ip).
+            // These are services that break or behave incorrectly with fake IPs,
+            // such as captive portals, game consoles, and LAN discovery.
+            'fake-ip-filter': [
+                '*.lan',
+                '*.local',
+                '*.localhost',
+                '*.localdomain',
+                'localhost.ptlogin2.qq.com',
+                '*.msftncsi.com',
+                '*.srv.nintendo.net',
+                '*.stun.playstation.net',
+                'xbox.*.microsoft.com',
+                '*.xboxlive.com',
+                '*.stun.steamwire.com',
+                'stun.*',
+            ],
+            // Base DNS servers used to resolve DoH/DoT hostnames themselves.
+            // Without this, mihomo cannot resolve the DoH server domain (e.g. dns.google)
+            // because it needs DNS to reach the DoH server — a circular dependency.
+            'default-nameserver': [
+                '223.5.5.5',
+                '119.29.29.29',
+                '1.1.1.1',
+                '8.8.8.8',
+            ],
             nameserver: dnsConfig.nameserver,
             fallback: dnsConfig.fallback,
         },

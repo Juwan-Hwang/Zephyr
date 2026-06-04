@@ -699,6 +699,42 @@ pub fn prepare_runtime_config(
             mapping.insert(unified_delay_key, serde_yaml::Value::Bool(true));
         }
 
+        // Network performance defaults (Google Cloud TCP best practices)
+        // Only inject when the profile doesn't already specify a value,
+        // so user/subscription overrides are respected.
+
+        // tcp-concurrent: attempt TCP connections to all resolved IPs
+        // simultaneously and use the fastest one. Reduces handshake
+        // latency especially when a proxy node has both IPv4 and IPv6.
+        let tcp_concurrent_key = serde_yaml::Value::String("tcp-concurrent".to_owned());
+        if !mapping.contains_key(&tcp_concurrent_key) {
+            mapping.insert(tcp_concurrent_key, serde_yaml::Value::Bool(true));
+        }
+
+        // keep-alive-interval: TCP keep-alive probe interval in seconds.
+        // Prevents idle connections from being dropped by middleboxes
+        // (NATs, firewalls), aligning with Google's recommendation to
+        // maintain persistent connections and avoid slow-start after idle.
+        let keep_alive_key = serde_yaml::Value::String("keep-alive-interval".to_owned());
+        if !mapping.contains_key(&keep_alive_key) {
+            mapping.insert(
+                keep_alive_key,
+                serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+            );
+        }
+
+        // find-process-mode: always match the originating process for
+        // each connection. Required for accurate rule-based routing in
+        // TUN mode and better connection visibility.
+        // (Not a TCP optimization — improves routing accuracy)
+        let find_process_key = serde_yaml::Value::String("find-process-mode".to_owned());
+        if !mapping.contains_key(&find_process_key) {
+            mapping.insert(
+                find_process_key,
+                serde_yaml::Value::String("always".to_owned()),
+            );
+        }
+
         // Inject global user preferences (override YAML profile values)
         if let Some(p) = prefs {
             if let Some(mode) = &p.mode {
@@ -774,7 +810,7 @@ pub fn prepare_runtime_config(
 fn build_minimal_runtime_config(secret: &str) -> (String, u16) {
     (
         format!(
-            "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
+            "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\ntcp-concurrent: true\nkeep-alive-interval: 30\nfind-process-mode: always\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
         DEFAULT_API_PORT,
     )
@@ -1405,6 +1441,9 @@ mod tests {
         assert!(config.contains("external-controller: 127.0.0.1:9090"));
         assert!(config.contains("secret: mysecret"));
         assert!(config.contains("unified-delay: true"));
+        assert!(config.contains("tcp-concurrent: true"));
+        assert!(config.contains("keep-alive-interval: 30"));
+        assert!(config.contains("find-process-mode: always"));
     }
 
     #[test]
@@ -1425,6 +1464,36 @@ mod tests {
         let (config, _) = result.unwrap();
         assert!(config.contains("unified-delay: false"));
         assert_eq!(config.matches("unified-delay").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_tcp_concurrent() {
+        let content = "tcp-concurrent: false\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("tcp-concurrent: false"));
+        assert_eq!(config.matches("tcp-concurrent").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_keep_alive_interval() {
+        let content = "keep-alive-interval: 60\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("keep-alive-interval: 60"));
+        assert_eq!(config.matches("keep-alive-interval").count(), 1);
+    }
+
+    #[test]
+    fn test_prepare_runtime_config_preserves_find_process_mode() {
+        let content = "find-process-mode: off\nport: 7890";
+        let result = prepare_runtime_config(content, "s", None);
+        assert!(result.is_some());
+        let (config, _) = result.unwrap();
+        assert!(config.contains("find-process-mode: off"));
+        assert_eq!(config.matches("find-process-mode").count(), 1);
     }
 
     #[test]

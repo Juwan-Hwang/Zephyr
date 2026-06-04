@@ -70,6 +70,7 @@ export const TUN = Object.freeze({
     KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
     GRANT_LINUX_PERMISSION: "grant_linux_tun_permission",
+    APPLY_WINDOWS_TCP_OPTIMIZATIONS: "apply_windows_tcp_optimizations",
 });
 
 // ---------------------------------------------------------------------------
