@@ -184,6 +184,9 @@ struct Settings {
     /// Failover: auto-switch on consecutive proxy failures.
     #[serde(default)]
     failover_enabled: bool,
+    /// Auto-apply network optimizations on startup.
+    #[serde(default)]
+    network_optim_auto_apply: bool,
 }
 
 impl Settings {
@@ -283,6 +286,7 @@ fn patch_settings(
             patch_field!(app_opacity);
             patch_field!(node_scroll);
             patch_field!(failover_enabled);
+            patch_field!(network_optim_auto_apply);
         }
         if !modified {
             return Ok(());
@@ -698,6 +702,7 @@ pub fn run() {
                     app_opacity: None,
                     node_scroll: None,
                     failover_enabled: false,
+                    network_optim_auto_apply: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
@@ -836,6 +841,10 @@ pub fn run() {
             disable_tun_cmd,
             grant_linux_tun_permission,
             core_manager::core::tun_manager::apply_windows_tcp_optimizations,
+            // Network Optimization commands
+            core_manager::core::network_optim::apply_network_optimizations,
+            core_manager::core::network_optim::revert_network_optimizations,
+            core_manager::core::network_optim::check_network_optimizations_status,
             // Re-export tray commands
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
