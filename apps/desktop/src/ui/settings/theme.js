@@ -95,11 +95,11 @@ export function initThemeSettings({
         }
         themeModeButtons.forEach((btn, btnIdx) => {
             if (btnIdx === idx) {
-                btn.classList.add('text-zinc-100');
-                btn.classList.remove('text-zinc-400');
+                btn.classList.add('text-[var(--text-primary)]');
+                btn.classList.remove('text-[var(--text-secondary)]');
             } else {
-                btn.classList.remove('text-zinc-100');
-                btn.classList.add('text-zinc-400');
+                btn.classList.remove('text-[var(--text-primary)]');
+                btn.classList.add('text-[var(--text-secondary)]');
             }
         });
     };

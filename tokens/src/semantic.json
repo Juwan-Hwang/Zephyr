@@ -1,0 +1,62 @@
+{
+  "text": {
+    "primary":   { "value": "rgba(255, 255, 255, 0.95)", "lightValue": "rgba(24, 24, 28, 0.95)" },
+    "secondary": { "value": "rgba(255, 255, 255, 0.6)",  "lightValue": "rgba(24, 24, 28, 0.65)" },
+    "tertiary":  { "value": "rgba(255, 255, 255, 0.4)",  "lightValue": "rgba(24, 24, 28, 0.4)" },
+    "muted":     { "value": "#71717a" },
+    "danger":    { "value": "#ef4444",  "lightValue": "#dc2626" },
+    "warning":   { "value": "#f59e0b",  "lightValue": "#d97706" },
+    "success":   { "value": "#4ade80",  "lightValue": "#16a34a" },
+    "info":      { "value": "#38bdf8",  "lightValue": "#2563eb" },
+    "on-accent": { "value": "#fff" },
+    "badge":     { "value": "rgba(255, 255, 255, 0.6)", "lightValue": "rgba(24, 24, 28, 0.65)" }
+  },
+  "bg": {
+    "secondary": { "value": "rgba(12, 12, 16, 0.55)",    "lightValue": "rgba(0, 0, 0, 0.04)" },
+    "tertiary":  { "value": "rgba(12, 12, 16, 0.5)",     "lightValue": "rgba(0, 0, 0, 0.06)" },
+    "subtle":    { "value": "rgba(255, 255, 255, 0.03)",  "lightValue": "rgba(0, 0, 0, 0.03)" },
+    "muted":     { "value": "rgba(255, 255, 255, 0.05)",  "lightValue": "rgba(0, 0, 0, 0.05)" },
+    "input":     { "value": "rgba(0, 0, 0, 0.4)",         "lightValue": "rgba(255, 255, 255, 0.8)" },
+    "elevated":  { "value": "rgba(24, 24, 27, 0.97)",     "lightValue": "#ffffff" },
+    "overlay":   { "value": "rgba(0, 0, 0, 0.4)", "lightValue": "rgba(0, 0, 0, 0.25)" }
+  },
+  "border": {
+    "primary": { "value": "hsla(0, 0%, 100%, 0.1)",       "lightValue": "rgba(0, 0, 0, 0.15)" },
+    "subtle":  { "value": "rgba(255, 255, 255, 0.05)",     "lightValue": "rgba(30, 41, 59, 0.1)" },
+    "default": { "value": "rgba(255, 255, 255, 0.1)",      "lightValue": "rgba(30, 41, 59, 0.14)" },
+    "strong":  { "value": "rgba(255, 255, 255, 0.2)",      "lightValue": "rgba(30, 41, 59, 0.2)" }
+  },
+  "color": {
+    "danger":  { "value": "#ef4444",  "lightValue": "#dc2626" },
+    "warning": { "value": "#f59e0b",  "lightValue": "#d97706" },
+    "success": { "value": "#4ade80",  "lightValue": "#16a34a" },
+    "info":    { "value": "#38bdf8",  "lightValue": "#2563eb" }
+  },
+  "shadow": {
+    "dialog": {
+      "value": "inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 8px 40px rgba(0, 0, 0, 0.55)",
+      "lightValue": "inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 8px 40px rgba(0, 0, 0, 0.25)"
+    },
+    "dropdown": {
+      "value": "10px 10px 10px 0 rgba(0, 0, 0, 0.1)",
+      "lightValue": "10px 10px 10px 0 rgba(0, 0, 0, 0.08)"
+    },
+    "glow": {
+      "value": "0 0 8px var(--color-accent-glow)"
+    }
+  },
+  "transition": {
+    "micro":    { "value": "{time.micro} {easing.ease-in}" },
+    "standard": { "value": "{time.standard} {easing.ease-out}" },
+    "fast":     { "value": "{time.fast} {easing.spring}" },
+    "dropdown": { "value": "{time.dropdown} {easing.ease-in}" },
+    "page":     { "value": "{time.page} {easing.smooth}" }
+  },
+  "glass": {
+    "blur": { "value": "blur(16px)" }
+  },
+  "brightness": {
+    "dark":  { "value": "0.88" },
+    "light": { "value": "0.95" }
+  }
+}

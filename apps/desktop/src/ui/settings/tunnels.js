@@ -82,7 +82,7 @@ export function initTunnelSettings({
 
         currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
-            item.className = 'flex items-center justify-between bg-black/20 border border-white/5 rounded-lg p-3 hover:border-white/10 transition-all';
+            item.className = 'flex items-center justify-between bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg p-3 hover:border-[var(--zephyr-border-strong)] transition-[border-color]';
 
             const info = document.createElement('div');
             info.className = 'flex flex-col gap-1';
@@ -91,18 +91,18 @@ export function initTunnelSettings({
             topRow.className = 'flex items-center gap-2';
 
             const protocolBadge = document.createElement('span');
-            protocolBadge.className = 'type-badge text-zinc-300';
+            protocolBadge.className = 'type-badge text-[var(--text-secondary)]';
             protocolBadge.textContent = tunnel.network.join(', ');
 
             const target = document.createElement('span');
-            target.className = 'text-xs font-medium text-zinc-200';
+            target.className = 'text-xs font-medium text-[var(--text-primary)]';
             target.textContent = tunnel.target;
 
             topRow.appendChild(protocolBadge);
             topRow.appendChild(target);
 
             const listenEl = document.createElement('span');
-            listenEl.className = 'text-2xs text-zinc-500 font-mono';
+            listenEl.className = 'text-2xs text-[var(--text-muted)] font-mono';
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             listenEl.textContent = `${t.listen || 'Listen'}: ${tunnel.address}`;
@@ -131,64 +131,80 @@ export function initTunnelSettings({
     addTunnelBtn?.addEventListener('click', async () => {
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        const cancelText = t.cancel || 'Cancel';
+        const confirmText = t.confirm || 'Confirm';
         const customHtml = `
             <div class="space-y-4">
                 <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
+                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
                     <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="input-mono">
                 </div>
                 <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
+                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
                     <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="input-mono">
                 </div>
                 <div>
-                    <label class="block text-2xs text-zinc-500 uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
+                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
                     <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="input-mono">
+                </div>
+                <div class="flex gap-3 justify-end pt-2">
+                    <button id="tunnel-cancel-btn" class="btn-ghost">${cancelText}</button>
+                    <button id="tunnel-confirm-btn" class="btn-primary">${confirmText}</button>
                 </div>
             </div>
         `;
 
-        const contentArea = /** @type {HTMLElement} */ (await showModal(t.addPortForwarding || "Add Port Forwarding", "", "", true, customHtml));
-        if (!contentArea) return;
+        const _contentArea = /** @type {HTMLElement} */ (await showModal(
+            t.addPortForwarding || "Add Port Forwarding",
+            "", "", true, customHtml,
+            (contentArea, closeModal) => {
+                const protocolInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-protocol-input'));
+                const addressInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-address-input'));
+                const targetInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-target-input'));
+                const cancelBtn = contentArea.querySelector('#tunnel-cancel-btn');
+                const confirmBtn = contentArea.querySelector('#tunnel-confirm-btn');
 
-        const protocolInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-protocol-input'));
-        const addressInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-address-input'));
-        const targetInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-target-input'));
+                cancelBtn?.addEventListener('click', () => closeModal(null));
 
-        const protocolStr = protocolInput.value.trim();
-        const address = addressInput.value.trim();
-        const target = targetInput.value.trim();
+                confirmBtn?.addEventListener('click', async () => {
+                    const protocolStr = protocolInput?.value?.trim() || '';
+                    const address = addressInput?.value?.trim() || '';
+                    const target = targetInput?.value?.trim() || '';
 
-        if (!protocolStr || !address || !target) {
-            showNotification(t.valueEmpty || 'Value cannot be empty', 'error');
-            return;
-        }
+                    if (!protocolStr || !address || !target) {
+                        showNotification(t.valueEmpty || 'Value cannot be empty', 'error');
+                        return;
+                    }
 
-        const protocols = protocolStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
-        const validProtocols = ['tcp', 'udp'];
-        const invalidProtocols = protocols.filter(p => !validProtocols.includes(p));
+                    const protocols = protocolStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+                    const validProtocols = ['tcp', 'udp'];
+                    const invalidProtocols = protocols.filter(p => !validProtocols.includes(p));
 
-        if (protocols.length === 0 || invalidProtocols.length > 0) {
-            showNotification(t.invalidProtocol || 'Invalid protocol. Use tcp, udp, or both.', 'error');
-            return;
-        }
+                    if (protocols.length === 0 || invalidProtocols.length > 0) {
+                        showNotification(t.invalidProtocol || 'Invalid protocol. Use tcp, udp, or both.', 'error');
+                        return;
+                    }
 
-        if (!isValidAddress(address)) {
-            showNotification(t.invalidAddressFormat || 'Invalid listen address format. Use host:port', 'error');
-            return;
-        }
+                    if (!isValidAddress(address)) {
+                        showNotification(t.invalidAddressFormat || 'Invalid listen address format. Use host:port', 'error');
+                        return;
+                    }
 
-        if (!isValidAddress(target)) {
-            showNotification(t.invalidTargetFormat || 'Invalid target address format. Use host:port', 'error');
-            return;
-        }
+                    if (!isValidAddress(target)) {
+                        showNotification(t.invalidTargetFormat || 'Invalid target address format. Use host:port', 'error');
+                        return;
+                    }
 
-        const network = protocols;
-        const newTunnel = { network, address, target };
-        currentTunnels.push(newTunnel);
-        const ok = await saveConfigToCore({ tunnels: currentTunnels });
-        if (!ok) { currentTunnels.pop(); return; }
-        renderTunnels();
+                    const network = protocols;
+                    const newTunnel = { network, address, target };
+                    currentTunnels.push(newTunnel);
+                    const ok = await saveConfigToCore({ tunnels: currentTunnels });
+                    if (!ok) { currentTunnels.pop(); return; }
+                    closeModal(null);
+                    renderTunnels();
+                });
+            }
+        ));
     });
 
     // Initial render

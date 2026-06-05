@@ -470,11 +470,11 @@ export async function initSettings() {
         // Update button states
         uiScaleButtons.forEach(btn => {
             btn.classList.remove('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
-            btn.classList.add('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
+            btn.classList.add('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
         });
         const activeBtn = document.getElementById(`ui-scale-${Math.round(scale * 100)}`);
         if (activeBtn) {
-            activeBtn.classList.remove('bg-zinc-200', 'dark:bg-zinc-700/50', 'text-zinc-600', 'dark:text-zinc-400');
+            activeBtn.classList.remove('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
             activeBtn.classList.add('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
         }
         // Apply scale via CSS custom property --ui-scale
@@ -698,10 +698,10 @@ export async function initSettings() {
                 appStore.set('currentTheme', 'zinc');
                 settings.theme = 'zinc';
                 applyTheme('zinc');
-                document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-zinc-900'));
+                document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-[var(--zephyr-bg-secondary)]'));
                 const defaultThemeBtn = document.querySelector('.theme-btn[data-theme="zinc"]');
                 if (defaultThemeBtn) {
-                    defaultThemeBtn.classList.add('ring-2', 'ring-offset-2', 'ring-offset-zinc-900', 'ring-zinc-500');
+                    defaultThemeBtn.classList.add('ring-2', 'ring-offset-2', 'ring-offset-[var(--zephyr-bg-secondary)]', 'ring-zinc-500');
                 }
                 successItems.push('themeColor');
 
@@ -1435,39 +1435,39 @@ export async function initSettings() {
 
             const modal = document.createElement('div');
             modal.id = 'smart-config-modal';
-            modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+            modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
             // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${t.smartProxyConfigTitle || 'Smart Proxy Settings'}</h3>
-                        <button id="smart-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                        <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.smartProxyConfigTitle || 'Smart Proxy Settings'}</h3>
+                        <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightLatency || 'Latency Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightLatency || 'Latency Weight'}</label>
                             <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="input-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightSuccess || 'Success Rate Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightSuccess || 'Success Rate Weight'}</label>
                             <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="input-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyWeightStability || 'Stability Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightStability || 'Stability Weight'}</label>
                             <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="input-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyHalfLife || 'Half-life (hours)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyHalfLife || 'Half-life (hours)'}</label>
                             <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="input-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyMinInterval || 'Min Test Interval (s)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMinInterval || 'Min Test Interval (s)'}</label>
                             <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="input-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${t.smartProxyMaxInterval || 'Max Test Interval (s)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMaxInterval || 'Max Test Interval (s)'}</label>
                             <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="input-mono text-xs">
                         </div>
                     </div>

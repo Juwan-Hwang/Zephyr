@@ -20,6 +20,7 @@
     "eslint": "10.4.0",
     "globals": "^17.6.0",
     "happy-dom": "^20.9.0",
+    "style-dictionary": "^5.4.2",
     "tailwindcss": "4.3.0",
     "typescript": "^6.0.2",
     "vitest": "4.1.7"
