@@ -102,7 +102,7 @@ async function renderPluginsList(plugins) {
     if (!container) return;
     if (!plugins || plugins.length === 0) {
          
-    container.innerHTML = '<div class="glass-card p-6 text-center text-zinc-600 text-xs">No plugins found.</div>';
+    container.innerHTML = '<div class="glass-card p-6 text-center text-[var(--text-tertiary)] text-xs">No plugins found.</div>';
         return;
     }
 
@@ -118,12 +118,12 @@ async function renderPluginsList(plugins) {
         <div class="glass-card p-4">
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-md ${isLoaded ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-500'} border flex items-center justify-center">
+                    <div class="w-10 h-10 rounded-md ${isLoaded ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-[var(--zephyr-bg-muted)] border-[var(--zephyr-border-subtle)] text-[var(--text-muted)]'} border flex items-center justify-center">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                     </div>
                     <div>
-                        <p class="text-sm font-semibold text-zinc-200">${esc(p.name || id || 'Unknown')}</p>
-                        <p class="text-2xs text-zinc-500">${esc(p.description || '')} ${p.version ? `v${esc(p.version)}` : ''}</p>
+                        <p class="text-sm font-semibold text-[var(--text-primary)]">${esc(p.name || id || 'Unknown')}</p>
+                        <p class="text-2xs text-[var(--text-muted)]">${esc(p.description || '')} ${p.version ? `v${esc(p.version)}` : ''}</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-1">
@@ -178,13 +178,13 @@ async function loadHooksList() {
         const hooks = /** @type {Array<{name: string, isHighFrequency?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListHooks('*')));
         if (!hooks || hooks.length === 0) {
              
-    container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-2">No hooks available</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No hooks available</div>';
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
     container.innerHTML = hooks.map(h => `
-            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
-                <span class="text-xs text-zinc-300">${esc(h.name)}</span>
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
+                <span class="text-xs text-[var(--text-secondary)]">${esc(h.name)}</span>
                 <div class="flex items-center gap-2">
                     ${h.isHighFrequency ? '<span class="text-2xs text-yellow-500">high-freq</span>' : ''}
                     <button class="hook-trigger-btn btn-ghost text-2xs" data-hook="${esc(h.name)}">Trigger</button>
@@ -219,15 +219,15 @@ async function loadPermissionsList() {
         const perms = /** @type {Array<{name: string, displayName: string, allowedForConfigPlugin?: boolean, allowedForUiExtension?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListPermissions('*')));
         if (!perms || perms.length === 0) {
              
-    container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-2">No permissions</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No permissions</div>';
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
     container.innerHTML = perms.map(p => `
-            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div>
-                    <span class="text-xs text-zinc-300 font-mono">${esc(p.name)}</span>
-                    <span class="text-2xs text-zinc-500 ml-2">${esc(p.displayName)}</span>
+                    <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(p.name)}</span>
+                    <span class="text-2xs text-[var(--text-muted)] ml-2">${esc(p.displayName)}</span>
                 </div>
                 <div class="flex gap-2">
                     ${p.allowedForConfigPlugin ? '<span class="text-2xs text-blue-400">config</span>' : ''}
@@ -250,7 +250,7 @@ async function loadKvStore() {
         const keys = await prism.kvKeys();
         if (!keys || keys.length === 0) {
              
-    container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-2">KV Store is empty</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">KV Store is empty</div>';
             return;
         }
         const entries = [];
@@ -260,10 +260,10 @@ async function loadKvStore() {
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
     container.innerHTML = entries.map(e => `
-            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-white/5">
+            <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div class="flex-1 min-w-0">
-                    <span class="text-xs text-zinc-300 font-mono">${esc(e.key)}</span>
-                    <span class="text-2xs text-zinc-600 ml-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
+                    <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(e.key)}</span>
+                    <span class="text-2xs text-[var(--text-tertiary)] ml-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
                 </div>
                 <div class="flex items-center gap-1 ml-2">
                     <button class="kv-edit-btn text-2xs text-blue-400 hover:text-blue-300" data-key="${esc(e.key)}">edit</button>
@@ -552,7 +552,7 @@ async function loadSchedulerConfig() {
     try {
         const sc = /** @type {Record<string, any>} */ (await prism.smartSchedulerConfig());
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `            <div class="flex gap-4 text-2xs text-zinc-500">
+    container.innerHTML = `            <div class="flex gap-4 text-2xs text-[var(--text-muted)]">
                 <span>Base: ${sc.baseIntervalSecs}s</span>
                 <span>Adaptive: ${sc.adaptive ? 'on' : 'off'}</span>
                 <span>Max: ${sc.maxIntervalSecs || 3600}s</span>
@@ -591,7 +591,7 @@ async function loadSmartRankings() {
         const rankings = await prism.smartRank();
         if (!rankings || rankings.length === 0) {
              
-    container.innerHTML = '<div class="text-zinc-600 text-xs text-center py-4">No ranking data. Run speed tests first.</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-4">No ranking data. Run speed tests first.</div>';
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
@@ -601,12 +601,12 @@ async function loadSmartRankings() {
             const barColor = barWidth >= 80 ? 'bg-green-500' : barWidth >= 50 ? 'bg-yellow-500' : 'bg-red-500';
             return `
                 <div class="flex items-center gap-3 py-1">
-                    <span class="text-2xs text-zinc-600 w-6 text-right">#${i + 1}</span>
-                    <span class="text-xs text-zinc-300 flex-1 truncate font-mono">${esc(r.name || 'Unknown')}</span>
-                    <div class="w-24 h-2 bg-black/40 rounded-full overflow-hidden">
-                        <div class="${barColor} h-full rounded-full transition-all" style="width: ${barWidth}%"></div>
+                    <span class="text-2xs text-[var(--text-tertiary)] w-6 text-right">#${i + 1}</span>
+                    <span class="text-xs text-[var(--text-secondary)] flex-1 truncate font-mono">${esc(r.name || 'Unknown')}</span>
+                    <div class="w-24 h-2 bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden">
+                        <div class="${barColor} h-full rounded-full transition-[width]" style="width: ${barWidth}%"></div>
                     </div>
-                    <span class="text-xs font-bold text-zinc-200 w-10 text-right">${score}</span>
+                    <span class="text-xs font-bold text-[var(--text-primary)] w-10 text-right">${score}</span>
                 </div>`;
         }).join('');
     } catch (e) {

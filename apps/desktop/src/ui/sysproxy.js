@@ -29,12 +29,12 @@ export async function updateSysProxyUI() {
 
         if (isActive) {
             statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusActive || 'Proxy Active';
-            statusText.classList.remove('text-zinc-500');
+            statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
             statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusReady || 'Ready to protect your traffic';
             statusText.classList.remove('text-accent');
-            statusText.classList.add('text-zinc-500');
+            statusText.classList.add('text-[var(--text-muted)]');
         }
     } catch (err) {
         sysproxyLogger.error('Failed to update sys proxy UI', err);

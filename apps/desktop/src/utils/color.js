@@ -40,7 +40,7 @@ export function getThemeColors() {
     const style = getComputedStyle(document.documentElement);
 
     return {
-        accent: style.getPropertyValue('--color-accent').trim() || '#8b5cf6',
+        accent: style.getPropertyValue('--accent-primary').trim() || '#8b5cf6',
         secondary: style.getPropertyValue('--color-secondary').trim() || '#3b82f6',
     };
 }

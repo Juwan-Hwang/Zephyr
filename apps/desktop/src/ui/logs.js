@@ -260,15 +260,15 @@ function buildPageHTML() {
     return `
         <header class="flex items-center justify-between relative z-10 shrink-0">
             <div class="flex items-center gap-4">
-                <h2 class="text-2xl font-light text-zinc-100" data-i18n="logsTitle">${t('logsTitle')}</h2>
+                <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="logsTitle">${t('logsTitle')}</h2>
                 <!-- Tab buttons -->
-                <div class="flex items-center gap-1 bg-black/5 dark:bg-white/5 rounded-lg p-0.5">
-                    <button id="log-tab-core" class="log-tab-btn active text-xs px-3 py-1 rounded-md transition-all" data-i18n="logTabCore">${t('logTabCore')}</button>
-                    <button id="log-tab-ext" class="log-tab-btn text-xs px-3 py-1 rounded-md transition-all" data-i18n="ruleLibraryLogTab">${t('ruleLibraryLogTab')}</button>
+                <div class="flex items-center gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-0.5">
+                    <button id="log-tab-core" class="log-tab-btn active text-xs px-3 py-1 rounded-md transition-colors" data-i18n="logTabCore">${t('logTabCore')}</button>
+                    <button id="log-tab-ext" class="log-tab-btn text-xs px-3 py-1 rounded-md transition-colors" data-i18n="ruleLibraryLogTab">${t('ruleLibraryLogTab')}</button>
                 </div>
             </div>
             <div class="flex items-center gap-3">
-                <span id="log-line-count" class="text-xs text-zinc-500 tabular-nums">0 ${t('logLines')}</span>
+                <span id="log-line-count" class="text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
                 <button id="log-auto-scroll-btn" class="btn-ghost active" title="${t('autoScroll')}">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
                     <span data-i18n="autoScroll">${t('autoScroll')}</span>
@@ -289,16 +289,16 @@ function buildPageHTML() {
                 <!-- Search Box -->
                 <div class="relative group flex items-center">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                     </div>
-                    <input id="log-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
+                    <input id="log-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 pl-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
                 </div>
             </div>
 
             <!-- Virtual scroll container -->
-            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
+            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
                 <div id="log-spacer-top" style="height:0"></div>
                 <div id="log-lines-container"></div>
                 <div id="log-spacer-bottom" style="height:0"></div>
@@ -318,15 +318,15 @@ function buildPageHTML() {
                 <!-- Search Box -->
                 <div class="relative group flex items-center">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <svg class="h-4 w-4 text-zinc-400 group-focus-within:text-white transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                     </div>
-                    <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-11 text-white text-xs w-52 transition-all duration-400 focus:outline-none focus:border-white/30 focus:bg-white/20 focus:w-72 placeholder:text-zinc-400 shadow-inner">
+                    <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 pl-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
                 </div>
             </div>
-            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/5 border border-white/10 p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
-                <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-zinc-600">
+            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
+                <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-[var(--text-tertiary)]">
                     <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span data-i18n="ruleLibraryLogEmpty">${t('ruleLibraryLogEmpty')}</span>
                 </div>
@@ -845,10 +845,10 @@ function createExtLogRow(entry) {
         : (EXT_EVENT_COLORS[entry.type] || '#a1a1aa');
 
     const row = document.createElement('div');
-    row.className = 'flex items-start gap-3 py-1 border-b border-white/5 last:border-0';
+    row.className = 'flex items-start gap-3 py-1 border-b border-[var(--zephyr-border-subtle)] last:border-0';
 
     const ts = document.createElement('span');
-    ts.className = 'text-zinc-600 shrink-0 select-none';
+    ts.className = 'text-[var(--text-tertiary)] shrink-0 select-none';
     ts.textContent = entry.timestamp;
 
     const badge = document.createElement('span');
@@ -860,7 +860,7 @@ function createExtLogRow(entry) {
         : entry.type;
 
     const msg = document.createElement('span');
-    msg.className = 'text-zinc-400 break-all';
+    msg.className = 'text-[var(--text-secondary)] break-all';
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
     msg.innerHTML = formatExtLogMessage(entry);
 
