@@ -34,7 +34,7 @@ export function removeContextMenu() {
  * {@link attachContextMenuCloseHandlers} when ready.
  *
  * @param {MouseEvent} e - The right-click event
- * @returns {HTMLElement} The menu container element (not yet in the DOM)
+ * @returns {{ menu: HTMLElement, scroll: HTMLElement }} The menu container and inner scroll element (not yet in the DOM)
  */
 export function createContextMenuContainer(e) {
     e.preventDefault();
@@ -46,10 +46,16 @@ export function createContextMenuContainer(e) {
     const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
 
     const menu = document.createElement('div');
-    menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-y-auto custom-scrollbar py-1 shadow-xl border border-white/10 rounded-lg glass-card`;
+    menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-hidden shadow-xl border border-[var(--zephyr-border-default)] rounded-lg glass-card`;
     menu.style.left = `${e.clientX / uiScale}px`;
     menu.style.top = `${e.clientY / uiScale}px`;
-    return menu;
+
+    // Inner scroll wrapper so scrollbar is clipped by outer border-radius
+    const scroll = document.createElement('div');
+    scroll.className = 'menu-scroll max-h-[60vh] py-1';
+    menu.appendChild(scroll);
+
+    return { menu, scroll };
 }
 
 /**
@@ -110,14 +116,14 @@ export function attachContextMenuCloseHandlers(menu) {
  * @param {Array<{label?: string, html?: string, icon?: string, action?: () => void, separator?: boolean, className?: string}>} items
  */
 export function showContextMenu(e, items) {
-    const menu = createContextMenuContainer(e);
+    const { menu, scroll } = createContextMenuContainer(e);
 
     items.forEach((item) => {
         // Separator
         if (item.separator) {
             const sep = document.createElement('div');
-            sep.className = 'my-1 border-t border-white/10';
-            menu.appendChild(sep);
+            sep.className = 'my-1 border-t border-[var(--zephyr-border-default)]';
+            scroll.appendChild(sep);
             return;
         }
 
@@ -134,13 +140,13 @@ export function showContextMenu(e, items) {
                     item.action?.();
                 });
             }
-            menu.appendChild(wrapper);
+            scroll.appendChild(wrapper);
             return;
         }
 
         // Standard button item
         const btn = document.createElement('button');
-        btn.className = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-white/10 hover:text-white transition-colors text-left';
+        btn.className = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] transition-colors text-left';
         const iconHtml = item.icon ? '<span class="w-4 shrink-0">' + sanitizeHtml(item.icon) + '</span>' : '';
         // eslint-disable-next-line no-unsanitized/property -- label escaped, icon sanitized
         btn.innerHTML = iconHtml + '<span>' + escapeHtml(item.label || '') + '</span>';
@@ -149,7 +155,7 @@ export function showContextMenu(e, items) {
             removeContextMenu();
             item.action?.();
         });
-        menu.appendChild(btn);
+        scroll.appendChild(btn);
     });
 
     document.body.appendChild(menu);

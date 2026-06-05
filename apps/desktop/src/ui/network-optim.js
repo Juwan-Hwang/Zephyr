@@ -62,13 +62,13 @@ function updateUI() {
     btn.classList.remove('opacity-50');
 
     if (isApplied) {
-        dot.className = 'w-2 h-2 rounded-full bg-green-500 transition-all';
+        dot.className = 'w-2 h-2 rounded-full bg-green-500 transition-colors';
         const span = document.createElement('span');
         span.setAttribute('data-i18n', 'networkOptimRevert');
         span.textContent = t('networkOptimRevert');
         btn.replaceChildren(span);
     } else {
-        dot.className = 'w-2 h-2 rounded-full bg-zinc-600 transition-all';
+        dot.className = 'w-2 h-2 rounded-full bg-[var(--text-tertiary)] transition-colors';
         const span = document.createElement('span');
         span.setAttribute('data-i18n', 'networkOptimApply');
         span.textContent = t('networkOptimApply');
@@ -100,21 +100,21 @@ async function showApplyModal() {
             contentArea.innerHTML = '';
 
             const wrapper = document.createElement('div');
-            wrapper.className = 'space-y-4 text-sm text-zinc-300';
+            wrapper.className = 'space-y-4 text-sm text-[var(--text-secondary)]';
 
             const desc = document.createElement('p');
-            desc.className = 'text-zinc-400';
+            desc.className = 'text-[var(--text-secondary)]';
             desc.textContent = t('networkOptimModalDesc');
             wrapper.appendChild(desc);
 
             const changesBox = document.createElement('div');
-            changesBox.className = 'bg-black/30 rounded-lg p-4 space-y-2 text-xs';
+            changesBox.className = 'bg-[var(--zephyr-bg-input)] rounded-lg p-4 space-y-2 text-xs';
             const changesTitle = document.createElement('h4');
-            changesTitle.className = 'font-bold text-zinc-200 uppercase tracking-wider';
+            changesTitle.className = 'font-bold text-[var(--text-primary)] uppercase tracking-wider';
             changesTitle.textContent = t('networkOptimModalChanges');
             changesBox.appendChild(changesTitle);
             const ul = document.createElement('ul');
-            ul.className = 'space-y-1 text-zinc-400 list-disc list-inside';
+            ul.className = 'space-y-1 text-[var(--text-secondary)] list-disc list-inside';
             for (let i = 1; i <= 5; i++) {
                 const li = document.createElement('li');
                 li.textContent = t(`networkOptimChange${i}`);
@@ -139,7 +139,7 @@ async function showApplyModal() {
                 autoApplyValue = checkbox.checked;
             });
             const labelSpan = document.createElement('span');
-            labelSpan.className = 'text-zinc-300 text-sm';
+            labelSpan.className = 'text-[var(--text-secondary)] text-sm';
             labelSpan.textContent = t('networkOptimAutoApply');
             label.appendChild(checkbox);
             label.appendChild(labelSpan);

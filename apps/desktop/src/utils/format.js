@@ -17,10 +17,10 @@ import { getDateTimeFormat } from './intl-cache.js';
  * getDelayColorClass(120);  // 'text-emerald-400'
  * getDelayColorClass(350);  // 'text-amber-400'
  * getDelayColorClass(800);  // 'text-rose-400'
- * getDelayColorClass(null); // 'text-zinc-600'
+ * getDelayColorClass(null); // 'text-[var(--zephyr-text-tertiary)]'
  */
 export function getDelayColorClass(delay) {
-    if (delay === null || delay === 0 || delay >= 999999) return 'text-zinc-600';
+    if (delay === null || delay === 0 || delay >= 999999) return 'text-[var(--zephyr-text-tertiary)]';
     if (delay < 200) return 'text-emerald-400';
     if (delay < 500) return 'text-amber-400';
     return 'text-rose-400';
