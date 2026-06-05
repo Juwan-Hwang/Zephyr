@@ -24,7 +24,7 @@ export function createCollapsible(container, {
     icon = '',
     defaultOpen = false,
     headerClass = '',
-    contentClass = 'border-t border-white/5 space-y-1 p-3',
+    contentClass = 'border-t border-[var(--zephyr-border-subtle)] space-y-1 p-3',
     cardClass = 'glass-card overflow-hidden',
     badgeText = '',
     subLabel = '',
@@ -34,14 +34,14 @@ export function createCollapsible(container, {
 
     // Header
     const header = document.createElement('div');
-    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-white/[0.03] active:bg-white/[0.06] transition-all duration-200 select-none ${headerClass}`;
+    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--zephyr-bg-subtle)] active:bg-[var(--zephyr-bg-muted)] transition-all duration-200 select-none ${headerClass}`;
 
     const leftPart = document.createElement('div');
     leftPart.className = 'flex items-center gap-2.5';
 
     // Collapse arrow
     const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    arrow.setAttribute('class', 'w-3 h-3 text-zinc-500 transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow');
+    arrow.setAttribute('class', 'w-3 h-3 text-[var(--text-muted)] transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow');
     arrow.setAttribute('viewBox', '0 0 24 24');
     arrow.setAttribute('fill', 'none');
     arrow.setAttribute('stroke', 'currentColor');
@@ -63,13 +63,13 @@ export function createCollapsible(container, {
     }
 
     const titleSpan = document.createElement('span');
-    titleSpan.className = 'text-xs font-semibold text-zinc-200 tracking-wide';
+    titleSpan.className = 'text-xs font-semibold text-[var(--text-primary)] tracking-wide';
     titleSpan.textContent = title;
     leftPart.appendChild(titleSpan);
 
     if (badgeText) {
         const badge = document.createElement('span');
-        badge.className = 'text-2xs text-zinc-600 font-mono';
+        badge.className = 'text-2xs text-[var(--text-tertiary)] font-mono';
         badge.textContent = badgeText;
         leftPart.appendChild(badge);
     }
@@ -78,7 +78,7 @@ export function createCollapsible(container, {
 
     if (subLabel) {
         const sub = document.createElement('span');
-        sub.className = 'text-2xs text-zinc-600 font-mono opacity-60';
+        sub.className = 'text-2xs text-[var(--text-tertiary)] font-mono opacity-60';
         sub.textContent = subLabel;
         header.appendChild(sub);
     }

@@ -6,9 +6,10 @@
   "scripts": {
     "tauri": "tauri",
     "copy-shared": "node -e \"const fs=require('fs');const p=require('path');const src=p.resolve(__dirname,'../../packages/shared/src/index.js');const dst=p.resolve(__dirname,'src/_shared/index.js');fs.mkdirSync(p.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);console.log('copied',src,'->',dst)\"",
-    "build:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --minify",
+    "build:tokens": "cd ../.. && pnpm exec style-dictionary build --config tokens/config.js",
+    "build:css": "pnpm run copy-shared && pnpm run build:tokens && tailwindcss -i src/styles.css -o src/tailwind.css --minify",
     "build:cm6": "esbuild src/ui/editor/cm6-entry.js --bundle --format=esm --outfile=src/cm6.bundle.js --minify",
-    "dev:css": "pnpm run copy-shared && tailwindcss -i src/styles.css -o src/tailwind.css --watch",
+    "dev:css": "pnpm run copy-shared && pnpm run build:tokens && tailwindcss -i src/styles.css -o src/tailwind.css --watch",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -p jsconfig.json --noEmit"

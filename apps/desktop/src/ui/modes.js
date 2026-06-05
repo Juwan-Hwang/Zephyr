@@ -96,11 +96,11 @@ export function updateModeUI(mode) {
         slider.style.transform = `translateX(${idx * 100}%)`;
         buttons.forEach((b, i) => {
             if (i === idx) {
-                b.classList.add('text-zinc-100');
-                b.classList.remove('text-zinc-400');
+                b.classList.add('text-[var(--text-primary)]');
+                b.classList.remove('text-[var(--text-secondary)]');
             } else {
-                b.classList.remove('text-zinc-100');
-                b.classList.add('text-zinc-400');
+                b.classList.remove('text-[var(--text-primary)]');
+                b.classList.add('text-[var(--text-secondary)]');
             }
         });
     }
