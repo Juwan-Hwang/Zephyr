@@ -64,7 +64,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     const closeMenu = () => {
         menu.classList.add('hidden');
         if (arrow) arrow.classList.remove('rotate-180');
-        trigger.classList.remove('border-accent/50');
+        trigger.classList.remove('border-[var(--zephyr-border-strong)]');
         // Return from portal
         if (isPortalActive) {
             isPortalActive = false;
@@ -80,7 +80,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     const openMenu = () => {
         menu.classList.remove('hidden');
         if (arrow) arrow.classList.add('rotate-180');
-        trigger.classList.add('border-accent/50');
+        trigger.classList.add('border-[var(--zephyr-border-strong)]');
         // Portal to body to escape any parent stacking context
         if (!isPortalActive) {
             isPortalActive = true;

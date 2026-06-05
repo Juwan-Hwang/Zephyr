@@ -372,7 +372,7 @@ function showLatencyLoadingForAllCards() {
 const ACTIVE_CARD_CLASSES = [
     'bg-white/15', 'border-accent/40', 'shadow-accent/20', 'ring-1', 'ring-accent/30',
 ];
-const INACTIVE_HOVER_CLASS = 'hover:bg-white/5';
+const INACTIVE_HOVER_CLASS = 'hover:bg-[var(--zephyr-bg-muted)]';
 
 /** @type {HTMLElement|null} Cached reference to the currently active card */
 let _activeCard = null;
@@ -408,7 +408,7 @@ function setActiveNode(card, _container) {
 
     if (!card.querySelector('.active-dot')) {
         const activeDot = document.createElement('div');
-        activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
+        activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
         card.appendChild(activeDot);
     }
 
@@ -512,11 +512,11 @@ function updateModeUI(mode) {
         slider.style.transform = `translateX(${idx * 100}%)`;
         buttons.forEach((b, i) => {
             if (i === idx) {
-                b.classList.add('text-zinc-100');
-                b.classList.remove('text-zinc-400');
+                b.classList.add('text-[var(--text-primary)]');
+                b.classList.remove('text-[var(--text-secondary)]');
             } else {
-                b.classList.remove('text-zinc-100');
-                b.classList.add('text-zinc-400');
+                b.classList.remove('text-[var(--text-primary)]');
+                b.classList.add('text-[var(--text-secondary)]');
             }
         });
     }
@@ -542,12 +542,12 @@ export async function updateSysProxyUI() {
 
         if (isActive) {
             statusText.textContent = /** @type {any} */ (translations)[currentLang].proxyStatusActive || 'Proxy Active';
-            statusText.classList.remove('text-zinc-500');
+            statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
             statusText.textContent = /** @type {any} */ (translations)[currentLang].proxyStatusReady || 'Ready to protect your traffic';
             statusText.classList.remove('text-accent');
-            statusText.classList.add('text-zinc-500');
+            statusText.classList.add('text-[var(--text-muted)]');
         }
     } catch (err) {
         proxyLogger.error('Failed to update sys proxy UI', err);
@@ -652,7 +652,7 @@ export function initProxyControls() {
                             }
                         } else {
                             updatedLatVal.textContent = /** @type {any} */ (translations)[currentLang].timeout || 'Timeout';
-                            updatedLatVal.className = 'text-xs tabular-nums font-semibold text-zinc-600';
+                            updatedLatVal.className = 'text-xs tabular-nums font-semibold text-[var(--text-tertiary)]';
                             if (card) {
                                 (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
                                 setProxyPendingState(/** @type {HTMLElement} */ (card), false);
@@ -1006,7 +1006,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Explanation text — use t() for fallback chain support
     const text = document.createElement('span');
-    text.className = 'text-2xs text-zinc-400 flex-1';
+    text.className = 'text-2xs text-[var(--text-secondary)] flex-1';
 
     if (showObserved) {
         text.textContent = t('observedGroupMismatch', { observedGroup: observedGroupName, uiGroup: uiGroupName });
@@ -1042,7 +1042,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
             }
         };
     } else {
-        btn.className = 'text-2xs text-zinc-600 cursor-not-allowed whitespace-nowrap flex-shrink-0';
+        btn.className = 'text-2xs text-[var(--text-tertiary)] cursor-not-allowed whitespace-nowrap flex-shrink-0';
         btn.textContent = showObserved
             ? t('observedGroupNotSwitchable')
             : t('effectiveGroupNotSwitchable');
@@ -1051,7 +1051,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Dismiss button
     const dismiss = document.createElement('button');
-    dismiss.className = 'text-zinc-600 hover:text-zinc-400 ml-2 flex-shrink-0';
+    dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ml-2 flex-shrink-0';
      
     dismiss.innerHTML = '&times;';
     dismiss.title = t('dismiss');
@@ -1103,19 +1103,23 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-_groupMenuElement.className = 'hidden fixed min-w-[160px] bg-zinc-900 border border-white/10 rounded-lg shadow-2xl p-2 max-h-[300px] overflow-y-auto custom-scrollbar';
+        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
+        const scrollDiv = document.createElement('div');
+        scrollDiv.className = 'menu-scroll max-h-[300px]';
+        _groupMenuElement.appendChild(scrollDiv);
         document.body.appendChild(_groupMenuElement);
     }
     const menu = _groupMenuElement;
+    const menuScroll = /** @type {HTMLElement} */ (menu.querySelector('.menu-scroll'));
 
     // Build menu items
-     
-    menu.innerHTML = '';
+
+    menuScroll.innerHTML = '';
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
-btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-300 hover:bg-white/5 transition-all';
+btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         if (groupName === currentGroup) {
             btn.classList.add('active');
         }
@@ -1145,7 +1149,7 @@ btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[18px] te
                 showNotification(String(e), 'error');
             }
         };
-        menu.appendChild(btn);
+        menuScroll.appendChild(btn);
     });
 
     // Initialize event listeners once
@@ -1161,6 +1165,7 @@ btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[18px] te
                 const rect = trigger.getBoundingClientRect();
                 menu.style.left = rect.left + 'px';
                 menu.style.top = (rect.bottom + 6) + 'px';
+                menu.style.width = Math.max(rect.width, 160) + 'px';
                 menu.classList.remove('hidden');
                 trigger.querySelector('.dropdown-arrow')?.classList.add('rotate-180');
             } else {
@@ -1206,11 +1211,11 @@ function renderProxiesLoading(container, loadingText) {
      
     container.innerHTML = '';
     const loading = document.createElement('div');
-    loading.className = 'col-span-full text-center py-10 text-zinc-500 flex flex-col items-center gap-4';
+    loading.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     const span = document.createElement('span');
     span.textContent = loadingText;
     const spinner = document.createElement('div');
-    spinner.className = 'w-6 h-6 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin';
+    spinner.className = 'w-6 h-6 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin';
     loading.appendChild(span);
     loading.appendChild(spinner);
     container.appendChild(loading);
@@ -1271,7 +1276,7 @@ async function updateProxiesInPlace(container, proxies, data, current) {
                 card.classList.remove(INACTIVE_HOVER_CLASS);
                 if (!card.querySelector('.active-dot')) {
                     const activeDot = document.createElement('div');
-                    activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
+                    activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
                     card.appendChild(activeDot);
                 }
             } else {
@@ -1320,7 +1325,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         // Defensive: if proxy data is missing, show placeholder
         if (!proxy) {
             const placeholder = document.createElement('div');
-            placeholder.className = 'p-4 glass-card text-zinc-500 text-sm';
+            placeholder.className = 'p-4 glass-card text-[var(--text-muted)] text-sm';
             placeholder.textContent = 'Loading...';
             return placeholder;
         }
@@ -1335,8 +1340,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         card.dataset.baseOrder = `${index}`;
         card.dataset.selected = isSelected ? '1' : '0';
         // Use h-full to maintain 96px height, use absolute positioning for badge
-        card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-all duration-300 group h-full w-full
-            ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-white/5'}`;
+        card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-[color,border-color,box-shadow] duration-300 group h-full w-full
+            ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-[var(--zephyr-bg-muted)]'}`;
 
         let lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         // Only use latFromWrapper if proxy has no history AND latFromWrapper is valid (not DELAY_INFINITE)
@@ -1354,7 +1359,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         top.className = 'flex items-center justify-between pointer-events-none w-full gap-2';
 
         const nameContainer = document.createElement('div');
-        nameContainer.className = `flex-1 text-sm font-semibold text-zinc-100 tracking-tight transition-all duration-300 ${isScrollingEnabled && name.length > 12 ? 'scrolling-text-container' : 'overflow-hidden'}`;
+        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-300 ${isScrollingEnabled && name.length > 12 ? 'scrolling-text-container' : 'overflow-hidden'}`;
 
         const nameSpan = document.createElement('span');
         if (isScrollingEnabled && name.length > 12) {
@@ -1384,7 +1389,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const dotColor = 'bg-green-500';
         dot.className = `w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)] ${dotColor}`;
         const transportText = document.createElement('span');
-        transportText.className = 'text-2xs text-zinc-500 font-medium';
+        transportText.className = 'text-2xs text-[var(--text-muted)] font-medium';
         transportText.textContent = transport;
         left.appendChild(dot);
         left.appendChild(transportText);
@@ -1392,7 +1397,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const right = document.createElement('div');
         right.className = 'flex flex-col items-end';
         const latLabel = document.createElement('span');
-        latLabel.className = 'text-2xs text-zinc-500 font-medium uppercase tracking-wider mb-0.5';
+        latLabel.className = 'text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider mb-0.5';
         latLabel.setAttribute('data-latency-label', 'true');
         latLabel.textContent = /** @type {any} */ (translations)[currentLang].latency || 'Latency';
 
@@ -1415,7 +1420,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
         if (isSelected) {
             const activeDot = document.createElement('div');
-            activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-zinc-900 shadow-lg animate-pulse';
+            activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
             card.appendChild(activeDot);
         }
 
@@ -1566,7 +1571,7 @@ export async function renderProxies() {
     if (config?.mode?.toLowerCase() === 'direct') {
         container.innerHTML = '';
         const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-zinc-500 bg-white/5 rounded-lg border border-white/5 flex flex-col items-center gap-4';
+        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         prompt.innerHTML = `
             ${SVG_ICONS.externalLink}
@@ -1588,7 +1593,7 @@ export async function renderProxies() {
  
     container.innerHTML = '';
     const empty = document.createElement('div');
-    empty.className = 'col-span-full text-center py-10 text-zinc-500';
+    empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
     empty.textContent = t.noGroupsFound;
         container.appendChild(empty);
         return;
@@ -1613,7 +1618,7 @@ export async function renderProxies() {
  
     container.innerHTML = '';
     const empty = document.createElement('div');
-    empty.className = 'col-span-full text-center py-10 text-zinc-500';
+    empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
     empty.textContent = t.noGroupsFound || 'No switchable proxy groups found';
         container.appendChild(empty);
         return;
