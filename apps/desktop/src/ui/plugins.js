@@ -196,7 +196,7 @@ export function initPlugins() {
         if (!source) return;
 
         scriptStatus.textContent = t('overrideValidating') ?? 'Validating...';
-        scriptStatus.className = 'text-xs text-zinc-400';
+        scriptStatus.className = 'text-xs text-[var(--text-secondary)]';
 
         try {
             // Use overrideSetContent with dry_run for validation
@@ -228,7 +228,7 @@ export function initPlugins() {
         if (!source) return;
 
         scriptOutput.textContent = '';
-        scriptOutput.className = 'text-xs text-zinc-400 font-mono whitespace-pre-wrap break-all';
+        scriptOutput.className = 'text-xs text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-all';
 
         stopSmartAutoTest();
 
@@ -467,7 +467,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     existing?.remove();
 
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
     overlay.id = 'scope-editor-overlay';
     overlay.style.background = '';
 
@@ -476,7 +476,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     // Title
     const title = document.createElement('div');
-    title.className = 'text-sm font-semibold text-zinc-800 dark:text-zinc-200';
+    title.className = 'text-sm font-semibold text-[var(--text-primary)]';
     title.textContent = t('overrideScopeTitle') ?? 'Override Scope';
 
     // Global toggle
@@ -487,7 +487,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     globalCheck.checked = currentGlobal;
     globalCheck.className = 'w-4 h-4 rounded accent-indigo-500';
     const globalLabel = document.createElement('span');
-    globalLabel.className = 'text-sm text-zinc-700 dark:text-zinc-300';
+    globalLabel.className = 'text-sm text-[var(--text-secondary)]';
     globalLabel.textContent = t('overrideScopeGlobal') ?? 'Global (applies to all subscriptions)';
     globalRow.appendChild(globalCheck);
     globalRow.appendChild(globalLabel);
@@ -514,14 +514,14 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
         if (configs.length === 0) {
             const empty = document.createElement('div');
-            empty.className = 'text-xs text-zinc-400 dark:text-zinc-500 py-2';
+            empty.className = 'text-xs text-[var(--text-muted)] py-2';
             empty.textContent = t('overrideNoProfiles') ?? 'No subscriptions found';
             profileContainer.appendChild(empty);
         }
 
         for (const cfg of configs) {
             const row = document.createElement('label');
-            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5';
+            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-md hover:bg-[var(--zephyr-bg-muted)]';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.value = cfg.name || cfg;
@@ -529,7 +529,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
             cb.className = 'w-4 h-4 rounded accent-indigo-500 profile-scope-cb';
             cb.dataset.profileName = cb.value;
             const label = document.createElement('span');
-            label.className = 'text-xs text-zinc-700 dark:text-zinc-300 truncate';
+            label.className = 'text-xs text-[var(--text-secondary)] truncate';
             label.textContent = cfg.name || cfg;
             row.appendChild(cb);
             row.appendChild(label);
@@ -889,7 +889,7 @@ function renderOverrideCards(container, items, filter) {
     if (filtered.length === 0) {
         container.innerHTML = '';
         const empty = document.createElement('div');
-        empty.className = 'text-center text-zinc-500 text-sm py-12';
+        empty.className = 'text-center text-[var(--text-muted)] text-sm py-12';
         empty.textContent = filter
             ? (t('overrideNoMatch') ?? 'No overrides match your search')
             : (t('overrideEmpty') ?? 'No overrides yet. Click + to create one.');
@@ -944,7 +944,7 @@ function updateOverrideCardContent(card, item) {
     // Update status indicator
     const statusDot = card.querySelector('.rounded-full[title]');
     if (statusDot instanceof HTMLElement) {
-        const statusColor = item.enabled ? 'bg-emerald-400' : 'bg-zinc-600';
+        const statusColor = item.enabled ? 'bg-emerald-400' : 'bg-[var(--text-tertiary)]';
         const summaryText = item.enabled
             ? t('overrideEnabled')
             : t('overrideDisabled');
@@ -955,7 +955,7 @@ function updateOverrideCardContent(card, item) {
     // Update scope badge
     const scopeBadge = card.querySelector('[data-action="edit-scope"]');
     if (scopeBadge) {
-        const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400';
+        const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
         const scopeLabel = item.global
             ? t('overrideScopeGlobal')
             : (item.profileIds?.length
@@ -966,7 +966,7 @@ function updateOverrideCardContent(card, item) {
     }
 
     // Update status text
-    const statusText = card.querySelector('.text-xs.text-zinc-500');
+    const statusText = card.querySelector('[data-override-status]');
     if (statusText) {
         statusText.textContent = item.enabled
             ? t('overrideEnabled')
@@ -983,7 +983,7 @@ function updateOverrideCardContent(card, item) {
         // eslint-disable-next-line no-unsanitized/property -- static SVG icon
         toggleBtn.innerHTML = item.enabled
             ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
-            : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
+            : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
     }
 
     // Update up/down button visibility
@@ -1016,7 +1016,7 @@ function buildOverrideCard(item) {
     const typeLabel = isJs ? 'JS' : 'Prism';
 
     // ── Scope badge ───────────────────────────────────────────
-    const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400';
+    const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
     const scopeLabel = item.global
         ? t('overrideScopeGlobal')
         : (item.profileIds?.length
@@ -1026,7 +1026,7 @@ function buildOverrideCard(item) {
     // ── Status indicator ───────────────────────────────────────
     const statusColor = item.enabled
         ? 'bg-emerald-400'
-        : 'bg-zinc-600';
+        : 'bg-[var(--text-tertiary)]';
 
     // ── Status summary line ────────────────────────────────────
     const summaryText = item.enabled
@@ -1039,27 +1039,27 @@ function buildOverrideCard(item) {
             <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${summaryText}"></div>
             <div class="flex flex-col gap-1 min-w-0">
                 <div class="flex items-center gap-2">
-                    <span class="text-sm text-zinc-200 font-medium truncate">${escapeHtml(item.name ?? '')}</span>
+                    <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(item.name ?? '')}</span>
                     <span class="text-2xs px-1.5 py-0.5 rounded-sm ${typeColor} shrink-0">${typeLabel}</span>
                     ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded-sm bg-sky-500/20 text-sky-400 shrink-0">🌐</span>' : ''}
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
-                    <span class="text-xs text-zinc-500">${summaryText}</span>
+                    <span class="text-xs text-[var(--text-muted)]" data-override-status>${summaryText}</span>
                 </div>
             </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-            <button class="override-toggle-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-all" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
+            <button class="override-toggle-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
                 ${item.enabled
                     ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
-                    : `<svg class="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
+                    : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
                 }
             </button>
-            <button class="override-up-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
+            <button class="override-up-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowUp}
             </button>
-            <button class="override-down-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
+            <button class="override-down-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowDown}
             </button>
             <button class="btn-delete-icon opacity-0 group-hover:opacity-100" title="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
@@ -1143,11 +1143,11 @@ async function openEditor(id, name, ext) {
     if (scriptOutput) {
         scriptOutput.textContent = '';
         scriptOutput.style.display = 'none';
-        scriptOutput.className = 'script-output px-4 pb-3 text-zinc-400 whitespace-pre-wrap break-all custom-scrollbar';
+        scriptOutput.className = 'script-output px-4 pb-3 text-[var(--text-secondary)] whitespace-pre-wrap break-all custom-scrollbar';
     }
     if (scriptStatus) {
         scriptStatus.textContent = '';
-        scriptStatus.className = 'text-xs text-zinc-400';
+        scriptStatus.className = 'text-xs text-[var(--text-secondary)]';
     }
     if (scriptOutputChevron) scriptOutputChevron.style.transform = '';
     if (scriptOutputLabel) scriptOutputLabel.textContent = t('overrideOutput') || 'Output';
@@ -1265,7 +1265,7 @@ function showDeleteConfirm(overrideId, overrideName) {
     existing?.remove();
 
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md';
+    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
     overlay.id = 'plugin-unload-confirm';
     overlay.style.background = '';
 
@@ -1273,11 +1273,11 @@ function showDeleteConfirm(overrideId, overrideName) {
     card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[320px] max-w-[420px] shadow-2xl';
 
     const title = document.createElement('div');
-    title.className = 'text-sm font-semibold text-zinc-200';
+    title.className = 'text-sm font-semibold text-[var(--text-primary)]';
     title.textContent = (t('overrideDeleteConfirmTitle') ?? 'Delete override "@@name@@"?').replace('@@name@@', overrideName);
 
     const msg = document.createElement('div');
-    msg.className = 'text-xs text-zinc-400';
+    msg.className = 'text-xs text-[var(--text-secondary)]';
     msg.textContent = t('overrideDeleteConfirmMsg') ?? 'This action cannot be undone. The override script and execution logs will be deleted.';
 
     const btnRow = document.createElement('div');
@@ -1475,7 +1475,7 @@ async function validateFullscreenEditor() {
 
     if (status) {
         status.textContent = t('overrideValidating') ?? 'Validating...';
-        status.className = 'text-zinc-400';
+        status.className = 'text-[var(--text-secondary)]';
     }
 
     try {
@@ -1513,7 +1513,7 @@ async function runFullscreenEditor() {
 
     if (output) {
         // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
-        output.innerHTML = '<div class="text-zinc-500">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
+        output.innerHTML = '<div class="text-[var(--text-muted)]">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
     }
 
     stopSmartAutoTest();
@@ -1589,8 +1589,8 @@ function clearFullscreenOutput() {
     const output = document.getElementById('fullscreen-editor-output');
     if (output) {
         // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
-        output.innerHTML = '<div class="text-zinc-600 italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
-        output.className = 'flex-1 p-4 text-sm font-mono text-zinc-400 whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
+        output.innerHTML = '<div class="text-[var(--text-tertiary)] italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
+        output.className = 'flex-1 p-4 text-sm font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
     }
 }
 
@@ -1642,7 +1642,7 @@ function copyFullscreenOutput() {
         if (copyBtn) {
             const originalText = copyBtn.textContent;
             copyBtn.textContent = t('overrideCopied') || 'Copied';
-            copyBtn.style.color = 'var(--color-accent, #6366f1)';
+            copyBtn.style.color = 'var(--accent-primary, #6366f1)';
             setTimeout(() => {
                 copyBtn.textContent = originalText;
                 copyBtn.style.color = '';
@@ -1661,7 +1661,7 @@ function copyFullscreenOutput() {
             if (copyBtn) {
                 const originalText = copyBtn.textContent;
                 copyBtn.textContent = t('overrideCopied') || 'Copied';
-                copyBtn.style.color = 'var(--color-accent, #6366f1)';
+                copyBtn.style.color = 'var(--accent-primary, #6366f1)';
                 setTimeout(() => {
                     copyBtn.textContent = originalText;
                     copyBtn.style.color = '';
