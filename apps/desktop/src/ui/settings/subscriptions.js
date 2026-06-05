@@ -107,7 +107,7 @@ async function showEditPanel(configInfo) {
 
     // Build dropdown menu items (escape labels for XSS safety)
     const dropdownMenuItems = autoUpdateOptions.map(opt => 
-        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-200 transition-all">${escapeHtml(opt.label)}</button>`
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-primary)] transition-colors">${escapeHtml(opt.label)}</button>`
     ).join('');
 
     // Remove any existing modal to prevent duplicate IDs
@@ -126,38 +126,38 @@ async function showEditPanel(configInfo) {
     let isSaving = false;
     const modal = document.createElement('div');
     modal.id = 'edit-subscription-modal';
-    modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-md opacity-0 transition-opacity';
+    modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md opacity-0 transition-opacity';
     modal.style.transitionDuration = `${ANIMATION_DURATION}ms`;
     // Escape all translation strings for XSS safety
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:opacity ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1),transform ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
-                <button id="edit-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
+                <button id="edit-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
+                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="input-common text-xs">
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
-                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-zinc-600">
+                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-[var(--text-tertiary)]">
                 </div>
             </div>
             <!-- Auto-update dropdown in bottom right -->
             <div class="flex items-center justify-between pt-2">
                 <div class="flex items-center gap-2">
-                    <label class="text-2xs text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
+                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
                     <div id="edit-auto-update-wrap" class="relative">
                         <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
-                            <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] p-1 z-30 w-40">
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] backdrop-blur-xl shadow-[var(--zephyr-shadow-md)] p-1 z-30 w-40">
                             ${dropdownMenuItems}
                         </div>
                         <select id="edit-auto-update" class="hidden">
@@ -613,11 +613,11 @@ export function initSubscriptionSettings({
         // Stem name for __when__.profile matching (must match get_current_profile() which uses file_stem)
         const profileStem = name.replace(/\.(yaml|yml)$/i, '');
 
-        const menu = createContextMenuContainer(e);
+        const { menu, scroll: menuScroll } = createContextMenuContainer(e);
 
         // --- "Edit" item ---
         const editItem = document.createElement('div');
-        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
@@ -625,16 +625,16 @@ export function initSubscriptionSettings({
             removeContextMenu();
             showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval });
         });
-        menu.appendChild(editItem);
+        menuScroll.appendChild(editItem);
 
         // --- Separator ---
         const renameSep = document.createElement('div');
-        renameSep.className = 'my-1 border-t border-white/5';
-        menu.appendChild(renameSep);
+        renameSep.className = 'my-1 border-t border-[var(--zephyr-border-subtle)]';
+        menuScroll.appendChild(renameSep);
 
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
-        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
@@ -650,12 +650,12 @@ export function initSubscriptionSettings({
                 showNotification(String(err), 'error');
             }
         });
-        menu.appendChild(extractItem);
+        menuScroll.appendChild(extractItem);
 
         // --- Separator ---
         const separator = document.createElement('div');
-        separator.className = 'my-1 border-t border-white/5';
-        menu.appendChild(separator);
+        separator.className = 'my-1 border-t border-[var(--zephyr-border-subtle)]';
+        menuScroll.appendChild(separator);
 
         // --- "Extension Rules" submenu ---
         try {
@@ -673,9 +673,9 @@ export function initSubscriptionSettings({
 
             if (files.length === 0) {
                 const emptyItem = document.createElement('div');
-                emptyItem.className = 'px-3 py-2 text-2xs text-zinc-600 italic';
+                emptyItem.className = 'px-3 py-2 text-2xs text-[var(--text-tertiary)] italic';
                 emptyItem.textContent = t.ruleLibraryNoRules || 'No rule files';
-                menu.appendChild(emptyItem);
+                menuScroll.appendChild(emptyItem);
             } else {
                 // Build a map: filename -> group name (if any)
                 const fileGroupMap = /** @type {Map<string, string>} */ (new Map());
@@ -701,11 +701,11 @@ export function initSubscriptionSettings({
                 // Helper: create a checkbox item for a rule file
                 const createRuleItem = (/** @type {{filename: string, rule_count: number}} */ file) => {
                     const item = document.createElement('label');
-                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400 hover:bg-accent/10 hover:text-zinc-200 cursor-pointer transition-colors';
+                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-accent/10 hover:text-[var(--text-primary)] cursor-pointer transition-colors';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
-                    checkbox.className = 'w-3 h-3 rounded border-zinc-600 bg-zinc-800 text-accent focus:ring-accent/50 shrink-0';
+                    checkbox.className = 'w-3 h-3 rounded border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-input)] text-accent focus:ring-accent/50 shrink-0';
                     checkbox.checked = false;
                     checkbox.dataset.filename = file.filename;
 
@@ -738,7 +738,7 @@ export function initSubscriptionSettings({
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
-                        spinner.className = 'animate-spin ml-1 text-zinc-500';
+                        spinner.className = 'animate-spin ml-1 text-[var(--text-muted)]';
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>';
                         item.appendChild(spinner);
                         checkbox.disabled = true;
@@ -831,7 +831,7 @@ export function initSubscriptionSettings({
                     label.textContent = file.filename.replace(/\.yaml\.prism\.yaml$/i, '').replace(/\.(yaml|yml)$/i, '');
 
                     const count = document.createElement('span');
-                    count.className = 'ml-auto text-2xs text-zinc-600 shrink-0';
+                    count.className = 'ml-auto text-2xs text-[var(--text-tertiary)] shrink-0';
                     count.textContent = String(file.rule_count || 0);
 
                     item.appendChild(checkbox);
@@ -843,24 +843,24 @@ export function initSubscriptionSettings({
                 // Render groups
                 for (const [groupName, groupFiles] of grouped) {
                     const groupHeader = document.createElement('div');
-                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-zinc-500 uppercase tracking-wider font-bold';
+                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-[var(--text-muted)] uppercase tracking-wider font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                     groupHeader.innerHTML = `<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${escapeHtml(groupName)}`;
-                    menu.appendChild(groupHeader);
+                    menuScroll.appendChild(groupHeader);
 
                     for (const f of groupFiles) {
-                        menu.appendChild(createRuleItem(f));
+                        menuScroll.appendChild(createRuleItem(f));
                     }
                 }
 
                 // Render ungrouped files
                 if (ungrouped.length > 0 && grouped.size > 0) {
                     const sep = document.createElement('div');
-                    sep.className = 'my-1 border-t border-white/5';
-                    menu.appendChild(sep);
+                    sep.className = 'my-1 border-t border-[var(--zephyr-border-subtle)]';
+                    menuScroll.appendChild(sep);
                 }
                 for (const f of ungrouped) {
-                    menu.appendChild(createRuleItem(f));
+                    menuScroll.appendChild(createRuleItem(f));
                 }
             }
         } catch {
@@ -1091,7 +1091,7 @@ export function initSubscriptionSettings({
             const isCurrent = name === currentConfig;
 
             const item = document.createElement('div');
-            item.className = `glass-card flex flex-col p-4 transition-all group cursor-pointer relative ${isCurrent ? 'ring-1 ring-accent/50 shadow-[0_0_20px_rgba(var(--color-accent-rgb),0.2)]' : 'hover:shadow-lg'}`;
+            item.className = `glass-card flex flex-col p-4 transition-all group cursor-pointer relative ${isCurrent ? 'ring-1 ring-accent/50 shadow-[0_0_20px_rgba(var(--accent-rgb),0.2)]' : 'hover:shadow-lg'}`;
             item.dataset.configName = name;
 
             const row = document.createElement('div');
@@ -1101,17 +1101,17 @@ export function initSubscriptionSettings({
             left.className = 'flex items-center gap-3 pointer-events-none';
 
             const dot = document.createElement('div');
-            dot.className = `w-2 h-2 rounded-full ${isCurrent ? 'bg-accent shadow-[0_0_8px_var(--color-accent-glow)]' : 'bg-zinc-700'}`;
+            dot.className = `w-2 h-2 rounded-full ${isCurrent ? 'bg-accent shadow-[0_0_8px_var(--accent-glow)]' : 'bg-[var(--text-tertiary)]'}`;
 
             const label = document.createElement('span');
-            label.className = `text-xs transition-colors ${isCurrent ? 'font-bold text-zinc-100' : 'text-zinc-400'}`;
+            label.className = `text-xs transition-colors ${isCurrent ? 'font-bold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`;
             label.textContent = name.replace(/\.(yaml|yml)$/i, '');
 
             left.appendChild(dot);
             left.appendChild(label);
 
             const actions = document.createElement('div');
-            actions.className = 'flex items-center gap-2 transition-all opacity-0 group-hover:opacity-100';
+            actions.className = 'flex items-center gap-2 transition-opacity opacity-0 group-hover:opacity-100';
 
             // Delete button
             const delBtn = document.createElement('button');
@@ -1148,7 +1148,7 @@ export function initSubscriptionSettings({
             // Update button (only if has URL)
             if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
-                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-zinc-500 hover:text-accent transition-all';
+                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh;
                 updateBtn.title = t.update;
@@ -1233,15 +1233,15 @@ export function initSubscriptionSettings({
                     usageContainer.className = 'mt-3 mb-1 w-full';
 
                     const textRow = document.createElement('div');
-                    textRow.className = 'flex justify-between text-2xs text-zinc-500 mb-1.5 px-0.5 uppercase tracking-wider font-bold';
+                    textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
                     textRow.innerHTML = `<span>${formatFileSize(used)} ${t.usedSpace || 'used'}</span><span>${formatFileSize(total)} ${t.totalSpace || 'total'}</span>`;
 
                     const barBg = document.createElement('div');
-                    barBg.className = 'h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5';
+                    barBg.className = 'h-1.5 w-full bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden border border-[var(--zephyr-border-subtle)]';
 
                     const barFill = document.createElement('div');
-                    barFill.className = `h-full rounded-full transition-all duration-1000 ${percentage > 90 ? 'bg-rose-500' : 'bg-accent'}`;
+                    barFill.className = `h-full rounded-full transition-[width] duration-1000 ${percentage > 90 ? 'bg-rose-500' : 'bg-accent'}`;
                     barFill.style.width = `${percentage}%`;
 
                     barBg.appendChild(barFill);
@@ -1263,14 +1263,14 @@ export function initSubscriptionSettings({
                 
                 if (hasUrl) {
                     const urlLabel = document.createElement('div');
-                    urlLabel.className = 'text-2xs text-zinc-600 truncate flex-1';
+                    urlLabel.className = 'text-2xs text-[var(--text-tertiary)] truncate flex-1';
                     urlLabel.textContent = configInfo.url_display;
                     infoRow.appendChild(urlLabel);
                 }
                 
                 if (hasTime) {
                     const timeEl = document.createElement('div');
-                    timeEl.className = 'text-2xs text-zinc-600 shrink-0';
+                    timeEl.className = 'text-2xs text-[var(--text-tertiary)] shrink-0';
                     timeEl.textContent = lastUpdatedText;
                     infoRow.appendChild(timeEl);
                 }
