@@ -199,26 +199,26 @@ function openShortcutModal() {
 
     const modal = document.createElement('div');
     modal.id = 'shortcut-modal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
     // eslint-disable-next-line no-unsanitized/property -- i18n translation keys only
     modal.innerHTML = `
         <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-zinc-800 dark:text-zinc-200">${t.globalShortcut || 'Global Shortcuts'}</h3>
-                <button id="shortcut-modal-close" class="text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.globalShortcut || 'Global Shortcuts'}</h3>
+                <button id="shortcut-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="flex items-center justify-between py-2">
-                <span class="text-xs text-zinc-600 dark:text-zinc-300">${t.enableGlobalShortcuts || 'Enable Global Shortcuts'}</span>
+                <span class="text-xs text-[var(--text-tertiary)]">${t.enableGlobalShortcuts || 'Enable Global Shortcuts'}</span>
                 <label class="ios-switch">
                     <input type="checkbox" id="shortcut-enable-toggle" ${enabled ? 'checked' : ''} />
                     <span class="switch-slider"></span>
                 </label>
             </div>
-            <div class="h-px bg-black/5 dark:bg-white/5"></div>
+            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
             <div id="shortcut-list" class="space-y-3"></div>
-            <div class="flex items-center justify-between pt-2 border-t border-black/10 dark:border-white/10">
+            <div class="flex items-center justify-between pt-2 border-t border-[var(--zephyr-border-default)]">
                 <button id="shortcut-add-btn" class="btn-ghost text-xs px-3 py-1.5 text-accent">+ ${t.addShortcut || 'Add Shortcut'}</button>
                 <button id="shortcut-modal-done" class="btn-ghost text-xs px-3 py-1.5">${t.done || 'Done'}</button>
             </div>
@@ -342,7 +342,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
     selectBtn.innerHTML = `
         <span class="select-label">${currentLabel}</span>
-        <svg class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+        <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
     `;
 
     const dropdownMenu = document.createElement('div');
@@ -359,7 +359,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         const opt = document.createElement('button');
         opt.type = 'button';
         opt.dataset.value = actionDef.id;
-        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-[18px] text-xs text-zinc-700 dark:text-zinc-200 transition-all';
+        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] transition-colors';
         if (actionDef.id === actionId) opt.classList.add('active');
         opt.textContent = getActionLabel(actionDef.id, t);
         opt.addEventListener('click', () => {
@@ -449,7 +449,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
 
     // --- Clear/delete button ---
     const clearBtn = document.createElement('button');
-    clearBtn.className = 'text-zinc-500 hover:text-rose-400 transition-colors p-1';
+    clearBtn.className = 'text-[var(--text-muted)] hover:text-rose-400 transition-colors p-1';
     clearBtn.title = t.delete || 'Delete';
     clearBtn.innerHTML = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
     clearBtn.addEventListener('click', async () => {

@@ -72,12 +72,12 @@ export function initNavigation(callbacks = {}) {
 
             // Update nav item active styling
             navItems.forEach(i => {
-                i.classList.remove('bg-white/10', 'text-white', 'shadow-lg', 'ring-1', 'ring-white/20');
-                i.classList.add('text-zinc-500');
+                i.classList.remove('bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+                i.classList.add('text-[var(--text-muted)]');
                 i.removeAttribute('aria-current');
             });
-            item.classList.add('bg-white/10', 'text-white', 'shadow-lg', 'ring-1', 'ring-white/20');
-            item.classList.remove('text-zinc-500');
+            item.classList.add('bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+            item.classList.remove('text-[var(--text-muted)]');
             item.setAttribute('aria-current', 'page');
 
             // Switch page
