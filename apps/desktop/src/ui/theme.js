@@ -17,7 +17,7 @@ const THEME_CLASSES = [
 ];
 
 /**
- * Apply a theme to the document body.
+ * Apply a theme to the document element.
  * Supports both preset theme names and hex color strings.
  *
  * @param {string} theme - Theme name (e.g. 'purple') or hex color (e.g. '#8b5cf6')
@@ -25,24 +25,32 @@ const THEME_CLASSES = [
 export function applyTheme(theme) {
     currentTheme = theme;
 
-    // Remove all possible theme classes
-    THEME_CLASSES.forEach(cls => document.body.classList.remove(cls));
+    // Remove all possible theme classes from html element
+    THEME_CLASSES.forEach(cls => document.documentElement.classList.remove(cls));
 
     if (theme && theme.startsWith('#')) {
-        document.body.style.setProperty('--color-accent', theme);
+        document.documentElement.style.setProperty('--accent-primary', theme);
 
-        // Calculate glow from hex
-        const r = parseInt(theme.slice(1, 3), 16) || 139;
-        const g = parseInt(theme.slice(3, 5), 16) || 92;
-        const b = parseInt(theme.slice(5, 7), 16) || 246;
-        document.body.style.setProperty('--color-accent-glow', `rgba(${r}, ${g}, ${b}, 0.2)`);
-        document.body.style.setProperty('--accent-rgb', `${r} ${g} ${b}`);
+        // Expand 3-char hex (#fff) to 6-char (#ffffff) for consistent parsing
+        let hex = theme.slice(1);
+        if (hex.length === 3) {
+            hex = hex.split('').map(c => c + c).join('');
+        }
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        const rv = isNaN(r) ? 139 : r;
+        const gv = isNaN(g) ? 92 : g;
+        const bv = isNaN(b) ? 246 : b;
+        document.documentElement.style.setProperty('--accent-glow', `rgba(${rv}, ${gv}, ${bv}, 0.2)`);
+        document.documentElement.style.setProperty('--accent-rgb', `${rv}, ${gv}, ${bv}`);
     } else {
-        document.body.style.removeProperty('--color-accent');
-        document.body.style.removeProperty('--color-accent-glow');
+        document.documentElement.style.removeProperty('--accent-primary');
+        document.documentElement.style.removeProperty('--accent-glow');
+        document.documentElement.style.removeProperty('--accent-rgb');
 
         const t = VALID_THEMES.has(theme) ? theme : 'purple';
-        document.body.classList.add(`theme-${t}`);
+        document.documentElement.classList.add(`theme-${t}`);
         currentTheme = t;
     }
 

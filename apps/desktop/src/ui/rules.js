@@ -183,16 +183,16 @@ async function renderRulesList(searchQuery = '') {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         item.innerHTML = `
             <div class="flex items-center gap-4 flex-1">
-                <div class="type-badge text-zinc-500">${escapeHtml(type)}</div>
-                <div class="text-xs text-zinc-300 font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
+                <div class="type-badge text-[var(--text-muted)]">${escapeHtml(type)}</div>
+                <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
             </div>
             <div class="flex items-center gap-2">
                 <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
 
-                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToTop || 'Move to Top')}">
+                <button class="btn-move-top-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToTop || 'Move to Top')}">
                     ${SVG_ICONS.arrowUp}
                 </button>
-                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToBottom || 'Move to Bottom')}">
+                <button class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang].moveToBottom || 'Move to Bottom')}">
                     ${SVG_ICONS.arrowDown}
                 </button>
                 <button class="btn-delete-rule opacity-0 group-hover:opacity-100 btn-delete-icon">
