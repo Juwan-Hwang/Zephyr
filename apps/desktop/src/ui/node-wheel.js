@@ -166,14 +166,14 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             const isSelected = name === current;
 
             const item = document.createElement('div');
-            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-all duration-200 w-full h-full
-                ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-white' : 'bg-black/40 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`;
+            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-200 w-full h-full
+                ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-[var(--text-primary)]' : 'bg-[var(--zephyr-bg-input)] border-[var(--zephyr-border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)]'}`;
 
             const dot = document.createElement('div');
             let dotColor;
             if (isSelected) dotColor = 'bg-accent animate-pulse';
             else if (proxy.udp) dotColor = 'bg-green-500';
-            else dotColor = 'bg-zinc-600';
+            else dotColor = 'bg-[var(--text-tertiary)]';
             dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
 
             const nameSpan = document.createElement('span');

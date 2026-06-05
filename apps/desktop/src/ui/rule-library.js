@@ -207,10 +207,10 @@ function render() {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
-                <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-all duration-200 ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'}">
+                <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-200 ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryManageFiles || 'Manage Rule Files')}
                 </button>
-                <button data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-all duration-200 ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'}">
+                <button data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-200 ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryActiveRules || 'Active Rules')}
                 </button>
             </div>
@@ -254,10 +254,10 @@ function render() {
         }
         if (tab === activeTab) {
             btn.classList.add('bg-accent/20', 'text-accent');
-            btn.classList.remove('text-zinc-500');
+            btn.classList.remove('text-[var(--text-muted)]');
         } else {
             btn.classList.remove('bg-accent/20', 'text-accent');
-            btn.classList.add('text-zinc-500');
+            btn.classList.add('text-[var(--text-muted)]');
         }
     });
 
@@ -287,19 +287,19 @@ function renderRuleSets(container) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
-                <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="w-16 h-16 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
                 </svg>
-                <p class="text-zinc-500 dark:text-zinc-400 text-sm">${escapeHtml(t.ruleLibraryEmpty || 'No extension rules yet')}</p>
-                <p class="text-zinc-400 dark:text-zinc-600 text-xs max-w-sm text-center">${escapeHtml(t.ruleLibraryEmptyHint || '')}</p>
+                <p class="text-[var(--text-muted)] text-sm">${escapeHtml(t.ruleLibraryEmpty || 'No extension rules yet')}</p>
+                <p class="text-[var(--text-secondary)] text-xs max-w-sm text-center">${escapeHtml(t.ruleLibraryEmptyHint || '')}</p>
                 <div class="flex items-center gap-2 mt-2">
-                    <button id="rl-btn-extract" class="px-4 py-2 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700/80 hover:text-zinc-900 dark:hover:text-white transition-all duration-200">
+                    <button id="rl-btn-extract" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-200">
                         ${escapeHtml(t.ruleLibraryExtract || 'Extract from Subscription')}
                     </button>
-                    <button id="rl-btn-import-empty" class="px-4 py-2 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200">
+                    <button id="rl-btn-import-empty" class="px-4 py-2 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
                         ${escapeHtml(t.ruleLibraryImport || 'Import Rules')}
                     </button>
-                    <button id="rl-btn-create-file" class="px-4 py-2 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700/80 hover:text-zinc-900 dark:hover:text-white transition-all duration-200">
+                    <button id="rl-btn-create-file" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-200">
                         ${escapeHtml(t.ruleLibraryCreateFile || 'Create Rule File')}
                     </button>
                 </div>
@@ -367,13 +367,13 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Group header
     const header = document.createElement('div');
-    header.className = 'flex items-center justify-between py-2 px-3 rounded-xl bg-white/60 dark:bg-zinc-800/40 cursor-pointer group hover:bg-white/60 dark:hover:bg-zinc-800/60 transition-all duration-200';
+    header.className = 'flex items-center justify-between py-2 px-3 rounded-xl bg-[var(--zephyr-bg-muted)] cursor-pointer group hover:bg-[var(--zephyr-bg-input)] transition-colors duration-200';
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     header.innerHTML = `
         <div class="flex items-center gap-2">
             ${SVG_ICONS.collapseArrow}
-            <span class="text-sm font-medium text-zinc-700 dark:text-zinc-300">${escapeHtml(group.name)}</span>
-            <span class="text-xs text-zinc-400 dark:text-zinc-600">${files.length} ${t.ruleLibraryFiles || 'files'}  ${totalRules} ${t.ruleLibraryRules || 'rules'}</span>
+            <span class="text-sm font-medium text-[var(--text-secondary)]">${escapeHtml(group.name)}</span>
+            <span class="text-xs text-[var(--text-muted)]">${files.length} ${t.ruleLibraryFiles || 'files'}  ${totalRules} ${t.ruleLibraryRules || 'rules'}</span>
         </div>
     `;
 
@@ -424,8 +424,8 @@ function buildFileCard(file, _fileMap) {
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="flex flex-col gap-0.5 min-w-0">
-                <span class="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">${escapeHtml(file.filename.replace(/\.prism\.ya?ml$/i, ''))}</span>
-                <span class="text-xs text-zinc-500">${file.rule_count || 0} ${t.ruleLibraryRules || 'rules'}</span>
+                <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(file.filename.replace(/\.prism\.ya?ml$/i, ''))}</span>
+                <span class="text-xs text-[var(--text-muted)]">${file.rule_count || 0} ${t.ruleLibraryRules || 'rules'}</span>
             </div>
             <span class="text-[10px] px-2 py-0.5 rounded-full shrink-0 ${sourceBadge.cls}">${escapeHtml(sourceBadge.label)}</span>
         </div>
@@ -461,7 +461,7 @@ function getSourceBadge(source) {
     if (s.includes('import')) {
         return { cls: 'bg-accent/15 text-accent', label: t.ruleLibraryImported || 'Imported' };
     }
-    return { cls: 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400', label: t.ruleLibraryManual || 'Manual' };
+    return { cls: 'bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)]', label: t.ruleLibraryManual || 'Manual' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -503,11 +503,11 @@ function renderActiveRules(container) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         ct.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
-                <svg class="w-16 h-16 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="w-16 h-16 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
                     <path d="m9 12 2 2 4-4"/>
                 </svg>
-                <p class="text-zinc-500 text-sm">${escapeHtml(t.ruleLibraryActiveRulesDesc || 'Rules currently in effect')}</p>
+                <p class="text-[var(--text-muted)] text-sm">${escapeHtml(t.ruleLibraryActiveRulesDesc || 'Rules currently in effect')}</p>
             </div>
         `;
         return;
@@ -561,11 +561,11 @@ function renderActiveRules(container) {
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     toolbar.innerHTML = `
         <div class="flex items-center gap-2">
-            <span id="arl-groups-count" class="text-xs text-zinc-500">${escapeHtml(String(activeRules.length))} ${t.ruleLibraryActiveGroups || 'groups'}</span>
-            <span class="text-xs text-zinc-600">|</span>
-            <span id="arl-rules-count" class="text-xs text-zinc-500">${escapeHtml(String(totalRules))} ${t.ruleLibraryRules || 'rules'}</span>
+            <span id="arl-groups-count" class="text-xs text-[var(--text-muted)]">${escapeHtml(String(activeRules.length))} ${t.ruleLibraryActiveGroups || 'groups'}</span>
+            <span class="text-xs text-[var(--text-tertiary)]">|</span>
+            <span id="arl-rules-count" class="text-xs text-[var(--text-muted)]">${escapeHtml(String(totalRules))} ${t.ruleLibraryRules || 'rules'}</span>
         </div>
-        <button id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200">
+        <button id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
             ${escapeHtml(t.ruleLibraryInsertRule || '+ Insert Rule')}
         </button>
     `;
@@ -622,16 +622,16 @@ function renderActiveRules(container) {
 
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
-                header.className = 'flex items-center justify-between p-2 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/60 cursor-pointer select-none';
+                header.className = 'flex items-center justify-between p-2 rounded-lg bg-[var(--zephyr-bg-muted)] cursor-pointer select-none';
                 // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 header.innerHTML = `
                     <div class="flex items-center gap-3">
-                        <svg class="w-3 h-3 text-zinc-500 collapse-arrow transition-transform duration-200 ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                        <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-200 ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                         <span class="text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
-                        <span class="text-[10px] text-zinc-500">${ruleCount} rules</span>
+                        <span class="text-[10px] text-[var(--text-muted)]">${ruleCount} rules</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="text-[10px] ${enabled ? 'text-emerald-500' : 'text-zinc-500'}">${enabled ? '● ON' : '○ OFF'}</span>
+                        <span class="text-[10px] ${enabled ? 'text-emerald-500' : 'text-[var(--text-muted)]'}">${enabled ? '● ON' : '○ OFF'}</span>
                     </div>
                 `;
                 header.addEventListener('click', () => {
@@ -659,9 +659,9 @@ function renderActiveRules(container) {
                 // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 el.innerHTML = `
                     <div class="flex items-center gap-4 flex-1 min-w-0">
-                        <span class="text-xs text-zinc-600 w-6 shrink-0">${localIndex}</span>
-                        <div class="type-badge text-zinc-500 shrink-0">${escapeHtml(type)}</div>
-                        <div class="text-xs text-zinc-700 dark:text-zinc-300 font-mono truncate max-w-[300px]" title="${escapeAttr(value)}">${escapeHtml(value)}</div>
+                        <span class="text-xs text-[var(--text-tertiary)] w-6 shrink-0">${localIndex}</span>
+                        <div class="type-badge text-[var(--text-muted)] shrink-0">${escapeHtml(type)}</div>
+                        <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[300px]" title="${escapeAttr(value)}">${escapeHtml(value)}</div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
                         <span class="text-[10px] px-1.5 py-0.5 rounded-full ${badgeColor}">${escapeHtml(groupLabel)}</span>
@@ -951,7 +951,7 @@ async function handleMoveToGroup(filename) {
 
     // Use a simple modal to pick group
     const optionsHtml = groupNames
-        .map((name, i) => `<button class="w-full text-left px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-accent/10 hover:text-accent transition-colors rounded-lg" data-group-index="${i}">${escapeHtml(name)}</button>`)
+        .map((name, i) => `<button class="w-full text-left px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg" data-group-index="${i}">${escapeHtml(name)}</button>`)
         .join('');
 
     const result = await showModal(
@@ -1072,10 +1072,10 @@ function buildEditorHtml(t) {
         <div class="flex flex-col overflow-hidden" style="max-height: calc(65vh - 6rem)">
             <div class="flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
-                    <button id="rl-editor-toggle" class="px-3 py-1 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-800/80 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                    <button id="rl-editor-toggle" class="px-3 py-1 text-xs rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                         ${escapeHtml(t.ruleLibrarySwitchToText || 'Text Editor')}
                     </button>
-                    <button id="rl-editor-add" class="px-3 py-1 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-800/80 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+                    <button id="rl-editor-add" class="px-3 py-1 text-xs rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                         + ${escapeHtml(t.ruleLibraryCreateRule || 'Create Rule')}
                     </button>
                 </div>
@@ -1086,11 +1086,11 @@ function buildEditorHtml(t) {
                 <div id="rl-vs-spacer-bottom" style="height:0"></div>
             </div>
             <div id="rl-editor-text" class="hidden flex-1 min-h-0 overflow-y-auto custom-scrollbar mt-4">
-                <textarea id="rl-editor-textarea" class="hidden w-full min-h-full bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-700/50 rounded-xl p-4 text-xs text-zinc-700 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors" spellcheck="false"></textarea>
-                <div id="rl-editor-cm6" class="w-full min-h-full bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-700/50 rounded-xl overflow-hidden"></div>
+                <textarea id="rl-editor-textarea" class="hidden w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl p-4 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors" spellcheck="false"></textarea>
+                <div id="rl-editor-cm6" class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl overflow-hidden"></div>
             </div>
-            <div class="flex items-center justify-end gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-700/30 shrink-0">
-                <button id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200">
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-[var(--zephyr-border-subtle)] shrink-0">
+                <button id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
                     ${escapeHtml(t.ruleLibrarySave || 'Save')}
                 </button>
             </div>
@@ -1186,16 +1186,16 @@ async function handleEditRule(filename) {
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr
             item.innerHTML = `
                 <div class="flex items-center gap-4 flex-1">
-                    <span class="text-xs text-zinc-600 w-6 shrink-0 cursor-grab active:cursor-grabbing select-none" title="${escapeAttr(t.ruleLibraryDragToReorder || 'Drag to reorder')}">${index + 1}</span>
-                    <div class="type-badge text-zinc-500">${escapeHtml(type)}</div>
-                    <div class="text-xs text-zinc-700 dark:text-zinc-300 font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
+                    <span class="text-xs text-[var(--text-tertiary)] w-6 shrink-0 cursor-grab active:cursor-grabbing select-none" title="${escapeAttr(t.ruleLibraryDragToReorder || 'Drag to reorder')}">${index + 1}</span>
+                    <div class="type-badge text-[var(--text-muted)]">${escapeHtml(type)}</div>
+                    <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
                 </div>
                 <div class="flex items-center gap-2">
                     <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
-                    <button class="btn-rl-rule-top opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isFirst ? 'invisible' : ''}" title="${escapeAttr(t.moveToTop || 'Move to Top')}">
+                    <button class="btn-rl-rule-top opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst ? 'invisible' : ''}" title="${escapeAttr(t.moveToTop || 'Move to Top')}">
                         ${SVG_ICONS.arrowUp}
                     </button>
-                    <button class="btn-rl-rule-bottom opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-zinc-500 hover:text-accent hover:bg-accent/10 transition-all ${isLast ? 'invisible' : ''}" title="${escapeAttr(t.moveToBottom || 'Move to Bottom')}">
+                    <button class="btn-rl-rule-bottom opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast ? 'invisible' : ''}" title="${escapeAttr(t.moveToBottom || 'Move to Bottom')}">
                         ${SVG_ICONS.arrowDown}
                     </button>
                     <button class="btn-rl-rule-del opacity-0 group-hover:opacity-100 btn-delete-icon">
@@ -1412,8 +1412,8 @@ async function handleViewChanges(filename) {
         const panelHtml = `
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-zinc-500">${escapeHtml(filename)}</span>
-                    <span class="text-xs text-zinc-500">${totalChanges} ${t.ruleLibraryDiffChanges || 'changes'}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${escapeHtml(filename)}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${totalChanges} ${t.ruleLibraryDiffChanges || 'changes'}</span>
                 </div>
                 <div class="space-y-3 overflow-y-auto max-h-[400px] custom-scrollbar pr-1">${diffHtml}</div>
             </div>
@@ -1486,20 +1486,20 @@ async function handleImportRules() {
 
     const importHtml = `
         <div class="space-y-4">
-            <p class="text-xs text-zinc-500">${escapeHtml(t.ruleLibraryImportHint || '')}</p>
+            <p class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryImportHint || '')}</p>
             <div class="flex items-center gap-1 mb-2">
-                <button data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-all duration-200 bg-accent/20 text-accent">
+                <button data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 bg-accent/20 text-accent">
                     ${escapeHtml(t.ruleLibraryImportPaste || 'Paste rules text')}
                 </button>
-                <button data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-all duration-200 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                <button data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportFile || 'Select file')}
                 </button>
-                <button data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-all duration-200 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                <button data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportUrl || 'Import from URL')}
                 </button>
             </div>
             <div id="rl-import-paste" class="space-y-3">
-                <textarea id="rl-import-text" class="w-full h-32 bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-700/50 rounded-xl p-3 text-xs text-zinc-700 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
+                <textarea id="rl-import-text" class="w-full h-32 bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-xl p-3 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
             </div>
             <div id="rl-import-file" class="hidden space-y-3">
                 <input id="rl-import-file-path" type="text" class="input-modal w-full" placeholder="${escapeHtml(t.ruleLibraryImportFile || '')}" />
@@ -1508,11 +1508,11 @@ async function handleImportRules() {
                 <input id="rl-import-url-input" type="text" class="input-modal w-full" placeholder="https://..." />
             </div>
             <div class="space-y-2">
-                <label class="text-xs text-zinc-500">${escapeHtml(t.ruleLibraryGroupName || 'Name')}</label>
+                <label class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryGroupName || 'Name')}</label>
                 <input id="rl-import-name" type="text" class="input-modal w-full" placeholder="my-rules" />
             </div>
             <div class="flex items-center justify-end gap-2 pt-2">
-                <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-all duration-200">
+                <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
                     ${escapeHtml(t.ruleLibraryImportConfirm || 'Import')}
                 </button>
             </div>
@@ -1538,9 +1538,9 @@ async function handleImportRules() {
                     importMode = /** @type {'paste'|'file'|'url'} */ (/** @type {HTMLElement} */ (tab).dataset.rlImportTab);
 
                     importTabs.forEach((tabItem) => {
-                        tabItem.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-all duration-200 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300';
+                        tabItem.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]';
                     });
-                    tab.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-all duration-200 bg-accent/20 text-accent';
+                    tab.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 bg-accent/20 text-accent';
 
                     pastePanel?.classList.toggle('hidden', importMode !== 'paste');
                     filePanel?.classList.toggle('hidden', importMode !== 'file');
@@ -1636,9 +1636,9 @@ async function handleExtractFromSubscription() {
             .map((/** @type {any} */ p, /** @type {number} */ i) => {
                 const pName = p.name || p.label || p.id || `Profile ${i + 1}`;
                 const pId = p.id || p.name || p;
-                return `<button class="w-full text-left px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-accent/10 hover:text-accent transition-colors rounded-lg flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
+                return `<button class="w-full text-left px-4 py-3 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
                     <span>${escapeHtml(String(pName))}</span>
-                    <span class="text-xs text-zinc-400 dark:text-zinc-600">${escapeHtml(String(pId))}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${escapeHtml(String(pId))}</span>
                 </button>`;
             })
             .join('');
@@ -1706,10 +1706,10 @@ async function handleTraceRule(rule, index) {
         const panelHtml = `
             <div class="space-y-3">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-zinc-500">${escapeHtml(t.ruleLibraryTraceDesc || 'Rule matching trace')} [${index}]</span>
-                    <span class="text-xs text-zinc-600">${escapeHtml(String(reportStr.length))} chars</span>
+                    <span class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryTraceDesc || 'Rule matching trace')} [${index}]</span>
+                    <span class="text-xs text-[var(--text-tertiary)]">${escapeHtml(String(reportStr.length))} chars</span>
                 </div>
-                <pre class="glass-card p-4 text-xs text-zinc-700 dark:text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap break-all overflow-y-auto max-h-[400px] custom-scrollbar">${escapeHtml(reportStr)}</pre>
+                <pre class="glass-card p-4 text-xs text-[var(--text-secondary)] font-mono leading-relaxed whitespace-pre-wrap break-all overflow-y-auto max-h-[400px] custom-scrollbar">${escapeHtml(reportStr)}</pre>
             </div>
         `;
 
