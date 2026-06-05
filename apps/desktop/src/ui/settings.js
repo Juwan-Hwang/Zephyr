@@ -35,6 +35,7 @@ import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
 import { invalidateSettingsCache } from './cache.js';
 import { saveSetting, saveSettings } from './settings-helpers.js';
+import { initNetworkOptim } from './network-optim.js';
 import {
     DEFAULT_DNS_CONFIG,
     isValidIPv6,
@@ -520,6 +521,7 @@ export async function initSettings() {
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
     if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
     appStore.set('failoverEnabled', settings.failover_enabled || false);
+    appStore.set('networkOptimAutoApply', settings.network_optim_auto_apply ?? false);
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
     // Apply saved UI scale
@@ -1529,6 +1531,9 @@ export async function initSettings() {
     }
 
     initFakeClient();
+
+    // Initialize network optimization UI
+    initNetworkOptim().catch(() => {});
 
     // Start smart auto-test scheduler if enabled
     const shouldStartAutoTest = localStorage.getItem('smartAutoTest') === 'true';
