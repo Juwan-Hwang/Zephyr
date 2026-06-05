@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { getDelayColorClass, formatFileSize, formatBytes, formatSpeed, formatDuration } from './format.js';
 
 describe('getDelayColorClass', () => {
-    it('returns zinc for null', () => expect(getDelayColorClass(null)).toBe('text-zinc-600'));
-    it('returns zinc for 0', () => expect(getDelayColorClass(0)).toBe('text-zinc-600'));
-    it('returns zinc for 999999+', () => expect(getDelayColorClass(999999)).toBe('text-zinc-600'));
+    it('returns tertiary for null', () => expect(getDelayColorClass(null)).toBe('text-[var(--text-tertiary)]'));
+    it('returns tertiary for 0', () => expect(getDelayColorClass(0)).toBe('text-[var(--text-tertiary)]'));
+    it('returns tertiary for 999999+', () => expect(getDelayColorClass(999999)).toBe('text-[var(--text-tertiary)]'));
     it('returns emerald for < 200', () => expect(getDelayColorClass(120)).toBe('text-emerald-400'));
     it('returns emerald for 199', () => expect(getDelayColorClass(199)).toBe('text-emerald-400'));
     it('returns amber for 200', () => expect(getDelayColorClass(200)).toBe('text-amber-400'));

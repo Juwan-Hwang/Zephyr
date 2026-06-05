@@ -47,10 +47,10 @@ function zephyrTheme() {
         '.cm-content': {
             fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'DejaVu Sans Mono', 'Ubuntu Mono', monospace",
             padding: '0.75rem 0',
-            caretColor: 'var(--color-accent, #6366f1)',
+            caretColor: 'var(--accent-primary, #6366f1)',
         },
         '.cm-cursor': {
-            borderLeftColor: 'var(--color-accent, #6366f1)',
+            borderLeftColor: 'var(--accent-primary, #6366f1)',
         },
         '.cm-activeLine': {
             backgroundColor: 'rgba(255, 255, 255, 0.03)',
@@ -59,7 +59,7 @@ function zephyrTheme() {
             backgroundColor: 'rgba(255, 255, 255, 0.03)',
         },
         '.cm-selectionBackground': {
-            backgroundColor: 'var(--color-accent, #6366f1) !important',
+            backgroundColor: 'var(--accent-primary, #6366f1) !important',
             opacity: '0.2',
         },
         '.cm-gutters': {
@@ -78,7 +78,7 @@ function zephyrTheme() {
 
         // Prism DSL keyword colors
         '.cm-prism-keyword': {
-            color: 'var(--color-accent, #6366f1)',
+            color: 'var(--accent-primary, #6366f1)',
             fontWeight: '600',
         },
         '.cm-prism-meta': {
@@ -100,7 +100,7 @@ function zephyrTheme() {
             fontSize: '0.75rem',
         },
         '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-            backgroundColor: 'var(--color-accent, #6366f1)',
+            backgroundColor: 'var(--accent-primary, #6366f1)',
             color: '#fff',
         },
         '.cm-completionLabel': {
