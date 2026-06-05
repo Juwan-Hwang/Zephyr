@@ -538,7 +538,7 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
     let mut failed = Vec::new();
     for (name, args) in &optimizations {
         let mut cmd = std::process::Command::new("netsh");
-        cmd.args(args);
+        cmd.args(*args);
         cmd.creation_flags(super::CREATE_NO_WINDOW);
         match cmd.output() {
             Ok(output) if output.status.success() => {
@@ -751,7 +751,7 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
     let mut failed = Vec::new();
     for (name, args) in &reverts {
         let mut cmd = std::process::Command::new("netsh");
-        cmd.args(args);
+        cmd.args(*args);
         cmd.creation_flags(super::CREATE_NO_WINDOW);
         match cmd.output() {
             Ok(output) if output.status.success() => {
