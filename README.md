@@ -10,7 +10,7 @@
 
 [![Stars](https://badgen.net/github/stars/Juwan-Hwang/Zephyr?icon=github&color=blue)](https://github.com/Juwan-Hwang/Zephyr/stargazers)
 [![Release](https://badgen.net/github/release/Juwan-Hwang/Zephyr?icon=git&color=cyan)](https://github.com/Juwan-Hwang/Zephyr/releases)
-[![License](https://badgen.net/github/license/Juwan-Hwang/Zephyr)](https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE)
+[![License](https://badgen.net/badge/license/MIT/blue)](https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE)
 [![Platform](https://badgen.net/badge/Platform/Windows%20%7C%20macOS%20%7C%20Linux/08C)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg?style=flat&label=Downloads&color=08C&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Security](https://badgen.net/badge/Security/CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy/green)](https://github.com/Juwan-Hwang/Zephyr/wiki/Security)
