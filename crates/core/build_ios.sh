@@ -2,8 +2,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FFI_DIR="$SCRIPT_DIR/ffi/uniffi"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+FFI_DIR="$SCRIPT_DIR/../core-ffi"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Cargo workspace puts all output in workspace root target/
 TARGET_DIR="$PROJECT_ROOT/target"
 OUT_DIR="$PROJECT_ROOT/ios"

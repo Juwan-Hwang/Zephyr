@@ -257,9 +257,15 @@ cargo clippy --all-targets --all-features
 │   └── desktop/                 # Tauri 桌面应用
 │       ├── src/                 # 原生 JS 前端、样式、UI 模块
 │       └── src-tauri/           # Rust 后端、IPC、系统集成、Prism 能力
+├── crates/
+│   ├── core/                    # zephyr-core — 跨平台纯业务逻辑 (rlib)
+│   │   └── build_ios.sh         # iOS XCFramework 构建脚本
+│   └── core-ffi/                # zephyr-core-ffi — UniFFI 移动端绑定入口 (cdylib)
 ├── packages/
 │   ├── shared/                  # 前端共享代码
-│   └── scripts/                 # 项目脚本，如 i18n 检查
+│   ├── scripts/                 # 项目脚本，如 i18n 检查
+│   └── tokens/                  # Design Token 系统 (Style Dictionary)
+│       └── src/                 # Primitive / Semantic / Component token 定义
 ├── FEATURES.md                  # 功能清单
 ├── package.json                 # workspace 根脚本
 └── pnpm-workspace.yaml          # pnpm workspace 配置

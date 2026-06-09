@@ -372,8 +372,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.geometry.Offset
 
-// AUTO-GENERATED — DO NOT EDIT — Source: tokens/src/*.json
-// Run: npx style-dictionary build --config=tokens/config.js
+// AUTO-GENERATED — DO NOT EDIT — Source: packages/tokens/src/*.json
+// Run: npx style-dictionary build --config=packages/tokens/config.js
 
 object AppColors {
 ${colorLines}
@@ -705,8 +705,8 @@ StyleDictionary.registerFormat({
 
     return `import SwiftUI
 
-// AUTO-GENERATED — DO NOT EDIT — Source: tokens/src/*.json
-// Run: npx style-dictionary build --config=tokens/config.js
+// AUTO-GENERATED — DO NOT EDIT — Source: packages/tokens/src/*.json
+// Run: npx style-dictionary build --config=packages/tokens/config.js
 
 public enum AppColors {
 ${colorLines}
@@ -767,12 +767,12 @@ ${accentBlock}
 });
 
 export default {
-  source: ['tokens/src/**/*.json'],
+  source: ['packages/tokens/src/**/*.json'],
   platforms: {
     css: {
       transformGroup: 'css',
       transforms: ['semantic/dark-light'],
-      buildPath: 'tokens/build/css/',
+      buildPath: 'packages/tokens/build/css/',
       files: [
         { destination: 'variables.css', format: 'css/variables-themed' },
         { destination: 'theme.css', format: 'css/theme-vars' },
