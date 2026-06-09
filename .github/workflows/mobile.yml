@@ -1,0 +1,122 @@
+name: Mobile Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk & uniffi-bindgen
+        run: |
+          cargo install cargo-ndk
+          # Install uniffi-bindgen from source (0.28.x has no standalone binary on crates.io)
+          git clone --depth 1 --branch v0.28.3 https://github.com/mozilla/uniffi-rs.git /tmp/uniffi-src
+          rm -f /tmp/uniffi-src/rust-toolchain.toml
+          cargo install --path /tmp/uniffi-src/examples/app/uniffi-bindgen-cli
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/core crates/core-ffi"
+
+      - name: Build Design Tokens
+        run: pnpm exec style-dictionary build --config packages/tokens/config.js
+
+      - name: Build Rust (host, for bindgen)
+        working-directory: crates/core-ffi
+        run: cargo build --release
+
+      - name: Build Rust (Android NDK)
+        working-directory: crates/core-ffi
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 \
+            -o ../../android/app/src/main/jniLibs \
+            build --release
+
+      - name: Generate Kotlin bindings
+        run: |
+          uniffi-bindgen generate \
+            --library target/release/libzephyr_core_ffi.so \
+            --language kotlin \
+            --out-dir android/app/build/generated/uniffi/
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: android/app/build/outputs/apk/release/*.apk
+
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Install uniffi-bindgen
+        run: |
+          git clone --depth 1 --branch v0.28.3 https://github.com/mozilla/uniffi-rs.git /tmp/uniffi-src
+          rm -f /tmp/uniffi-src/rust-toolchain.toml
+          cargo install --path /tmp/uniffi-src/examples/app/uniffi-bindgen-cli
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build Design Tokens
+        run: pnpm exec style-dictionary build --config packages/tokens/config.js
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/core crates/core-ffi"
+
+      - name: Build XCFramework
+        working-directory: crates/core
+        run: ./build_ios.sh
+
+      - name: Upload XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework
+          path: ios/ZephyrCore.xcframework
