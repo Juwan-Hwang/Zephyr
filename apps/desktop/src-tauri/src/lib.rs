@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod backend_event;
 pub mod config_manager;
+pub mod core_event_bridge;
 pub mod core_manager;
 pub mod deep_link;
 pub mod global_shortcut;
@@ -310,7 +311,8 @@ fn update_proxy_selection(
     group_name: Option<String>,
 ) -> Result<(), String> {
     // Validate inputs to prevent settings bloat from webview
-    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
+    let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(profile_name)
+        .map_err(|e| e.to_string())?;
     if safe_name.len() > 256
         || node_name.len() > 256
         || group_name.as_ref().is_some_and(|g| g.len() > 256)
@@ -342,7 +344,8 @@ fn update_primary_group_preference(
     profile_name: String,
     group_name: String,
 ) -> Result<(), String> {
-    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&profile_name)?;
+    let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(profile_name)
+        .map_err(|e| e.to_string())?;
     if safe_name.len() > 256 || group_name.len() > 256 {
         return Err("Profile name or group name too long".to_owned());
     }
@@ -386,7 +389,8 @@ fn update_last_config(
     state: tauri::State<SettingsState>,
     config_name: String,
 ) -> Result<(), String> {
-    let safe_name = core_manager::core::config_sanitizer::sanitize_config_file_name(&config_name)?;
+    let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(config_name)
+        .map_err(|e| e.to_string())?;
     if safe_name.len() > 256 {
         return Err("Config name too long".to_owned());
     }
@@ -636,6 +640,7 @@ pub fn run() {
         .manage(ShortcutRegistry::default())
         .setup(|app| {
             backend_event::init_app_handle(app.handle());
+            core_event_bridge::install_core_event_bridge();
 
             // Set AppUserModelId on Windows so notifications show "Zephyr" instead of "Windows PowerShell"
             #[cfg(target_os = "windows")]
@@ -762,20 +767,20 @@ pub fn run() {
                                         .and_then(|n| n.to_str())
                                     {
                                         // Sanitize file name to prevent path traversal
-                                        let safe_name = match core_manager::core::config_sanitizer::sanitize_config_file_name(file_name) {
+                                        let safe_name = match zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned()) {
                                             Ok(name) => name,
                                             Err(_) => continue,
                                         };
                                         let target_path =
                                             storage_paths.profiles_dir.join(&safe_name);
                                         // Validate path stays within profiles dir
-                                        if core_manager::core::config_sanitizer::validate_path_within_dir(&target_path, &storage_paths.profiles_dir).is_err() {
+                                        if zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &storage_paths.profiles_dir).is_err() {
                                             continue;
                                         }
                                         // Sanitize dangerous keys (same as subscription import)
                                         let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
                                             .unwrap_or(serde_yaml::Value::Null);
-                                        core_manager::core::config_sanitizer::remove_dangerous_keys(&mut yaml_value, false);
+                                        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut yaml_value, false);
                                         let sanitized_content = serde_yaml::to_string(&yaml_value)
                                             .unwrap_or(content);
                                         if core_manager::write_file_secure(&target_path, &sanitized_content)
