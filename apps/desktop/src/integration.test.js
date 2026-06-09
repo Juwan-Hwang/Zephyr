@@ -673,6 +673,9 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'theme_mode',
         'app_opacity',
         'node_scroll',
+        'failover_enabled',
+        'network_optim_auto_apply',
+        'lightweight_mode',
     ];
 
     // All settings.xxx property accesses in frontend JS code
@@ -701,6 +704,9 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'app_opacity',       // settings.js, theme.js
         'node_scroll',       // settings.js, proxies.js
         'hide_timeout_nodes', // settings.js
+        'failover_enabled',   // settings.js
+        'network_optim_auto_apply', // settings.js
+        'lightweight_mode',   // settings.js
     ];
 
     it('every frontend settings.xxx access has a matching Rust struct field', () => {

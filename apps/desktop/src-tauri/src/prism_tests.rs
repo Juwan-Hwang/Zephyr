@@ -1326,8 +1326,8 @@ rules:
         }
 
         #[test]
-        fn sanitize_accepts_single_dot() {
-            assert!(sanitize_filename(".").is_ok());
+        fn sanitize_rejects_single_dot() {
+            assert!(sanitize_filename(".").is_err());
         }
 
         #[test]

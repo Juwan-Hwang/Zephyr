@@ -188,6 +188,11 @@ struct Settings {
     /// Auto-apply network optimizations on startup.
     #[serde(default)]
     network_optim_auto_apply: bool,
+    /// Lightweight mode: when `close_to_tray` is also enabled, closing the window
+    /// immediately destroys the `WebView` to free memory. Tray click recreates it.
+    /// Has no effect when `close_to_tray` is disabled (app exits on close).
+    #[serde(default)]
+    lightweight_mode: bool,
 }
 
 impl Settings {
@@ -207,6 +212,11 @@ impl Settings {
 }
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
+
+/// Flag to signal that the user explicitly requested exit (tray "Quit" or
+/// close button with `close_to_tray` disabled). Prevents `ExitRequested`
+/// from blocking the shutdown.
+pub(crate) struct ExplicitExitFlag(pub(crate) Arc<std::sync::atomic::AtomicBool>);
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -427,9 +437,38 @@ pub(crate) fn persist_settings(app: &tauri::AppHandle, settings: &Settings) -> R
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn show_main_window(window: tauri::Window) {
-    let _ = window.show();
-    let _ = window.set_focus();
+fn show_main_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        // Window was destroyed by lightweight mode — recreate it
+        match tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title("Zephyr")
+        .inner_size(960.0, 680.0)
+        .min_inner_size(640.0, 420.0)
+        .decorations(false)
+        .transparent(true)
+        .visible(true)
+        .build()
+        {
+            Ok(window) => {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Err(e) => {
+                emit_error!(
+                    System,
+                    SYS_PROXY_FAILED,
+                    "Failed to recreate main window: {e}"
+                );
+            }
+        }
+    }
 }
 
 /// Get current system proxy and core status for tray state determination
@@ -598,7 +637,13 @@ pub fn run() {
         default_panic(info);
     }));
 
-    let mut builder = tauri::Builder::default();
+    // Flag to distinguish "user explicitly quit" from "window destroyed by lightweight mode".
+    // When true, ExitRequested should NOT be prevented.
+    let explicit_exit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let explicit_exit_run = Arc::clone(&explicit_exit);
+
+    let mut builder =
+        tauri::Builder::default().manage(ExplicitExitFlag(Arc::clone(&explicit_exit)));
 
     #[cfg(desktop)]
     {
@@ -623,6 +668,24 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
+            } else {
+                // Window was destroyed by lightweight mode — recreate it
+                if let Ok(window) = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "main",
+                    tauri::WebviewUrl::App("index.html".into()),
+                )
+                .title("Zephyr")
+                .inner_size(960.0, 680.0)
+                .min_inner_size(640.0, 420.0)
+                .decorations(false)
+                .transparent(true)
+                .visible(true)
+                .build()
+                {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
             // Forward deep link arguments from the second instance to the first.
             for arg in args {
@@ -708,6 +771,7 @@ pub fn run() {
                     node_scroll: None,
                     failover_enabled: false,
                     network_optim_auto_apply: false,
+                    lightweight_mode: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
@@ -728,21 +792,30 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(move |window, event| {
             #[allow(clippy::wildcard_enum_match_arm)]
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     let settings_state = window.state::<SettingsState>();
-                    let close_to_tray = settings_state
+                    let (close_to_tray, lightweight_mode) = settings_state
                         .0
                         .lock()
-                        .map(|guard| guard.close_to_tray)
-                        .unwrap_or(true);
+                        .map(|guard| (guard.close_to_tray, guard.lightweight_mode))
+                        .unwrap_or((true, false));
 
                     if close_to_tray {
                         api.prevent_close();
-                        let _ = window.hide();
+                        if lightweight_mode {
+                            // Lightweight mode: destroy the WebView to free memory.
+                            // The app stays alive in the tray because we prevent
+                            // exit on ExitRequested. Tray click recreates the window.
+                            let _ = window.destroy();
+                        } else {
+                            let _ = window.hide();
+                        }
                     } else {
+                        // User explicitly wants to quit
+                        explicit_exit.store(true, std::sync::atomic::Ordering::SeqCst);
                         kill_mihomo();
                         let _ = clear_sys_proxy();
                         let app = window.app_handle();
@@ -981,17 +1054,36 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            // Signal scheduler to shutdown gracefully
-            if let Some(scheduler_state) = handle
-                .try_state::<Arc<core_manager::core::subscription_scheduler::SchedulerState>>()
-            {
-                scheduler_state.shutdown();
+    app.run(move |handle, event| {
+        match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // Prevent the app from exiting when all windows are closed
+                // (lightweight mode destroys the WebView, close-to-tray hides it).
+                // Only allow exit when the user explicitly quits (tray "Quit" or
+                // close button with close_to_tray disabled).
+                if !explicit_exit_run.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
-            kill_mihomo();
-            // Smart kill: only prompts for password if there's actually a root mihomo running
-            let _ = smart_kill_all_mihomo_as_root();
+            tauri::RunEvent::Exit => {
+                // Signal scheduler to shutdown gracefully
+                if let Some(scheduler_state) = handle
+                    .try_state::<Arc<core_manager::core::subscription_scheduler::SchedulerState>>()
+                {
+                    scheduler_state.shutdown();
+                }
+                kill_mihomo();
+                // Smart kill: only prompts for password if there's actually a root mihomo running
+                let _ = smart_kill_all_mihomo_as_root();
+            }
+            tauri::RunEvent::Ready
+            | tauri::RunEvent::Resumed
+            | tauri::RunEvent::MainEventsCleared
+            | tauri::RunEvent::WindowEvent { .. }
+            | tauri::RunEvent::WebviewEvent { .. }
+            | tauri::RunEvent::MenuEvent(_)
+            | tauri::RunEvent::TrayIconEvent(_)
+            | _ => {}
         }
     });
 }

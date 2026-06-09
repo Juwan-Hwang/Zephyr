@@ -153,7 +153,7 @@ pub fn try_decode_base64_content(content: &str) -> Option<String> {
 }
 
 /// Check if an IP address is private or local
-pub const fn is_private_ip(ip: IpAddr) -> bool {
+pub fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
             ipv4.is_private()
@@ -164,15 +164,21 @@ pub const fn is_private_ip(ip: IpAddr) -> bool {
                 || ipv4.is_unspecified()
         }
         IpAddr::V6(ipv6) => {
-            // Check for IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-            // which can bypass SSRF protection if not handled
-            if let Some(ipv4) = ipv6.to_ipv4() {
-                return ipv4.is_private()
-                    || ipv4.is_loopback()
-                    || ipv4.is_link_local()
-                    || ipv4.is_broadcast()
-                    || ipv4.is_documentation()
-                    || ipv4.is_unspecified();
+            // Only convert IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+            // to prevent bypass via mapped addresses.
+            // Do NOT use to_ipv4() which also converts ::1 → 0.0.0.1 etc.
+            let octets = ipv6.octets();
+            let is_ipv4_mapped =
+                octets[0..10] == [0; 10] && octets[10] == 0xff && octets[11] == 0xff;
+            if is_ipv4_mapped {
+                if let Some(ipv4) = ipv6.to_ipv4() {
+                    return ipv4.is_private()
+                        || ipv4.is_loopback()
+                        || ipv4.is_link_local()
+                        || ipv4.is_broadcast()
+                        || ipv4.is_documentation()
+                        || ipv4.is_unspecified();
+                }
             }
             ipv6.is_loopback()
                 || ipv6.is_unspecified()
