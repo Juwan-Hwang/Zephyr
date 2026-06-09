@@ -3,8 +3,8 @@ use std::net::IpAddr;
 use std::time::Duration;
 use tauri::{AppHandle, Manager as _, State};
 
-use super::config_sanitizer::remove_dangerous_keys;
 use super::fetch_util::fetch_url_content;
+use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
@@ -169,7 +169,8 @@ fn validate_subscription_name(name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("Subscription name cannot be empty".to_owned());
     }
-    super::config_sanitizer::sanitize_base_filename(name)
+    zephyr_core::config::sanitizer::sanitize_base_filename(name.to_owned())
+        .map_err(|e| e.to_string())
 }
 
 fn build_http_client_with_proxy(
@@ -662,7 +663,8 @@ async fn download_sub_inner_raw(
         }
     }
 
-    clean_name = super::config_sanitizer::sanitize_config_file_name(&clean_name)?;
+    clean_name = zephyr_core::config::sanitizer::sanitize_config_file_name(clean_name)
+        .map_err(|e| e.to_string())?;
 
     // When overwrite is true (updating an existing subscription), write directly.
     // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
@@ -697,7 +699,8 @@ async fn download_sub_inner_raw(
     }
 
     let target_path = paths.profiles_dir.join(&clean_name);
-    super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
+    zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)
+        .map_err(|e| e.to_string())?;
 
     let mut metadata = load_metadata(&paths);
     // Preserve existing auto_update_interval to avoid silently disabling scheduled updates

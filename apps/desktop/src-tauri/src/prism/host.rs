@@ -5,9 +5,9 @@ use tauri::Manager as _;
 use clash_prism_extension::{ApplyStatus, CoreInfo, PrismEvent, PrismHost, ProfileInfo};
 
 use crate::backend_event::{codes, lock_best_effort, lock_critical, BackendModule};
-use crate::core_manager::core::config_sanitizer::validate_path_within_dir;
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
 use crate::core_manager::{ensure_app_storage, write_file_secure, MihomoState};
+use zephyr_core::config::sanitizer::validate_path_within_dir;
 
 use super::prism_data_dir;
 use super::types::sanitize_filename;
@@ -153,7 +153,7 @@ impl PrismHost for ZephyrPrismHost {
         let safe_id = sanitize_filename(profile_id)?;
         let paths = ensure_app_storage(&self.app)?;
         let profile_path = paths.profiles_dir.join(&safe_id);
-        validate_path_within_dir(&profile_path, &paths.profiles_dir)?;
+        validate_path_within_dir(&profile_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
         let metadata = std::fs::metadata(&profile_path)
             .map_err(|e| format!("Failed to read profile '{safe_id}': {e}"))?;
         if metadata.len() > MAX_RESPONSE_SIZE as u64 {
