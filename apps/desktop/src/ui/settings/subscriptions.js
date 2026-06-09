@@ -107,7 +107,7 @@ async function showEditPanel(configInfo) {
 
     // Build dropdown menu items (escape labels for XSS safety)
     const dropdownMenuItems = autoUpdateOptions.map(opt => 
-        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-primary)] transition-colors">${escapeHtml(opt.label)}</button>`
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
     ).join('');
 
     // Remove any existing modal to prevent duplicate IDs
@@ -157,8 +157,10 @@ async function showEditPanel(configInfo) {
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] backdrop-blur-xl shadow-[var(--zephyr-shadow-md)] p-1 z-30 w-40">
-                            ${dropdownMenuItems}
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
+                            <div class="menu-scroll">
+                                ${dropdownMenuItems}
+                            </div>
                         </div>
                         <select id="edit-auto-update" class="hidden">
                             ${autoUpdateOptions.map(opt => `<option value="${opt.value}" ${opt.value === String(currentInterval) ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
