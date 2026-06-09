@@ -71,3 +71,15 @@ id_ed25519*
 
 .claude/
 
+# Mobile build artifacts
+core/target/
+android/app/src/main/jniLibs/
+android/app/build/
+android/.gradle/
+ios/Sources/UniFFI/
+ios/ZephyrCore.xcframework/
+android/app/src/main/res/values/app_colors.xml
+android/app/src/main/res/values/app_dimens.xml
+android/app/src/main/java/com/zephyr/ui/theme/AppTokens.kt
+ios/Sources/DesignSystem/AppTokens.swift
+

@@ -24,6 +24,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+zephyr-core = { path = "../../../core", version = "0.1.0" }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
@@ -89,13 +90,6 @@ winreg = "0.52"
 [dev-dependencies]
 mockall = "0.13"
 tempfile = "3.14"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"
 
 [lints]
 # rustc native lints

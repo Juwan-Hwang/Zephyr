@@ -10,11 +10,11 @@ use tokio::net::TcpStream;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt as _;
 
-use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::secure_io::write_file_secure;
 use crate::backend_event::{codes, lock_critical, redact_error_message, BackendModule};
 #[allow(unused_imports)]
 use crate::{emit_error, emit_info, emit_warn};
+use zephyr_core::config::sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 
 const DEFAULT_API_PORT: u16 = 9090;
 const DEFAULT_MIXED_PORT: u16 = 7890;
@@ -505,7 +505,8 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
 }
 
 fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, PathBuf), String> {
-    let config_file_name = sanitize_config_file_name(config_path)?;
+    let config_file_name =
+        sanitize_config_file_name(config_path.to_owned()).map_err(|e| e.to_string())?;
     if config_file_name == "run_config.yaml" {
         return Err("Cannot switch to run_config.yaml directly".to_owned());
     }
@@ -513,7 +514,7 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
     let resolved_path = paths.profiles_dir.join(&config_file_name);
 
     // Validate that the resolved path is within profiles_dir
-    validate_path_within_dir(&resolved_path, &paths.profiles_dir)?;
+    validate_path_within_dir(&resolved_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
     if resolved_path.exists() {
         return Ok((config_file_name, resolved_path));
