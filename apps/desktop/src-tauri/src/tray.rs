@@ -191,12 +191,9 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click { button, .. } = event {
                 if button == tauri::tray::MouseButton::Left {
-                    // Left click: show main window
+                    // Left click: show or recreate main window
                     let app = tray.app_handle();
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    show_or_recreate_window(app);
                 }
             }
         });
@@ -212,16 +209,36 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Show the main window, or recreate it if it was destroyed (lightweight mode).
+fn show_or_recreate_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        // Window was destroyed by lightweight mode — recreate it
+        match crate::recreate_main_window(app) {
+            Ok(window) => {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Err(e) => {
+                eprintln!("Failed to recreate main window: {e}");
+            }
+        }
+    }
+}
+
 /// Handle tray menu events
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
         "show" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_or_recreate_window(app);
         }
         "quit" => {
+            // Signal that this is an explicit exit, so ExitRequested won't block it
+            if let Some(flag) = app.try_state::<crate::ExplicitExitFlag>() {
+                flag.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             let state = app.state::<MihomoState>();
             let _ = crate::core_manager::stop_core_inner(app, &state);
             if let Err(e) = sys_proxy::clear_sys_proxy() {
