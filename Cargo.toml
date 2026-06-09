@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "core", "core/ffi/uniffi"]
+members = ["apps/desktop/src-tauri", "crates/core", "crates/core-ffi"]
 resolver = "2"
 
 # 性能优先（默认）
