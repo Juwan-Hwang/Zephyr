@@ -1,0 +1,8 @@
+[build]
+# rustc-wrapper = "sccache"  # Disabled: sccache not installed
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android-clang"
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android-clang"

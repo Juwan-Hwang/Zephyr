@@ -57,5 +57,16 @@
     "overlay":  { "value": "800" },
     "modal":    { "value": "1000" },
     "toast":    { "value": "1100" }
+  },
+  "fontSize": {
+    "2xs": { "value": "10px", "comment": "0.625rem" },
+    "xs":  { "value": "12px", "comment": "0.75rem" },
+    "sm":  { "value": "14px", "comment": "0.875rem" },
+    "base":{ "value": "16px", "comment": "1rem" },
+    "lg":  { "value": "18px", "comment": "1.125rem" },
+    "xl":  { "value": "20px", "comment": "1.25rem" },
+    "2xl": { "value": "24px", "comment": "1.5rem" },
+    "3xl": { "value": "30px", "comment": "1.875rem" },
+    "4xl": { "value": "36px", "comment": "2.25rem" }
   }
 }

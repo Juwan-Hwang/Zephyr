@@ -3,13 +3,13 @@ use std::fs;
 use std::process::Command;
 use tauri::{AppHandle, Manager as _};
 
-use super::config_sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 use super::core_process::ensure_app_storage;
 use super::crypto::{
     cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata, ProfilesMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
+use zephyr_core::config::sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 
 /// Update a field on an existing metadata entry (or create the entry first).
 fn update_metadata_entry<F>(
@@ -41,7 +41,7 @@ fn validate_config_for_update(
     app: &AppHandle,
     name: &str,
 ) -> Result<(super::AppPaths, String), String> {
-    let safe_name = sanitize_config_file_name(name)?;
+    let safe_name = sanitize_config_file_name(name.to_owned()).map_err(|e| e.to_string())?;
     if safe_name == "run_config.yaml" {
         return Err("Cannot modify the active temp config".to_owned());
     }
@@ -53,21 +53,10 @@ fn validate_config_for_update(
     Ok((paths, safe_name))
 }
 
-/// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
+/// Mask URL for safe display in UI — delegates to [`zephyr_core`].
 #[must_use]
 pub fn mask_url(url: &str) -> String {
-    if let Ok(parsed) = reqwest::Url::parse(url) {
-        let host = parsed.host_str().unwrap_or("???");
-        let masked_host = if host.len() > 6 {
-            format!("{}***{}", &host[..3], &host[host.len() - 3..])
-        } else {
-            "***".to_owned()
-        };
-        // Only show scheme + masked host; hide path and query entirely
-        format!("{}://{masked_host}/***", parsed.scheme())
-    } else {
-        "***".to_owned()
-    }
+    zephyr_core::config::merge::mask_url(url.to_owned())
 }
 
 #[tauri::command]
@@ -141,7 +130,7 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
 /// Internal use only — NOT exposed as a Tauri command to prevent URL leakage to the frontend.
 pub fn get_config_url(app: &AppHandle, name: &str) -> Result<String, String> {
     // Reuse comprehensive sanitization (URL decode, path traversal check, etc.)
-    let safe_name = sanitize_config_file_name(name)?;
+    let safe_name = sanitize_config_file_name(name.to_owned()).map_err(|e| e.to_string())?;
 
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
@@ -224,13 +213,13 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
         format!("{name}.yaml")
     };
 
-    clean_name = sanitize_config_file_name(&clean_name)?;
+    clean_name = sanitize_config_file_name(clean_name).map_err(|e| e.to_string())?;
     if clean_name == "run_config.yaml" {
         return Err("Cannot delete the active temp config".to_owned());
     }
 
     let target_path = paths.profiles_dir.join(&clean_name);
-    validate_path_within_dir(&target_path, &paths.profiles_dir)?;
+    validate_path_within_dir(&target_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
     let file_exists = target_path.exists();
 
@@ -280,7 +269,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
 #[allow(clippy::needless_pass_by_value)]
 pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
-    let config_file_name = sanitize_config_file_name(&config_path)?;
+    let config_file_name = sanitize_config_file_name(config_path).map_err(|e| e.to_string())?;
     let (resolved_path, base_dir) = if config_file_name == "run_config.yaml" {
         (
             paths.core_dir.join(&config_file_name),
@@ -293,7 +282,7 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
         )
     };
 
-    validate_path_within_dir(&resolved_path, &base_dir)?;
+    validate_path_within_dir(&resolved_path, &base_dir).map_err(|e| e.to_string())?;
 
     if !resolved_path.exists() {
         return Err("Config file not found".to_owned());
@@ -310,7 +299,7 @@ pub fn write_config_file(
     content: String,
 ) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
-    let config_file_name = sanitize_config_file_name(&config_path)?;
+    let config_file_name = sanitize_config_file_name(config_path).map_err(|e| e.to_string())?;
     let (resolved_path, base_dir) = if config_file_name == "run_config.yaml" {
         (
             paths.core_dir.join(&config_file_name),
@@ -323,7 +312,7 @@ pub fn write_config_file(
         )
     };
 
-    validate_path_within_dir(&resolved_path, &base_dir)?;
+    validate_path_within_dir(&resolved_path, &base_dir).map_err(|e| e.to_string())?;
 
     write_file_secure(&resolved_path, &content)?;
 
@@ -374,7 +363,7 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     } else {
         format!("{old_name}.yaml")
     };
-    clean_old = sanitize_config_file_name(&clean_old)?;
+    clean_old = sanitize_config_file_name(clean_old).map_err(|e| e.to_string())?;
     if clean_old == "run_config.yaml" {
         return Err("Cannot rename the active temp config".to_owned());
     }
@@ -385,15 +374,15 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     } else {
         format!("{new_name}.yaml")
     };
-    clean_new = sanitize_config_file_name(&clean_new)?;
+    clean_new = sanitize_config_file_name(clean_new).map_err(|e| e.to_string())?;
     if clean_new == "run_config.yaml" {
         return Err("Cannot use reserved name 'run_config'".to_owned());
     }
 
     let old_path = paths.profiles_dir.join(&clean_old);
     let new_path = paths.profiles_dir.join(&clean_new);
-    validate_path_within_dir(&old_path, &paths.profiles_dir)?;
-    validate_path_within_dir(&new_path, &paths.profiles_dir)?;
+    validate_path_within_dir(&old_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
+    validate_path_within_dir(&new_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
     if !old_path.exists() {
         return Err(format!("Config '{clean_old}' does not exist"));
@@ -556,7 +545,7 @@ mod tests {
     fn test_top_level_script_removed() {
         let yaml = "script: test.js\nport: 7890";
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
         assert!(!value
             .as_mapping()
             .unwrap()
@@ -578,7 +567,7 @@ proxy-groups:
       - proxy1
 ";
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         let groups = value.get("proxy-groups").unwrap().as_sequence().unwrap();
         let group = groups.first().unwrap().as_mapping().unwrap();
@@ -597,7 +586,7 @@ proxy-providers:
     interval: 3600
 ";
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
         let provider = providers
@@ -625,7 +614,7 @@ proxies:
     port: 8388
 "#;
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
         let proxy = proxies.first().unwrap().as_mapping().unwrap();
@@ -643,7 +632,7 @@ script:
     function main() { return "malicious" }
 "#;
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         assert!(!value
             .as_mapping()
@@ -658,7 +647,7 @@ script-path: /malicious/script.js
 mode: rule
 ";
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         assert!(!value
             .as_mapping()
@@ -676,7 +665,7 @@ rule-providers:
     interval: 86400
 ";
         let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        super::super::config_sanitizer::remove_dangerous_keys(&mut value, false);
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut value, false);
 
         let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
         assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));

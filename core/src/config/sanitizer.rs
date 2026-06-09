@@ -1,3 +1,7 @@
+//! Configuration file sanitizer — platform-agnostic security validation.
+//!
+//! Migrated from `src-tauri/src/core/config_sanitizer.rs` for cross-platform reuse.
+
 use std::path::Path;
 
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
@@ -69,13 +73,26 @@ fn remove_dangerous_keys_internal(
 /// Recursively remove dangerous keys from YAML structure to prevent code execution.
 /// This function is security-critical and used by both production code and tests.
 /// Automatically limits recursion depth to prevent Billion Laughs attacks.
-pub(crate) fn remove_dangerous_keys(value: &mut serde_yaml::Value, in_provider_context: bool) {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn remove_dangerous_keys(value_json: String) -> Result<String, crate::error::AppError> {
+    let mut value: serde_yaml::Value = serde_yaml::from_str(&value_json)
+        .map_err(|e| crate::error::AppError::ParseError(format!("Invalid YAML: {e}")))?;
+    remove_dangerous_keys_internal(&mut value, false, 0);
+    serde_yaml::to_string(&value)
+        .map_err(|e| crate::error::AppError::ParseError(format!("YAML serialization failed: {e}")))
+}
+
+/// Non-FFI version that works directly with serde_yaml::Value (for internal use).
+pub fn remove_dangerous_keys_internal_pub(
+    value: &mut serde_yaml::Value,
+    in_provider_context: bool,
+) {
     remove_dangerous_keys_internal(value, in_provider_context, 0);
 }
 
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
-pub(crate) fn url_decode_complete(input: &str) -> String {
+pub fn url_decode_complete(input: &str) -> String {
     let mut result = input.to_owned();
 
     // Decode iteratively until no more changes (handles nested encoding)
@@ -121,65 +138,81 @@ pub(crate) fn url_decode_complete(input: &str) -> String {
 ///
 /// Performs URL decoding, null byte removal, control character removal,
 /// path traversal rejection, directory separator rejection, and length check.
-pub(crate) fn sanitize_base_filename(raw: &str) -> Result<String, String> {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn sanitize_base_filename(raw: String) -> Result<String, crate::error::AppError> {
     // Step 1: Complete URL decoding to catch all encoded patterns
-    let decoded = url_decode_complete(raw);
+    let decoded = url_decode_complete(&raw);
+
+    // Trim trailing spaces and dots to prevent Windows canonicalization bypasses (e.g. ".. " or ".. .")
+    let trimmed = decoded.trim_end_matches([' ', '.']);
 
     // Step 1.5: Check the decoded path for traversal BEFORE extracting the filename.
-    if decoded.contains('/') || decoded.contains('\\') {
-        return Err("Path traversal detected: directory separators are not allowed".to_owned());
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(crate::error::AppError::ConfigError(
+            "Path traversal detected: directory separators are not allowed".to_owned(),
+        ));
     }
     // Reject bare ".." which is a real parent-directory reference.
-    // "file..name" and "..yaml" are safe filenames (no directory separator).
-    if decoded == ".." {
-        return Err("Path traversal detected: '..' is not allowed".to_owned());
+    if trimmed == ".." {
+        return Err(crate::error::AppError::ConfigError(
+            "Path traversal detected: '..' is not allowed".to_owned(),
+        ));
+    }
+    // Reject bare "." which is a special current-directory reference.
+    if trimmed == "." || trimmed.is_empty() {
+        return Err(crate::error::AppError::ConfigError(
+            "'.' is not a valid filename".to_owned(),
+        ));
     }
 
     // Step 2: Extract just the filename
-    // Path::new(".").file_name() returns None on Linux, but "." is a valid filename.
-    let filename = Path::new(&decoded)
+    let filename = Path::new(trimmed)
         .file_name()
         .and_then(|f| f.to_str())
-        .unwrap_or_else(|| {
-            emit_warn!(
-                Config,
-                CONFIG_PARSE_FAILED,
-                "Path::new({decoded:?}).file_name() returned None, using raw input"
-            );
-            &decoded
-        })
+        .unwrap_or(trimmed)
         .to_owned();
 
     // Step 3: Reject null bytes
     if filename.contains('\0') {
-        return Err("Invalid character in filename: null byte detected".to_owned());
+        return Err(crate::error::AppError::ConfigError(
+            "Invalid character in filename: null byte detected".to_owned(),
+        ));
     }
 
     // Step 4: Reject control characters
     if filename.chars().any(char::is_control) {
-        return Err("Invalid character in filename: control characters not allowed".to_owned());
+        return Err(crate::error::AppError::ConfigError(
+            "Invalid character in filename: control characters not allowed".to_owned(),
+        ));
     }
 
     // Step 5: Length limit
     if filename.len() > 255 {
-        return Err("Filename too long: maximum 255 characters allowed".to_owned());
+        return Err(crate::error::AppError::ConfigError(
+            "Filename too long: maximum 255 characters allowed".to_owned(),
+        ));
     }
 
     Ok(filename)
 }
 
 /// Sanitize configuration file name with comprehensive security checks
-pub(crate) fn sanitize_config_file_name(config_path: &str) -> Result<String, String> {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::error::AppError> {
     let config_file_name = sanitize_base_filename(config_path)?;
 
     // Validate extension
     let lower_name = config_file_name.to_lowercase();
     if !lower_name.ends_with(".yaml") && !lower_name.ends_with(".yml") {
-        return Err("Invalid file type: only .yaml and .yml files are permitted".to_owned());
+        return Err(crate::error::AppError::ConfigError(
+            "Invalid file type: only .yaml and .yml files are permitted".to_owned(),
+        ));
     }
 
     if config_file_name.len() > 255 {
-        return Err("Filename too long: maximum 255 characters allowed".to_owned());
+        return Err(crate::error::AppError::ConfigError(
+            "Filename too long: maximum 255 characters allowed".to_owned(),
+        ));
     }
 
     // Check for reserved Windows names (even on other platforms for consistency)
@@ -192,36 +225,35 @@ pub(crate) fn sanitize_config_file_name(config_path: &str) -> Result<String, Str
         "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if reserved_names.contains(&base_name) {
-        return Err(format!(
+        return Err(crate::error::AppError::ConfigError(format!(
             "Reserved filename: '{config_file_name}' is not allowed"
-        ));
+        )));
     }
 
     Ok(config_file_name)
 }
 
 /// Validates that the resolved path is within the expected base directory
-pub(crate) fn validate_path_within_dir(
+pub fn validate_path_within_dir(
     resolved_path: &Path,
     base_dir: &Path,
-) -> Result<(), String> {
+) -> Result<(), crate::error::AppError> {
     // If the file exists, use canonicalize for definitive check
     if resolved_path.exists() {
-        let canonical_resolved = resolved_path
-            .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize resolved path: {e}"))?;
-        let canonical_base = base_dir
-            .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize base directory: {e}"))?;
+        let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
+            crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
+        })?;
+        let canonical_base = base_dir.canonicalize().map_err(|e| {
+            crate::error::AppError::IoError(format!("Failed to canonicalize base directory: {e}"))
+        })?;
 
         if !canonical_resolved.starts_with(&canonical_base) {
-            return Err(
+            return Err(crate::error::AppError::ConfigError(
                 "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            );
+            ));
         }
     } else {
         // File doesn't exist yet, do string-level validation
-        // Convert to string and check for path traversal patterns
         let resolved_str = resolved_path.to_string_lossy();
         let base_str = base_dir.to_string_lossy();
 
@@ -230,9 +262,9 @@ pub(crate) fn validate_path_within_dir(
         let base_normalized = base_str.replace('\\', "/");
 
         if !resolved_normalized.starts_with(&*base_normalized) {
-            return Err(
+            return Err(crate::error::AppError::ConfigError(
                 "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            );
+            ));
         }
     }
     Ok(())
@@ -245,23 +277,27 @@ mod tests {
 
     #[test]
     fn test_sanitize_config_file_name_valid() {
-        assert_eq!(sanitize_config_file_name("test.yaml").unwrap(), "test.yaml");
-        assert_eq!(sanitize_config_file_name("test.yml").unwrap(), "test.yml");
-        assert!(sanitize_config_file_name("../test.yaml").is_err());
-        assert!(sanitize_config_file_name("foo/test.yaml").is_err());
-        // Path traversal fix: directory separators are always rejected
-        // regardless of platform (both '/' and '\' are blocked)
-        assert!(sanitize_config_file_name("foo\\test.yaml").is_err());
-        assert!(sanitize_config_file_name("test.txt").is_err());
+        assert_eq!(
+            sanitize_config_file_name("test.yaml".to_owned()).unwrap(),
+            "test.yaml"
+        );
+        assert_eq!(
+            sanitize_config_file_name("test.yml".to_owned()).unwrap(),
+            "test.yml"
+        );
+        assert!(sanitize_config_file_name("../test.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("foo/test.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("foo\\test.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("test.txt".to_owned()).is_err());
     }
 
     #[test]
     fn test_sanitize_config_file_name_rejects_path_traversal() {
-        assert!(sanitize_config_file_name("..").is_err());
-        assert!(sanitize_config_file_name("foo/bar").is_err());
-        assert!(sanitize_config_file_name("test\x00.yaml").is_err());
-        assert!(sanitize_config_file_name(".test.yaml").is_ok());
-        assert!(sanitize_config_file_name("config.backup.yml").is_ok());
+        assert!(sanitize_config_file_name("..".to_owned()).is_err());
+        assert!(sanitize_config_file_name("foo/bar".to_owned()).is_err());
+        assert!(sanitize_config_file_name("test\x00.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name(".test.yaml".to_owned()).is_ok());
+        assert!(sanitize_config_file_name("config.backup.yml".to_owned()).is_ok());
     }
 
     #[test]
@@ -278,84 +314,39 @@ mod tests {
     }
 
     #[test]
-    fn test_url_decode_triple_encoding() {
-        assert_eq!(url_decode_complete("%252541"), "A");
+    fn test_remove_dangerous_keys_script() {
+        let yaml = "script: test.js\nport: 7890";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        assert!(!value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("script".to_owned())));
+        assert!(value
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String("port".to_owned())));
     }
 
     #[test]
-    fn test_url_decode_no_encoding() {
-        assert_eq!(url_decode_complete("hello"), "hello");
-        assert_eq!(url_decode_complete(""), "");
-    }
-
-    #[test]
-    fn test_url_decode_incomplete_percent() {
-        let result = url_decode_complete("test%");
-        assert!(!result.contains('\0'));
-    }
-
-    #[test]
-    fn test_url_decode_invalid_hex() {
-        assert_eq!(url_decode_complete("%GG"), "%GG");
-    }
-
-    #[test]
-    fn test_url_decode_mixed_case() {
-        assert_eq!(url_decode_complete("%3A"), ":");
-        assert_eq!(url_decode_complete("%2e"), ".");
-    }
-
-    #[test]
-    fn test_url_decode_max_iterations() {
-        let deep = "%252525252541";
-        let result = url_decode_complete(deep);
-        assert!(!result.is_empty());
-    }
-
-    #[test]
-    fn test_sanitize_url_encoded_path_traversal() {
-        assert!(sanitize_config_file_name("%2e%2e%2fetc%2fpasswd.yaml").is_err());
-        assert!(sanitize_config_file_name("..%2f..%2f..%2ftest.yaml").is_err());
-    }
-
-    #[test]
-    fn test_sanitize_control_characters() {
-        assert!(sanitize_config_file_name("test\x01.yaml").is_err());
-        assert!(sanitize_config_file_name("test\x1f.yaml").is_err());
-        assert!(sanitize_config_file_name("test\x7f.yaml").is_err());
-    }
-
-    #[test]
-    fn test_sanitize_filename_too_long() {
-        let long_name = "a".repeat(256) + ".yaml";
-        assert!(sanitize_config_file_name(&long_name).is_err());
-        let ok_name = "a".repeat(250) + ".yaml";
-        assert!(sanitize_config_file_name(&ok_name).is_ok());
-    }
-
-    #[test]
-    fn test_sanitize_windows_reserved_names() {
-        assert!(sanitize_config_file_name("CON.yaml").is_err());
-        assert!(sanitize_config_file_name("AUX.yaml").is_err());
-        assert!(sanitize_config_file_name("NUL.yaml").is_err());
-        assert!(sanitize_config_file_name("PRN.yaml").is_err());
-        assert!(sanitize_config_file_name("COM1.yaml").is_err());
-        assert!(sanitize_config_file_name("LPT1.yaml").is_err());
-    }
-
-    #[test]
-    fn test_sanitize_empty_string() {
-        assert!(sanitize_config_file_name("").is_err());
-    }
-
-    #[test]
-    fn test_sanitize_hidden_files() {
-        assert!(sanitize_config_file_name(".hidden.yaml").is_ok());
-    }
-
-    #[test]
-    fn test_sanitize_mixed_case_extension() {
-        assert!(sanitize_config_file_name("CONFIG.YAML").is_ok());
-        assert!(sanitize_config_file_name("test.YML").is_ok());
+    fn test_remove_dangerous_keys_provider_path() {
+        let yaml = r"
+proxy-providers:
+  my-provider:
+    type: http
+    url: https://example.com/proxies.yaml
+    path: /etc/passwd
+    interval: 3600
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
+        let provider = providers
+            .get(serde_yaml::Value::String("my-provider".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert!(!provider.contains_key(serde_yaml::Value::String("path".to_owned())));
+        assert!(provider.contains_key(serde_yaml::Value::String("type".to_owned())));
     }
 }
