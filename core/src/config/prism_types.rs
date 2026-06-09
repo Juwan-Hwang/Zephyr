@@ -1,56 +1,62 @@
-//! Shared types, constants, and utility functions for the Prism module.
+//! Prism rule types and utility functions — migrated from `src-tauri/src/prism/types.rs`.
+//!
+//! Only pure functions and data types are migrated.
+//! File I/O functions (read_json, write_json, etc.) remain in src-tauri.
 
 use serde::{Deserialize, Serialize};
 
-use zephyr_core::config::sanitizer::{sanitize_base_filename, url_decode_complete};
+use super::sanitizer::{sanitize_base_filename, url_decode_complete};
+use crate::error::AppError;
 
 /// Maximum allowed size for user-supplied text inputs (10 MB).
 pub const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
 
-// ===========================================================================
-// Serializable types
-// ===========================================================================
+// ── Data types ────────────────────────────────────────────────────────────
 
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Serialize)]
 pub struct RuleFileInfo {
     pub filename: String,
-    pub rule_count: usize,
+    pub rule_count: u64,
     pub source: String,
 }
 
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Serialize, Deserialize)]
 pub struct RuleGroup {
     pub name: String,
     pub files: Vec<String>,
 }
 
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Serialize, Deserialize)]
 pub struct RuleGroups {
     pub groups: Vec<RuleGroup>,
 }
 
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Serialize, Deserialize)]
 pub struct PrismSettings {
     pub auto_apply: bool,
 }
 
-// ===========================================================================
-// Utility functions
-// ===========================================================================
+// ── Utility functions ─────────────────────────────────────────────────────
 
 /// Reject inputs that exceed `MAX_INPUT_SIZE`.
-pub fn check_input_size(input: &str, label: &str) -> Result<(), String> {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn check_input_size(input: &str, label: &str) -> Result<(), AppError> {
     if input.len() > MAX_INPUT_SIZE {
-        return Err(format!(
+        return Err(AppError::ParseError(format!(
             "{label} too large ({} bytes, max {MAX_INPUT_SIZE} bytes)",
             input.len()
-        ));
+        )));
     }
     Ok(())
 }
 
 /// Validate that a plugin ID is a simple name (no path traversal).
-pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn validate_plugin_id(plugin_id: &str) -> Result<(), AppError> {
     const MAX_PLUGIN_ID_LEN: usize = 128;
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
     let decoded = url_decode_complete(plugin_id);
@@ -61,32 +67,29 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
         || decoded.contains("..")
         || decoded.contains('\0')
     {
-        return Err(String::from(
-            "Invalid plugin ID: contains unsafe characters or exceeds length limit",
+        return Err(AppError::ConfigError(
+            "Invalid plugin ID: contains unsafe characters or exceeds length limit".to_owned(),
         ));
     }
     Ok(())
 }
 
 /// Sanitize a user-supplied filename to prevent path traversal and injection attacks.
-///
-/// Returns an error if the filename is empty, contains path traversal components,
-/// or contains disallowed characters. Does NOT add the `.prism.yaml` extension;
-/// callers should use `ensure_prism_ext` afterward when needed.
-pub fn sanitize_filename(name: &str) -> Result<String, String> {
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn sanitize_filename(name: &str) -> Result<String, AppError> {
     // Pre-process: strip characters that sanitize_base_filename would reject,
     // so they are silently removed instead of causing an error.
-    // Prism filenames are always flat (no subdirectories), so directory
-    // separators and control characters can be safely stripped.
     let preprocessed: String = name
         .chars()
         .filter(|c| *c != '/' && *c != '\\' && !c.is_control() && *c != '\0')
         .collect();
 
-    let base = sanitize_base_filename(preprocessed).map_err(|e| e.to_string())?;
+    let base = sanitize_base_filename(preprocessed)?;
 
     if base.is_empty() {
-        return Err("Filename must not be empty".to_owned());
+        return Err(AppError::ConfigError(
+            "Filename must not be empty".to_owned(),
+        ));
     }
 
     // Prism-specific: only allow alphanumeric, hyphens, underscores, dots,
@@ -111,14 +114,17 @@ pub fn sanitize_filename(name: &str) -> Result<String, String> {
         .collect();
 
     if allowed.is_empty() {
-        return Err("Filename contains no allowed characters".to_owned());
+        return Err(AppError::ConfigError(
+            "Filename contains no allowed characters".to_owned(),
+        ));
     }
 
     Ok(allowed)
 }
 
-#[must_use]
 /// Ensure the filename ends with `.prism.yaml`.
+#[must_use]
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn ensure_prism_ext(name: &str) -> String {
     if name.ends_with(".prism.yaml") {
         name.to_owned()
@@ -127,13 +133,12 @@ pub fn ensure_prism_ext(name: &str) -> String {
     }
 }
 
-#[must_use]
 /// Count rule lines in a .prism.yaml content string.
-/// Rules are top-level sequence items under `rules:` that start with `- ` and
-/// contain a comma (the standard Clash/Surge rule format).
-pub fn count_rules(content: &str) -> usize {
+#[must_use]
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn count_rules(content: &str) -> u64 {
     let mut in_rules = false;
-    let mut count = 0usize;
+    let mut count = 0u64;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == "rules:" {
@@ -156,25 +161,13 @@ pub fn count_rules(content: &str) -> usize {
     count
 }
 
-/// Sanitize a rule filename and resolve its full path within the prism directory.
-/// Returns an error if the filename is invalid or doesn't end with `.prism.yaml`.
-pub fn resolve_rule_path(
-    prism_dir: &std::path::Path,
-    filename: &str,
-) -> Result<std::path::PathBuf, String> {
-    let safe = sanitize_filename(filename)?;
-    if !safe.ends_with(".prism.yaml") {
-        return Err("Filename must end with .prism.yaml".to_owned());
-    }
-    Ok(prism_dir.join(&safe))
-}
-
-#[must_use]
 /// Detect the source format of rule text.
-pub fn detect_source(content: &str) -> &'static str {
+#[must_use]
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn detect_source(content: &str) -> String {
     let trimmed = content.trim();
     if trimmed.is_empty() {
-        return "empty";
+        return "empty".to_owned();
     }
     // Surge / S-R format: lines like "DOMAIN,example.com,REJECT"
     let surge_count = trimmed
@@ -193,16 +186,16 @@ pub fn detect_source(content: &str) -> &'static str {
         })
         .count();
     if clash_count > surge_count {
-        "clash"
+        "clash".to_owned()
     } else if surge_count > 0 {
-        "surge"
+        "surge".to_owned()
     } else {
-        "unknown"
+        "unknown".to_owned()
     }
 }
 
-#[must_use]
 /// Convert raw rule text (Surge/S-R or Clash format) into .prism.yaml content.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn normalize_to_prism_yaml(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -212,7 +205,7 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
 
     const BUILTIN_POLICIES: &[&str] = &["DIRECT", "REJECT", "PASS"];
 
-    let rules: Vec<String> = match source {
+    let rules: Vec<String> = match source.as_str() {
         "surge" => trimmed
             .lines()
             .filter(|l| {
@@ -243,20 +236,12 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
             })
             .collect(),
     };
-    // Wrap rules under $append so Prism Engine injects them at the end
-    // of the rules array instead of replacing the entire array.
     format!("rules:\n  $append:\n{}\n", rules.join("\n"))
 }
 
 /// Replace the policy field in a rule line with {{proxy}} if it's not a built-in policy.
-/// This makes imported rules cross-subscription compatible.
-///
-/// Standard rules: "DOMAIN-SUFFIX,example.com,Proxy" → "DOMAIN-SUFFIX,example.com,{{proxy}}"
-/// MATCH/FINAL:   "MATCH,Proxy" → "MATCH,{{proxy}}"
 fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
     let parts: Vec<&str> = rule.splitn(4, ',').collect();
-    // MATCH/FINAL rules always have the policy at index 1 (regardless of
-    // additional options like "no-resolve"). All other rules use index 2.
     let is_match_final = parts
         .first()
         .is_some_and(|t| t.eq_ignore_ascii_case("MATCH") || t.eq_ignore_ascii_case("FINAL"));
@@ -271,7 +256,6 @@ fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
     if builtin.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
         return rule.to_owned();
     }
-    // Reconstruct: replace only the policy_index field with {{proxy}}
     parts
         .iter()
         .enumerate()
@@ -280,57 +264,80 @@ fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
         .join(",")
 }
 
-/// Read and parse a JSON file from the prism directory.
-/// Returns the default value if the file does not exist.
-pub fn read_json<T: serde::de::DeserializeOwned>(
-    dir: &std::path::Path,
-    filename: &str,
-    default: fn() -> T,
-) -> Result<T, String> {
-    let path = dir.join(filename);
-    if !path.exists() {
-        return Ok(default());
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_input_size_ok() {
+        assert!(check_input_size("hello", "test").is_ok());
     }
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {filename}: {e}"))?;
-    serde_json::from_str(&content).map_err(|e| format!("Failed to parse {filename}: {e}"))
-}
 
-/// Write a serializable value as pretty-printed JSON to the prism directory.
-pub fn write_json<T: serde::Serialize>(
-    dir: &std::path::Path,
-    filename: &str,
-    data: &T,
-) -> Result<(), String> {
-    let path = dir.join(filename);
-    let content = serde_json::to_string_pretty(data)
-        .map_err(|e| format!("Failed to serialize {filename}: {e}"))?;
-    crate::core_manager::write_file_secure(&path, &content)
-}
+    #[test]
+    fn test_check_input_size_too_large() {
+        let big = "x".repeat(MAX_INPUT_SIZE + 1);
+        assert!(check_input_size(&big, "test").is_err());
+    }
 
-/// Read and parse groups.json from the prism directory.
-pub fn read_groups(prism_dir: &std::path::Path) -> Result<RuleGroups, String> {
-    read_json(prism_dir, "groups.json", || RuleGroups {
-        groups: Vec::new(),
-    })
-}
+    #[test]
+    fn test_validate_plugin_id_ok() {
+        assert!(validate_plugin_id("my-plugin").is_ok());
+    }
 
-/// Write groups.json to the prism directory.
-pub fn write_groups(prism_dir: &std::path::Path, groups: &RuleGroups) -> Result<(), String> {
-    write_json(prism_dir, "groups.json", groups)
-}
+    #[test]
+    fn test_validate_plugin_id_traversal() {
+        assert!(validate_plugin_id("../etc/passwd").is_err());
+    }
 
-/// Read `auto_apply` from settings.json in prism directory.
-pub fn read_prism_settings(prism_dir: &std::path::Path) -> Result<PrismSettings, String> {
-    read_json(prism_dir, "settings.json", || PrismSettings {
-        auto_apply: false,
-    })
-}
+    #[test]
+    fn test_sanitize_filename_simple() {
+        assert_eq!(sanitize_filename("test-rule").unwrap(), "test-rule");
+    }
 
-/// Write settings.json to the prism directory.
-pub fn write_prism_settings(
-    prism_dir: &std::path::Path,
-    settings: &PrismSettings,
-) -> Result<(), String> {
-    write_json(prism_dir, "settings.json", settings)
+    #[test]
+    fn test_sanitize_filename_traversal() {
+        // Pre-processing removes / and \, so the result is a sanitized name, not an error.
+        // The dots are preserved but the path separators are removed, making it safe.
+        let result = sanitize_filename("../../etc/passwd").unwrap();
+        assert!(!result.contains('/'));
+        assert!(!result.contains('\\'));
+    }
+
+    #[test]
+    fn test_ensure_prism_ext_with_ext() {
+        assert_eq!(ensure_prism_ext("test.prism.yaml"), "test.prism.yaml");
+    }
+
+    #[test]
+    fn test_ensure_prism_ext_without_ext() {
+        assert_eq!(ensure_prism_ext("test"), "test.prism.yaml");
+    }
+
+    #[test]
+    fn test_count_rules() {
+        let content = "rules:\n  - DOMAIN,example.com,REJECT\n  - DOMAIN-SUFFIX,test.com,DIRECT\n";
+        assert_eq!(count_rules(content), 2);
+    }
+
+    #[test]
+    fn test_detect_source_surge() {
+        let content = "DOMAIN,example.com,REJECT\nDOMAIN-SUFFIX,test.com,DIRECT\n";
+        assert_eq!(detect_source(content), "surge");
+    }
+
+    #[test]
+    fn test_detect_source_clash() {
+        let content = "- DOMAIN,example.com,REJECT\n- DOMAIN-SUFFIX,test.com,DIRECT\n";
+        assert_eq!(detect_source(content), "clash");
+    }
+
+    #[test]
+    fn test_normalize_to_prism_yaml() {
+        let raw = "DOMAIN,example.com,REJECT\nDOMAIN-SUFFIX,test.com,Proxy\n";
+        let result = normalize_to_prism_yaml(raw);
+        assert!(result.starts_with("rules:"));
+        assert!(result.contains("{{proxy}}"));
+        assert!(result.contains("REJECT"));
+    }
 }

@@ -1,0 +1,11 @@
+[package]
+name = "zephyr-core-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+zephyr-core = { path = "../..", features = ["uniffi"] }
+uniffi = "0.28"

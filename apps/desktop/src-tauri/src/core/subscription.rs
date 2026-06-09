@@ -1,32 +1,13 @@
-use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
-use std::net::IpAddr;
 use std::time::Duration;
 use tauri::{AppHandle, Manager as _, State};
 
-use super::config_sanitizer::remove_dangerous_keys;
 use super::fetch_util::fetch_url_content;
-
-/// Quote `short-id` values in YAML content before parsing.
-/// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
-fn quote_short_id_values(content: &str) -> String {
-    // Regex: match "short-id:" at line start, capture the unquoted value
-    // (?:^|\n) = line start, (\s*short-id:\s*) = key with indent,
-    // ([^\s"'\n][^\s\n]*) = unquoted value (not starting with quote)
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
-        }
-    });
-    re.replace_all(content, |caps: &regex::Captures| {
-        let prefix = &caps[1];
-        let value = &caps[2];
-        let newline = if caps[0].starts_with('\n') { "\n" } else { "" };
-        format!("{newline}{prefix}\"{value}\"")
-    })
-    .into_owned()
-}
+use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
+use zephyr_core::config::subscription::{
+    classify_sub_error, extract_name_from_rules, is_private_host, is_private_ip,
+    parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
+    try_decode_base64_content, validate_subscription_name, validate_subscription_url_with_ip,
+};
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{load_metadata, save_metadata};
@@ -34,143 +15,6 @@ use super::secure_io::write_file_secure;
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 #[allow(unused_imports)]
 use crate::emit_warn;
-
-// ── Pure functions for subscription content sanitization ─────────────────
-
-/// Extract a name from the rules' policy-group field.
-/// Scans up to 10 rules, returns the first non-generic policy-group name.
-/// Example: `DOMAIN-SUFFIX,abpchina.org,VPN07` → `Some("VPN07")`
-/// Returns `None` if rules are empty, unparseable, or all names are generic.
-fn extract_name_from_rules(content: &str) -> Option<String> {
-    let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
-
-    let rules_seq = yaml.get("rules").and_then(|r| r.as_sequence())?;
-
-    if rules_seq.is_empty() {
-        return None;
-    }
-
-    let max_scan = 10.min(rules_seq.len());
-    for rule_val in rules_seq.iter().take(max_scan) {
-        let rule_str = match rule_val.as_str() {
-            Some(s) => s,
-            None => continue, // Skip non-string rules (e.g. mappings)
-        };
-
-        // Split by comma, take the 3rd field (policy-group name)
-        // Format: TYPE,MATCH,policy-group[,options...]
-        let name = match rule_str.split(',').nth(2) {
-            Some(n) => n.trim(),
-            None => continue,
-        };
-
-        // Skip generic / built-in names (case-insensitive)
-        let upper = name.to_uppercase();
-        if upper.is_empty()
-            || upper == "DIRECT"
-            || upper == "REJECT"
-            || upper == "MATCH"
-            || upper == "PROXY"
-            || upper == "PASS"
-            || upper == "DROP"
-        {
-            continue;
-        }
-
-        // Sanity: reasonable length and safe filename characters
-        // Allow letters (including CJK), digits, hyphens, underscores, spaces
-        if name.len() > 64 {
-            continue;
-        }
-        let is_safe = name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
-        if !is_safe {
-            continue;
-        }
-
-        return Some(name.to_owned());
-    }
-
-    None
-}
-
-/// Parse filename from a Content-Disposition header value.
-/// Supports both `filename="name"` and `filename*=UTF-8''encoded_name` (RFC 5987).
-fn parse_content_disposition_filename(header_value: &str) -> Option<String> {
-    // Try filename*= first (RFC 5987, takes precedence)
-    for raw_part in header_value.split(';') {
-        let part = raw_part.trim();
-        if let Some(raw_encoded) = part.strip_prefix("filename*=") {
-            let encoded = raw_encoded.trim_matches('"');
-            // Format: charset''percent-encoded-name
-            if let Some(name) = encoded.split("''").last() {
-                let decoded = percent_decode(name);
-                let trimmed = decoded.trim();
-                if !trimmed.is_empty() {
-                    return Some(trimmed.to_owned());
-                }
-            }
-        }
-    }
-    // Fallback to filename=
-    for raw_part in header_value.split(';') {
-        let part = raw_part.trim();
-        if let Some(filename) = part.strip_prefix("filename=") {
-            let trimmed = filename.trim_matches('"').trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-    }
-    None
-}
-
-/// Decode percent-encoded string (e.g. "%E4%B8%AD%E6%96%87" → "中文").
-fn percent_decode(input: &str) -> String {
-    let mut result = Vec::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes.get(i) == Some(&b'%') && i + 2 < bytes.len() {
-            if let Some(hex) = bytes.get(i + 1..i + 3) {
-                if let Ok(byte) = u8::from_str_radix(&String::from_utf8_lossy(hex), 16) {
-                    result.push(byte);
-                    i += 3;
-                    continue;
-                }
-            }
-        }
-        if let Some(&b) = bytes.get(i) {
-            result.push(b);
-        }
-        i += 1;
-    }
-    String::from_utf8(result).unwrap_or_else(|_| input.to_owned())
-}
-
-/// Attempt to base64-decode content that does not already contain Clash markers.
-/// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
-/// and contain a `proxies:` key (required for a valid Clash config).
-fn try_decode_base64_content(content: &str) -> Option<String> {
-    let trimmed = content.replace(&['\r', '\n', ' ', '\t'][..], "");
-    let decoded_bytes = base64_standard.decode(&trimmed).ok()?;
-    let decoded_str = String::from_utf8(decoded_bytes).ok()?;
-    let yaml_val: serde_yaml::Value = serde_yaml::from_str(&decoded_str).ok()?;
-    // Validate it looks like a Clash config: must have proxies (array)
-    let has_proxies = yaml_val
-        .get("proxies")
-        .is_some_and(serde_yaml::Value::is_sequence);
-    has_proxies.then_some(decoded_str)
-}
-
-/// Validate and sanitize a subscription name to prevent path traversal and injection attacks.
-fn validate_subscription_name(name: &str) -> Result<String, String> {
-    if name.is_empty() {
-        return Err("Subscription name cannot be empty".to_owned());
-    }
-    super::config_sanitizer::sanitize_base_filename(name)
-}
 
 fn build_http_client_with_proxy(
     user_agent: Option<&str>,
@@ -274,124 +118,6 @@ fn build_http_client_with_proxy(
     client_builder.build().map_err(|e| e.to_string())
 }
 
-/// Check if an IP address is private or local
-pub(crate) const fn is_private_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ipv4) => {
-            ipv4.is_private()
-                || ipv4.is_loopback()
-                || ipv4.is_link_local()
-                || ipv4.is_broadcast()
-                || ipv4.is_documentation()
-                || ipv4.is_unspecified()
-        }
-        IpAddr::V6(ipv6) => {
-            ipv6.is_loopback() ||
-            ipv6.is_unspecified() ||
-            (ipv6.segments()[0] & 0xfe00) == 0xfc00 || // Unique Local Address
-            (ipv6.segments()[0] & 0xff00) == 0xfe00 // Link Local Address
-        }
-    }
-}
-
-/// Check if a host is a private or local address (SSRF protection)
-pub(crate) fn is_private_host(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
-
-    // Only allow these local hostname patterns for user-entered private addresses:
-    // - localhost / *.localhost (standard loopback)
-    // - *.local (mDNS / local network)
-    // Note: .test/.example/.invalid are IANA reserved but not commonly used for
-    // actual local services. We exclude them for stricter security boundaries.
-    if host_lower == "localhost"
-        || host_lower.ends_with(".localhost")
-        || host_lower.ends_with(".local")
-    {
-        return true;
-    }
-
-    // If it's a direct IP address, check it
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return is_private_ip(ip);
-    }
-
-    false
-}
-
-/// Validate URL and its resolved IPs for SSRF protection.
-/// Returns `(host, resolved_addr, user_entered_private)` where `user_entered_private`
-/// is `true` only when the host itself is a private/local address (e.g. `192.168.x.x`,
-/// `10.x.x.x`, `localhost`). In that case the request is allowed but DNS pinning is
-/// skipped so the proxy/system can resolve it.
-///
-/// Security boundary:
-/// - **Allowed**: user explicitly enters a private host → skip DNS pinning.
-/// - **Rejected**: public domain resolves to a private IP → SSRF, blocked.
-/// - **Rejected**: redirect to a private address → blocked by `redirect_policy`.
-pub(crate) fn validate_subscription_url_with_ip(
-    url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
-
-    // Only allow http and https schemes
-    let scheme = parsed_url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err("Only HTTP and HTTPS URLs are allowed".to_owned());
-    }
-
-    // Extract host
-    let host = parsed_url.host_str().ok_or("URL must have a host")?;
-
-    // Check if user explicitly entered a private/local host.
-    // This is the ONLY case where private IPs are allowed.
-    let user_entered_private = is_private_host(host);
-
-    if user_entered_private {
-        // User explicitly typed a private address (e.g. http://192.168.1.2/sub).
-        // Allow it, but return None for resolved_addr (no DNS pinning).
-        return Ok((host.to_owned(), None, true));
-    }
-
-    // Host is a public domain — resolve and verify all IPs are public.
-    // Fix Med-3: DNS Rebinding / SSRF TOCTOU
-    let default_port = if scheme == "https" { 443 } else { 80 };
-    let addrs: Vec<std::net::SocketAddr> =
-        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
-            .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
-            .collect();
-
-    validate_public_host_addrs(host, &addrs)
-}
-
-/// Core validation logic for a public host's resolved addresses.
-/// Extracted so tests can inject mock DNS results without real DNS.
-fn validate_public_host_addrs(
-    host: &str,
-    addrs: &[std::net::SocketAddr],
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    let mut resolved_addr = None;
-
-    for addr in addrs {
-        if is_private_ip(addr.ip()) {
-            // Public domain resolving to a private IP = SSRF, always block.
-            return Err(format!(
-                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed. \
-                 If this is a trusted internal subscription, enter the private address directly (e.g. http://192.168.x.x) instead of using a domain name.",
-                host, addr.ip()
-            ));
-        }
-        if resolved_addr.is_none() {
-            resolved_addr = Some(*addr);
-        }
-    }
-
-    if resolved_addr.is_none() {
-        return Err("Could not resolve any IP address for the host".to_owned());
-    }
-
-    Ok((host.to_owned(), resolved_addr, false))
-}
-
 async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> {
     if let Some(content_length) = resp.content_length() {
         if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
@@ -444,7 +170,7 @@ pub(crate) async fn download_sub_inner(
 ) -> Result<String, String> {
     download_sub_inner_raw(app, url, name, user_agent, overwrite)
         .await
-        .map_err(|e| redact_url_in_string(&e))
+        .map_err(redact_url_in_string)
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -455,7 +181,7 @@ async fn download_sub_inner_raw(
     user_agent: Option<String>,
     overwrite: bool,
 ) -> Result<String, String> {
-    let safe_name = validate_subscription_name(&name)?;
+    let safe_name = validate_subscription_name(&name).map_err(|e| e.to_string())?;
 
     let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
     // For user-entered private addresses, skip DNS pinning (proxy/system handles resolution).
@@ -579,7 +305,7 @@ async fn download_sub_inner_raw(
                     last_error = match direct_error.as_deref() {
                         Some(de) => format!("{de} | Proxy client build: {e}"),
                         None => format!("Proxy client build: {e}"),
-                    };
+                    }
                 }
             }
         }
@@ -662,7 +388,8 @@ async fn download_sub_inner_raw(
         }
     }
 
-    clean_name = super::config_sanitizer::sanitize_config_file_name(&clean_name)?;
+    clean_name = zephyr_core::config::sanitizer::sanitize_config_file_name(clean_name)
+        .map_err(|e| e.to_string())?;
 
     // When overwrite is true (updating an existing subscription), write directly.
     // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
@@ -697,7 +424,8 @@ async fn download_sub_inner_raw(
     }
 
     let target_path = paths.profiles_dir.join(&clean_name);
-    super::config_sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)?;
+    zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)
+        .map_err(|e| e.to_string())?;
 
     let mut metadata = load_metadata(&paths);
     // Preserve existing auto_update_interval to avoid silently disabling scheduled updates
@@ -779,105 +507,9 @@ async fn download_sub_inner_raw(
     Ok(format!("Config saved as {clean_name}"))
 }
 
-/// Determine the appropriate error code based on the error message content.
-fn classify_sub_error(e: &str) -> u16 {
-    use crate::backend_event::codes::{
-        SUB_DNS_FAILED, SUB_HTTP_ERROR, SUB_NAME_INVALID, SUB_NETWORK_ERROR,
-        SUB_RESPONSE_TOO_LARGE, SUB_SSRF_BLOCKED, SUB_UPDATE_FAILED, SUB_UPDATE_TIMEOUT,
-        SUB_URL_INVALID, SUB_YAML_INVALID,
-    };
-    if e.contains("SSRF protection") {
-        SUB_SSRF_BLOCKED
-    } else if e.contains("DNS resolution failed") || e.contains("Could not resolve") {
-        SUB_DNS_FAILED
-    } else if e.contains("Invalid URL")
-        || e.contains("Only HTTP")
-        || e.contains("must have a host")
-        || e.contains("URL must not be empty")
-    {
-        SUB_URL_INVALID
-    } else if e.contains("Subscription name")
-        || e.contains("Path traversal detected")
-        || e.contains("Invalid character in filename")
-        || e.contains("Filename too long")
-        || e.contains("Reserved filename")
-        || e.contains("Invalid file type")
-    {
-        SUB_NAME_INVALID
-    } else if e.contains("HTTP ") {
-        SUB_HTTP_ERROR
-    } else if e.contains("timeout") || e.contains("Timeout") {
-        SUB_UPDATE_TIMEOUT
-    } else if e.contains("Response too large") || e.contains("exceeded size limit") {
-        SUB_RESPONSE_TOO_LARGE
-    } else if e.contains("Invalid YAML")
-        || e.contains("YAML structure")
-        || e.contains("neither a valid Clash YAML")
-    {
-        SUB_YAML_INVALID
-    } else if e.contains("Connection failed")
-        || e.contains("Network error")
-        || e.contains("Request error")
-        || e.contains("Direct:")
-        || e.contains("Proxy:")
-    {
-        SUB_NETWORK_ERROR
-    } else {
-        SUB_UPDATE_FAILED
-    }
-}
-
-fn redact_url_in_string(s: &str) -> String {
-    // Strip query parameters, username, and password from any http(s) URL in the string.
-    // This prevents leaking subscription tokens to logs and frontend.
-    // Reuses the same reqwest::Url parsing as config_manager::mask_url.
-    let mut result = s.to_owned();
-    let mut start_idx = 0;
-    while start_idx < result.len() {
-        let remaining = &result[start_idx..];
-        let found_http = remaining.find("http://");
-        let found_https = remaining.find("https://");
-        let found_offset = found_http.into_iter().chain(found_https).min();
-        let Some(offset) = found_offset else {
-            break;
-        };
-        let start = start_idx + offset;
-        // Find end of URL (whitespace or end of string)
-        let mut url_end = result[start..]
-            .find(|c: char| c.is_whitespace())
-            .map(|pos| start + pos)
-            .unwrap_or(result.len());
-        // Trim trailing punctuation/delimiters that are likely not part of the URL
-        while url_end > start {
-            let last_char = result[..url_end].chars().next_back();
-            if let Some(c) = last_char {
-                if matches!(
-                    c,
-                    ')' | ']' | '}' | '>' | '"' | '\'' | ',' | '.' | ';' | ':'
-                ) {
-                    url_end -= c.len_utf8();
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-        let url_str = &result[start..url_end];
-        if reqwest::Url::parse(url_str).is_ok() {
-            let redacted = super::config_manager::mask_url(url_str);
-            result.replace_range(start..url_end, &redacted);
-            start_idx = start + redacted.len();
-        } else {
-            start_idx = start + 4; // Skip past "http" to avoid infinite loop
-        }
-    }
-    result
-}
-
 fn log_sub_update_failure(name: &str, err: &str) {
-    let code = classify_sub_error(err);
-    let redacted_err = redact_url_in_string(err);
+    let code = classify_sub_error(err.to_owned());
+    let redacted_err = redact_url_in_string(err.to_owned());
     crate::backend_event::emit_backend_event(&crate::backend_event::BackendEvent::error(
         crate::backend_event::BackendModule::Subscription,
         code,
@@ -946,7 +578,7 @@ pub async fn download_sub_batch(
                 results.push(BatchUpdateResult {
                     name,
                     success: false,
-                    error: Some(redact_url_in_string(&e)),
+                    error: Some(redact_url_in_string(e)),
                 });
                 continue;
             }
@@ -991,7 +623,10 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::*;
+    use zephyr_core::config::subscription::{
+        is_private_host, is_private_ip, quote_short_id_values, validate_public_host_addrs,
+        validate_subscription_name, validate_subscription_url_with_ip,
+    };
 
     #[test]
     fn test_is_private_ip_v4() {
@@ -1045,32 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_decode_base64_content() {
-        // Valid base64-encoded Clash config
-        let yaml = "proxies:\n  - name: test\n    type: ss\n    port: 443";
-        let encoded = base64_standard.encode(yaml);
-        let result = try_decode_base64_content(&encoded);
-        assert!(result.is_some());
-        assert!(result.unwrap().contains("proxies:"));
-
-        // Non-base64 content should return None
-        assert!(try_decode_base64_content("not base64 at all!!!").is_none());
-
-        // Valid base64 but not YAML should return None
-        let not_yaml = base64_standard.encode("just some random text");
-        assert!(try_decode_base64_content(&not_yaml).is_none());
-
-        // Valid base64 YAML but no proxies key should return None
-        let no_proxies = "some_key: value\nother: thing";
-        let encoded_no_proxies = base64_standard.encode(no_proxies);
-        assert!(try_decode_base64_content(&encoded_no_proxies).is_none());
-    }
-
-    // ── validate_subscription_url_with_ip: user-entered private hosts ──
-
-    #[test]
     fn test_validate_private_ip_allowed() {
-        // User explicitly enters a private IP → allowed, no DNS pinning
         let result = validate_subscription_url_with_ip("http://192.168.1.2/sub");
         assert!(result.is_ok());
         let (host, resolved_addr, user_entered_private) = result.unwrap();
@@ -1108,11 +718,8 @@ mod tests {
         assert!(user_entered_private);
     }
 
-    // ── validate_subscription_url_with_ip: public hosts ──
-
     #[test]
     fn test_validate_public_ip_returns_pin() {
-        // Public IP like 8.8.8.8 → allowed with DNS pinning
         let result = validate_subscription_url_with_ip("http://8.8.8.8/sub");
         assert!(result.is_ok());
         let (host, resolved_addr, user_entered_private) = result.unwrap();
@@ -1136,8 +743,6 @@ mod tests {
         assert!(validate_subscription_url_with_ip("http:///sub").is_err());
     }
 
-    // ── validate_public_host_addrs: mock DNS tests ──
-
     #[test]
     fn test_public_host_with_public_ip_allowed() {
         let addrs: Vec<std::net::SocketAddr> = vec!["1.2.3.4:80".parse().unwrap()];
@@ -1150,7 +755,6 @@ mod tests {
 
     #[test]
     fn test_public_host_resolving_to_private_ip_rejected() {
-        // Public domain resolves to 192.168.1.1 → SSRF, must be blocked
         let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("attacker.com", &addrs);
         assert!(result.is_err());
@@ -1173,7 +777,6 @@ mod tests {
 
     #[test]
     fn test_public_host_mixed_ips_rejected() {
-        // If ANY resolved IP is private, the whole thing is blocked
         let addrs: Vec<std::net::SocketAddr> = vec![
             "1.2.3.4:80".parse().unwrap(),
             "192.168.1.1:80".parse().unwrap(),
@@ -1189,8 +792,6 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Could not resolve"));
     }
-
-    // ── short-id value quoting tests ──
 
     #[test]
     fn test_quote_short_id_values_simple() {
