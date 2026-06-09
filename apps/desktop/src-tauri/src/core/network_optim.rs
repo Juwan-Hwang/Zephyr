@@ -9,6 +9,233 @@ pub struct NetworkOptimStatus {
     pub details: String,
 }
 
+// ---------------------------------------------------------------------------
+// Optimization level & platform config structs
+// ---------------------------------------------------------------------------
+
+/// Optimization level preset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OptimLevel {
+    Conservative,
+    #[default]
+    Balanced,
+    Aggressive,
+}
+
+fn get_optim_level() -> OptimLevel {
+    if let Ok(level_str) = std::env::var("ZEPHYR_NET_OPTIM_LEVEL") {
+        if level_str.eq_ignore_ascii_case("conservative") {
+            OptimLevel::Conservative
+        } else if level_str.eq_ignore_ascii_case("aggressive") {
+            OptimLevel::Aggressive
+        } else {
+            OptimLevel::Balanced
+        }
+    } else {
+        OptimLevel::Balanced
+    }
+}
+
+// -- Linux config --
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone)]
+struct LinuxTcpOptimConfig {
+    tcp_fastopen: u32,
+    tcp_ecn: u32,
+    rmem_max: u64,
+    wmem_max: u64,
+    tcp_rmem: (u32, u32, u64),
+    tcp_wmem: (u32, u32, u64),
+    tcp_notsent_lowat: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxTcpOptimConfig {
+    const fn conservative() -> Self {
+        Self {
+            tcp_fastopen: 1,
+            tcp_ecn: 2,
+            rmem_max: 8_388_608,
+            wmem_max: 16_777_216,
+            tcp_rmem: (4096, 131_072, 8_388_608),
+            tcp_wmem: (4096, 131_072, 16_777_216),
+            tcp_notsent_lowat: 65_536,
+        }
+    }
+
+    const fn balanced() -> Self {
+        Self {
+            tcp_fastopen: 3,
+            tcp_ecn: 1,
+            rmem_max: 16_777_216,
+            wmem_max: 33_554_432,
+            tcp_rmem: (4096, 262_144, 16_777_216),
+            tcp_wmem: (4096, 262_144, 33_554_432),
+            tcp_notsent_lowat: 131_072,
+        }
+    }
+
+    const fn aggressive() -> Self {
+        Self {
+            tcp_fastopen: 3,
+            tcp_ecn: 1,
+            rmem_max: 33_554_432,
+            wmem_max: 67_108_864,
+            tcp_rmem: (4096, 524_288, 33_554_432),
+            tcp_wmem: (4096, 524_288, 67_108_864),
+            tcp_notsent_lowat: 262_144,
+        }
+    }
+
+    const fn from_level(level: OptimLevel) -> Self {
+        match level {
+            OptimLevel::Conservative => Self::conservative(),
+            OptimLevel::Balanced => Self::balanced(),
+            OptimLevel::Aggressive => Self::aggressive(),
+        }
+    }
+
+    /// sysctl key names used for backup / restore validation.
+    const BACKUP_KEYS: &[&str] = &[
+        "net.ipv4.tcp_fastopen",
+        "net.ipv4.tcp_ecn",
+        "net.core.rmem_max",
+        "net.core.wmem_max",
+        "net.ipv4.tcp_rmem",
+        "net.ipv4.tcp_wmem",
+        "net.ipv4.tcp_notsent_lowat",
+    ];
+}
+
+// -- macOS config --
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+struct MacosTcpOptimConfig {
+    msl: u32,
+    fastopen: u32,
+    ecn: u32,
+}
+
+#[cfg(target_os = "macos")]
+impl MacosTcpOptimConfig {
+    const fn balanced() -> Self {
+        Self {
+            msl: 1000,
+            fastopen: 3,
+            ecn: 1,
+        }
+    }
+
+    const fn from_level(level: OptimLevel) -> Self {
+        match level {
+            // macOS only provides balanced for now; other levels map to balanced
+            OptimLevel::Conservative | OptimLevel::Balanced | OptimLevel::Aggressive => {
+                Self::balanced()
+            }
+        }
+    }
+}
+
+// -- Windows config --
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+struct WindowsTcpOptimConfig {
+    autotuninglevel: &'static str,
+    heuristics: &'static str,
+    initial_rto: u32,
+    fastopen: &'static str,
+    ecncapability: &'static str,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsTcpOptimConfig {
+    const fn balanced() -> Self {
+        Self {
+            autotuninglevel: "normal",
+            heuristics: "disabled",
+            initial_rto: 300,
+            fastopen: "enabled",
+            ecncapability: "enabled",
+        }
+    }
+
+    const fn from_level(level: OptimLevel) -> Self {
+        match level {
+            OptimLevel::Conservative | OptimLevel::Balanced | OptimLevel::Aggressive => {
+                Self::balanced()
+            }
+        }
+    }
+
+    /// Registry key names used for backup / restore validation.
+    const BACKUP_REGISTRY_KEYS: &[&str] = &[
+        "TcpFastOpen",
+        "TcpInitialRto",
+        "EcnCapability",
+        "TcpAutoTuningLevel",
+        "EnableTCPHeuristics",
+    ];
+
+    /// Build the netsh optimization commands from this config.
+    fn to_netsh_commands(&self) -> [(&'static str, [String; 5]); 5] {
+        [
+            (
+                "autotuninglevel",
+                [
+                    "int".into(),
+                    "tcp".into(),
+                    "set".into(),
+                    "global".into(),
+                    format!("autotuninglevel={}", self.autotuninglevel),
+                ],
+            ),
+            (
+                "heuristics",
+                [
+                    "int".into(),
+                    "tcp".into(),
+                    "set".into(),
+                    "heuristics".into(),
+                    self.heuristics.into(),
+                ],
+            ),
+            (
+                "initialRto",
+                [
+                    "int".into(),
+                    "tcp".into(),
+                    "set".into(),
+                    "global".into(),
+                    format!("initialRto={}", self.initial_rto),
+                ],
+            ),
+            (
+                "fastopen",
+                [
+                    "int".into(),
+                    "tcp".into(),
+                    "set".into(),
+                    "global".into(),
+                    format!("fastopen={}", self.fastopen),
+                ],
+            ),
+            (
+                "ecncapability",
+                [
+                    "int".into(),
+                    "tcp".into(),
+                    "set".into(),
+                    "global".into(),
+                    format!("ecncapability={}", self.ecncapability),
+                ],
+            ),
+        ]
+    }
+}
+
 /// Get the backup file path in the app's secure data directory.
 fn backup_path(app: &AppHandle) -> Option<std::path::PathBuf> {
     let dir = app.path().app_data_dir().ok()?;
@@ -29,6 +256,8 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
         "Applying network optimizations (Linux)..."
     );
 
+    let config = LinuxTcpOptimConfig::from_level(get_optim_level());
+
     // Use app data directory for backup (consistent with macOS/Windows)
     // Read sysctl values in Rust (user space) and write backup as normal user
     let backup =
@@ -39,16 +268,7 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
                 .map_err(|e| format!("Failed to create backup directory: {e}"))?;
         }
         let mut backup_lines = Vec::new();
-        const KEYS: &[&str] = &[
-            "net.ipv4.tcp_fastopen",
-            "net.ipv4.tcp_ecn",
-            "net.core.rmem_max",
-            "net.core.wmem_max",
-            "net.ipv4.tcp_rmem",
-            "net.ipv4.tcp_wmem",
-            "net.ipv4.tcp_notsent_lowat",
-        ];
-        for key in KEYS {
+        for key in LinuxTcpOptimConfig::BACKUP_KEYS {
             if let Ok(output) = std::process::Command::new("sysctl")
                 .args(["-n", key])
                 .output()
@@ -65,56 +285,10 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
         }
     }
 
-    #[allow(clippy::literal_string_with_formatting_args)]
-    let script = r#"set -e
-export PATH="/usr/sbin:/sbin:$PATH"
-
-# TCP Fast Open + ECN
-sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
-sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
-
-# HyStart: disable ACK train detection, keep RTT delay only
-modprobe tcp_cubic 2>/dev/null || true
-echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
-
-# TCP buffer limits (raise-only)
-curr_rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
-curr_rmem_max=${curr_rmem_max:-0}
-if [ "$curr_rmem_max" -lt 16777216 ] 2>/dev/null; then
-    sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
-fi
-curr_wmem_max=$(sysctl -n net.core.wmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
-curr_wmem_max=${curr_wmem_max:-0}
-if [ "$curr_wmem_max" -lt 33554432 ] 2>/dev/null; then
-    sysctl -w net.core.wmem_max=33554432 2>/dev/null || true
-fi
-read -r r_min r_def r_max <<< "$(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo "4096 262144 16777216")"
-r_min=${r_min:-4096}; r_def=${r_def:-262144}; r_max=${r_max:-16777216}
-if [ "$r_def" -lt 262144 ] 2>/dev/null; then r_def=262144; fi
-if [ "$r_max" -lt 16777216 ] 2>/dev/null; then r_max=16777216; fi
-sysctl -w "net.ipv4.tcp_rmem=$r_min $r_def $r_max" 2>/dev/null || true
-read -r w_min w_def w_max <<< "$(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo "4096 262144 33554432")"
-w_min=${w_min:-4096}; w_def=${w_def:-262144}; w_max=${w_max:-33554432}
-if [ "$w_def" -lt 262144 ] 2>/dev/null; then w_def=262144; fi
-if [ "$w_max" -lt 33554432 ] 2>/dev/null; then w_max=33554432; fi
-sysctl -w "net.ipv4.tcp_wmem=$w_min $w_def $w_max" 2>/dev/null || true
-sysctl -w net.ipv4.tcp_notsent_lowat=131072 2>/dev/null || true
-
-# Persist to /etc/sysctl.d so it survives reboot
-cat > /etc/sysctl.d/99-zephyr-tcp-tuning.conf << 'SYSEOF'
-# Zephyr TCP performance tuning
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_ecn = 1
-net.core.rmem_max = 16777216
-net.core.wmem_max = 33554432
-net.ipv4.tcp_rmem = 4096 262144 16777216
-net.ipv4.tcp_wmem = 4096 262144 33554432
-net.ipv4.tcp_notsent_lowat = 131072
-SYSEOF
-chmod 644 /etc/sysctl.d/99-zephyr-tcp-tuning.conf 2>/dev/null || true"#;
+    let script = generate_linux_optim_script(&config);
 
     let output = std::process::Command::new("pkexec")
-        .args(["bash", "-c", script, "bash"])
+        .args(["bash", "-c", &script, "bash"])
         .output()
         .map_err(|e| format!("Failed to execute pkexec: {e}"))?;
 
@@ -139,6 +313,69 @@ chmod 644 /etc/sysctl.d/99-zephyr-tcp-tuning.conf 2>/dev/null || true"#;
 }
 
 #[cfg(target_os = "linux")]
+fn generate_linux_optim_script(cfg: &LinuxTcpOptimConfig) -> String {
+    format!(
+        r#"set -e
+export PATH="/usr/sbin:/sbin:$PATH"
+
+# TCP Fast Open + ECN
+sysctl -w net.ipv4.tcp_fastopen={tcp_fastopen} 2>/dev/null || true
+sysctl -w net.ipv4.tcp_ecn={tcp_ecn} 2>/dev/null || true
+
+# HyStart: disable ACK train detection, keep RTT delay only
+modprobe tcp_cubic 2>/dev/null || true
+echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
+
+# TCP buffer limits (raise-only)
+curr_rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
+curr_rmem_max=${{curr_rmem_max:-0}}
+if [ "$curr_rmem_max" -lt {rmem_max} ] 2>/dev/null; then
+    sysctl -w net.core.rmem_max={rmem_max} 2>/dev/null || true
+fi
+curr_wmem_max=$(sysctl -n net.core.wmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
+curr_wmem_max=${{curr_wmem_max:-0}}
+if [ "$curr_wmem_max" -lt {wmem_max} ] 2>/dev/null; then
+    sysctl -w net.core.wmem_max={wmem_max} 2>/dev/null || true
+fi
+read -r r_min r_def r_max <<< "$(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo "{rmem_min} {rmem_def} {rmem_max_val}")"
+r_min=${{r_min:-{rmem_min}}}; r_def=${{r_def:-{rmem_def}}}; r_max=${{r_max:-{rmem_max_val}}}
+if [ "$r_def" -lt {rmem_def} ] 2>/dev/null; then r_def={rmem_def}; fi
+if [ "$r_max" -lt {rmem_max_val} ] 2>/dev/null; then r_max={rmem_max_val}; fi
+sysctl -w "net.ipv4.tcp_rmem=$r_min $r_def $r_max" 2>/dev/null || true
+read -r w_min w_def w_max <<< "$(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo "{wmem_min} {wmem_def} {wmem_max_val}")"
+w_min=${{w_min:-{wmem_min}}}; w_def=${{w_def:-{wmem_def}}}; w_max=${{w_max:-{wmem_max_val}}}
+if [ "$w_def" -lt {wmem_def} ] 2>/dev/null; then w_def={wmem_def}; fi
+if [ "$w_max" -lt {wmem_max_val} ] 2>/dev/null; then w_max={wmem_max_val}; fi
+sysctl -w "net.ipv4.tcp_wmem=$w_min $w_def $w_max" 2>/dev/null || true
+sysctl -w net.ipv4.tcp_notsent_lowat={notsent_lowat} 2>/dev/null || true
+
+# Persist to /etc/sysctl.d so it survives reboot
+cat > /etc/sysctl.d/99-zephyr-tcp-tuning.conf << 'SYSEOF'
+# Zephyr TCP performance tuning
+net.ipv4.tcp_fastopen = {tcp_fastopen}
+net.ipv4.tcp_ecn = {tcp_ecn}
+net.core.rmem_max = {rmem_max}
+net.core.wmem_max = {wmem_max}
+net.ipv4.tcp_rmem = {rmem_min} {rmem_def} {rmem_max_val}
+net.ipv4.tcp_wmem = {wmem_min} {wmem_def} {wmem_max_val}
+net.ipv4.tcp_notsent_lowat = {notsent_lowat}
+SYSEOF
+chmod 644 /etc/sysctl.d/99-zephyr-tcp-tuning.conf 2>/dev/null || true"#,
+        tcp_fastopen = cfg.tcp_fastopen,
+        tcp_ecn = cfg.tcp_ecn,
+        rmem_max = cfg.rmem_max,
+        wmem_max = cfg.wmem_max,
+        rmem_min = cfg.tcp_rmem.0,
+        rmem_def = cfg.tcp_rmem.1,
+        rmem_max_val = cfg.tcp_rmem.2,
+        wmem_min = cfg.tcp_wmem.0,
+        wmem_def = cfg.tcp_wmem.1,
+        wmem_max_val = cfg.tcp_wmem.2,
+        notsent_lowat = cfg.tcp_notsent_lowat,
+    )
+}
+
+#[cfg(target_os = "linux")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
@@ -155,20 +392,11 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
 
     let mut restore_commands = Vec::new();
     if let Ok(content) = std::fs::read_to_string(&backup) {
-        const ALLOWED_KEYS: &[&str] = &[
-            "net.ipv4.tcp_fastopen",
-            "net.ipv4.tcp_ecn",
-            "net.core.rmem_max",
-            "net.core.wmem_max",
-            "net.ipv4.tcp_rmem",
-            "net.ipv4.tcp_wmem",
-            "net.ipv4.tcp_notsent_lowat",
-        ];
         for line in content.lines() {
             if let Some((k, v)) = line.split_once('=') {
                 let key = k.trim();
                 let val = v.trim();
-                if ALLOWED_KEYS.contains(&key)
+                if LinuxTcpOptimConfig::BACKUP_KEYS.contains(&key)
                     && !val.is_empty()
                     && val.chars().all(|c| c.is_ascii_digit() || c.is_whitespace())
                 {
@@ -268,6 +496,8 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
         "Applying network optimizations (macOS)..."
     );
 
+    let config = MacosTcpOptimConfig::from_level(get_optim_level());
+
     // Backup current values to app data directory (secure, not /tmp)
     // Only create backup if one doesn't already exist (prevent overwriting original values)
     let backup =
@@ -317,8 +547,11 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to write backup file: {e}"))?;
     }
 
-    // Apply optimizations via osascript
-    let script = r#"do shell script "sysctl -w net.inet.tcp.msl=1000; sysctl -w net.inet.tcp.fastopen=3; sysctl -w net.inet.tcp.ecn=1" with administrator privileges"#;
+    // Apply optimizations via osascript using config values
+    let script = format!(
+        r#"do shell script "sysctl -w net.inet.tcp.msl={}; sysctl -w net.inet.tcp.fastopen={}; sysctl -w net.inet.tcp.ecn={}" with administrator privileges"#,
+        config.msl, config.fastopen, config.ecn
+    );
 
     let output = std::process::Command::new("osascript")
         .args(["-e", &script])
@@ -468,6 +701,8 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
         "Applying network optimizations (Windows)..."
     );
 
+    let config = WindowsTcpOptimConfig::from_level(get_optim_level());
+
     // Backup current values from registry before modifying (use app data dir, not temp)
     // Only create backup if one doesn't already exist (prevent overwriting original values)
     let backup =
@@ -487,24 +722,10 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
                 r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
                 KEY_READ,
             ) {
-                if let Ok(val) = key.get_value::<u32, _>("TcpFastOpen") {
-                    backup_lines.push(format!("TcpFastOpen={val}"));
-                }
-                if let Ok(val) = key.get_value::<u32, _>("TcpInitialRto") {
-                    backup_lines.push(format!("TcpInitialRto={val}"));
-                }
-                if let Ok(val) = key.get_value::<u32, _>("EcnCapability") {
-                    backup_lines.push(format!("EcnCapability={val}"));
-                }
-                // Read autotuninglevel and heuristics from registry (language-independent)
-                if let Ok(val) = key.get_value::<u32, _>("TcpAutoTuningLevel") {
-                    // TcpAutoTuningLevel registry: 0=disabled, 1=restricted,
-                    // 2=highlyrestricted, 3=normal, 4=experimental
-                    backup_lines.push(format!("TcpAutoTuningLevel={val}"));
-                }
-                if let Ok(val) = key.get_value::<u32, _>("EnableTCPHeuristics") {
-                    // EnableTCPHeuristics registry: 0=disabled, 1=enabled
-                    backup_lines.push(format!("EnableTCPHeuristics={val}"));
+                for &reg_key in WindowsTcpOptimConfig::BACKUP_REGISTRY_KEYS {
+                    if let Ok(val) = key.get_value::<u32, _>(reg_key) {
+                        backup_lines.push(format!("{reg_key}={val}"));
+                    }
                 }
             }
         }
@@ -512,33 +733,12 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to write backup file: {e}"))?;
     }
 
-    let optimizations: [(&str, &[&str]); 5] = [
-        (
-            "autotuninglevel",
-            &["int", "tcp", "set", "global", "autotuninglevel=normal"],
-        ),
-        (
-            "heuristics",
-            &["int", "tcp", "set", "heuristics", "disabled"],
-        ),
-        (
-            "initialRto",
-            &["int", "tcp", "set", "global", "initialRto=300"],
-        ),
-        (
-            "fastopen",
-            &["int", "tcp", "set", "global", "fastopen=enabled"],
-        ),
-        (
-            "ecncapability",
-            &["int", "tcp", "set", "global", "ecncapability=enabled"],
-        ),
-    ];
+    let optimizations = config.to_netsh_commands();
 
     let mut failed = Vec::new();
     for (name, args) in &optimizations {
         let mut cmd = std::process::Command::new("netsh");
-        cmd.args(*args);
+        cmd.args(args);
         cmd.creation_flags(super::CREATE_NO_WINDOW);
         match cmd.output() {
             Ok(output) if output.status.success() => {
@@ -620,17 +820,10 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
             r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
             KEY_WRITE,
         ) {
-            const ALLOWED_KEYS: &[&str] = &[
-                "TcpFastOpen",
-                "TcpInitialRto",
-                "EcnCapability",
-                "TcpAutoTuningLevel",
-                "EnableTCPHeuristics",
-            ];
             for line in backup_content.lines() {
                 if let Some((k, v)) = line.split_once('=') {
                     let key_name = k.trim();
-                    if ALLOWED_KEYS.contains(&key_name) {
+                    if WindowsTcpOptimConfig::BACKUP_REGISTRY_KEYS.contains(&key_name) {
                         if let Ok(val) = v.trim().parse::<u32>() {
                             let _ = key.set_value(key_name, &val);
                         }
