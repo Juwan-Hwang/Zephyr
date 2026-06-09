@@ -1119,7 +1119,7 @@ function renderGroupSelector(groups, currentGroup) {
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
-btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
+        btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         if (groupName === currentGroup) {
             btn.classList.add('active');
         }
@@ -1152,9 +1152,29 @@ btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[var(--ra
         menuScroll.appendChild(btn);
     });
 
+    // Store current group for mouseleave restore
+    menuScroll.dataset.currentGroup = currentGroup;
+
+    // Hover highlight: same behavior as initCustomDropdown
+    // mouseenter removes all active, highlights hovered item
+    menuScroll.querySelectorAll('.proxy-group-option').forEach(btn => {
+        btn.addEventListener('mouseenter', () => {
+            menuScroll.querySelectorAll('.proxy-group-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
     // Initialize event listeners once
     if (!_groupSelectorInitialized) {
         _groupSelectorInitialized = true;
+
+        // mouseleave restores active on the current group (registered once)
+        menuScroll.addEventListener('mouseleave', () => {
+            const current = menuScroll.dataset.currentGroup;
+            menuScroll.querySelectorAll('.proxy-group-option').forEach(b => {
+                b.classList.toggle('active', b.textContent === current);
+            });
+        });
 
         // Toggle menu
         trigger.addEventListener('click', (e) => {
