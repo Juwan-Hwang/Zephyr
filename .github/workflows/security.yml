@@ -148,6 +148,7 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           deny-licenses: GPL-3.0, AGPL-3.0
+          fail-on-severity: high
 
   # ============================================================
   # Job 7: Semgrep SAST（开源模式，无需 token）
