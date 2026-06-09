@@ -343,6 +343,7 @@ export async function initSettings() {
 
     const langSelect = /** @type {HTMLSelectElement} */ (document.getElementById('setting-lang'));
     const closeTrayToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-close-tray'));
+    const lightweightModeToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-lightweight-mode'));
     const autoUpdateToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-auto-update'));
     const autoUpdateClientToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-auto-update-client'));
     const autostartToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-autostart'));
@@ -514,6 +515,7 @@ export async function initSettings() {
     }
 
     if (closeTrayToggle) closeTrayToggle.checked = settings.close_to_tray;
+    if (lightweightModeToggle) lightweightModeToggle.checked = settings.lightweight_mode || false;
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
@@ -735,6 +737,7 @@ export async function initSettings() {
             /** @type {any} */
             const currentSettings = await invoke(COMMANDS.GET_SETTINGS);
             if (closeTrayToggle) currentSettings.close_to_tray = closeTrayToggle.checked;
+            if (lightweightModeToggle) currentSettings.lightweight_mode = lightweightModeToggle.checked;
             if (autoUpdateToggle) currentSettings.auto_update = autoUpdateToggle.checked;
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
@@ -750,6 +753,7 @@ export async function initSettings() {
     }
 
     closeTrayToggle?.addEventListener('change', save);
+    lightweightModeToggle?.addEventListener('change', save);
     autoUpdateToggle?.addEventListener('change', async () => {
         await save();
         /** @type {any} */
