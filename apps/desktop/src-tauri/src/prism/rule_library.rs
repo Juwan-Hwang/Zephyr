@@ -4,7 +4,6 @@
 
 use tauri::State;
 
-use crate::core_manager::core::config_sanitizer::remove_dangerous_keys;
 use crate::core_manager::core::fetch_util::fetch_url_content;
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
 use crate::core_manager::write_file_secure;
@@ -13,6 +12,7 @@ use crate::prism::types::{
     resolve_rule_path, sanitize_filename, RuleFileInfo,
 };
 use crate::prism::PrismState;
+use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt as _;

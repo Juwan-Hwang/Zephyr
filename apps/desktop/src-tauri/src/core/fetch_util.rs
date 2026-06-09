@@ -14,10 +14,10 @@
  * - Response size limiting (`MAX_RESPONSE_SIZE`)
  * - `.no_proxy()` by default to prevent system proxy leaks
  */
-use std::net::IpAddr;
 use std::time::Duration;
 
 use super::MAX_RESPONSE_SIZE;
+use zephyr_core::config::subscription::{is_private_host, is_private_ip};
 
 /// Configuration for HTTP client building.
 #[derive(Debug, Clone)]
@@ -37,56 +37,6 @@ impl Default for HttpClientConfig {
             connect_timeout_secs: 30,
             proxy_url: None,
             resolve_pin: None,
-        }
-    }
-}
-
-/// Check if a host is a private or local address (SSRF protection).
-///
-/// Aligned with subscription.rs `is_private_host` implementation.
-fn is_private_host(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
-
-    // Only allow these local hostname patterns for user-entered private addresses:
-    // - localhost / *.localhost (standard loopback)
-    // - *.local (mDNS / local network)
-    if host_lower == "localhost"
-        || host_lower.ends_with(".localhost")
-        || host_lower.ends_with(".local")
-    {
-        return true;
-    }
-
-    // If it's a direct IP address, check it
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return is_private_ip(ip);
-    }
-
-    false
-}
-
-/// Check if an IP address is private or local.
-///
-/// Aligned with subscription.rs `is_private_ip` implementation,
-/// using stdlib methods for reliability.
-const fn is_private_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ipv4) => {
-            ipv4.is_private()
-                || ipv4.is_loopback()
-                || ipv4.is_link_local()
-                || ipv4.is_broadcast()
-                || ipv4.is_documentation()
-                || ipv4.is_unspecified()
-        }
-        IpAddr::V6(ipv6) => {
-            let segments = ipv6.segments();
-            ipv6.is_loopback()
-                || ipv6.is_unspecified()
-                // fc00::/7 (Unique Local Address)
-                || (segments[0] & 0xfe00) == 0xfc00
-                // fe80::/10 (Link Local Address)
-                || (segments[0] & 0xff00) == 0xfe00
         }
     }
 }
@@ -400,61 +350,6 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_private_host_localhost() {
-        assert!(is_private_host("localhost"));
-        assert!(is_private_host("LOCALHOST"));
-        assert!(is_private_host("my.localhost"));
-        assert!(is_private_host("my.local"));
-    }
-
-    #[test]
-    fn test_is_private_host_does_not_false_positive() {
-        // 127.example.com is a public domain, NOT private
-        assert!(!is_private_host("127.example.com"));
-    }
-
-    #[test]
-    fn test_is_private_ip_v4() {
-        use std::net::Ipv4Addr;
-        // Private ranges
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        // Loopback
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
-        // Link-local
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))));
-        // Broadcast
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255))));
-        // Unspecified
-        assert!(is_private_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
-        // Public
-        assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
-        assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
-    }
-
-    #[test]
-    fn test_is_private_ip_v6() {
-        use std::net::Ipv6Addr;
-        // Loopback
-        assert!(is_private_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-        // Unspecified
-        assert!(is_private_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
-        // Unique local fc00::/7
-        assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(
-            0xfc00, 0, 0, 0, 0, 0, 0, 1
-        ))));
-        // Link local fe80::/10
-        assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(
-            0xfe80, 0, 0, 0, 0, 0, 0, 1
-        ))));
-        // Public
-        assert!(!is_private_ip(IpAddr::V6(Ipv6Addr::new(
-            0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888
-        ))));
-    }
 
     #[test]
     fn test_format_host_port() {
