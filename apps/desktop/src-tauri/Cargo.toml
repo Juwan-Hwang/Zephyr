@@ -24,7 +24,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-zephyr-core = { path = "../../../core", version = "0.1.0" }
+zephyr-core = { path = "../../../crates/core", version = "0.1.0" }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"

@@ -72,7 +72,7 @@ id_ed25519*
 .claude/
 
 # Mobile build artifacts
-core/target/
+crates/core/target/
 android/app/src/main/jniLibs/
 android/app/build/
 android/.gradle/

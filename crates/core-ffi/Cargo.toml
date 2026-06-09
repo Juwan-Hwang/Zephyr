@@ -7,5 +7,5 @@ edition = "2021"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-zephyr-core = { path = "../..", features = ["uniffi"] }
+zephyr-core = { path = "../core", features = ["uniffi"] }
 uniffi = "0.28"
