@@ -460,26 +460,44 @@ echo 0 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true"#
 #[cfg(target_os = "linux")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
-    // Check if backup exists (indicates optimizations were applied by Zephyr)
-    let backup = backup_path(&app);
-    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    let config = LinuxTcpOptimConfig::from_level(get_optim_level());
 
-    let value = match std::fs::read_to_string("/proc/sys/net/ipv4/tcp_fastopen") {
-        Ok(v) => v.trim().to_owned(),
-        Err(_) => {
-            return Ok(NetworkOptimStatus {
-                applied: has_backup,
-                details: "tcp_fastopen not available".to_owned(),
-            });
-        }
+    // Read sysctl values directly from /proc/sys (no process spawning)
+    let read_proc = |key: &str| -> Option<String> {
+        let path = format!("/proc/sys/{}", key.replace('.', "/"));
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|s| s.trim().to_owned())
     };
-    let applied = value == "3" || has_backup;
 
-    Ok(NetworkOptimStatus {
-        applied,
-        details: format!("net.ipv4.tcp_fastopen={value}"),
-    })
+    let fastopen = read_proc("net.ipv4.tcp_fastopen");
+    let ecn = read_proc("net.ipv4.tcp_ecn");
+    let rmem_max = read_proc("net.core.rmem_max");
+
+    // All three key parameters must match the expected config values
+    let fastopen_ok = fastopen
+        .as_ref()
+        .is_some_and(|v| v == &config.tcp_fastopen.to_string());
+    let ecn_ok = ecn
+        .as_ref()
+        .is_some_and(|v| v == &config.tcp_ecn.to_string());
+    let rmem_ok = rmem_max
+        .as_ref()
+        .is_some_and(|v| v.parse::<u64>().is_ok_and(|n| n >= config.rmem_max));
+    let applied = fastopen_ok && ecn_ok && rmem_ok;
+
+    let details = format!(
+        "tcp_fastopen={} (expect {}), tcp_ecn={} (expect {}), rmem_max={} (expect >= {})",
+        fastopen.as_deref().unwrap_or("?"),
+        config.tcp_fastopen,
+        ecn.as_deref().unwrap_or("?"),
+        config.tcp_ecn,
+        rmem_max.as_deref().unwrap_or("?"),
+        config.rmem_max,
+    );
+
+    Ok(NetworkOptimStatus { applied, details })
 }
 
 // ---------------------------------------------------------------------------
@@ -650,39 +668,49 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
-    // Check if backup exists (indicates optimizations were applied by Zephyr)
-    let backup = backup_path(&app);
-    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    let config = MacosTcpOptimConfig::from_level(get_optim_level());
 
-    let output = match std::process::Command::new("sysctl")
-        .args(["-n", "net.inet.tcp.msl"])
+    // Query all three sysctl keys in a single command
+    let sysctls = std::process::Command::new("sysctl")
+        .args([
+            "-n",
+            "net.inet.tcp.msl",
+            "net.inet.tcp.fastopen",
+            "net.inet.tcp.ecn",
+        ])
         .output()
-    {
-        Ok(o) => o,
-        Err(_) => {
-            return Ok(NetworkOptimStatus {
-                applied: has_backup,
-                details: "sysctl command not available".to_owned(),
-            });
-        }
-    };
-
-    if !output.status.success() {
-        return Ok(NetworkOptimStatus {
-            applied: has_backup,
-            details: "sysctl command failed".to_owned(),
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|s| s.trim().to_owned())
+                .collect::<Vec<_>>()
         });
-    }
 
-    // Check msl=1000 (optimized) instead of fastopen=3 (which is the macOS default)
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let applied = value == "1000";
+    let msl = sysctls.as_ref().and_then(|v| v.get(0).cloned());
+    let fastopen = sysctls.as_ref().and_then(|v| v.get(1).cloned());
+    let ecn = sysctls.as_ref().and_then(|v| v.get(2).cloned());
 
-    Ok(NetworkOptimStatus {
-        applied,
-        details: format!("net.inet.tcp.msl={value}"),
-    })
+    let msl_ok = msl.as_ref().is_some_and(|v| v == &config.msl.to_string());
+    let fastopen_ok = fastopen
+        .as_ref()
+        .is_some_and(|v| v == &config.fastopen.to_string());
+    let ecn_ok = ecn.as_ref().is_some_and(|v| v == &config.ecn.to_string());
+    let applied = msl_ok && fastopen_ok && ecn_ok;
+
+    let details = format!(
+        "msl={} (expect {}), fastopen={} (expect {}), ecn={} (expect {})",
+        msl.as_deref().unwrap_or("?"),
+        config.msl,
+        fastopen.as_deref().unwrap_or("?"),
+        config.fastopen,
+        ecn.as_deref().unwrap_or("?"),
+        config.ecn,
+    );
+
+    Ok(NetworkOptimStatus { applied, details })
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,10 +1029,8 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptimStatus, String> {
-    // Check if backup exists (indicates optimizations were applied by Zephyr)
-    let backup = backup_path(&app);
-    let has_backup = backup.as_ref().is_some_and(|p| p.exists());
+pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
+    let config = WindowsTcpOptimConfig::from_level(get_optim_level());
 
     use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
@@ -1012,22 +1038,31 @@ pub fn check_network_optimizations_status(app: AppHandle) -> Result<NetworkOptim
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key_path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
 
-    let tcp_fastopen_enabled = match hklm.open_subkey_with_flags(key_path, KEY_READ) {
-        Ok(key) => match key.get_value::<u32, _>("TcpFastOpen") {
-            Ok(val) => val >= 1,
-            Err(_) => false,
-        },
-        Err(_) => false,
-    };
+    // Open the registry subkey once and reuse it
+    let key = hklm.open_subkey_with_flags(key_path, KEY_READ).ok();
+    let read_reg_u32 =
+        |name: &str| -> Option<u32> { key.as_ref().and_then(|k| k.get_value::<u32, _>(name).ok()) };
 
-    let applied = tcp_fastopen_enabled || has_backup;
+    let fastopen_val = read_reg_u32("TcpFastOpen");
+    let rto_val = read_reg_u32("TcpInitialRto");
+    let ecn_val = read_reg_u32("EcnCapability");
 
-    Ok(NetworkOptimStatus {
-        applied,
-        details: if applied {
-            "TCP optimizations applied".to_owned()
-        } else {
-            "TCP optimizations not applied".to_owned()
-        },
-    })
+    // TcpFastOpen: registry 1 = enabled (maps to "enabled")
+    let fastopen_ok = fastopen_val.is_some_and(|v| v >= 1);
+    // TcpInitialRto: registry value in ms, config.initial_rto is in ms
+    let rto_ok = rto_val.is_some_and(|v| v <= config.initial_rto);
+    // EcnCapability: registry 1 = enabled
+    let ecn_ok = ecn_val.is_some_and(|v| v >= 1);
+
+    let applied = fastopen_ok && rto_ok && ecn_ok;
+
+    let details = format!(
+        "TcpFastOpen={} (expect >=1), TcpInitialRto={} (expect <={}), EcnCapability={} (expect >=1)",
+        fastopen_val.map_or("?".to_owned(), |v| v.to_string()),
+        rto_val.map_or("?".to_owned(), |v| v.to_string()),
+        config.initial_rto,
+        ecn_val.map_or("?".to_owned(), |v| v.to_string()),
+    );
+
+    Ok(NetworkOptimStatus { applied, details })
 }
