@@ -1352,7 +1352,10 @@ pub async fn start_core(
             } else {
                 stderr
             };
-            let err_msg = redact_error_message(raw_err.trim());
+            let mut err_msg = redact_error_message(raw_err.trim());
+            if err_msg.is_empty() {
+                err_msg = format!("Process exited with status: {}", output.status);
+            }
             emit_error!(
                 Config,
                 CONFIG_PARSE_FAILED,
