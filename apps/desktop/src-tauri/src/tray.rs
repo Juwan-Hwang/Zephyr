@@ -326,13 +326,12 @@ fn toggle_sys_proxy(app: &AppHandle) {
     } else {
         // Get the current PROXY port from core state (not the API port)
         let state = app.state::<MihomoState>();
-        let port = match state.0.lock() {
-            Ok(guard) => guard.last_proxy_port().unwrap_or(DEFAULT_MIXED_PORT),
-            Err(poisoned) => poisoned
-                .into_inner()
-                .last_proxy_port()
-                .unwrap_or(DEFAULT_MIXED_PORT),
-        };
+        let port = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_proxy_port()
+            .unwrap_or(DEFAULT_MIXED_PORT);
         let server = format!("127.0.0.1:{port}");
         sys_proxy::enable_sysproxy(server, None)
     };
@@ -346,10 +345,10 @@ fn toggle_sys_proxy(app: &AppHandle) {
 
     // Operation succeeded — update tray state, icon, and menu
     let tray_state = app.state::<TrayState>();
-    let mut guard = match tray_state.0.lock() {
-        Ok(g) => g,
-        Err(e) => e.into_inner(),
-    };
+    let mut guard = tray_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.sys_proxy_enabled = new_state;
     let tun_enabled = guard.tun_enabled;
     drop(guard);
@@ -418,10 +417,10 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
 
     // Update internal state
     let state = app.state::<TrayState>();
-    let mut guard = match state.0.lock() {
-        Ok(g) => g,
-        Err(e) => e.into_inner(),
-    };
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.sys_proxy_enabled = params.sys_proxy_enabled;
     guard.tun_enabled = params.tun_enabled;
     guard.current_mode.clone_from(&params.current_mode);
@@ -606,10 +605,10 @@ pub fn update_tray_toggle_states(
 #[allow(clippy::doc_markdown)]
 fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
-    let guard = match tray_state.0.lock() {
-        Ok(g) => g,
-        Err(e) => e.into_inner(),
-    };
+    let guard = tray_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let sys_on = guard.sys_proxy_enabled;
     let tun_on = guard.tun_enabled;
     let mode = if guard.current_mode.is_empty() {
