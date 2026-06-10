@@ -1216,9 +1216,26 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         );
     }
 
-    let signature_content = sig_response.text().await.map_err(|e| {
+    // Stream signature with size limit (4 KB is more than enough for a Minisign signature)
+    let mut sig_stream = sig_response.bytes_stream();
+    let mut sig_bytes = Vec::new();
+    const MAX_SIG_SIZE: usize = 4096;
+    while let Some(chunk_result) = sig_stream.next().await {
+        let chunk = chunk_result.map_err(|e| {
+            let _ = std::fs::remove_file(&dest_path);
+            format!("Failed to download signature chunk: {e}. Installer deleted for security.")
+        })?;
+        if sig_bytes.len() + chunk.len() > MAX_SIG_SIZE {
+            let _ = std::fs::remove_file(&dest_path);
+            return Err(
+                "Signature file exceeded size limit. Installer deleted for security.".to_owned(),
+            );
+        }
+        sig_bytes.extend_from_slice(&chunk);
+    }
+    let signature_content = String::from_utf8(sig_bytes).map_err(|e| {
         let _ = std::fs::remove_file(&dest_path);
-        format!("Failed to read signature content: {e}. Installer deleted for security.")
+        format!("Invalid UTF-8 in signature: {e}. Installer deleted for security.")
     })?;
 
     emit_core_download_status(&window, "Verifying signature...", 95);
