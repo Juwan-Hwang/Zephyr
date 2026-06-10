@@ -599,7 +599,7 @@ pub fn update_tray_toggle_states(
 #[allow(clippy::doc_markdown)]
 fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
-    let (mut sys_on, tun_on, mode, labels) = tray_state
+    let (sys_on, tun_on, mode, labels) = tray_state
         .0
         .lock()
         .map(|guard| {
@@ -616,17 +616,6 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
             )
         })
         .unwrap_or_else(|_| (false, false, "rule".to_owned(), TrayLabels::default()));
-
-    // Sync TrayState with the actual system proxy state to handle any mismatches
-    // (e.g. first load before frontend has called update_tray_full_menu,
-    // or external changes to system proxy settings).
-    let real_sys_on = sys_proxy::get_sys_proxy().unwrap_or(false);
-    if sys_on != real_sys_on {
-        sys_on = real_sys_on;
-        if let Ok(mut guard) = tray_state.0.lock() {
-            guard.sys_proxy_enabled = real_sys_on;
-        }
-    }
 
     let tray = match app.tray_by_id("main") {
         Some(t) => t,
