@@ -619,13 +619,11 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
 
     // If TrayState says sys proxy is off but it's actually on (e.g. first load
     // before frontend has called update_tray_full_menu), read the real state.
-    if !sys_on {
-        if sys_proxy::get_sys_proxy().unwrap_or(false) {
-            sys_on = true;
-            // Sync TrayState so subsequent reads are correct
-            if let Ok(mut guard) = tray_state.0.lock() {
-                guard.sys_proxy_enabled = true;
-            }
+    if !sys_on && sys_proxy::get_sys_proxy().unwrap_or(false) {
+        sys_on = true;
+        // Sync TrayState so subsequent reads are correct
+        if let Ok(mut guard) = tray_state.0.lock() {
+            guard.sys_proxy_enabled = true;
         }
     }
 
