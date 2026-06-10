@@ -593,13 +593,13 @@ pub fn update_tray_toggle_states(
     Ok(())
 }
 
-/// Rebuild tray menu from current TrayState (works without WebView/frontend).
+/// Rebuild tray menu from current `TrayState` (works without WebView/frontend).
 /// Used when tray operations happen in lightweight mode or when the frontend
 /// is not available to provide full menu data.
 #[allow(clippy::doc_markdown)]
 fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
-    let (sys_on, tun_on, mode, labels) = tray_state
+    let (mut sys_on, tun_on, mode, labels) = tray_state
         .0
         .lock()
         .map(|guard| {
@@ -616,6 +616,18 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
             )
         })
         .unwrap_or_else(|_| (false, false, "rule".to_owned(), TrayLabels::default()));
+
+    // If TrayState says sys proxy is off but it's actually on (e.g. first load
+    // before frontend has called update_tray_full_menu), read the real state.
+    if !sys_on {
+        if sys_proxy::get_sys_proxy().unwrap_or(false) {
+            sys_on = true;
+            // Sync TrayState so subsequent reads are correct
+            if let Ok(mut guard) = tray_state.0.lock() {
+                guard.sys_proxy_enabled = true;
+            }
+        }
+    }
 
     let tray = match app.tray_by_id("main") {
         Some(t) => t,
