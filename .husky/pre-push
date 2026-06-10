@@ -1,5 +1,20 @@
 #!/bin/sh
 set -e
+
+# Skip checks for delete-only pushes (e.g. git push --delete origin branch)
+# Only skip if ALL refs being pushed are deletions (handles multi-ref pushes)
+has_non_delete=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ] && \
+     [ "$local_sha" != "0000000000000000000000000000000000000000000000000000000000000000" ]; then
+    has_non_delete=true
+  fi
+done
+
+if [ "$has_non_delete" = false ]; then
+  exit 0
+fi
+
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 pnpm test
