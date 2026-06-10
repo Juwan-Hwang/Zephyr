@@ -1324,20 +1324,27 @@ pub async fn start_core(
     // This catches syntax errors, missing proxy references, etc. early and prevents
     // the core from entering a crash-restart loop due to an invalid config.
     {
-        let mut cmd = Command::new(&exe_path);
-        #[cfg(target_os = "windows")]
-        use std::os::windows::process::CommandExt as _;
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.current_dir(&paths.core_dir);
-        cmd.args(["-d", "."]);
-        cmd.args(["-t", "-f", "run_config.yaml"]);
-        for arg in &safe_custom_args {
-            cmd.arg(arg);
-        }
-        let output = cmd
-            .output()
-            .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
+        let exe_path_clone = exe_path.clone();
+        let core_dir_clone = paths.core_dir.clone();
+        let safe_custom_args_clone = safe_custom_args.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            let mut cmd = Command::new(&exe_path_clone);
+            #[cfg(target_os = "windows")]
+            use std::os::windows::process::CommandExt as _;
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            cmd.current_dir(&core_dir_clone);
+            cmd.args(["-d", "."]);
+            cmd.args(["-t", "-f", "run_config.yaml"]);
+            for arg in &safe_custom_args_clone {
+                cmd.arg(arg);
+            }
+            cmd.output()
+        })
+        .await
+        .map_err(|e| format!("Preflight check task panicked: {e}"))?
+        .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
+
         if !output.status.success() {
             let err_msg = redact_error_message(&String::from_utf8_lossy(&output.stderr));
             emit_error!(
