@@ -1326,6 +1326,8 @@ pub async fn start_core(
     {
         let mut cmd = Command::new(&exe_path);
         #[cfg(target_os = "windows")]
+        use std::os::windows::process::CommandExt as _;
+        #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.args(["-t", "-f"]).arg(&run_config_path);
         let output = cmd
