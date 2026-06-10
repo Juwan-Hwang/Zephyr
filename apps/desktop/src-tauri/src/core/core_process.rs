@@ -1329,7 +1329,12 @@ pub async fn start_core(
         use std::os::windows::process::CommandExt as _;
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.args(["-t", "-f"]).arg(&run_config_path);
+        cmd.current_dir(&paths.core_dir);
+        cmd.args(["-d", "."]);
+        cmd.args(["-t", "-f", "run_config.yaml"]);
+        for arg in &safe_custom_args {
+            cmd.arg(arg);
+        }
         let output = cmd
             .output()
             .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
