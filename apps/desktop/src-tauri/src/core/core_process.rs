@@ -1320,6 +1320,30 @@ pub async fn start_core(
     let run_config_path = paths.core_dir.join("run_config.yaml");
     write_file_secure(&run_config_path, &final_config)?;
 
+    // Preflight: validate config with `mihomo -t` before spawning the process.
+    // This catches syntax errors, missing proxy references, etc. early and prevents
+    // the core from entering a crash-restart loop due to an invalid config.
+    {
+        let mut cmd = Command::new(&exe_path);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.args(["-t", "-f"]).arg(&run_config_path);
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
+        if !output.status.success() {
+            let err_msg = redact_error_message(&String::from_utf8_lossy(&output.stderr));
+            emit_error!(
+                Config,
+                CONFIG_PARSE_FAILED,
+                "Config preflight failed: {err_msg}"
+            );
+            return Err(format!(
+                "Config preflight check failed. The config file has errors and the core will not be started. Details: {err_msg}"
+            ));
+        }
+    }
+
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
