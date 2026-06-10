@@ -1526,10 +1526,11 @@ mod tests {
     #[test]
     fn prepare_runtime_config_injects_secret_and_controller() {
         let config = "external-controller: 0.0.0.0:7897\nsecret: old\nmode: rule\n";
-        let (prepared, api_port, _proxy_port) =
+        let (prepared, api_port, proxy_port) =
             prepare_runtime_config(config, "new-secret", None).unwrap();
 
         assert_eq!(api_port, 7897);
+        assert_eq!(proxy_port, DEFAULT_MIXED_PORT);
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
         assert!(prepared.contains("secret: new-secret"));
         assert!(!prepared.contains("secret: old"));
@@ -1557,8 +1558,9 @@ mod tests {
         let content = "port: 7890\nmode: rule";
         let result = prepare_runtime_config(content, "mysecret", None);
         assert!(result.is_some());
-        let (config, port, _) = result.unwrap();
+        let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 9090);
+        assert_eq!(proxy_port, 7890);
         assert!(config.contains("external-controller: 127.0.0.1:9090"));
         assert!(config.contains("secret: mysecret"));
         assert!(config.contains("unified-delay: true"));
@@ -1574,8 +1576,9 @@ mod tests {
         let content = "external-controller: 0.0.0.0:8080\nport: 7890";
         let result = prepare_runtime_config(content, "secret", None);
         assert!(result.is_some());
-        let (config, port, _) = result.unwrap();
+        let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 8080);
+        assert_eq!(proxy_port, 7890);
         assert!(config.contains("external-controller: 127.0.0.1:8080"));
     }
 

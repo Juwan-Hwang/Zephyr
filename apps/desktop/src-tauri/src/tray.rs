@@ -326,11 +326,13 @@ fn toggle_sys_proxy(app: &AppHandle) {
     } else {
         // Get the current PROXY port from core state (not the API port)
         let state = app.state::<MihomoState>();
-        let port = state
-            .0
-            .lock()
-            .map(|guard| guard.last_proxy_port().unwrap_or(DEFAULT_MIXED_PORT))
-            .unwrap_or(DEFAULT_MIXED_PORT);
+        let port = match state.0.lock() {
+            Ok(guard) => guard.last_proxy_port().unwrap_or(DEFAULT_MIXED_PORT),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .last_proxy_port()
+                .unwrap_or(DEFAULT_MIXED_PORT),
+        };
         let server = format!("127.0.0.1:{port}");
         sys_proxy::enable_sysproxy(server, None)
     };
@@ -343,12 +345,14 @@ fn toggle_sys_proxy(app: &AppHandle) {
     }
 
     // Operation succeeded — update tray state, icon, and menu
-    let tun_enabled = if let Ok(mut guard) = app.state::<TrayState>().0.lock() {
-        guard.sys_proxy_enabled = new_state;
-        guard.tun_enabled
-    } else {
-        false
+    let tray_state = app.state::<TrayState>();
+    let mut guard = match tray_state.0.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
     };
+    guard.sys_proxy_enabled = new_state;
+    let tun_enabled = guard.tun_enabled;
+    drop(guard);
 
     let icon_mode = if tun_enabled {
         "tun"
