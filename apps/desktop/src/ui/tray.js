@@ -202,8 +202,6 @@ export async function initTrayEventListeners() {
             trayLogger.error('Failed to toggle sys proxy from tray', err);
             appStore.set('isSysProxyEnabled', !enabled);
             if (toggle) toggle.checked = !enabled;
-            // Sync the reverted state back to the tray menu
-            updateTrayMenu().catch(() => {});
         }
     });
     _trayEventUnlisteners.push(unlisten1);

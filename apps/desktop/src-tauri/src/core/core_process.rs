@@ -621,23 +621,19 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
 
 /// Parse the proxy port from YAML config.
 /// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
+/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
 fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+    let parse_u16 = |val: &serde_yaml::Value| -> Option<u16> {
+        val.as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .or_else(|| val.as_str().and_then(|s| s.parse::<u16>().ok()))
+    };
+
     yaml_val
         .get("mixed-port")
-        .and_then(serde_yaml::Value::as_u64)
-        .and_then(|p| u16::try_from(p).ok())
-        .or_else(|| {
-            yaml_val
-                .get("port")
-                .and_then(serde_yaml::Value::as_u64)
-                .and_then(|p| u16::try_from(p).ok())
-        })
-        .or_else(|| {
-            yaml_val
-                .get("socks-port")
-                .and_then(serde_yaml::Value::as_u64)
-                .and_then(|p| u16::try_from(p).ok())
-        })
+        .and_then(parse_u16)
+        .or_else(|| yaml_val.get("port").and_then(parse_u16))
+        .or_else(|| yaml_val.get("socks-port").and_then(parse_u16))
         .unwrap_or(DEFAULT_MIXED_PORT)
 }
 
@@ -706,7 +702,6 @@ pub fn prepare_runtime_config(
     }
 
     let config_port = parse_external_controller_port(&yaml_val);
-    let proxy_port = parse_proxy_port(&yaml_val);
     if let Some(mapping) = yaml_val.as_mapping_mut() {
         mapping.insert(
             serde_yaml::Value::String("external-controller".to_owned()),
@@ -865,6 +860,10 @@ pub fn prepare_runtime_config(
             }
         }
     }
+
+    // Parse proxy_port AFTER all overrides are applied so it reflects
+    // any user-overridden values (mixed_port, socks_port, http_port).
+    let proxy_port = parse_proxy_port(&yaml_val);
 
     let result = serde_yaml::to_string(&yaml_val).ok()?;
 

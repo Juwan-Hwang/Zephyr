@@ -617,13 +617,14 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         })
         .unwrap_or_else(|_| (false, false, "rule".to_owned(), TrayLabels::default()));
 
-    // If TrayState says sys proxy is off but it's actually on (e.g. first load
-    // before frontend has called update_tray_full_menu), read the real state.
-    if !sys_on && sys_proxy::get_sys_proxy().unwrap_or(false) {
-        sys_on = true;
-        // Sync TrayState so subsequent reads are correct
+    // Sync TrayState with the actual system proxy state to handle any mismatches
+    // (e.g. first load before frontend has called update_tray_full_menu,
+    // or external changes to system proxy settings).
+    let real_sys_on = sys_proxy::get_sys_proxy().unwrap_or(false);
+    if sys_on != real_sys_on {
+        sys_on = real_sys_on;
         if let Ok(mut guard) = tray_state.0.lock() {
-            guard.sys_proxy_enabled = true;
+            guard.sys_proxy_enabled = real_sys_on;
         }
     }
 
