@@ -1233,18 +1233,27 @@ pub async fn start_core(
     // If the requested config differs from the current one, we must restart to apply it.
     // Also extract port/secret for drain before killing.
     let drain_info: Option<(u16, String)> = {
-        let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+        let mut lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         if lock.process().is_some() {
             let same_config = lock
                 .last_config_path()
                 .is_some_and(|current| current == config_path);
             if same_config {
-                if let Some(port) = lock.last_port() {
-                    return Ok(CoreStartResult {
-                        secret: lock.last_secret().to_owned(),
-                        port,
-                    });
+                // Check if the process is actually still alive before short-circuiting.
+                // If mihomo crashed, the Child handle still exists but the process
+                // is dead — we must restart instead of returning stale info.
+                let alive = lock
+                    .process_mut()
+                    .is_some_and(|p| matches!(p.try_wait(), Ok(None)));
+                if alive {
+                    if let Some(port) = lock.last_port() {
+                        return Ok(CoreStartResult {
+                            secret: lock.last_secret().to_owned(),
+                            port,
+                        });
+                    }
                 }
+                // Process is dead — fall through to restart
             }
             // Core is running with a different config — prepare drain info
             lock.last_port()

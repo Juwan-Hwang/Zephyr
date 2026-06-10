@@ -15,6 +15,7 @@
  */
 
 import { wsLogger as log } from './utils/logger.js';
+import { setCoreReachable } from './api.js';
 
 /* ------------------------------------------------------------------ */
 /*  Connection state enum                                             */
@@ -195,8 +196,12 @@ export function connectTraffic(callback) {
   /** @type {boolean} Guard against double connection during force-reconnect */
   let isForceReconnecting = false;
 
+  /** @type {boolean} Whether the last error was a connection-refused (core not running) */
+  let isConnectionRefused = false;
+
   /* ---- constants ---- */
   const MAX_RETRIES = 15;
+  const MAX_RETRIES_REFUSED = 3; // 内核未运行时最多重试 3 次
   const BASE_DELAY = 1000;
   const MAX_DELAY = 30000;
   const HEARTBEAT_TIMEOUT = 30_000; // 30 s
@@ -267,6 +272,7 @@ export function connectTraffic(callback) {
       // --- stream established ---
       retryCount = 0;
       maxRetriesReached = false;
+      isConnectionRefused = false;
       setState(ConnectionState.CONNECTED);
       touchHeartbeat();
 
@@ -338,7 +344,28 @@ export function connectTraffic(callback) {
         return;
       }
       if (error.name === 'AbortError') return;
-      log.error('stream error:', error.message || error);
+
+      // 检测连接被拒绝（内核未运行）
+      isConnectionRefused = (
+        error.message?.includes('Failed to fetch') ||
+        error.message?.includes('NetworkError') ||
+        error.message?.includes('Connection refused') ||
+        error.message?.includes('ERR_CONNECTION_REFUSED') ||
+        error.message?.includes('Load failed') ||
+        error.message?.includes('Network request failed')
+      );
+
+      if (isConnectionRefused) {
+        setCoreReachable(false);
+        // 连接被拒绝时降级日志：首次 warn，后续 debug
+        if (retryCount === 0) {
+          log.warn('stream error: core unreachable');
+        } else {
+          log.debug(`stream error: core unreachable (retry #${retryCount})`);
+        }
+      } else {
+        log.error('stream error:', error.message || error);
+      }
       handleClose();
     }
   };
@@ -352,23 +379,37 @@ export function connectTraffic(callback) {
 
     if (isForceReconnecting || isClosed) return;
 
-    if (retryCount < MAX_RETRIES) {
+    // 内核未运行时使用更少的重试次数
+    const effectiveMaxRetries = isConnectionRefused ? MAX_RETRIES_REFUSED : MAX_RETRIES;
+
+    if (retryCount < effectiveMaxRetries) {
       retryCount++;
       const delay = Math.min(
         MAX_DELAY,
         BASE_DELAY * Math.pow(2, retryCount - 1),
       );
-      log.warn(`reconnect #${retryCount} in ${delay} ms`);
+      // 连接被拒绝时降级重连日志
+      if (isConnectionRefused) {
+        log.debug(`reconnect #${retryCount} in ${delay} ms (core unreachable)`);
+      } else {
+        log.warn(`reconnect #${retryCount} in ${delay} ms`);
+      }
       setState(ConnectionState.RECONNECTING);
       retryTimer = setTimeout(connect, delay);
     } else {
-      log.error('max reconnection attempts reached — giving up');
+      if (isConnectionRefused) {
+        log.warn('core unreachable — traffic stream stopped, restart core to reconnect');
+      } else {
+        log.error('max reconnection attempts reached — giving up');
+      }
       maxRetriesReached = true;
       setState(ConnectionState.DISCONNECTED);
 
       // User-facing notification
       /** @type {any} */ (window).showNotification?.(
-        'Lost connection to core traffic monitor. Click to reconnect.',
+        isConnectionRefused
+          ? 'Core is not running. Restart core to reconnect.'
+          : 'Lost connection to core traffic monitor. Click to reconnect.',
         'warning',
       );
 
@@ -406,6 +447,7 @@ export function connectTraffic(callback) {
       stopHeartbeat();
       maxRetriesReached = false;
       retryCount = 0;
+      isConnectionRefused = false;
       isForceReconnecting = true;
       abortController.abort();
       abortController = new AbortController();

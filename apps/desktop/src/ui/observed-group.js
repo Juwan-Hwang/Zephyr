@@ -10,7 +10,7 @@
  * @module ui/observed-group
  */
 
-import { getConnections } from '../api.js';
+import { getConnections, isCoreReachable } from '../api.js';
 import { getProxiesCached } from './cache.js';
 import { isWritableGroupType } from './proxy-groups.js';
 import { appStore } from './state.js';
@@ -162,6 +162,7 @@ function _scheduleNext() {
 
 async function _poll() {
     if (_polling) return;
+    if (!isCoreReachable()) return; // 内核不可达时跳过轮询
     _polling = true;
     try {
         const [connData, proxiesData] = await Promise.all([
