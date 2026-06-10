@@ -18,7 +18,7 @@
  *   - destroyConnectionsPage()
  */
 
-import { getConnections, closeConnection, closeAllConnections } from '../api.js';
+import { getConnections, closeConnection, closeAllConnections, isCoreReachable } from '../api.js';
 import { showNotification } from '../ui/notifications.js';
 import { translations, currentLang, applyTranslations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
@@ -190,10 +190,10 @@ const _onThemeChanged = () => updateSortIndicators();
 _unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
 _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
 
-    // Auto-refresh every 2 seconds (only when page is visible)
+    // Auto-refresh every 2 seconds (only when page is visible and core is reachable)
     connectionsPollTimer = setInterval(() => {
         const pageEl = document.querySelector('[data-page="connections"]');
-        if (pageEl && !pageEl.classList.contains('hidden')) {
+        if (pageEl && !pageEl.classList.contains('hidden') && isCoreReachable()) {
             fetchAndRenderConnections();
         }
     }, 2000);

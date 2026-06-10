@@ -14,6 +14,12 @@ let BASE_URL = 'http://127.0.0.1:9090';
 /** 运行时状态（sealed，防止意外扩展） */
 const _state = Object.seal({ secret: '' });
 
+/** @type {boolean} 内核是否可达（连接未被拒绝） */
+let _coreReachable = true;
+
+/** @type {boolean} 是否已输出过一次连接拒绝日志（避免重复报错） */
+let _connectionRefusedLogged = false;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ApiError — 统一错误类型
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -96,12 +102,34 @@ async function apiFetch(endpoint, init = {}) {
       });
     }
 
+    // 请求成功 — 标记内核可达
+    if (!_coreReachable) {
+      _coreReachable = true;
+      _connectionRefusedLogged = false;
+      apiLogger.info('core connection restored');
+    }
+
     return res;
   } catch (err) {
     if (err instanceof ApiError) throw err;
 
     const error = /** @type {Error} */ (err);
     const isAbort = error.name === 'AbortError';
+
+    // 检测连接被拒绝（内核未运行）
+    const isConnectionRefused = !isAbort && isConnectionRefusedError(error);
+
+    if (isConnectionRefused) {
+      _coreReachable = false;
+      // 只在首次连接拒绝时输出 warn，后续降级为 debug
+      if (!_connectionRefusedLogged) {
+        _connectionRefusedLogged = true;
+        apiLogger.warn(`core unreachable: ${endpoint}`);
+      } else {
+        apiLogger.debug(`core unreachable: ${endpoint}`);
+      }
+    }
+
     throw new ApiError(
       isAbort ? `Request timeout (${timeout}ms): ${endpoint}` : `Network request failed: ${endpoint}`,
       { endpoint, cause: error },
@@ -224,6 +252,43 @@ export function setBaseUrl(url) {
  */
 export function setSecret(s) {
   _state.secret = s || '';
+}
+
+/**
+ * 判断错误是否为"连接被拒绝"（内核未运行）
+ * 用于 apiFetch 和 websocket.js 共享同一检测逻辑。
+ *
+ * @param {Error} error
+ * @returns {boolean}
+ */
+export function isConnectionRefusedError(error) {
+  return (
+    error.message?.includes('Failed to fetch') ||
+    error.message?.includes('NetworkError') ||
+    error.message?.includes('Connection refused') ||
+    error.message?.includes('ERR_CONNECTION_REFUSED') ||
+    error.message?.includes('Load failed') ||
+    error.message?.includes('Network request failed')
+  );
+}
+
+/**
+ * 查询内核是否可达
+ * @returns {boolean}
+ */
+export function isCoreReachable() {
+  return _coreReachable;
+}
+
+/**
+ * 设置内核可达状态（内核重启成功后调用重置为 true）
+ * @param {boolean} reachable
+ */
+export function setCoreReachable(reachable) {
+  _coreReachable = reachable;
+  if (reachable) {
+    _connectionRefusedLogged = false;
+  }
 }
 
 /**
@@ -536,6 +601,7 @@ export async function restartCore(configPath, customArgs = []) {
   setSecret(coreResult.secret);
   setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
   setWsSecret(coreResult.secret);
+  setCoreReachable(true);
   Bus.emit(Events.CORE_RESTARTED);
   return coreResult;
 }
