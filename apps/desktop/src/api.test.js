@@ -3,6 +3,8 @@ import {
     ApiError,
     setBaseUrl,
     setSecret,
+    isCoreReachable,
+    setCoreReachable,
     getProxies,
     switchProxy,
     getConfig,
@@ -132,6 +134,50 @@ describe('setSecret', () => {
 
     it('is a function', () => {
         expect(typeof setSecret).toBe('function');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  isCoreReachable / setCoreReachable
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('isCoreReachable', () => {
+    afterEach(() => {
+        setCoreReachable(true);
+    });
+
+    it('returns true by default', () => {
+        expect(isCoreReachable()).toBe(true);
+    });
+
+    it('returns false after setCoreReachable(false)', () => {
+        setCoreReachable(false);
+        expect(isCoreReachable()).toBe(false);
+    });
+
+    it('returns true after setCoreReachable(true)', () => {
+        setCoreReachable(false);
+        setCoreReachable(true);
+        expect(isCoreReachable()).toBe(true);
+    });
+
+    it('is a function', () => {
+        expect(typeof isCoreReachable).toBe('function');
+    });
+});
+
+describe('setCoreReachable', () => {
+    afterEach(() => {
+        setCoreReachable(true);
+    });
+
+    it('does not throw', () => {
+        expect(() => setCoreReachable(true)).not.toThrow();
+        expect(() => setCoreReachable(false)).not.toThrow();
+    });
+
+    it('is a function', () => {
+        expect(typeof setCoreReachable).toBe('function');
     });
 });
 
