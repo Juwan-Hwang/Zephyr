@@ -179,6 +179,9 @@ export async function initTrayEventListeners() {
             toggle.checked = enabled;
         }
 
+        // Update appStore immediately so updateTrayMenu() reads the correct state
+        appStore.set('isSysProxyEnabled', enabled);
+
         try {
             /** @type {any} */
             const currentConfig = await getConfig();
@@ -197,7 +200,10 @@ export async function initTrayEventListeners() {
             await updateTrayMenu();
         } catch (err) {
             trayLogger.error('Failed to toggle sys proxy from tray', err);
+            appStore.set('isSysProxyEnabled', !enabled);
             if (toggle) toggle.checked = !enabled;
+            // Sync the reverted state back to the tray menu
+            updateTrayMenu().catch(() => {});
         }
     });
     _trayEventUnlisteners.push(unlisten1);

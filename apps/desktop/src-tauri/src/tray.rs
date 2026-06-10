@@ -288,9 +288,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 
 fn toggle_sys_proxy(app: &AppHandle) {
     let current = sys_proxy::get_sys_proxy().unwrap_or(false);
+    let new_state = !current;
 
-    if current {
-        let _ = sys_proxy::disable_sysproxy();
+    let result = if current {
+        sys_proxy::disable_sysproxy()
     } else {
         // Get the current proxy port from core state
         let state = app.state::<MihomoState>();
@@ -300,11 +301,37 @@ fn toggle_sys_proxy(app: &AppHandle) {
             .map(|guard| guard.last_port().unwrap_or(7890))
             .unwrap_or(7890);
         let server = format!("127.0.0.1:{port}");
-        let _ = sys_proxy::enable_sysproxy(server, None);
+        sys_proxy::enable_sysproxy(server, None)
+    };
+
+    if let Err(e) = result {
+        eprintln!("Failed to toggle system proxy: {e}");
+        // Operation failed — do not update state, rebuild menu with current state
+        rebuild_tray_menu_from_state(app);
+        return;
     }
 
-    // Emit event to frontend
-    crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", !current);
+    // Operation succeeded — update tray state, icon, and menu
+    let tun_enabled = if let Ok(mut guard) = app.state::<TrayState>().0.lock() {
+        guard.sys_proxy_enabled = new_state;
+        guard.tun_enabled
+    } else {
+        false
+    };
+
+    let icon_mode = if tun_enabled {
+        "tun"
+    } else if new_state {
+        "sysproxy"
+    } else {
+        "default"
+    };
+    let _ = change_tray_icon(app.clone(), icon_mode.to_owned());
+
+    rebuild_tray_menu_from_state(app);
+
+    // Also emit to frontend (will be ignored if no WebView, which is fine)
+    crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", new_state);
 }
 
 fn toggle_tun(app: &AppHandle) {
@@ -523,4 +550,115 @@ pub fn update_tray_toggle_states(
     }
 
     Ok(())
+}
+
+/// Rebuild tray menu from current TrayState (works without WebView/frontend).
+/// Used when tray operations happen in lightweight mode or when the frontend
+/// is not available to provide full menu data.
+#[allow(clippy::doc_markdown)]
+fn rebuild_tray_menu_from_state(app: &AppHandle) {
+    let tray_state = app.state::<TrayState>();
+    let (sys_on, tun_on, mode) = tray_state
+        .0
+        .lock()
+        .map(|guard| {
+            (
+                guard.sys_proxy_enabled,
+                guard.tun_enabled,
+                guard.current_mode.clone(),
+            )
+        })
+        .unwrap_or_else(|_| (false, false, "rule".to_owned()));
+
+    let tray = match app.tray_by_id("main") {
+        Some(t) => t,
+        None => return,
+    };
+
+    let show_i = match MenuItem::with_id(app, "show", "Show Zephyr", true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let sep1 = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let sys_label = if sys_on {
+        "● System Proxy".to_owned()
+    } else {
+        "○ System Proxy".to_owned()
+    };
+    let sys_i = match MenuItem::with_id(app, "toggle_sysproxy", &sys_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let tun_label = if tun_on {
+        "● TUN Mode".to_owned()
+    } else {
+        "○ TUN Mode".to_owned()
+    };
+    let tun_i = match MenuItem::with_id(app, "toggle_tun", &tun_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let mode_sep = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let rule_label = if mode.to_lowercase() == "rule" {
+        "● Rule".to_owned()
+    } else {
+        "○ Rule".to_owned()
+    };
+    let global_label = if mode.to_lowercase() == "global" {
+        "● Global".to_owned()
+    } else {
+        "○ Global".to_owned()
+    };
+    let direct_label = if mode.to_lowercase() == "direct" {
+        "● Direct".to_owned()
+    } else {
+        "○ Direct".to_owned()
+    };
+    let rule_i = match MenuItem::with_id(app, "mode_rule", &rule_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let global_i = match MenuItem::with_id(app, "mode_global", &global_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let direct_i = match MenuItem::with_id(app, "mode_direct", &direct_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let sep2 = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let quit_i = match MenuItem::with_id(app, "quit", "Quit", true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let menu = MenuBuilder::new(app)
+        .item(&show_i)
+        .item(&sep1)
+        .item(&sys_i)
+        .item(&tun_i)
+        .item(&mode_sep)
+        .item(&rule_i)
+        .item(&global_i)
+        .item(&direct_i)
+        .item(&sep2)
+        .item(&quit_i)
+        .build();
+
+    if let Ok(m) = menu {
+        let _ = tray.set_menu(Some(m));
+    }
 }
