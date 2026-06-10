@@ -209,6 +209,7 @@ pub mod codes {
     pub const SYS_TUN_FAILED: u16 = 6002;
     pub const SYS_DNS_FAILED: u16 = 6003;
     pub const SYS_LOCK_FAILED: u16 = 6004;
+    pub const SYS_WINDOW_RECREATE_FAILED: u16 = 6005;
 
     // Updater: 7000-7999
     pub const UPDATE_CHECK_FAILED: u16 = 7001;

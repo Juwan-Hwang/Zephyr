@@ -452,7 +452,7 @@ fn show_main_window(app: tauri::AppHandle) {
                 eprintln!("Failed to recreate main window: {e}");
                 emit_error!(
                     System,
-                    SYS_PROXY_FAILED,
+                    SYS_WINDOW_RECREATE_FAILED,
                     "Failed to recreate main window: {e}"
                 );
             }
