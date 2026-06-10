@@ -14,7 +14,7 @@ use tauri::{
     AppHandle, Manager as _,
 };
 
-use crate::core_manager::MihomoState;
+use crate::core_manager::{MihomoState, DEFAULT_MIXED_PORT};
 use crate::sys_proxy;
 
 /// Tray menu state for tracking check states
@@ -25,6 +25,37 @@ pub struct TrayMenuState {
     pub current_mode: String,
     pub active_config: Option<String>,
     pub active_proxy: Option<String>,
+    /// i18n labels for `rebuild_tray_menu_from_state` (lightweight mode)
+    #[serde(default)]
+    pub labels: TrayLabels,
+}
+
+/// Localized labels stored in `TrayMenuState` so the Rust-side
+/// `rebuild_tray_menu_from_state` can display the correct language
+/// even when the frontend/WebView is not available (lightweight mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrayLabels {
+    pub show: String,
+    pub quit: String,
+    pub sys_proxy: String,
+    pub tun_mode: String,
+    pub rule: String,
+    pub global: String,
+    pub direct: String,
+}
+
+impl Default for TrayLabels {
+    fn default() -> Self {
+        Self {
+            show: "Show Zephyr".to_owned(),
+            quit: "Quit".to_owned(),
+            sys_proxy: "System Proxy".to_owned(),
+            tun_mode: "TUN Mode".to_owned(),
+            rule: "Rule".to_owned(),
+            global: "Global".to_owned(),
+            direct: "Direct".to_owned(),
+        }
+    }
 }
 
 /// Wrapper for tray state to work with Tauri's State
@@ -293,13 +324,13 @@ fn toggle_sys_proxy(app: &AppHandle) {
     let result = if current {
         sys_proxy::disable_sysproxy()
     } else {
-        // Get the current proxy port from core state
+        // Get the current PROXY port from core state (not the API port)
         let state = app.state::<MihomoState>();
         let port = state
             .0
             .lock()
-            .map(|guard| guard.last_port().unwrap_or(7890))
-            .unwrap_or(7890);
+            .map(|guard| guard.last_proxy_port().unwrap_or(DEFAULT_MIXED_PORT))
+            .unwrap_or(DEFAULT_MIXED_PORT);
         let server = format!("127.0.0.1:{port}");
         sys_proxy::enable_sysproxy(server, None)
     };
@@ -387,6 +418,16 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
         guard.sys_proxy_enabled = params.sys_proxy_enabled;
         guard.tun_enabled = params.tun_enabled;
         guard.current_mode.clone_from(&params.current_mode);
+        // Store i18n labels for rebuild_tray_menu_from_state (lightweight mode)
+        guard.labels = TrayLabels {
+            show: params.show_text.clone(),
+            quit: params.quit_text.clone(),
+            sys_proxy: params.sys_proxy_text.clone(),
+            tun_mode: params.tun_text.clone(),
+            rule: params.rule_text.clone(),
+            global: params.global_text.clone(),
+            direct: params.direct_text.clone(),
+        };
     }
 
     // Build menu items
@@ -558,24 +599,30 @@ pub fn update_tray_toggle_states(
 #[allow(clippy::doc_markdown)]
 fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
-    let (sys_on, tun_on, mode) = tray_state
+    let (sys_on, tun_on, mode, labels) = tray_state
         .0
         .lock()
         .map(|guard| {
+            let mode = if guard.current_mode.is_empty() {
+                "rule".to_owned()
+            } else {
+                guard.current_mode.clone()
+            };
             (
                 guard.sys_proxy_enabled,
                 guard.tun_enabled,
-                guard.current_mode.clone(),
+                mode,
+                guard.labels.clone(),
             )
         })
-        .unwrap_or_else(|_| (false, false, "rule".to_owned()));
+        .unwrap_or_else(|_| (false, false, "rule".to_owned(), TrayLabels::default()));
 
     let tray = match app.tray_by_id("main") {
         Some(t) => t,
         None => return,
     };
 
-    let show_i = match MenuItem::with_id(app, "show", "Show Zephyr", true, None::<&str>) {
+    let show_i = match MenuItem::with_id(app, "show", &labels.show, true, None::<&str>) {
         Ok(i) => i,
         Err(_) => return,
     };
@@ -585,9 +632,9 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
     };
 
     let sys_label = if sys_on {
-        "● System Proxy".to_owned()
+        format!("● {}", labels.sys_proxy)
     } else {
-        "○ System Proxy".to_owned()
+        format!("○ {}", labels.sys_proxy)
     };
     let sys_i = match MenuItem::with_id(app, "toggle_sysproxy", &sys_label, true, None::<&str>) {
         Ok(i) => i,
@@ -595,9 +642,9 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
     };
 
     let tun_label = if tun_on {
-        "● TUN Mode".to_owned()
+        format!("● {}", labels.tun_mode)
     } else {
-        "○ TUN Mode".to_owned()
+        format!("○ {}", labels.tun_mode)
     };
     let tun_i = match MenuItem::with_id(app, "toggle_tun", &tun_label, true, None::<&str>) {
         Ok(i) => i,
@@ -609,19 +656,19 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         Err(_) => return,
     };
     let rule_label = if mode.to_lowercase() == "rule" {
-        "● Rule".to_owned()
+        format!("● {}", labels.rule)
     } else {
-        "○ Rule".to_owned()
+        format!("○ {}", labels.rule)
     };
     let global_label = if mode.to_lowercase() == "global" {
-        "● Global".to_owned()
+        format!("● {}", labels.global)
     } else {
-        "○ Global".to_owned()
+        format!("○ {}", labels.global)
     };
     let direct_label = if mode.to_lowercase() == "direct" {
-        "● Direct".to_owned()
+        format!("● {}", labels.direct)
     } else {
-        "○ Direct".to_owned()
+        format!("○ {}", labels.direct)
     };
     let rule_i = match MenuItem::with_id(app, "mode_rule", &rule_label, true, None::<&str>) {
         Ok(i) => i,
@@ -640,7 +687,7 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         Ok(s) => s,
         Err(_) => return,
     };
-    let quit_i = match MenuItem::with_id(app, "quit", "Quit", true, None::<&str>) {
+    let quit_i = match MenuItem::with_id(app, "quit", &labels.quit, true, None::<&str>) {
         Ok(i) => i,
         Err(_) => return,
     };

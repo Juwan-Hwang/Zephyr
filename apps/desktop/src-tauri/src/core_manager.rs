@@ -55,6 +55,7 @@ pub use core::{
     ReadLogResult,
     // Constants
     CORE_STARTING,
+    DEFAULT_MIXED_PORT,
     MAX_RESPONSE_SIZE,
     TUN_MODE_ACTIVE,
     TUN_TOGGLING,
