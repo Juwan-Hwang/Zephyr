@@ -394,6 +394,36 @@ jobs:
           cd portable && tar czf ../dist-artifacts/Zephyr-linux-portable.tar.gz . && cd ..
         shell: bash
 
+      # ── Minisign: sign all release artifacts ──
+      - name: Install minisign
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y minisign
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install minisign
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            choco install minisign
+          fi
+        shell: bash
+
+      - name: Sign release artifacts
+        run: |
+          # Write private key to temp file (minisign requires a file path)
+          KEY_FILE=$(mktemp)
+          printf '%s' "${{ secrets.MINISIGN_PRIVATE_KEY }}" > "$KEY_FILE"
+          trap 'rm -f "$KEY_FILE"' EXIT
+
+          shopt -s nullglob
+          for f in dist-artifacts/*; do
+            if [ -f "$f" ] && [ ! -f "${f}.minisig" ]; then
+              echo "Signing $(basename "$f")..."
+              minisign -S -s "$KEY_FILE" -m "$f" -x "${f}.minisig" -W
+            fi
+          done
+          echo "Signed artifacts:"
+          ls -la dist-artifacts/*.minisig 2>/dev/null || echo "No signatures generated"
+        shell: bash
+
       - name: Upload All Release Assets
         uses: softprops/action-gh-release@v2
         env:
