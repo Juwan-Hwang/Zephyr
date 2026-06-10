@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -1219,16 +1219,21 @@ function renderGroupSelector(groups, currentGroup) {
     }
 }
 
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _loadingTimeout = null;
+
 /**
  * Show loading state in the proxy container.
+ * After 2.5s, a "Restart Core" button appears below the spinner.
  * @param {HTMLElement} container
  * @param {string} loadingText
  */
 function renderProxiesLoading(container, loadingText) {
-     
+    clearLoadingTimeout();
     container.innerHTML = '';
     const loading = document.createElement('div');
     loading.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
+    loading.id = 'proxies-loading-state';
     const span = document.createElement('span');
     span.textContent = loadingText;
     const spinner = document.createElement('div');
@@ -1236,6 +1241,54 @@ function renderProxiesLoading(container, loadingText) {
     loading.appendChild(span);
     loading.appendChild(spinner);
     container.appendChild(loading);
+
+    _loadingTimeout = setTimeout(() => {
+        const existing = document.getElementById('proxies-loading-state');
+        if (!existing) return;
+        // Don't add button if it already exists
+        if (document.getElementById('restart-core-btn')) return;
+        const tObj = /** @type {any} */ (translations)[currentLang];
+        const btn = document.createElement('button');
+        btn.id = 'restart-core-btn';
+        btn.className = 'mt-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
+        btn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
+        btn.textContent = tObj.restartCore || 'Restart Core';
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = tObj.restartingCore || 'Restarting...';
+            try {
+                const settings = await getSettingsCached();
+                const configPath = settings?.last_config || 'config.yaml';
+                const customArgs = settings?.custom_args || [];
+                await restartCore(configPath, customArgs);
+                showNotification(tObj.coreRestarted || 'Core restarted', 'success');
+                (async () => {
+                    try {
+                        const { invalidateProxiesCache, invalidateConfigCache } = await import('./cache.js');
+                        invalidateProxiesCache();
+                        invalidateConfigCache();
+                        await renderProxies();
+                    } catch (error) {
+                        proxyLogger.error('Failed to re-render proxies after restart', error);
+                    }
+                })();
+            } catch (err) {
+                proxyLogger.error('Failed to restart core from loading state', err);
+                showNotification(String(err), 'error');
+                btn.disabled = false;
+                btn.textContent = tObj.restartCore || 'Restart Core';
+            }
+        });
+        existing.appendChild(btn);
+    }, 2500);
+}
+
+/** Clear the loading timeout timer if active. */
+function clearLoadingTimeout() {
+    if (_loadingTimeout) {
+        clearTimeout(_loadingTimeout);
+        _loadingTimeout = null;
+    }
 }
 
 /**
@@ -1575,13 +1628,49 @@ export async function renderProxies() {
         getConfigCached(),
     ]);
 
+    // Clear loading timeout — data fetch completed (success or failure)
+    clearLoadingTimeout();
+
     if (!data || !data.proxies) {
- 
-    container.innerHTML = '';
-    const err = document.createElement('div');
-        err.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20';
-        err.textContent = t.failedToConnect;
-        container.appendChild(err);
+        container.innerHTML = '';
+        const errWrap = document.createElement('div');
+        errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
+        const errText = document.createElement('span');
+        errText.textContent = t.failedToConnect;
+        errWrap.appendChild(errText);
+        // Add restart core button on connection failure
+        const restartBtn = document.createElement('button');
+        restartBtn.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
+        restartBtn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
+        restartBtn.textContent = t.restartCore || 'Restart Core';
+        restartBtn.addEventListener('click', async () => {
+            restartBtn.disabled = true;
+            restartBtn.textContent = t.restartingCore || 'Restarting...';
+            try {
+                const settings = await getSettingsCached();
+                const configPath = settings?.last_config || 'config.yaml';
+                const customArgs = settings?.custom_args || [];
+                await restartCore(configPath, customArgs);
+                showNotification(t.coreRestarted || 'Core restarted', 'success');
+                (async () => {
+                    try {
+                        const { invalidateProxiesCache, invalidateConfigCache } = await import('./cache.js');
+                        invalidateProxiesCache();
+                        invalidateConfigCache();
+                        await renderProxies();
+                    } catch (error) {
+                        proxyLogger.error('Failed to re-render proxies after restart', error);
+                    }
+                })();
+            } catch (err) {
+                proxyLogger.error('Failed to restart core from error state', err);
+                showNotification(String(err), 'error');
+                restartBtn.disabled = false;
+                restartBtn.textContent = t.restartCore || 'Restart Core';
+            }
+        });
+        errWrap.appendChild(restartBtn);
+        container.appendChild(errWrap);
         return;
     }
 
