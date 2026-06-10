@@ -418,21 +418,24 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
 
     // Update internal state
     let state = app.state::<TrayState>();
-    if let Ok(mut guard) = state.0.lock() {
-        guard.sys_proxy_enabled = params.sys_proxy_enabled;
-        guard.tun_enabled = params.tun_enabled;
-        guard.current_mode.clone_from(&params.current_mode);
-        // Store i18n labels for rebuild_tray_menu_from_state (lightweight mode)
-        guard.labels = TrayLabels {
-            show: params.show_text.clone(),
-            quit: params.quit_text.clone(),
-            sys_proxy: params.sys_proxy_text.clone(),
-            tun_mode: params.tun_text.clone(),
-            rule: params.rule_text.clone(),
-            global: params.global_text.clone(),
-            direct: params.direct_text.clone(),
-        };
-    }
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    guard.sys_proxy_enabled = params.sys_proxy_enabled;
+    guard.tun_enabled = params.tun_enabled;
+    guard.current_mode.clone_from(&params.current_mode);
+    // Store i18n labels for rebuild_tray_menu_from_state (lightweight mode)
+    guard.labels = TrayLabels {
+        show: params.show_text.clone(),
+        quit: params.quit_text.clone(),
+        sys_proxy: params.sys_proxy_text.clone(),
+        tun_mode: params.tun_text.clone(),
+        rule: params.rule_text.clone(),
+        global: params.global_text.clone(),
+        direct: params.direct_text.clone(),
+    };
+    drop(guard);
 
     // Build menu items
     let show_i = MenuItem::with_id(&app, "show", &params.show_text, true, None::<&str>)
