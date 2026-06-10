@@ -603,23 +603,19 @@ pub fn update_tray_toggle_states(
 #[allow(clippy::doc_markdown)]
 fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
-    let (sys_on, tun_on, mode, labels) = tray_state
-        .0
-        .lock()
-        .map(|guard| {
-            let mode = if guard.current_mode.is_empty() {
-                "rule".to_owned()
-            } else {
-                guard.current_mode.clone()
-            };
-            (
-                guard.sys_proxy_enabled,
-                guard.tun_enabled,
-                mode,
-                guard.labels.clone(),
-            )
-        })
-        .unwrap_or_else(|_| (false, false, "rule".to_owned(), TrayLabels::default()));
+    let guard = match tray_state.0.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let sys_on = guard.sys_proxy_enabled;
+    let tun_on = guard.tun_enabled;
+    let mode = if guard.current_mode.is_empty() {
+        "rule".to_owned()
+    } else {
+        guard.current_mode.clone()
+    };
+    let labels = guard.labels.clone();
+    drop(guard);
 
     let tray = match app.tray_by_id("main") {
         Some(t) => t,

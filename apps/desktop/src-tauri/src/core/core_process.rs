@@ -627,6 +627,7 @@ fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
         val.as_u64()
             .and_then(|p| u16::try_from(p).ok())
             .or_else(|| val.as_str().and_then(|s| s.trim().parse::<u16>().ok()))
+            .filter(|&p| p != 0)
     };
 
     yaml_val
