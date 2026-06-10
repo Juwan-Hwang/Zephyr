@@ -1,0 +1,3 @@
+cargo clippy --all-targets -- -D warnings
+cargo test
+pnpm test

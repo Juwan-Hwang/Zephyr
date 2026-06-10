@@ -1,0 +1,3 @@
+cargo fmt --check --all
+pnpm lint
+pnpm typecheck
