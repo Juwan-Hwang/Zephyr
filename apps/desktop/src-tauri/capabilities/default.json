@@ -23,6 +23,7 @@
     "core:tray:default",
     "core:resources:default",
     "core:app:default",
-    "dialog:allow-message"
+    "dialog:allow-message",
+    "notification:default"
   ]
 }

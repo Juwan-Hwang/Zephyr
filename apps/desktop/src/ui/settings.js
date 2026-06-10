@@ -756,11 +756,14 @@ export async function initSettings() {
         if (lightweightModeToggle && closeTrayToggle) {
             lightweightModeToggle.disabled = !closeTrayToggle.checked;
             lightweightModeToggle.closest('.flex')?.classList.toggle('opacity-50', !closeTrayToggle.checked);
+            if (!closeTrayToggle.checked && lightweightModeToggle.checked) {
+                lightweightModeToggle.checked = false;
+            }
         }
     };
     closeTrayToggle?.addEventListener('change', () => {
-        save();
         syncLightweightState();
+        save();
     });
     lightweightModeToggle?.addEventListener('change', save);
     syncLightweightState();

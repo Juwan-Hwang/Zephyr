@@ -14,7 +14,7 @@ use tauri::{
     AppHandle, Manager as _,
 };
 
-use crate::core_manager::MihomoState;
+use crate::core_manager::{MihomoState, DEFAULT_MIXED_PORT};
 use crate::sys_proxy;
 
 /// Tray menu state for tracking check states
@@ -25,6 +25,37 @@ pub struct TrayMenuState {
     pub current_mode: String,
     pub active_config: Option<String>,
     pub active_proxy: Option<String>,
+    /// i18n labels for `rebuild_tray_menu_from_state` (lightweight mode)
+    #[serde(default)]
+    pub labels: TrayLabels,
+}
+
+/// Localized labels stored in `TrayMenuState` so the Rust-side
+/// `rebuild_tray_menu_from_state` can display the correct language
+/// even when the frontend/WebView is not available (lightweight mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrayLabels {
+    pub show: String,
+    pub quit: String,
+    pub sys_proxy: String,
+    pub tun_mode: String,
+    pub rule: String,
+    pub global: String,
+    pub direct: String,
+}
+
+impl Default for TrayLabels {
+    fn default() -> Self {
+        Self {
+            show: "Show Zephyr".to_owned(),
+            quit: "Quit".to_owned(),
+            sys_proxy: "System Proxy".to_owned(),
+            tun_mode: "TUN Mode".to_owned(),
+            rule: "Rule".to_owned(),
+            global: "Global".to_owned(),
+            direct: "Direct".to_owned(),
+        }
+    }
 }
 
 /// Wrapper for tray state to work with Tauri's State
@@ -288,23 +319,53 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 
 fn toggle_sys_proxy(app: &AppHandle) {
     let current = sys_proxy::get_sys_proxy().unwrap_or(false);
+    let new_state = !current;
 
-    if current {
-        let _ = sys_proxy::disable_sysproxy();
+    let result = if current {
+        sys_proxy::disable_sysproxy()
     } else {
-        // Get the current proxy port from core state
+        // Get the current PROXY port from core state (not the API port)
         let state = app.state::<MihomoState>();
         let port = state
             .0
             .lock()
-            .map(|guard| guard.last_port().unwrap_or(7890))
-            .unwrap_or(7890);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_proxy_port()
+            .unwrap_or(DEFAULT_MIXED_PORT);
         let server = format!("127.0.0.1:{port}");
-        let _ = sys_proxy::enable_sysproxy(server, None);
+        sys_proxy::enable_sysproxy(server, None)
+    };
+
+    if let Err(e) = result {
+        eprintln!("Failed to toggle system proxy: {e}");
+        // Operation failed — do not update state, rebuild menu with current state
+        rebuild_tray_menu_from_state(app);
+        return;
     }
 
-    // Emit event to frontend
-    crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", !current);
+    // Operation succeeded — update tray state, icon, and menu
+    let tray_state = app.state::<TrayState>();
+    let mut guard = tray_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.sys_proxy_enabled = new_state;
+    let tun_enabled = guard.tun_enabled;
+    drop(guard);
+
+    let icon_mode = if tun_enabled {
+        "tun"
+    } else if new_state {
+        "sysproxy"
+    } else {
+        "default"
+    };
+    let _ = change_tray_icon(app.clone(), icon_mode.to_owned());
+
+    rebuild_tray_menu_from_state(app);
+
+    // Also emit to frontend (will be ignored if no WebView, which is fine)
+    crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", new_state);
 }
 
 fn toggle_tun(app: &AppHandle) {
@@ -356,11 +417,24 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
 
     // Update internal state
     let state = app.state::<TrayState>();
-    if let Ok(mut guard) = state.0.lock() {
-        guard.sys_proxy_enabled = params.sys_proxy_enabled;
-        guard.tun_enabled = params.tun_enabled;
-        guard.current_mode.clone_from(&params.current_mode);
-    }
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.sys_proxy_enabled = params.sys_proxy_enabled;
+    guard.tun_enabled = params.tun_enabled;
+    guard.current_mode.clone_from(&params.current_mode);
+    // Store i18n labels for rebuild_tray_menu_from_state (lightweight mode)
+    guard.labels = TrayLabels {
+        show: params.show_text.clone(),
+        quit: params.quit_text.clone(),
+        sys_proxy: params.sys_proxy_text.clone(),
+        tun_mode: params.tun_text.clone(),
+        rule: params.rule_text.clone(),
+        global: params.global_text.clone(),
+        direct: params.direct_text.clone(),
+    };
+    drop(guard);
 
     // Build menu items
     let show_i = MenuItem::with_id(&app, "show", &params.show_text, true, None::<&str>)
@@ -523,4 +597,117 @@ pub fn update_tray_toggle_states(
     }
 
     Ok(())
+}
+
+/// Rebuild tray menu from current `TrayState` (works without WebView/frontend).
+/// Used when tray operations happen in lightweight mode or when the frontend
+/// is not available to provide full menu data.
+#[allow(clippy::doc_markdown)]
+fn rebuild_tray_menu_from_state(app: &AppHandle) {
+    let tray_state = app.state::<TrayState>();
+    let guard = tray_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let sys_on = guard.sys_proxy_enabled;
+    let tun_on = guard.tun_enabled;
+    let mode = if guard.current_mode.is_empty() {
+        "rule".to_owned()
+    } else {
+        guard.current_mode.clone()
+    };
+    let labels = guard.labels.clone();
+    drop(guard);
+
+    let tray = match app.tray_by_id("main") {
+        Some(t) => t,
+        None => return,
+    };
+
+    let show_i = match MenuItem::with_id(app, "show", &labels.show, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let sep1 = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let sys_label = if sys_on {
+        format!("● {}", labels.sys_proxy)
+    } else {
+        format!("○ {}", labels.sys_proxy)
+    };
+    let sys_i = match MenuItem::with_id(app, "toggle_sysproxy", &sys_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let tun_label = if tun_on {
+        format!("● {}", labels.tun_mode)
+    } else {
+        format!("○ {}", labels.tun_mode)
+    };
+    let tun_i = match MenuItem::with_id(app, "toggle_tun", &tun_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let mode_sep = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let rule_label = if mode.to_lowercase() == "rule" {
+        format!("● {}", labels.rule)
+    } else {
+        format!("○ {}", labels.rule)
+    };
+    let global_label = if mode.to_lowercase() == "global" {
+        format!("● {}", labels.global)
+    } else {
+        format!("○ {}", labels.global)
+    };
+    let direct_label = if mode.to_lowercase() == "direct" {
+        format!("● {}", labels.direct)
+    } else {
+        format!("○ {}", labels.direct)
+    };
+    let rule_i = match MenuItem::with_id(app, "mode_rule", &rule_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let global_i = match MenuItem::with_id(app, "mode_global", &global_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let direct_i = match MenuItem::with_id(app, "mode_direct", &direct_label, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let sep2 = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let quit_i = match MenuItem::with_id(app, "quit", &labels.quit, true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let menu = MenuBuilder::new(app)
+        .item(&show_i)
+        .item(&sep1)
+        .item(&sys_i)
+        .item(&tun_i)
+        .item(&mode_sep)
+        .item(&rule_i)
+        .item(&global_i)
+        .item(&direct_i)
+        .item(&sep2)
+        .item(&quit_i)
+        .build();
+
+    if let Ok(m) = menu {
+        let _ = tray.set_menu(Some(m));
+    }
 }

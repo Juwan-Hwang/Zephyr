@@ -17,7 +17,7 @@ use crate::{emit_error, emit_info, emit_warn};
 use zephyr_core::config::sanitizer::{sanitize_config_file_name, validate_path_within_dir};
 
 const DEFAULT_API_PORT: u16 = 9090;
-const DEFAULT_MIXED_PORT: u16 = 7890;
+pub const DEFAULT_MIXED_PORT: u16 = 7890;
 #[cfg(target_os = "macos")]
 const PORT_WAIT_MAX_RETRIES: u64 = 50;
 #[cfg(target_os = "macos")]
@@ -619,6 +619,25 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
         .unwrap_or(DEFAULT_API_PORT)
 }
 
+/// Parse the proxy port from YAML config.
+/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
+/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
+fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+    let parse_u16 = |val: &serde_yaml::Value| -> Option<u16> {
+        val.as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .or_else(|| val.as_str().and_then(|s| s.trim().parse::<u16>().ok()))
+            .filter(|&p| p != 0)
+    };
+
+    yaml_val
+        .get("mixed-port")
+        .and_then(parse_u16)
+        .or_else(|| yaml_val.get("port").and_then(parse_u16))
+        .or_else(|| yaml_val.get("socks-port").and_then(parse_u16))
+        .unwrap_or(DEFAULT_MIXED_PORT)
+}
+
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
     let mut safe_custom_args = Vec::with_capacity(custom_args.len());
 
@@ -677,7 +696,7 @@ pub fn prepare_runtime_config(
     content: &str,
     secret: &str,
     prefs: Option<&GlobalPreferences>,
-) -> Option<(String, u16)> {
+) -> Option<(String, u16, u16)> {
     let mut yaml_val = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
     if !yaml_val.is_mapping() {
         return None;
@@ -843,17 +862,22 @@ pub fn prepare_runtime_config(
         }
     }
 
+    // Parse proxy_port AFTER all overrides are applied so it reflects
+    // any user-overridden values (mixed_port, socks_port, http_port).
+    let proxy_port = parse_proxy_port(&yaml_val);
+
     let result = serde_yaml::to_string(&yaml_val).ok()?;
 
-    Some((result, config_port))
+    Some((result, config_port, proxy_port))
 }
 
-fn build_minimal_runtime_config(secret: &str) -> (String, u16) {
+fn build_minimal_runtime_config(secret: &str) -> (String, u16, u16) {
     (
         format!(
             "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\ntcp-concurrent: true\nkeep-alive-interval: 30\nkeep-alive-idle: 600\nfind-process-mode: always\nprofile:\n  store-fake-ip: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
         DEFAULT_API_PORT,
+        DEFAULT_MIXED_PORT,
     )
 }
 
@@ -863,21 +887,26 @@ fn select_runtime_config(
     preferred_path: &Path,
     secret: &str,
     prefs: Option<&GlobalPreferences>,
-) -> Result<(Option<String>, String, u16), String> {
+) -> Result<(Option<String>, String, u16, u16), String> {
     let preferred_content =
         fs::read_to_string(preferred_path).map_err(|e| format!("Failed to read config: {e}"))?;
-    if let Some((final_config, config_port)) =
+    if let Some((final_config, config_port, proxy_port)) =
         prepare_runtime_config(&preferred_content, secret, prefs)
     {
-        return Ok((Some(preferred_name.to_owned()), final_config, config_port));
+        return Ok((
+            Some(preferred_name.to_owned()),
+            final_config,
+            config_port,
+            proxy_port,
+        ));
     }
 
     let mut fallback_profiles = Vec::new();
     let entries = if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
         entries
     } else {
-        let (config, port) = build_minimal_runtime_config(secret);
-        return Ok((None, config, port));
+        let (config, api_port, proxy_port) = build_minimal_runtime_config(secret);
+        return Ok((None, config, api_port, proxy_port));
     };
 
     for entry in entries.flatten() {
@@ -904,7 +933,9 @@ fn select_runtime_config(
             Ok(content) => content,
             Err(_) => continue,
         };
-        if let Some((final_config, config_port)) = prepare_runtime_config(&content, secret, prefs) {
+        if let Some((final_config, config_port, proxy_port)) =
+            prepare_runtime_config(&content, secret, prefs)
+        {
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -915,7 +946,7 @@ fn select_runtime_config(
                 CONFIG_PARSE_FAILED,
                 "Requested config {preferred_name} is not valid, falling back to {file_name}"
             );
-            return Ok((Some(file_name), final_config, config_port));
+            return Ok((Some(file_name), final_config, config_port, proxy_port));
         }
     }
 
@@ -924,8 +955,8 @@ fn select_runtime_config(
         CONFIG_PARSE_FAILED,
         "Requested config {preferred_name} is not valid, falling back to minimal config"
     );
-    let (final_config, config_port) = build_minimal_runtime_config(secret);
-    Ok((None, final_config, config_port))
+    let (final_config, api_port, proxy_port) = build_minimal_runtime_config(secret);
+    Ok((None, final_config, api_port, proxy_port))
 }
 
 pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1309,7 +1340,7 @@ pub async fn start_core(
         Some(settings.to_global_prefs())
     };
 
-    let (active_config_name, final_config, config_port) = select_runtime_config(
+    let (active_config_name, final_config, config_port, proxy_port) = select_runtime_config(
         &paths,
         &resolved_config_name,
         &resolved_config_path,
@@ -1410,6 +1441,7 @@ pub async fn start_core(
     lock.set_last_config_path(active_config_name);
     lock.set_last_custom_args(Some(safe_custom_args));
     lock.set_last_port(Some(port));
+    lock.set_last_proxy_port(Some(proxy_port));
     lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
     drop(lock);
 
@@ -1428,6 +1460,7 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
             .lock()
             .map_err(|e| format!("Failed to lock state: {e}"))?;
         lock.set_last_port(None);
+        lock.set_last_proxy_port(None);
         lock.take_process()
     };
 
@@ -1494,9 +1527,11 @@ mod tests {
     #[test]
     fn prepare_runtime_config_injects_secret_and_controller() {
         let config = "external-controller: 0.0.0.0:7897\nsecret: old\nmode: rule\n";
-        let (prepared, port) = prepare_runtime_config(config, "new-secret", None).unwrap();
+        let (prepared, api_port, proxy_port) =
+            prepare_runtime_config(config, "new-secret", None).unwrap();
 
-        assert_eq!(port, 7897);
+        assert_eq!(api_port, 7897);
+        assert_eq!(proxy_port, DEFAULT_MIXED_PORT);
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
         assert!(prepared.contains("secret: new-secret"));
         assert!(!prepared.contains("secret: old"));
@@ -1524,8 +1559,9 @@ mod tests {
         let content = "port: 7890\nmode: rule";
         let result = prepare_runtime_config(content, "mysecret", None);
         assert!(result.is_some());
-        let (config, port) = result.unwrap();
+        let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 9090);
+        assert_eq!(proxy_port, 7890);
         assert!(config.contains("external-controller: 127.0.0.1:9090"));
         assert!(config.contains("secret: mysecret"));
         assert!(config.contains("unified-delay: true"));
@@ -1541,8 +1577,9 @@ mod tests {
         let content = "external-controller: 0.0.0.0:8080\nport: 7890";
         let result = prepare_runtime_config(content, "secret", None);
         assert!(result.is_some());
-        let (config, port) = result.unwrap();
+        let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 8080);
+        assert_eq!(proxy_port, 7890);
         assert!(config.contains("external-controller: 127.0.0.1:8080"));
     }
 
@@ -1551,7 +1588,7 @@ mod tests {
         let content = "unified-delay: false\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("unified-delay: false"));
         assert_eq!(config.matches("unified-delay").count(), 1);
     }
@@ -1561,7 +1598,7 @@ mod tests {
         let content = "tcp-concurrent: false\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("tcp-concurrent: false"));
         assert_eq!(config.matches("tcp-concurrent").count(), 1);
     }
@@ -1571,7 +1608,7 @@ mod tests {
         let content = "keep-alive-interval: 60\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("keep-alive-interval: 60"));
         assert_eq!(config.matches("keep-alive-interval").count(), 1);
     }
@@ -1581,7 +1618,7 @@ mod tests {
         let content = "find-process-mode: off\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("find-process-mode: off"));
         assert_eq!(config.matches("find-process-mode").count(), 1);
     }
@@ -1591,7 +1628,7 @@ mod tests {
         let content = "keep-alive-idle: 300\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("keep-alive-idle: 300"));
         assert_eq!(config.matches("keep-alive-idle").count(), 1);
     }
@@ -1601,7 +1638,7 @@ mod tests {
         let content = "profile:\n  store-fake-ip: false\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("store-fake-ip: false"));
         assert_eq!(config.matches("store-fake-ip").count(), 1);
     }
@@ -1612,7 +1649,7 @@ mod tests {
         let content = "profile:\nport: 7890";
         let result = prepare_runtime_config(content, "s", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("store-fake-ip: true"));
     }
 
@@ -1631,7 +1668,7 @@ mod tests {
         let content = "port: 7890";
         let result = prepare_runtime_config(content, "", None);
         assert!(result.is_some());
-        let (config, _) = result.unwrap();
+        let (config, _, _) = result.unwrap();
         assert!(config.contains("secret: "));
     }
 
@@ -1644,7 +1681,7 @@ mod tests {
             mode: Some("global".to_owned()),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("mode: global"));
         assert!(!config.contains("mode: rule"));
     }
@@ -1653,7 +1690,7 @@ mod tests {
     fn test_prefs_none_does_not_override() {
         let content = "mode: rule\nport: 7890";
         let prefs = GlobalPreferences::default();
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("mode: rule"));
     }
 
@@ -1664,7 +1701,7 @@ mod tests {
             tun_enabled: Some(true),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("enable: true"));
     }
 
@@ -1675,7 +1712,7 @@ mod tests {
             tun_enabled: Some(true),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("tun:\n  enable: true"));
     }
 
@@ -1686,7 +1723,7 @@ mod tests {
             mixed_port: Some(9090),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("mixed-port: 9090"));
     }
 
@@ -1697,7 +1734,7 @@ mod tests {
             socks_port: Some(1080),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("socks-port: 1080"));
     }
 
@@ -1708,7 +1745,7 @@ mod tests {
             http_port: Some(8080),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("port: 8080"));
     }
 
@@ -1719,7 +1756,7 @@ mod tests {
             ipv6: Some(true),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("ipv6: true"));
     }
 
@@ -1730,7 +1767,7 @@ mod tests {
             allow_lan: Some(true),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("allow-lan: true"));
     }
 
@@ -1741,7 +1778,7 @@ mod tests {
             unified_delay: Some(true),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("unified-delay: true"));
     }
 
@@ -1755,7 +1792,7 @@ mod tests {
             mixed_port: Some(7892),
             ..Default::default()
         };
-        let (config, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("mode: direct"));
         assert!(config.contains("ipv6: true"));
         assert!(config.contains("allow-lan: true"));

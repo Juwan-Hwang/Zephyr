@@ -86,8 +86,8 @@ function initReactiveBindings() {
   }
 
   // --- Tray auto-update on state changes ---
-  appStore.subscribe('isSysProxyEnabled', () => updateTrayStatus().catch(() => {}));
-  appStore.subscribe('isTunEnabled', () => updateTrayStatus().catch(() => {}));
+  appStore.subscribe('isSysProxyEnabled', () => { updateTrayStatus().catch(() => {}); updateTrayMenu().catch(() => {}); });
+  appStore.subscribe('isTunEnabled', () => { updateTrayStatus().catch(() => {}); updateTrayMenu().catch(() => {}); });
   appStore.subscribe('currentOutboundMode', () => updateTrayMenu(true).catch(() => {}));
 
   // --- Bus event -> store wiring (for events from settings.js, i18n.js) ---

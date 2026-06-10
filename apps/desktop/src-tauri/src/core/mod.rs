@@ -37,6 +37,7 @@ pub struct CoreData {
     last_config_path: Option<String>,
     last_custom_args: Option<Vec<String>>,
     last_port: Option<u16>,
+    last_proxy_port: Option<u16>,
     last_log_path: Option<String>,
 }
 
@@ -55,6 +56,7 @@ impl CoreData {
             last_config_path: None,
             last_custom_args: None,
             last_port: None,
+            last_proxy_port: None,
             last_log_path: None,
         }
     }
@@ -87,6 +89,10 @@ impl CoreData {
         self.last_port
     }
     #[must_use]
+    pub const fn last_proxy_port(&self) -> Option<u16> {
+        self.last_proxy_port
+    }
+    #[must_use]
     pub fn last_log_path(&self) -> Option<&str> {
         self.last_log_path.as_deref()
     }
@@ -105,6 +111,9 @@ impl CoreData {
     }
     pub const fn set_last_port(&mut self, p: Option<u16>) {
         self.last_port = p;
+    }
+    pub const fn set_last_proxy_port(&mut self, p: Option<u16>) {
+        self.last_proxy_port = p;
     }
     pub fn set_last_log_path(&mut self, p: Option<String>) {
         self.last_log_path = p;
@@ -157,7 +166,7 @@ pub use config_manager::{
 pub use core_log::read_core_log;
 pub use core_process::{
     core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_version,
-    kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner,
+    kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner, DEFAULT_MIXED_PORT,
 };
 pub use crypto::is_machine_key_persisted;
 pub use secure_io::write_file_secure;

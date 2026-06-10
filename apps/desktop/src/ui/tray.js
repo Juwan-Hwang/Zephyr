@@ -175,30 +175,11 @@ export async function initTrayEventListeners() {
         const enabled = ev.payload;
         const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
 
-        if (toggle) {
-            toggle.checked = enabled;
-        }
-
-        try {
-            /** @type {any} */
-            const currentConfig = await getConfig();
-            const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-
-            if (enabled) {
-                await invoke(COMMANDS.ENABLE_SYSPROXY, {
-                    server: `127.0.0.1:${currentPort}`,
-                    bypass: null,
-                });
-            } else {
-                await invoke(COMMANDS.DISABLE_SYSPROXY);
-            }
-
-            import('./sysproxy.js').then(m => m.updateSysProxyUI());
-            await updateTrayMenu();
-        } catch (err) {
-            trayLogger.error('Failed to toggle sys proxy from tray', err);
-            if (toggle) toggle.checked = !enabled;
-        }
+        // Rust backend has already toggled the system proxy; just sync the UI.
+        appStore.set('isSysProxyEnabled', enabled);
+        if (toggle) toggle.checked = enabled;
+        import('./sysproxy.js').then(m => m.updateSysProxyUI());
+        // appStore.subscribe in main.js already triggers updateTrayMenu()
     });
     _trayEventUnlisteners.push(unlisten1);
 

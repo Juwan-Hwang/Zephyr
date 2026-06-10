@@ -277,7 +277,7 @@ pub async fn prism_rebuild(
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
-            let (prepared, _port) = core_process::prepare_runtime_config(
+            let (prepared, _api_port, _proxy_port) = core_process::prepare_runtime_config(
                 &raw_profile,
                 &current_secret,
                 global_prefs.as_ref(),
