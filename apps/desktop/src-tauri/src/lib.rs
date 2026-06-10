@@ -5,6 +5,7 @@ pub mod core_event_bridge;
 pub mod core_manager;
 pub mod deep_link;
 pub mod global_shortcut;
+pub mod minisign_verify;
 pub mod os_notification;
 pub mod prism;
 pub mod sys_proxy;

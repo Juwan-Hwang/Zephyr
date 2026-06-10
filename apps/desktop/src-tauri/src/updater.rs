@@ -1198,7 +1198,38 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         );
     }
 
-    emit_core_download_status(&window, "Opening installer...", 95);
+    // Verify Minisign Ed25519 signature
+    let minisig_url = format!("{}.minisig", info.download_url);
+    emit_core_download_status(&window, "Downloading signature...", 94);
+
+    let sig_client = build_github_client()?;
+    let sig_response = sig_client.get(&minisig_url).send().await.map_err(|e| {
+        let _ = std::fs::remove_file(&dest_path);
+        format!("Failed to download signature: {e}. Installer deleted for security.")
+    })?;
+
+    if !sig_response.status().is_success() {
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(
+            "Minisign signature not available for this release. Installer was deleted for security."
+                .to_owned(),
+        );
+    }
+
+    let signature_content = sig_response.text().await.map_err(|e| {
+        let _ = std::fs::remove_file(&dest_path);
+        format!("Failed to read signature content: {e}. Installer deleted for security.")
+    })?;
+
+    emit_core_download_status(&window, "Verifying signature...", 95);
+    crate::minisign_verify::verify_minisign_signature(&dest_path, &signature_content).map_err(
+        |e| {
+            let _ = std::fs::remove_file(&dest_path);
+            format!("{e}. Installer deleted for security.")
+        },
+    )?;
+
+    emit_core_download_status(&window, "Opening installer...", 96);
 
     // Open the installer with the system default application
     tauri_plugin_opener::open_path(&dest_path, None::<&str>)
