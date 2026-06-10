@@ -12,7 +12,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "tauri": "pnpm --filter @zephyr/desktop tauri",
-    "check:i18n": "node packages/scripts/check-i18n.js"
+    "check:i18n": "node packages/scripts/check-i18n.js",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.0",
@@ -20,6 +21,7 @@
     "eslint": "10.4.0",
     "globals": "^17.6.0",
     "happy-dom": "^20.9.0",
+    "husky": "^9.1.7",
     "style-dictionary": "^5.4.2",
     "tailwindcss": "4.3.0",
     "typescript": "^6.0.2",
