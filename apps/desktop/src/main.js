@@ -10,6 +10,7 @@ import {
   invoke,
   setBaseUrl,
   setSecret,
+  setCoreReachable,
 } from './api.js';
 import {
   setBaseUrl as setWsBaseUrl,
@@ -171,6 +172,7 @@ async function initApp() {
     setWsBaseUrl(`ws://127.0.0.1:${port}`);
     setSecret(secret || '');
     setWsSecret(secret || '');
+    setCoreReachable(true);
 
     // 5b. Initialize Prism engine — compile patches and populate rule annotations.
     // mihomo already started with run_config.yaml (previous compile output), so rules
@@ -348,6 +350,13 @@ async function initApp() {
   // 9. Traffic WebSocket
   _trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
     updateTrafficData(data);
+  });
+
+  // 9b. Reconnect traffic stream when core restarts
+  Bus.on(Events.CORE_RESTARTED, () => {
+    if (_trafficWsHandle) {
+      _trafficWsHandle.reconnect();
+    }
   });
 
   // 11. Cleanup handlers
