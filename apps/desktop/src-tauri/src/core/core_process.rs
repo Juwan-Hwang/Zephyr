@@ -1346,7 +1346,13 @@ pub async fn start_core(
         .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
 
         if !output.status.success() {
-            let err_msg = redact_error_message(&String::from_utf8_lossy(&output.stderr));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let raw_err = if stderr.trim().is_empty() {
+                String::from_utf8_lossy(&output.stdout)
+            } else {
+                stderr
+            };
+            let err_msg = redact_error_message(raw_err.trim());
             emit_error!(
                 Config,
                 CONFIG_PARSE_FAILED,
