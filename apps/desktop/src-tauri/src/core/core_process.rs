@@ -1027,7 +1027,11 @@ async fn wait_for_port_free(port: u16) {
 
 /// Attach a log file to a `Command` for stdout/stderr redirection.
 fn attach_log_file(cmd: &mut Command, log_path: &Path) {
-    if let Ok(log_file) = std::fs::File::create(log_path) {
+    let file_result = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path);
+    if let Ok(log_file) = file_result {
         // Restrict log file permissions to owner-only (sensitive URLs/domains may be logged)
         #[cfg(unix)]
         {
@@ -1054,6 +1058,7 @@ async fn spawn_with_cache_retry(
     exe_path: &Path,
     safe_custom_args: &[String],
     core_dir: &Path,
+    app_data_dir: &Path,
 ) -> Result<(std::process::Child, PathBuf), String> {
     let spawn_cmd = |log_suffix: &str| -> (Command, PathBuf) {
         let mut cmd = Command::new(exe_path);
@@ -1069,15 +1074,49 @@ async fn spawn_with_cache_retry(
         }
         cmd.current_dir(core_dir);
 
-        let log_path = std::env::temp_dir().join(format!(
-            "zephyr-mihomo-{}-{}-{}.log",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0),
-            log_suffix,
-        ));
+        let log_path = if super::LOG_CORE_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            // Write to app data directory for persistence
+            let logs_dir = app_data_dir.join("logs").join("core");
+            let _ = std::fs::create_dir_all(&logs_dir);
+            let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let base_path = logs_dir.join(format!("{date}.log"));
+            let max_bytes = super::LOG_MAX_FILE_MB.load(std::sync::atomic::Ordering::Relaxed)
+                as u64
+                * 1024
+                * 1024;
+            match std::fs::metadata(&base_path) {
+                Ok(meta) if meta.len() >= max_bytes => {
+                    #[allow(clippy::redundant_clone)]
+                    let mut seq_path = base_path.clone();
+                    for seq in 2..100 {
+                        seq_path = logs_dir.join(format!("{date}-{seq}.log"));
+                        match std::fs::metadata(&seq_path) {
+                            Ok(m) => {
+                                if m.len() < max_bytes {
+                                    break;
+                                }
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                                break;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    seq_path
+                }
+                _ => base_path,
+            }
+        } else {
+            std::env::temp_dir().join(format!(
+                "zephyr-mihomo-{}-{}-{}.log",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0),
+                log_suffix,
+            ))
+        };
         (cmd, log_path)
     };
 
@@ -1430,8 +1469,13 @@ pub async fn start_core(
     }
 
     // Spawn mihomo (stdout/stderr redirected to log file internally)
-    let (mut child, log_path) =
-        spawn_with_cache_retry(&exe_path, &safe_custom_args, &paths.core_dir).await?;
+    let (mut child, log_path) = spawn_with_cache_retry(
+        &exe_path,
+        &safe_custom_args,
+        &paths.core_dir,
+        &paths.app_data_dir,
+    )
+    .await?;
 
     // Use config port directly, rely on health check to verify
     let port = config_port;
