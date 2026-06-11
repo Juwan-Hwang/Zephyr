@@ -16,6 +16,7 @@ pub use core::{
     encrypt_all_profiles,
     ensure_app_storage,
     ensure_executable,
+    export_logs,
     fetch_text,
     get_core_exe_path,
     get_core_version,
@@ -29,6 +30,7 @@ pub use core::{
     kill_mihomo,
     list_configs,
     open_config_folder,
+    open_log_folder,
     read_config_file,
     // core_log
     read_core_log,
