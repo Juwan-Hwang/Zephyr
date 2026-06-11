@@ -183,6 +183,272 @@ export function initUwpExemption() {
 }
 
 // ---------------------------------------------------------------------------
+function initLogSettingsModal() {
+    const btn = document.getElementById('log-settings-btn');
+    if (!btn) return;
+
+    btn.onclick = () => {
+        // Remove existing modal if any
+        document.getElementById('log-settings-modal')?.remove();
+
+        /** @type {Record<string, any>} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        const logAppEnabled = appStore.get('logAppEnabled') || false;
+        const logCoreEnabled = appStore.get('logCoreEnabled') || false;
+        const retentionDays = appStore.get('logRetentionDays') ?? 3;
+        const maxFileMb = appStore.get('logMaxFileMb') ?? 50;
+
+        const formatDate = (/** @type {Date} */ date) => {
+            const yyyy = date.getFullYear();
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        };
+        const today = formatDate(new Date());
+        const threeDaysAgo = formatDate(new Date(Date.now() - 3 * 86400000));
+
+        const modal = document.createElement('div');
+        modal.id = 'log-settings-modal';
+        modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+        modal.innerHTML = `
+            <div class="glass-card w-[480px] p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.logSettings || 'Log Settings'}</h3>
+                    <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <!-- Tab switcher -->
+                <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-1">
+                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logAppTab || 'App Logs'}</button>
+                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logCoreTab || 'Core Logs'}</button>
+                </div>
+
+                <!-- App Logs Tab -->
+                <div id="log-panel-app" class="log-tab-panel space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs text-[var(--text-primary)]">${t.logAppEnabled || 'Persist App Logs'}</span>
+                        <label class="ios-switch">
+                            <input type="checkbox" id="log-app-toggle" ${logAppEnabled ? 'checked' : ''}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
+                            <div class="flex items-center gap-1">
+                                <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="input-mono text-xs w-full">
+                                <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
+                            <div class="flex items-center gap-1">
+                                <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="input-mono text-xs w-full">
+                                <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Core Logs Tab -->
+                <div id="log-panel-core" class="log-tab-panel space-y-3" style="display:none">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs text-[var(--text-primary)]">${t.logCoreEnabled || 'Persist Core Logs'}</span>
+                        <label class="ios-switch">
+                            <input type="checkbox" id="log-core-toggle" ${logCoreEnabled ? 'checked' : ''}>
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
+                            <div class="flex items-center gap-1">
+                                <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="input-mono text-xs w-full">
+                                <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
+                            <div class="flex items-center gap-1">
+                                <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="input-mono text-xs w-full">
+                                <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                <!-- Export section -->
+                <div class="space-y-3">
+                    <p class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logExportTitle || 'Export Logs'}</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)]">${t.logExportFrom || 'From'}</label>
+                            <input id="log-export-from" type="date" value="${threeDaysAgo}" class="input-mono text-xs">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-2xs text-[var(--text-muted)]">${t.logExportTo || 'To'}</label>
+                            <input id="log-export-to" type="date" value="${today}" class="input-mono text-xs">
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-2xs text-[var(--text-muted)]">${t.logExportLevel || 'Severity Level'}</label>
+                        <select id="log-export-level" class="input-mono text-xs">
+                            <option value="">${t.logExportLevelAll || 'All'}</option>
+                            <option value="fatal">FATAL</option>
+                            <option value="error">ERROR</option>
+                            <option value="warn">WARN</option>
+                            <option value="info">INFO</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="log-export-app" class="btn-ghost text-2xs px-3 py-1.5 flex-1">${t.logExportApp || 'Export App Logs'}</button>
+                        <button id="log-export-core" class="btn-ghost text-2xs px-3 py-1.5 flex-1">${t.logExportCore || 'Export Core Logs'}</button>
+                        <button id="log-export-all" class="btn-ghost text-2xs px-3 py-1.5 flex-1">${t.logExportAll || 'Export All'}</button>
+                    </div>
+                    <button id="log-open-folder" class="btn-ghost text-2xs px-3 py-1.5 w-full">${t.logOpenFolder || 'Open Log Folder'}</button>
+                </div>
+
+                <div class="flex justify-end pt-1">
+                    <button id="log-modal-done" class="btn-ghost text-xs px-4 py-2">${t.done || 'Done'}</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Animate in
+        requestAnimationFrame(() => {
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                requestAnimationFrame(() => {
+                    panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                    panel.style.transform = 'scale(1)';
+                    panel.style.opacity = '1';
+                });
+            }
+        });
+
+        const closeModal = () => {
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transition = 'all 0.15s ease-in';
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                setTimeout(() => modal.remove(), 150);
+            } else {
+                modal.remove();
+            }
+        };
+
+        document.getElementById('log-modal-close')?.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+        document.getElementById('log-modal-done')?.addEventListener('click', closeModal);
+
+        // Tab switching
+        const tabApp = /** @type {HTMLElement} */ (modal.querySelector('#log-tab-app'));
+        const tabCore = /** @type {HTMLElement} */ (modal.querySelector('#log-tab-core'));
+        const panelApp = /** @type {HTMLElement} */ (modal.querySelector('#log-panel-app'));
+        const panelCore = /** @type {HTMLElement} */ (modal.querySelector('#log-panel-core'));
+
+        const activateTab = (/** @type {HTMLElement} */ tab, /** @type {HTMLElement} */ panel) => {
+            [tabApp, tabCore].forEach(t => {
+                t.classList.remove('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
+                t.classList.add('text-[var(--text-muted)]');
+            });
+            [panelApp, panelCore].forEach(p => { p.style.display = 'none'; });
+            tab.classList.add('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
+            tab.classList.remove('text-[var(--text-muted)]');
+            panel.style.display = '';
+        };
+        activateTab(tabApp, panelApp);
+        tabApp.onclick = () => activateTab(tabApp, panelApp);
+        tabCore.onclick = () => activateTab(tabCore, panelCore);
+
+        // Sync retention/max inputs between tabs
+        const retentionInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-retention-days'));
+        const retentionInput2 = /** @type {HTMLInputElement} */ (modal.querySelector('#log-retention-days-2'));
+        const maxFileInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-max-file-mb'));
+        const maxFileInput2 = /** @type {HTMLInputElement} */ (modal.querySelector('#log-max-file-mb-2'));
+
+        retentionInput?.addEventListener('input', () => { retentionInput2.value = retentionInput.value; saveSettings(); });
+        retentionInput2?.addEventListener('input', () => { retentionInput.value = retentionInput2.value; saveSettings(); });
+        maxFileInput?.addEventListener('input', () => { maxFileInput2.value = maxFileInput.value; saveSettings(); });
+        maxFileInput2?.addEventListener('input', () => { maxFileInput.value = maxFileInput2.value; saveSettings(); });
+
+        // Toggle handlers
+        const appToggle = /** @type {HTMLInputElement} */ (modal.querySelector('#log-app-toggle'));
+        const coreToggle = /** @type {HTMLInputElement} */ (modal.querySelector('#log-core-toggle'));
+
+        appToggle?.addEventListener('change', () => {
+            appStore.set('logAppEnabled', appToggle.checked);
+            saveSettings();
+        });
+        coreToggle?.addEventListener('change', () => {
+            appStore.set('logCoreEnabled', coreToggle.checked);
+            saveSettings();
+        });
+
+        // Save settings via patch_settings
+        const saveSettings = debounce(async () => {
+            try {
+                let retention = parseInt(retentionInput?.value || '3', 10);
+                if (isNaN(retention) || retention < 1) retention = 3;
+                let maxMb = parseInt(maxFileInput?.value || '50', 10);
+                if (isNaN(maxMb) || maxMb < 1) maxMb = 50;
+                appStore.set('logRetentionDays', retention);
+                appStore.set('logMaxFileMb', maxMb);
+                await invoke('patch_settings', {
+                    patch: {
+                        log_app_enabled: appToggle?.checked ?? false,
+                        log_core_enabled: coreToggle?.checked ?? false,
+                        log_retention_days: retention,
+                        log_max_file_mb: maxMb,
+                    }
+                });
+            } catch (err) {
+                settingsLogger.error('[log-settings] Failed to save:', err);
+            }
+        }, 500);
+
+        // Export handlers
+        const doExport = async (/** @type {string} */ logType) => {
+            const from = /** @type {HTMLInputElement} */ (modal.querySelector('#log-export-from'))?.value || threeDaysAgo;
+            const to = /** @type {HTMLInputElement} */ (modal.querySelector('#log-export-to'))?.value || today;
+            const level = /** @type {HTMLSelectElement} */ (modal.querySelector('#log-export-level'))?.value || null;
+            try {
+                const path = await invoke('export_logs', {
+                    logType,
+                    fromDate: from,
+                    toDate: to,
+                    level: level || null,
+                });
+                settingsLogger.info(`[log-settings] Exported to: ${path}`);
+            } catch (err) {
+                settingsLogger.error('[log-settings] Export failed:', err);
+            }
+        };
+
+        modal.querySelector('#log-export-app')?.addEventListener('click', () => doExport('app'));
+        modal.querySelector('#log-export-core')?.addEventListener('click', () => doExport('core'));
+        modal.querySelector('#log-export-all')?.addEventListener('click', () => doExport('all'));
+
+        modal.querySelector('#log-open-folder')?.addEventListener('click', async () => {
+            try {
+                await invoke('open_log_folder');
+            } catch (err) {
+                settingsLogger.error('[log-settings] Failed to open folder:', err);
+            }
+        });
+    };
+}
+
 //  initFakeClient
 // ---------------------------------------------------------------------------
 function initFakeClient() {
@@ -527,6 +793,10 @@ export async function initSettings() {
     appStore.set('failoverEnabled', settings.failover_enabled || false);
     appStore.set('networkOptimAutoApply', settings.network_optim_auto_apply ?? false);
     appStore.set('encryptConfigs', settings.encrypt_configs || false);
+    appStore.set('logAppEnabled', settings.log_app_enabled || false);
+    appStore.set('logCoreEnabled', settings.log_core_enabled || false);
+    appStore.set('logRetentionDays', settings.log_retention_days ?? 3);
+    appStore.set('logMaxFileMb', settings.log_max_file_mb ?? 50);
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
     // Apply saved UI scale
@@ -1579,6 +1849,9 @@ export async function initSettings() {
             inputs.forEach(input => input.addEventListener('input', /** @type {EventListener} */ (saveConfig)));
         };
     }
+
+    // Initialize log settings modal
+    initLogSettingsModal();
 
     initFakeClient();
 
