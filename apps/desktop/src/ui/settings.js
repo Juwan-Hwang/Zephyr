@@ -360,6 +360,7 @@ export async function initSettings() {
     const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
     const failoverToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-failover'));
+    const encryptConfigsToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-encrypt-configs'));
     const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
     const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
     const versionText = document.getElementById('core-version-text');
@@ -522,8 +523,10 @@ export async function initSettings() {
     if (nodeScrollToggle) nodeScrollToggle.checked = !!settings.node_scroll;
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
     if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
+    if (encryptConfigsToggle) encryptConfigsToggle.checked = settings.encrypt_configs || false;
     appStore.set('failoverEnabled', settings.failover_enabled || false);
     appStore.set('networkOptimAutoApply', settings.network_optim_auto_apply ?? false);
+    appStore.set('encryptConfigs', settings.encrypt_configs || false);
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
     // Apply saved UI scale
@@ -743,6 +746,7 @@ export async function initSettings() {
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             if (hideTimeoutToggle) currentSettings.hide_timeout_nodes = hideTimeoutToggle.checked;
             if (failoverToggle) currentSettings.failover_enabled = failoverToggle.checked;
+            if (encryptConfigsToggle) currentSettings.encrypt_configs = encryptConfigsToggle.checked;
             currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
@@ -786,6 +790,33 @@ export async function initSettings() {
     failoverToggle?.addEventListener('change', async () => {
         appStore.set('failoverEnabled', failoverToggle.checked);
         await save();
+    });
+    encryptConfigsToggle?.addEventListener('change', async () => {
+        if (!encryptConfigsToggle) return;
+        const enabled = encryptConfigsToggle.checked;
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        const confirmMsg = enabled
+            ? (t.encryptConfigsConfirmEnable || "Enabling encryption will immediately encrypt all existing config files. You will not be able to edit config files with an external editor. Continue?")
+            : (t.encryptConfigsConfirmDisable || "Disabling encryption will immediately decrypt all config files to plaintext. Continue?");
+        if (!confirm(confirmMsg)) {
+            encryptConfigsToggle.checked = !enabled;
+            return;
+        }
+        try {
+            appStore.set('encryptConfigs', enabled);
+            await save();
+            showNotification(
+                enabled
+                    ? (t.encryptConfigsEnabled || "Config files encrypted")
+                    : (t.encryptConfigsDisabled || "Config files decrypted"),
+                "info"
+            );
+        } catch (err) {
+            const error = toError(err);
+            encryptConfigsToggle.checked = !enabled;
+            appStore.set('encryptConfigs', !enabled);
+            showNotification(error.message, "error");
+        }
     });
     if (!isPortable) {
         autostartToggle?.addEventListener('change', async () => {
