@@ -952,6 +952,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .w-\[440px\] {
     width: 440px;
   }
+  .w-\[480px\] {
+    width: 480px;
+  }
   .w-\[500px\] {
     width: 500px;
   }
@@ -1447,6 +1450,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   }
   .bg-\[var\(--text-tertiary\)\] {
     background-color: var(--text-tertiary);
+  }
+  .bg-\[var\(--zephyr-bg-card\)\] {
+    background-color: var(--zephyr-bg-card);
   }
   .bg-\[var\(--zephyr-bg-elevated\)\] {
     background-color: var(--zephyr-bg-elevated);

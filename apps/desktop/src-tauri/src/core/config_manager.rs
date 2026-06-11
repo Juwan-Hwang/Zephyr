@@ -1,7 +1,9 @@
 use crate::core_manager::MihomoState;
-use std::fs;
+use std::fs::{self, File};
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Manager as _};
+use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
@@ -689,4 +691,212 @@ rule-providers:
         let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
         assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));
     }
+}
+
+// ── Log Folder & Export ──────────────────────────────────────────────────────
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn open_log_folder(app: AppHandle) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+    let logs_dir = paths.app_data_dir.join("logs");
+    fs::create_dir_all(&logs_dir).map_err(|e| format!("Failed to create logs dir: {e}"))?;
+
+    tauri_plugin_opener::open_path(&logs_dir, None::<&str>)
+        .map_err(|e| format!("Failed to open log folder: {e}"))?;
+
+    Ok(logs_dir.to_string_lossy().into_owned())
+}
+
+/// Check whether `haystack` contains `needle` using byte-slice windows search.
+/// Zero-allocation alternative to `str::contains()` for `&[u8]` data.
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub async fn export_logs(
+    app: AppHandle,
+    log_type: String,
+    from_date: String,
+    to_date: String,
+    level: Option<String>,
+) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+    let logs_base = paths.app_data_dir.join("logs");
+
+    // Collect files based on log_type
+    let mut files_to_export: Vec<(String, PathBuf)> = Vec::new(); // (relative_path, absolute_path)
+
+    let mut dirs_to_check = Vec::new();
+    if log_type == "app" || log_type == "all" {
+        dirs_to_check.push("app");
+    }
+    if log_type == "core" || log_type == "all" {
+        dirs_to_check.push("core");
+    }
+
+    for subdir in dirs_to_check {
+        let dir = logs_base.join(subdir);
+        for path in super::log_writer::collect_log_files(&dir, &from_date, &to_date) {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            files_to_export.push((format!("{subdir}/{name}"), path));
+        }
+    }
+
+    if files_to_export.is_empty() {
+        return Err("No log files found for the selected date range".to_owned());
+    }
+
+    // Use dialog to pick save location (async via oneshot channel)
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name("zephyr-logs.zip")
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let file_path = rx
+        .await
+        .map_err(|_e| "Dialog cancelled".to_owned())?
+        .ok_or_else(|| "Export cancelled".to_owned())?;
+
+    let save_path = file_path
+        .as_path()
+        .ok_or_else(|| "Invalid save path".to_owned())?
+        .to_path_buf();
+
+    // Run heavy zip creation on a dedicated blocking thread
+    let level_clone = level.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use std::io::Write as _;
+        use zip::write::SimpleFileOptions;
+
+        let zip_file =
+            File::create(&save_path).map_err(|e| format!("Failed to create zip file: {e}"))?;
+        let mut zip_writer = zip::ZipWriter::new(zip_file);
+        let zip_options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (relative_path, abs_path) in &files_to_export {
+            zip_writer
+                .start_file(relative_path.as_str(), zip_options)
+                .map_err(|e| format!("Failed to add file to zip: {e}"))?;
+
+            let mut file = File::open(abs_path)
+                .map_err(|e| format!("Failed to open log file {abs_path:?}: {e}"))?;
+
+            if let Some(lvl) = &level_clone {
+                let lvl_lower = lvl.to_lowercase();
+                if lvl_lower.is_empty() || lvl_lower == "all" {
+                    std::io::copy(&mut file, &mut zip_writer)
+                        .map_err(|e| format!("Failed to copy log file to zip: {e}"))?;
+                } else {
+                    use std::io::BufRead as _;
+                    let mut reader = std::io::BufReader::new(file);
+                    let mut buf = Vec::new();
+                    let mut lower_buf = Vec::new();
+                    // Track whether the current multi-line log entry matched the filter.
+                    // Continuation lines (no severity marker) follow their parent entry.
+                    let mut current_entry_matched = false;
+                    while reader
+                        .read_until(b'\n', &mut buf)
+                        .map_err(|e| format!("Failed to read line: {e}"))?
+                        > 0
+                    {
+                        // Zero-allocation severity matching: reuse a single buffer,
+                        // fill with ASCII-lowercased bytes, then byte-slice windows search.
+                        // Limit search to the line prefix (first 256 bytes) to accommodate
+                        // JSON logs where severity fields may appear later in the line.
+                        lower_buf.clear();
+                        let search_limit = std::cmp::min(buf.len(), 256);
+                        lower_buf.extend(
+                            buf.get(..search_limit)
+                                .unwrap_or(buf.as_slice())
+                                .iter()
+                                .map(u8::to_ascii_lowercase),
+                        );
+                        let search_buf = &lower_buf;
+
+                        // Match severity in three formats:
+                        //   plaintext: [fatal], [error], etc.
+                        //   logfmt:    level=fatal, level=error, etc.
+                        //   JSON:      "level":"fatal", "level": "error", etc.
+                        let is_fatal = contains_bytes(search_buf, b"[fatal]")
+                            || contains_bytes(search_buf, b"level=fatal")
+                            || contains_bytes(search_buf, b"\"level\":\"fatal\"")
+                            || contains_bytes(search_buf, b"\"level\": \"fatal\"");
+                        let is_error = contains_bytes(search_buf, b"[error]")
+                            || contains_bytes(search_buf, b"level=error")
+                            || contains_bytes(search_buf, b"\"level\":\"error\"")
+                            || contains_bytes(search_buf, b"\"level\": \"error\"");
+                        let is_warn = contains_bytes(search_buf, b"[warn]")
+                            || contains_bytes(search_buf, b"level=warn")
+                            || contains_bytes(search_buf, b"[warning]")
+                            || contains_bytes(search_buf, b"level=warning")
+                            || contains_bytes(search_buf, b"\"level\":\"warn\"")
+                            || contains_bytes(search_buf, b"\"level\": \"warn\"")
+                            || contains_bytes(search_buf, b"\"level\":\"warning\"")
+                            || contains_bytes(search_buf, b"\"level\": \"warning\"");
+                        let is_info = contains_bytes(search_buf, b"[info]")
+                            || contains_bytes(search_buf, b"level=info")
+                            || contains_bytes(search_buf, b"\"level\":\"info\"")
+                            || contains_bytes(search_buf, b"\"level\": \"info\"");
+                        let is_debug = contains_bytes(search_buf, b"[debug]")
+                            || contains_bytes(search_buf, b"level=debug")
+                            || contains_bytes(search_buf, b"\"level\":\"debug\"")
+                            || contains_bytes(search_buf, b"\"level\": \"debug\"");
+                        let is_trace = contains_bytes(search_buf, b"[trace]")
+                            || contains_bytes(search_buf, b"level=trace")
+                            || contains_bytes(search_buf, b"\"level\":\"trace\"")
+                            || contains_bytes(search_buf, b"\"level\": \"trace\"");
+
+                        // Determine if this line is a new log entry (has any severity marker)
+                        // or a continuation line (stack trace, multi-line payload, etc.)
+                        let is_new_entry =
+                            is_fatal || is_error || is_warn || is_info || is_debug || is_trace;
+
+                        if is_new_entry {
+                            current_entry_matched = match lvl_lower.as_str() {
+                                "fatal" => is_fatal,
+                                "error" => is_fatal || is_error,
+                                "warn" => is_fatal || is_error || is_warn,
+                                "info" => is_fatal || is_error || is_warn || is_info,
+                                "debug" => is_fatal || is_error || is_warn || is_info || is_debug,
+                                _ => true,
+                            };
+                        }
+                        // else: continuation line — keep current_entry_matched from parent
+
+                        if current_entry_matched {
+                            zip_writer
+                                .write_all(&buf)
+                                .map_err(|e| format!("Failed to write line to zip: {e}"))?;
+                        }
+                        buf.clear();
+                    }
+                }
+            } else {
+                std::io::copy(&mut file, &mut zip_writer)
+                    .map_err(|e| format!("Failed to copy log file to zip: {e}"))?;
+            }
+        }
+
+        zip_writer
+            .finish()
+            .map_err(|e| format!("Failed to finalize zip: {e}"))?;
+
+        Ok(save_path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("Export task panicked: {e}"))?
 }
