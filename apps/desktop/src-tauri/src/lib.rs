@@ -16,8 +16,9 @@ pub mod uwp_loopback;
 use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
-    delete_config, disable_tun_cmd, download_sub, download_sub_batch, ensure_app_storage,
-    fetch_text, get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
+    decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
+    encrypt_all_profiles, ensure_app_storage, fetch_text, get_core_version,
+    grant_linux_tun_permission, init_tun_mode_from_config, is_machine_key_persisted,
     kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
     rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
     start_core, stop_core, update_config_url, update_subscription_interval, write_config_file,
@@ -194,6 +195,12 @@ struct Settings {
     /// Has no effect when `close_to_tray` is disabled (app exits on close).
     #[serde(default)]
     lightweight_mode: bool,
+    /// Encrypt profile YAML files with the machine key.
+    /// When enabled, config files are AES-256-GCM encrypted on disk and
+    /// cannot be used on another machine. When toggled, existing files are
+    /// immediately encrypted/decrypted.
+    #[serde(default)]
+    encrypt_configs: bool,
 }
 
 impl Settings {
@@ -265,7 +272,15 @@ fn patch_settings(
             .lock()
             .map_err(|e| format!("Settings lock failed: {e}"))?;
         let mut modified = false;
-        if let serde_json::Value::Object(map) = patch {
+        if let serde_json::Value::Object(map) = &patch {
+            // Validate encrypt_configs before mutating state to prevent inconsistent in-memory state
+            if let Some(v) = map.get("encrypt_configs") {
+                if matches!(serde_json::from_value::<bool>(v.clone()), Ok(true))
+                    && !is_machine_key_persisted()
+                {
+                    return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
+                }
+            }
             macro_rules! patch_field {
                 ($field:ident) => {
                     if let Some(v) = map.get(stringify!($field)) {
@@ -299,10 +314,33 @@ fn patch_settings(
             patch_field!(node_scroll);
             patch_field!(failover_enabled);
             patch_field!(network_optim_auto_apply);
+            patch_field!(encrypt_configs);
         }
         if !modified {
             return Ok(());
         }
+
+        // Handle encrypt_configs toggle: batch encrypt/decrypt profile files
+        if patch.get("encrypt_configs").is_some() {
+            let paths = ensure_app_storage(&app)
+                .map_err(|e| format!("Failed to resolve app paths: {e}"))?;
+            if guard.encrypt_configs {
+                if let Err(e) = encrypt_all_profiles(&paths.profiles_dir) {
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "Failed to encrypt some profiles: {e}"
+                    );
+                }
+            } else if let Err(e) = decrypt_all_profiles(&paths.profiles_dir) {
+                emit_warn!(
+                    Core,
+                    CORE_START_FAILED,
+                    "Failed to decrypt some profiles: {e}"
+                );
+            }
+        }
+
         guard.clone()
     };
     persist_settings(&app, &updated)
@@ -771,6 +809,7 @@ pub fn run() {
                     failover_enabled: false,
                     network_optim_auto_apply: false,
                     lightweight_mode: false,
+                    encrypt_configs: false,
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
 use rand::RngExt as _;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
@@ -343,6 +343,127 @@ pub(super) fn deobfuscate_string(s: &str) -> Result<String, String> {
         .map_err(|e| format!("AES decryption failed - data may be tampered: {e}"))?;
 
     String::from_utf8(plaintext).map_err(|e| format!("Decrypted data is not valid UTF-8: {e}"))
+}
+
+/// Check whether file content is encrypted (starts with base64-encoded "v2:" prefix).
+/// The base64 of the 3-byte prefix `v2:` is `djI6`.
+#[must_use]
+pub fn is_encrypted_content(content: &str) -> bool {
+    content.starts_with("djI6")
+}
+
+/// Read a profile file, automatically decrypting if encrypted.
+pub fn read_profile_file(path: &Path) -> Result<String, String> {
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read config: {e}"))?;
+    if is_encrypted_content(&content) {
+        deobfuscate_string(&content)
+    } else {
+        Ok(content)
+    }
+}
+
+/// Write a profile file, encrypting if `encrypt` is true.
+pub fn write_profile_file(path: &Path, content: &str, encrypt: bool) -> Result<(), String> {
+    let data = if encrypt {
+        obfuscate_string(content)?
+    } else {
+        content.to_owned()
+    };
+    write_file_secure(path, &data)
+}
+
+/// Encrypt all plaintext profile YAML files in `profiles_dir`.
+/// Files already encrypted (starting with "djI6") are skipped.
+/// Returns an error string with the count of failures (does not abort on individual failures).
+pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
+    let entries =
+        fs::read_dir(profiles_dir).map_err(|e| format!("Failed to read profiles dir: {e}"))?;
+    let mut failures = 0u32;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_yaml = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+        if !is_yaml || !path.is_file() {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[encrypt_all_profiles] skip {}: {e}", path.display());
+                failures += 1;
+                continue;
+            }
+        };
+        if is_encrypted_content(&content) {
+            continue; // already encrypted
+        }
+        match obfuscate_string(&content) {
+            Ok(encrypted) => {
+                if let Err(e) = write_file_secure(&path, &encrypted) {
+                    eprintln!("[encrypt_all_profiles] write {}: {e}", path.display());
+                    failures += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("[encrypt_all_profiles] encrypt {}: {e}", path.display());
+                failures += 1;
+            }
+        }
+    }
+    if failures > 0 {
+        Err(format!("{failures} file(s) failed to encrypt"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Decrypt all encrypted profile YAML files in `profiles_dir`.
+/// Files not encrypted (not starting with "djI6") are skipped.
+/// Returns an error string with the count of failures (does not abort on individual failures).
+pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
+    let entries =
+        fs::read_dir(profiles_dir).map_err(|e| format!("Failed to read profiles dir: {e}"))?;
+    let mut failures = 0u32;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_yaml = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+        if !is_yaml || !path.is_file() {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[decrypt_all_profiles] skip {}: {e}", path.display());
+                failures += 1;
+                continue;
+            }
+        };
+        if !is_encrypted_content(&content) {
+            continue; // already plaintext
+        }
+        match deobfuscate_string(&content) {
+            Ok(decrypted) => {
+                if let Err(e) = write_file_secure(&path, &decrypted) {
+                    eprintln!("[decrypt_all_profiles] write {}: {e}", path.display());
+                    failures += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("[decrypt_all_profiles] decrypt {}: {e}", path.display());
+                failures += 1;
+            }
+        }
+    }
+    if failures > 0 {
+        Err(format!("{failures} file(s) failed to decrypt"))
+    } else {
+        Ok(())
+    }
 }
 
 pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {

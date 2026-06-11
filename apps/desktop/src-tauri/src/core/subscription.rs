@@ -10,8 +10,7 @@ use zephyr_core::config::subscription::{
 };
 
 use super::core_process::ensure_app_storage;
-use super::crypto::{load_metadata, save_metadata};
-use super::secure_io::write_file_secure;
+use super::crypto::{load_metadata, save_metadata, write_profile_file};
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 #[allow(unused_imports)]
 use crate::emit_warn;
@@ -465,8 +464,16 @@ async fn download_sub_inner_raw(
         is_overwrite.then(|| target_path.with_extension(format!("yaml.bak.{unique_id}")));
     let temp_path = target_path.with_extension(format!("yaml.tmp.{unique_id}"));
 
-    // Write new config to temp file
-    write_file_secure(&temp_path, &final_content)?;
+    // Write new config to temp file (encrypt if setting is enabled)
+    let encrypt = {
+        let settings_state = app.state::<crate::SettingsState>();
+        let settings = settings_state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        settings.encrypt_configs
+    };
+    write_profile_file(&temp_path, &final_content, encrypt)?;
 
     // Overwrite: move old config to backup first
     if let Some(bp) = backup_path.as_ref() {

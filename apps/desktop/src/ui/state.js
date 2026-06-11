@@ -414,6 +414,9 @@ export const appStore = createStore('zephyr.app', {
     // Network Optimization
     networkOptimAutoApply: false,
 
+    // Config encryption
+    encryptConfigs: false, // Actual value synced from settings.json in initSettings()
+
     // Config
     currentConfigName: null,
     currentCoreVersion: '',

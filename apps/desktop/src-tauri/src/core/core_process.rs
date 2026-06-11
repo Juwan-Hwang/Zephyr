@@ -888,8 +888,8 @@ fn select_runtime_config(
     secret: &str,
     prefs: Option<&GlobalPreferences>,
 ) -> Result<(Option<String>, String, u16, u16), String> {
-    let preferred_content =
-        fs::read_to_string(preferred_path).map_err(|e| format!("Failed to read config: {e}"))?;
+    let preferred_content = super::crypto::read_profile_file(preferred_path)
+        .map_err(|e| format!("Failed to read config: {e}"))?;
     if let Some((final_config, config_port, proxy_port)) =
         prepare_runtime_config(&preferred_content, secret, prefs)
     {
@@ -929,7 +929,7 @@ fn select_runtime_config(
     fallback_profiles.sort();
 
     for path in fallback_profiles {
-        let content = match fs::read_to_string(&path) {
+        let content = match super::crypto::read_profile_file(&path) {
             Ok(content) => content,
             Err(_) => continue,
         };
