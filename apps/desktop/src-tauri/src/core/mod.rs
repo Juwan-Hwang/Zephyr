@@ -168,7 +168,10 @@ pub use core_process::{
     core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_version,
     kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner, DEFAULT_MIXED_PORT,
 };
-pub use crypto::is_machine_key_persisted;
+pub use crypto::{
+    decrypt_all_profiles, encrypt_all_profiles, is_machine_key_persisted, read_profile_file,
+    write_profile_file,
+};
 pub use secure_io::write_file_secure;
 pub use subscription::{download_sub, download_sub_batch, fetch_text};
 pub use tun_manager::{

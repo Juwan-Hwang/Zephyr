@@ -5,6 +5,7 @@ pub mod core;
 pub use core::{
     // core_process
     core_binary_name,
+    decrypt_all_profiles,
     // config_manager
     delete_config,
     // tun_manager
@@ -12,6 +13,7 @@ pub use core::{
     // subscription
     download_sub,
     download_sub_batch,
+    encrypt_all_profiles,
     ensure_app_storage,
     ensure_executable,
     fetch_text,
@@ -30,6 +32,7 @@ pub use core::{
     read_config_file,
     // core_log
     read_core_log,
+    read_profile_file,
     release_tun_toggle,
     rename_config,
     resolve_app_paths,
@@ -46,6 +49,7 @@ pub use core::{
     write_config_file,
     // secure_io
     write_file_secure,
+    write_profile_file,
     // Shared types and constants
     AppPaths,
     ConfigInfo,

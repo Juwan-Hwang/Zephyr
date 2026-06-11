@@ -5,7 +5,8 @@ use tauri::{AppHandle, Manager as _};
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
-    cleanup_metadata_cache, load_metadata, save_metadata, ConfigMetadata, ProfilesMetadata,
+    cleanup_metadata_cache, load_metadata, read_profile_file, save_metadata, write_profile_file,
+    ConfigMetadata, ProfilesMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -288,7 +289,12 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
         return Err("Config file not found".to_owned());
     }
 
-    fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {e}"))
+    // run_config.yaml is always plaintext; profile files may be encrypted
+    if config_file_name == "run_config.yaml" {
+        fs::read_to_string(&resolved_path).map_err(|e| format!("Failed to read config: {e}"))
+    } else {
+        read_profile_file(&resolved_path)
+    }
 }
 
 #[tauri::command]
@@ -314,7 +320,20 @@ pub fn write_config_file(
 
     validate_path_within_dir(&resolved_path, &base_dir).map_err(|e| e.to_string())?;
 
-    write_file_secure(&resolved_path, &content)?;
+    // run_config.yaml is always plaintext; profile files may be encrypted
+    if config_file_name == "run_config.yaml" {
+        write_file_secure(&resolved_path, &content)?;
+    } else {
+        let encrypt = {
+            let settings_state = app.state::<crate::SettingsState>();
+            let settings = settings_state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            settings.encrypt_configs
+        };
+        write_profile_file(&resolved_path, &content, encrypt)?;
+    }
 
     Ok("Config saved".to_owned())
 }
