@@ -1,7 +1,9 @@
 use crate::core_manager::MihomoState;
-use std::fs;
+use std::fs::{self, File};
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Manager as _};
+use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
@@ -689,4 +691,165 @@ rule-providers:
         let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
         assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));
     }
+}
+
+// ── Log Folder & Export ──────────────────────────────────────────────────────
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn open_log_folder(app: AppHandle) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+    let logs_dir = paths.app_data_dir.join("logs");
+    fs::create_dir_all(&logs_dir).map_err(|e| format!("Failed to create logs dir: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&logs_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open log folder: {e}"))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&logs_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open log folder: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&logs_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open log folder: {e}"))?;
+    }
+
+    Ok(logs_dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn export_logs(
+    app: AppHandle,
+    log_type: String,
+    from_date: String,
+    to_date: String,
+    level: Option<String>,
+) -> Result<String, String> {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let paths = ensure_app_storage(&app)?;
+    let logs_base = paths.app_data_dir.join("logs");
+
+    // Collect files based on log_type
+    let mut files_to_export: Vec<(String, PathBuf)> = Vec::new(); // (relative_path, absolute_path)
+
+    let mut dirs_to_check = Vec::new();
+    if log_type == "app" || log_type == "all" {
+        dirs_to_check.push("app");
+    }
+    if log_type == "core" || log_type == "all" {
+        dirs_to_check.push("core");
+    }
+
+    for subdir in dirs_to_check {
+        let dir = logs_base.join(subdir);
+        for path in super::log_writer::collect_log_files(&dir, &from_date, &to_date) {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            files_to_export.push((format!("{subdir}/{name}"), path));
+        }
+    }
+
+    if files_to_export.is_empty() {
+        return Err("No log files found for the selected date range".to_owned());
+    }
+
+    // Use dialog to pick save location
+    let file_path = app
+        .dialog()
+        .file()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name("zephyr-logs.zip")
+        .blocking_save_file()
+        .ok_or_else(|| "Export cancelled".to_owned())?;
+
+    let save_path = file_path
+        .as_path()
+        .ok_or_else(|| "Invalid save path".to_owned())?;
+
+    // Create zip
+    let zip_file =
+        File::create(save_path).map_err(|e| format!("Failed to create zip file: {e}"))?;
+    let mut zip_writer = zip::ZipWriter::new(zip_file);
+    let zip_options =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (relative_path, abs_path) in &files_to_export {
+        zip_writer
+            .start_file(relative_path, zip_options)
+            .map_err(|e| format!("Failed to add file to zip: {e}"))?;
+
+        let mut file = File::open(abs_path)
+            .map_err(|e| format!("Failed to open log file {abs_path:?}: {e}"))?;
+
+        if let Some(lvl) = &level {
+            let lvl_lower = lvl.to_lowercase();
+            if lvl_lower.is_empty() || lvl_lower == "all" {
+                std::io::copy(&mut file, &mut zip_writer)
+                    .map_err(|e| format!("Failed to copy log file to zip: {e}"))?;
+            } else {
+                use std::io::BufRead as _;
+                let mut reader = std::io::BufReader::new(file);
+                let mut buf = Vec::new();
+                while reader
+                    .read_until(b'\n', &mut buf)
+                    .map_err(|e| format!("Failed to read line: {e}"))?
+                    > 0
+                {
+                    let line = String::from_utf8_lossy(&buf);
+                    let line_lower = line.to_ascii_lowercase();
+                    let is_fatal =
+                        line_lower.contains("[fatal]") || line_lower.contains("level=fatal");
+                    let is_error =
+                        line_lower.contains("[error]") || line_lower.contains("level=error");
+                    let is_warn = line_lower.contains("[warn]")
+                        || line_lower.contains("level=warn")
+                        || line_lower.contains("[warning]")
+                        || line_lower.contains("level=warning");
+                    let is_info =
+                        line_lower.contains("[info]") || line_lower.contains("level=info");
+
+                    let matched = match lvl_lower.as_str() {
+                        "fatal" => is_fatal,
+                        "error" => is_fatal || is_error,
+                        "warn" => is_fatal || is_error || is_warn,
+                        "info" => is_fatal || is_error || is_warn || is_info,
+                        _ => true,
+                    };
+                    if matched {
+                        zip_writer
+                            .write_all(&buf)
+                            .map_err(|e| format!("Failed to write line to zip: {e}"))?;
+                    }
+                    buf.clear();
+                }
+            }
+        } else {
+            std::io::copy(&mut file, &mut zip_writer)
+                .map_err(|e| format!("Failed to copy log file to zip: {e}"))?;
+        }
+    }
+
+    zip_writer
+        .finish()
+        .map_err(|e| format!("Failed to finalize zip: {e}"))?;
+
+    Ok(save_path.to_string_lossy().into_owned())
 }
