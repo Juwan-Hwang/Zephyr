@@ -416,6 +416,10 @@ export const appStore = createStore('zephyr.app', {
 
     // Config encryption
     encryptConfigs: false, // Actual value synced from settings.json in initSettings()
+    logAppEnabled: false,
+    logCoreEnabled: false,
+    logRetentionDays: 3,
+    logMaxFileMb: 50,
 
     // Config
     currentConfigName: null,
