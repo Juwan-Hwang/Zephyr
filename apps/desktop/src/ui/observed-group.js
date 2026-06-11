@@ -10,7 +10,7 @@
  * @module ui/observed-group
  */
 
-import { getConnections, isCoreReachable } from '../api.js';
+import { getConnections } from '../api.js';
 import { getProxiesCached } from './cache.js';
 import { isWritableGroupType } from './proxy-groups.js';
 import { appStore } from './state.js';
@@ -152,13 +152,12 @@ export function resetObservedGroup() {
 
 function _scheduleNext() {
     if (!_active || _timer) return;
-    const interval = isCoreReachable() ? POLL_INTERVAL : 15000;
     _timer = setTimeout(() => {
         _timer = null;
         _poll().finally(() => {
             _scheduleNext();
         });
-    }, interval);
+    }, POLL_INTERVAL);
 }
 
 async function _poll() {
