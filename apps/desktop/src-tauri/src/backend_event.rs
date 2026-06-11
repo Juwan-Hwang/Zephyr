@@ -1,12 +1,48 @@
 use serde::Serialize;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::SystemTime;
 use tauri::{AppHandle, Manager as _};
+
+use crate::core_manager::core::log_writer::LogWriter;
 
 // ── Path Redaction ───────────────────────────────────────────────────────────
 
 /// Cached paths for redaction. Set once during app startup.
 static REDACT_PATHS: OnceLock<(String, String)> = OnceLock::new();
+
+/// Global app log writer. Set when `log_app_enabled` is first enabled.
+static APP_LOG_WRITER: OnceLock<LogWriter> = OnceLock::new();
+
+/// Whether app log persistence is currently active.
+/// Controlled by the `log_app_enabled` setting.
+static APP_LOG_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Initialize the app log writer. Call when `log_app_enabled` is toggled on
+/// or at startup if already enabled.
+pub fn init_app_log_writer(log_dir: PathBuf, max_file_mb: u32) {
+    let writer = LogWriter::new(log_dir, max_file_mb);
+    let _ = APP_LOG_WRITER.set(writer);
+    APP_LOG_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// Set the max file size for the app log writer dynamically.
+pub fn set_app_log_max_file_mb(max_file_mb: u32) {
+    if let Some(writer) = APP_LOG_WRITER.get() {
+        writer.set_max_file_mb(max_file_mb);
+    }
+}
+
+/// Set whether app log persistence is active.
+pub fn set_app_log_active(active: bool) {
+    APP_LOG_ACTIVE.store(active, Ordering::Relaxed);
+}
+
+/// Check if app log persistence is currently active.
+pub fn is_app_log_active() -> bool {
+    APP_LOG_ACTIVE.load(Ordering::Relaxed)
+}
 
 /// Initialize redaction paths. Call once after `ensure_app_storage` succeeds.
 pub fn init_redact_paths(core_dir: &str, profiles_dir: &str) {
@@ -306,6 +342,35 @@ pub fn emit_backend_event(event: &BackendEvent) {
     // Tauri emit — direct eval dispatch to main webview.
     if let Some(handle) = APP_HANDLE.get() {
         emit_to_main(handle, "backend-event", &redacted_event);
+    }
+
+    // Persist to disk if app log persistence is active
+    if APP_LOG_ACTIVE.load(Ordering::Relaxed) {
+        if let Some(writer) = APP_LOG_WRITER.get() {
+            let level_str = match redacted_event.level {
+                BackendLevel::Fatal => "FATAL",
+                BackendLevel::Error => "ERROR",
+                BackendLevel::Warn => "WARN",
+                BackendLevel::Info => "INFO",
+            };
+            let module_str = match redacted_event.module {
+                BackendModule::Core => "core",
+                BackendModule::Subscription => "subscription",
+                BackendModule::Prism => "prism",
+                BackendModule::Config => "config",
+                BackendModule::Plugin => "plugin",
+                BackendModule::System => "system",
+                BackendModule::Updater => "updater",
+                BackendModule::Override => "override",
+                BackendModule::Rule => "rule",
+                BackendModule::Smart => "smart",
+            };
+            let line = format!(
+                "[{}] [{}] (#{}) {}",
+                level_str, module_str, redacted_event.code, redacted_event.message,
+            );
+            let _ = writer.write_line(&line);
+        }
     }
 }
 
