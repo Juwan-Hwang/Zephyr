@@ -18,7 +18,7 @@
  *   - destroyConnectionsPage()
  */
 
-import { getConnections, closeConnection, closeAllConnections } from '../api.js';
+import { getConnections, closeConnection, closeAllConnections, isCoreReachable } from '../api.js';
 import { showNotification } from '../ui/notifications.js';
 import { translations, currentLang, applyTranslations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
@@ -64,6 +64,8 @@ let _totalUploaded = 0;
 let _unsubI18n = null;
 /** @type {Function|null} */
 let _unsubTheme = null;
+/** Generation counter to invalidate stale poll callbacks on re-init */
+let _pollGeneration = 0;
 
 // HTML template for the connections page (injected into DOM on init)
 const PAGE_HTML = `
@@ -175,10 +177,11 @@ export function initConnectionsPage() {
     }
 
     // Clear any existing poll
-    if (connectionsPollTimer) {
-        clearInterval(connectionsPollTimer);
+    if (connectionsPollTimer != null) {
+        clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
     }
+    _pollGeneration++;
 
     bindConnectionsEvents();
     bindConnTabEvents();
@@ -190,21 +193,33 @@ const _onThemeChanged = () => updateSortIndicators();
 _unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
 _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
 
-    // Auto-refresh every 2 seconds (only when page is visible)
-    connectionsPollTimer = setInterval(() => {
-        const pageEl = document.querySelector('[data-page="connections"]');
-        if (pageEl && !pageEl.classList.contains('hidden')) {
-            fetchAndRenderConnections();
-        }
-    }, 2000);
+    // Auto-refresh: 2s when core is reachable, 15s when unreachable
+    // Using recursive setTimeout to dynamically adjust interval
+    const generation = _pollGeneration;
+    function schedulePoll() {
+        const interval = isCoreReachable() ? 2000 : 15000;
+        connectionsPollTimer = setTimeout(async () => {
+            // Skip if a new init invalidated this generation
+            if (generation !== _pollGeneration) return;
+            const pageEl = document.querySelector('[data-page="connections"]');
+            if (pageEl && !pageEl.classList.contains('hidden')) {
+                await fetchAndRenderConnections();
+            }
+            // Only schedule next poll if not destroyed during await
+            if (connectionsPollTimer != null && generation === _pollGeneration) {
+                schedulePoll();
+            }
+        }, interval);
+    }
+    schedulePoll();
 }
 
 /**
  * Clean up resources when navigating away.
  */
 export function destroyConnectionsPage() {
-    if (connectionsPollTimer) {
-        clearInterval(connectionsPollTimer);
+    if (connectionsPollTimer != null) {
+        clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
     }
     if (_unsubI18n) { _unsubI18n(); _unsubI18n = null; }
