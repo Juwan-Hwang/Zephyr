@@ -17,12 +17,12 @@ use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
-    encrypt_all_profiles, ensure_app_storage, fetch_text, get_core_version,
+    encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_version,
     grant_linux_tun_permission, init_tun_mode_from_config, is_machine_key_persisted,
-    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, read_config_file,
-    rename_config, restart_core_as_root_cmd, set_tun_enabled, smart_kill_all_mihomo_as_root,
-    start_core, stop_core, update_config_url, update_subscription_interval, write_config_file,
-    CoreData, MihomoState,
+    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, open_log_folder,
+    read_config_file, rename_config, restart_core_as_root_cmd, set_tun_enabled,
+    smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
+    update_subscription_interval, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -201,6 +201,26 @@ struct Settings {
     /// immediately encrypted/decrypted.
     #[serde(default)]
     encrypt_configs: bool,
+    // --- Log persistence settings ---
+    /// Persist app events (`emit_error/warn/info`) to disk.
+    #[serde(default)]
+    log_app_enabled: bool,
+    /// Persist mihomo core stdout/stderr to disk.
+    #[serde(default)]
+    log_core_enabled: bool,
+    /// Days to keep log files (both app and core).
+    #[serde(default = "default_log_retention_days")]
+    log_retention_days: u32,
+    /// Max single log file size in MB.
+    #[serde(default = "default_log_max_file_mb")]
+    log_max_file_mb: u32,
+}
+
+const fn default_log_retention_days() -> u32 {
+    3
+}
+const fn default_log_max_file_mb() -> u32 {
+    50
 }
 
 impl Settings {
@@ -315,6 +335,10 @@ fn patch_settings(
             patch_field!(failover_enabled);
             patch_field!(network_optim_auto_apply);
             patch_field!(encrypt_configs);
+            patch_field!(log_app_enabled);
+            patch_field!(log_core_enabled);
+            patch_field!(log_retention_days);
+            patch_field!(log_max_file_mb);
         }
         if !modified {
             return Ok(());
@@ -339,6 +363,34 @@ fn patch_settings(
                     "Failed to decrypt some profiles: {e}"
                 );
             }
+        }
+
+        // Handle log_app_enabled toggle: initialize writer or deactivate persistence
+        if patch.get("log_app_enabled").is_some() {
+            if guard.log_app_enabled {
+                let paths = ensure_app_storage(&app)
+                    .map_err(|e| format!("Failed to resolve app paths: {e}"))?;
+                let app_log_dir = paths.app_data_dir.join("logs").join("app");
+                if !backend_event::is_app_log_active() {
+                    backend_event::init_app_log_writer(app_log_dir, guard.log_max_file_mb);
+                } else {
+                    backend_event::set_app_log_active(true);
+                }
+            } else {
+                backend_event::set_app_log_active(false);
+            }
+        }
+
+        // Handle log_core_enabled toggle
+        if patch.get("log_core_enabled").is_some() {
+            core_manager::core::LOG_CORE_ENABLED
+                .store(guard.log_core_enabled, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // Update max file size if changed
+        if patch.get("log_max_file_mb").is_some() {
+            core_manager::core::LOG_MAX_FILE_MB
+                .store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
         }
 
         guard.clone()
@@ -810,9 +862,32 @@ pub fn run() {
                     network_optim_auto_apply: false,
                     lightweight_mode: false,
                     encrypt_configs: false,
+                    log_app_enabled: false,
+                    log_core_enabled: false,
+                    log_retention_days: default_log_retention_days(),
+                    log_max_file_mb: default_log_max_file_mb(),
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));
+
+            // Initialize app log writer if log persistence is enabled
+            {
+                let settings_state = app.state::<SettingsState>();
+                let guard = settings_state.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if guard.log_app_enabled {
+                    let app_log_dir = config_dir.join("logs").join("app");
+                    backend_event::init_app_log_writer(app_log_dir, guard.log_max_file_mb);
+                    let app_log_dir = config_dir.join("logs").join("app");
+                    core_manager::core::log_writer::cleanup_old_logs(&app_log_dir, guard.log_retention_days);
+                }
+                if guard.log_core_enabled {
+                    let core_log_dir = config_dir.join("logs").join("core");
+                    let _ = fs::create_dir_all(&core_log_dir);
+                    core_manager::core::log_writer::cleanup_old_logs(&core_log_dir, guard.log_retention_days);
+                    core_manager::core::LOG_CORE_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+                    core_manager::core::LOG_MAX_FILE_MB.store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
 
             // Initialize Prism Engine extension
             app.manage(prism::PrismState::new(app.handle()));
@@ -940,6 +1015,8 @@ pub fn run() {
             read_config_file,
             write_config_file,
             open_config_folder,
+            open_log_folder,
+            export_logs,
             show_main_window,
             change_tray_icon,
             get_tray_status,
