@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Mutex;
 
 // Global TUN mode flag
@@ -12,6 +12,10 @@ pub static CORE_STARTING: AtomicBool = AtomicBool::new(false);
 
 // Global lock to prevent concurrent TUN toggle operations (from both main UI and tray)
 pub static TUN_TOGGLING: AtomicBool = AtomicBool::new(false);
+
+// Global log persistence flags
+pub static LOG_CORE_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static LOG_MAX_FILE_MB: AtomicU32 = AtomicU32::new(50);
 
 #[cfg(target_os = "windows")]
 pub const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -150,6 +154,7 @@ pub mod core_log;
 pub mod core_process;
 pub mod crypto;
 pub mod fetch_util;
+pub mod log_writer;
 pub mod network_optim;
 pub mod secure_io;
 pub mod subscription;
@@ -160,8 +165,9 @@ pub mod tun_manager;
 
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
 pub use config_manager::{
-    delete_config, list_configs, open_config_folder, read_config_file, rename_config,
-    update_config_url, update_subscription_interval, write_config_file,
+    delete_config, export_logs, list_configs, open_config_folder, open_log_folder,
+    read_config_file, rename_config, update_config_url, update_subscription_interval,
+    write_config_file,
 };
 pub use core_log::read_core_log;
 pub use core_process::{
