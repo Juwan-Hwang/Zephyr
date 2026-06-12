@@ -405,7 +405,10 @@ jobs:
           elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install minisign
           elif [ "$RUNNER_OS" = "Windows" ]; then
-            choco install minisign
+            curl -sL https://github.com/jedisct1/minisign/releases/latest/download/minisign-win64.zip -o minisign-win.zip
+            unzip minisign-win.zip -d minisign-win
+            mv minisign-win/minisign.exe /usr/local/bin/
+            rm -rf minisign-win.zip minisign-win
           fi
         shell: bash
 
