@@ -417,7 +417,7 @@ jobs:
           for f in dist-artifacts/*; do
             if [ -f "$f" ] && [ ! -f "${f}.minisig" ]; then
               echo "Signing $(basename "$f")..."
-              minisign -S -s "$KEY_FILE" -m "$f" -x "${f}.minisig" -W
+              minisign -S -s "$KEY_FILE" -m "$f" -x "${f}.minisig"
             fi
           done
           echo "Signed artifacts:"
