@@ -407,7 +407,7 @@ jobs:
           elif [ "$RUNNER_OS" = "Windows" ]; then
             curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip -o minisign-win.zip
             unzip minisign-win.zip -d minisign-win
-            mv minisign-win/minisign-win64/x86_64/minisign.exe /usr/local/bin/
+            mv minisign-win/minisign-win64/x86_64/minisign.exe "$USERPROFILE/.cargo/bin/"
             rm -rf minisign-win.zip minisign-win
           fi
         shell: bash
