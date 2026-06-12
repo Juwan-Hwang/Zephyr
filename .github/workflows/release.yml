@@ -398,16 +398,16 @@ jobs:
       - name: Install minisign
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            curl -sL https://github.com/jedisct1/minisign/releases/latest/download/minisign-linux.tar.gz -o minisign.tar.gz
+            curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-linux.tar.gz -o minisign.tar.gz
             tar xzf minisign.tar.gz
             sudo mv minisign-linux/x86_64/minisign /usr/local/bin/
             rm -rf minisign.tar.gz minisign-linux
           elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install minisign
           elif [ "$RUNNER_OS" = "Windows" ]; then
-            curl -sL https://github.com/jedisct1/minisign/releases/latest/download/minisign-win64.zip -o minisign-win.zip
+            curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip -o minisign-win.zip
             unzip minisign-win.zip -d minisign-win
-            mv minisign-win/minisign.exe /usr/local/bin/
+            mv minisign-win/minisign-win64/minisign.exe /usr/local/bin/
             rm -rf minisign-win.zip minisign-win
           fi
         shell: bash
