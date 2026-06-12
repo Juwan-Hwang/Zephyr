@@ -263,10 +263,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
+          for f in target/release/bundle/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
+          for f in target/release/bundle/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
           done
         shell: bash
@@ -275,10 +275,10 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+          for f in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "dist-artifacts/$(basename "${f/.dmg/-full.dmg}")"
           done
-          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+          for f in target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
             cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-full.tar.gz}")"
           done
         shell: bash
@@ -287,13 +287,13 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
+          for f in target/release/bundle/deb/*.deb; do
             cp "$f" "dist-artifacts/$(basename "${f/.deb/-full.deb}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
+          for f in target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-full.AppImage}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
+          for f in target/release/bundle/rpm/*.rpm; do
             cp "$f" "dist-artifacts/$(basename "${f/.rpm/-full.rpm}")"
           done
         shell: bash
@@ -310,10 +310,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe; do
+          for f in target/release/bundle/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/msi/*.msi; do
+          for f in target/release/bundle/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
           done
         shell: bash
@@ -322,10 +322,10 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+          for f in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "dist-artifacts/$(basename "${f/.dmg/-lite.dmg}")"
           done
-          for f in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
+          for f in target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
             cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-lite.tar.gz}")"
           done
         shell: bash
@@ -334,13 +334,13 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           shopt -s nullglob
-          for f in apps/desktop/src-tauri/target/release/bundle/deb/*.deb; do
+          for f in target/release/bundle/deb/*.deb; do
             cp "$f" "dist-artifacts/$(basename "${f/.deb/-lite.deb}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage; do
+          for f in target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-lite.AppImage}")"
           done
-          for f in apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm; do
+          for f in target/release/bundle/rpm/*.rpm; do
             cp "$f" "dist-artifacts/$(basename "${f/.rpm/-lite.rpm}")"
           done
         shell: bash
@@ -360,7 +360,7 @@ jobs:
         if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
         run: |
           # Clean previous builds to ensure we get the correct portable artifact
-          rm -rf apps/desktop/src-tauri/target/release/bundle
+          rm -rf target/release/bundle
         shell: bash
 
       - name: Build Tauri app (Portable)
@@ -371,7 +371,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           mkdir -p portable/core portable/profiles portable/prism/plugins
-          cp apps/desktop/src-tauri/target/release/Zephyr.exe portable/
+          cp target/release/Zephyr.exe portable/
           cp apps/desktop/src-tauri/bundled/* portable/core/
           touch portable/.portable
           cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr-windows-portable.zip . && cd ..
@@ -381,7 +381,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           # Get the freshly built AppImage (should be the only one after clean)
-          APPIMAGE=$(ls -t apps/desktop/src-tauri/target/release/bundle/appimage/Zephyr*.AppImage | head -1)
+          APPIMAGE=$(ls -t target/release/bundle/appimage/Zephyr*.AppImage | head -1)
           if [ -z "$APPIMAGE" ]; then
             echo "ERROR: No AppImage found!"
             exit 1
