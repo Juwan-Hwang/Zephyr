@@ -1295,9 +1295,11 @@ pub async fn start_core(
                     .is_some_and(|current| current == config_path);
                 if same_config {
                     if let Some(port) = lock.last_port() {
+                        let active = lock.last_config_path().map(std::borrow::ToOwned::to_owned);
                         return Ok(CoreStartResult {
                             secret: lock.last_secret().to_owned(),
                             port,
+                            active_config: active,
                         });
                     }
                     None
@@ -1324,6 +1326,7 @@ pub async fn start_core(
         return Ok(CoreStartResult {
             secret,
             port: DEFAULT_API_PORT,
+            active_config: Some(resolved_config_name),
         });
     }
 
@@ -1373,6 +1376,7 @@ pub async fn start_core(
             return Ok(CoreStartResult {
                 secret: "test_ok".to_owned(),
                 port: 0,
+                active_config: Some(resolved_config_name),
             });
         }
         let mut err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -1501,7 +1505,7 @@ pub async fn start_core(
     };
     lock.set_process(Some(child));
     lock.set_last_secret(resolved_secret.clone());
-    lock.set_last_config_path(active_config_name);
+    lock.set_last_config_path(active_config_name.clone());
     lock.set_last_custom_args(Some(safe_custom_args));
     lock.set_last_port(Some(port));
     lock.set_last_proxy_port(Some(proxy_port));
@@ -1511,6 +1515,7 @@ pub async fn start_core(
     Ok(CoreStartResult {
         secret: resolved_secret,
         port,
+        active_config: active_config_name,
     })
 }
 
