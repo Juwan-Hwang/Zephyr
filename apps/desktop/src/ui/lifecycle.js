@@ -12,12 +12,14 @@ import { appStore } from './state.js';
 import { invalidateSettingsCache, invalidateProxiesCache, invalidateConfigCache } from './cache.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { apiLogger } from '../utils/logger.js';
+import { showNotification } from './notifications.js';
+import { t } from '../i18n.js';
 
 /**
  * 切换到指定配置（订阅）
  * @param {string} configName - 目标配置文件名
  * @param {string[]} [customArgs=[]] - 自定义核心参数
- * @returns {Promise<Object>} coreResult
+ * @returns {Promise<{secret: string, port: number, active_config: string|null, fallbackOccurred: boolean, actualConfig: string|null}>} coreResult
  */
 export async function switchToConfig(configName, customArgs = []) {
   // 中止正在进行的延迟测试，让 mihomo 处于空闲状态以便更快 kill
@@ -67,8 +69,32 @@ export async function switchToConfig(configName, customArgs = []) {
   const coreResult = await restartCore(configName, customArgs);
   if (!coreResult?.secret) throw new Error('Core start failed: no secret returned');
 
-  // 持久化新活动配置（原子更新，避免 RMW 竞态）
-  await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName });
+  // 检测是否发生回退：实际加载的配置与请求的不一致
+  const actualConfig = coreResult.active_config;
+  const fallbackOccurred = actualConfig && actualConfig !== configName;
+  const noConfigLoaded = actualConfig === null;
+
+  if (fallbackOccurred || noConfigLoaded) {
+    if (noConfigLoaded) {
+      // 没有有效配置，使用了最小配置
+      showNotification(
+        t('configFallbackMinimal', { requested: configName }),
+        'warning'
+      );
+    } else {
+      // 回退到其他配置
+      showNotification(
+        t('configFallback', { requested: configName, actual: actualConfig || '' }),
+        'warning'
+      );
+    }
+    apiLogger.warn(`[switchToConfig] Config fallback: requested=${configName}, actual=${actualConfig}`);
+  }
+
+  // 持久化实际活动配置（原子更新，避免 RMW 竞态）
+  // 如果发生了回退，使用实际加载的配置名
+  const configToPersist = actualConfig || configName;
+  await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: configToPersist });
   invalidateSettingsCache();
   invalidateRunConfigCache();
 
@@ -94,10 +120,10 @@ export async function switchToConfig(configName, customArgs = []) {
     apiLogger.warn('[switchToConfig] override_apply_all failed:', e);
   }
 
-  // 恢复代理选择
+  // 恢复代理选择（使用实际加载的配置）
   try {
     const { restoreProxySelection } = await import('./proxy-memory.js');
-    await restoreProxySelection(configName);
+    await restoreProxySelection(configToPersist);
   } catch (e) {
     apiLogger.warn('[switchToConfig] restoreProxySelection failed:', e);
   }
@@ -114,5 +140,11 @@ export async function switchToConfig(configName, customArgs = []) {
     startSmartAutoTest();
   })().catch(e => apiLogger.warn('[switchToConfig] renderProxies failed:', e));
 
-  return coreResult;
+  return {
+    ...coreResult,
+    /** @type {boolean} Whether a fallback occurred (requested config was invalid) */
+    fallbackOccurred: !!(fallbackOccurred || noConfigLoaded),
+    /** @type {string|null} The actual config that was loaded */
+    actualConfig: actualConfig,
+  };
 }

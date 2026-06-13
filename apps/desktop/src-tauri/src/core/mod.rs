@@ -136,6 +136,10 @@ pub struct AppPaths {
 pub struct CoreStartResult {
     pub secret: String,
     pub port: u16,
+    /// The name of the config that was actually loaded.
+    /// May differ from the requested config if a fallback occurred.
+    /// `None` means a minimal/generated config was used.
+    pub active_config: Option<String>,
 }
 
 #[derive(serde::Serialize)]

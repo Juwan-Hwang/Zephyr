@@ -326,6 +326,14 @@ async fn download_sub_inner_raw(
 
     let mut content = String::from_utf8_lossy(&bytes).into_owned();
 
+    // Reject empty responses — typically caused by expired subscriptions,
+    // server-side errors, or CDN edge returning an empty 200.
+    if content.trim().is_empty() {
+        return Err(
+            "Subscription returned empty content. The subscription may have expired or the server is unavailable.".to_owned(),
+        );
+    }
+
     if !content.contains("proxies:") && !content.contains("port:") {
         if let Some(decoded) = try_decode_base64_content(&content) {
             content = decoded;
