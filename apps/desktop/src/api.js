@@ -587,7 +587,7 @@ export async function openPrismFolder() {
  *
  * @param {string}   configPath        - 配置文件路径
  * @param {string[]} [customArgs=[]]   - 传递给核心的额外命令行参数
- * @returns {Promise<{ port: number, secret: string }>} 核心启动结果（含 port、secret 等）
+ * @returns {Promise<{ port: number, secret: string, active_config: string | null }>} 核心启动结果（含 port、secret、active_config 等）
  * @throws {Error}
  */
 export async function restartCore(configPath, customArgs = []) {

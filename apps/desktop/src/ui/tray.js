@@ -228,13 +228,16 @@ export async function initTrayEventListeners() {
         const t = /** @type {Record<string, string>} */(translations[langKey]);
 
         try {
-            showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
-
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
             const customArgs = settings.custom_args || [];
 
-            await switchToConfig(subName, customArgs);
+            const result = await switchToConfig(subName, customArgs);
+
+            // 只在没有回退时显示切换通知（回退时已显示警告）
+            if (!result.fallbackOccurred) {
+                showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
+            }
 
             // Sync core config first (updates appStore including TUN state), then update tray
             const { syncCoreConfig } = await import('./proxies.js');
