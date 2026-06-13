@@ -29,19 +29,83 @@ pub fn override_list(state: State<PrismState>) -> Result<Vec<OverrideItem>, Stri
 }
 
 /// Create a new override item and allocate a content file.
+///
+/// For remote overrides with a URL, the content is downloaded immediately
+/// and the extension is detected from the URL path (falling back to content analysis).
+/// If the download fails or the content is invalid (e.g. HTML), an error is returned
+/// and the override is NOT created.
 #[tauri::command]
-pub fn override_create(
-    state: State<PrismState>,
+pub async fn override_create(
+    state: State<'_, PrismState>,
     name: String,
     ext: String,
     r#type: String,
     url: Option<String>,
 ) -> Result<OverrideItem, String> {
-    let ext = OverrideExt::from_ext(&ext).ok_or_else(|| format!("Unknown ext: {ext}"))?;
+    let mut ext = OverrideExt::from_ext(&ext).ok_or_else(|| format!("Unknown ext: {ext}"))?;
     let r#type = match r#type.as_str() {
         "local" => OverrideType::Local,
-        "remote" => OverrideType::Remote,
+        "remote" => {
+            if url.as_ref().is_none_or(|u| u.trim().is_empty()) {
+                return Err("URL is required for remote overrides".to_owned());
+            }
+            OverrideType::Remote
+        }
         _ => return Err(format!("Unknown type: {type}")),
+    };
+
+    let download_url = if r#type == OverrideType::Remote {
+        url.clone()
+    } else {
+        None
+    };
+
+    // For remote overrides: detect ext from URL first, then download and validate content.
+    let pre_downloaded = if let Some(download_url) = &download_url {
+        // 1. Try URL extension (most reliable for CDN / raw file URLs)
+        if let Some(url_ext) = detect_ext_from_url(download_url) {
+            ext = url_ext;
+        }
+
+        // 2. Download content
+        let proxy_port = {
+            let settings_state = state.app.state::<crate::SettingsState>();
+            let lock = settings_state
+                .0
+                .lock()
+                .map_err(|e| format!("Lock failed: {e}"))?;
+            lock.mixed_port
+        };
+        match download_remote_content(download_url, proxy_port).await {
+            Ok(content) => {
+                // Validate content is not HTML / binary
+                validate_override_content(&content)?;
+
+                // 3. If URL had no clear extension, fall back to content-based detection
+                if detect_ext_from_url(download_url).is_none() {
+                    let detected = detect_override_ext(&content);
+                    if detected != ext {
+                        emit_warn!(
+                            Override,
+                            OVERRIDE_APPLY_FAILED,
+                            "Content-detected override type {:?} (URL hint was {:?}) for: {}",
+                            detected,
+                            ext,
+                            download_url
+                        );
+                    }
+                    ext = detected;
+                }
+                Some(content)
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to download override from {download_url}: {e}"
+                ));
+            }
+        }
+    } else {
+        None
     };
 
     let mut item = OverrideItem::new(name, ext, r#type);
@@ -52,12 +116,166 @@ pub fn override_create(
         item.url = Some(u);
     }
 
-    // Create content file with default template
+    // Write content: use pre-downloaded content, or fall back to default template
     let dir = overrides_store::overrides_dir(&state)?;
     let content_path = dir.join(item.content_filename());
-    let default_content = match item.ext {
-        OverrideExt::Js => {
-            r"// Zephyr Override Script
+    let content = pre_downloaded.unwrap_or_else(|| default_template_content(item.ext));
+
+    write_file_secure(&content_path, &content)
+        .map_err(|e| format!("Failed to create content file: {e}"))?;
+
+    // create_item atomically assigns order and persists — no race condition
+    overrides_store::create_item(&state, item)
+}
+
+/// Extract override extension from a URL path.
+///
+/// Parses the last path segment, strips query params and fragments,
+/// and checks for `.js`, `.yaml`, `.yml` extensions.
+/// Returns `None` if the URL has no recognizable extension.
+fn detect_ext_from_url(url: &str) -> Option<OverrideExt> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let last_segment = parsed
+        .path_segments()?
+        .rev()
+        .find(|s| !s.is_empty())?
+        .to_lowercase();
+
+    if last_segment.ends_with(".js")
+        || last_segment.ends_with(".mjs")
+        || last_segment.ends_with(".cjs")
+    {
+        Some(OverrideExt::Js)
+    } else if last_segment.ends_with(".yaml") || last_segment.ends_with(".yml") {
+        Some(OverrideExt::PrismYaml)
+    } else {
+        None
+    }
+}
+
+/// Validate that downloaded content is not HTML or binary data.
+fn validate_override_content(content: &str) -> Result<(), String> {
+    let trimmed = content.trim_start();
+    if trimmed
+        .get(..9)
+        .is_some_and(|s| s.eq_ignore_ascii_case("<!doctype"))
+        || trimmed
+            .get(..5)
+            .is_some_and(|s| s.eq_ignore_ascii_case("<html"))
+        || trimmed
+            .get(..5)
+            .is_some_and(|s| s.eq_ignore_ascii_case("<head"))
+    {
+        return Err(
+            "Downloaded content appears to be an HTML page, not a valid override script. \
+             The URL may point to a web page instead of a raw script file."
+                .to_owned(),
+        );
+    }
+    if content.contains('\0') {
+        return Err("Downloaded content contains null bytes (binary data)".to_owned());
+    }
+    Ok(())
+}
+
+/// Detect whether content is JS or Prism YAML.
+///
+/// Used as fallback when the URL has no recognizable extension.
+/// Relies on heuristic signal counting — no attempt to perfectly parse syntax.
+fn detect_override_ext(content: &str) -> OverrideExt {
+    let mut yaml_signals = 0_u32;
+    let mut js_signals = 0_u32;
+    let mut semicolons = 0_u32;
+
+    for line in content.lines().take(1000) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip line comments
+        if trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Count semicolons
+        semicolons = semicolons.saturating_add(
+            u32::try_from(trimmed.chars().filter(|&c| c == ';').count()).unwrap_or(u32::MAX),
+        );
+
+        // Minified JS: very long line (> 500 chars) is almost certainly JS.
+        if trimmed.len() > 500 {
+            js_signals += 5;
+            continue;
+        }
+
+        // YAML document start marker
+        if trimmed == "---" || trimmed.starts_with("--- ") {
+            return OverrideExt::PrismYaml;
+        }
+        if trimmed.starts_with("%YAML") || trimmed.starts_with("%TAG") {
+            return OverrideExt::PrismYaml;
+        }
+
+        // YAML key-value: `key: value` (colon + space) or `key:` at EOL
+        if let Some(colon_pos) = trimmed.find(':') {
+            let key_part = &trimmed[..colon_pos];
+            let after_colon = trimmed[colon_pos + 1..].chars().next();
+            if !key_part.is_empty()
+                && key_part
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '$')
+                && (after_colon == Some(' ') || after_colon.is_none())
+                && !trimmed.ends_with(',')
+                && !trimmed.ends_with(';')
+            {
+                yaml_signals += 1;
+            }
+        }
+
+        // YAML list item
+        if trimmed.starts_with("- ") && !trimmed.contains(';') {
+            yaml_signals += 1;
+        }
+
+        // JS keywords
+        if trimmed.starts_with("function ")
+            || trimmed.starts_with("async function ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("export ")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("var ")
+            || trimmed.starts_with("let ")
+            || trimmed.starts_with("const ")
+            || trimmed.starts_with("return ")
+            || trimmed == "return"
+        {
+            js_signals += 2;
+        }
+        if trimmed.starts_with("\"use strict\"") || trimmed.starts_with("'use strict'") {
+            js_signals += 3;
+        }
+        if trimmed.contains("=>") || trimmed.contains("console.") {
+            js_signals += 1;
+        }
+    }
+
+    // Semicolons are very common in JS but rare in YAML
+    if semicolons > 20 {
+        js_signals += 5;
+    }
+
+    if yaml_signals >= 2 && yaml_signals > js_signals {
+        OverrideExt::PrismYaml
+    } else {
+        OverrideExt::Js
+    }
+}
+
+/// Return the default template content for a given override extension.
+fn default_template_content(ext: OverrideExt) -> String {
+    match ext {
+        OverrideExt::Js => r"// Zephyr Override Script
 // API: config.get(path), config.set(path, value), log.*, utils.*
 
 function main(config) {
@@ -65,9 +283,8 @@ function main(config) {
     return config;
 }
 "
-        }
-        OverrideExt::PrismYaml => {
-            r#"# Zephyr Prism Override
+        .to_owned(),
+        OverrideExt::PrismYaml => r#"# Zephyr Prism Override
 # Supports: $override, $prepend, $append, $filter, $transform, $remove, $default
 # Conditions: __when__, Variables: __vars__, Dependencies: __after__
 
@@ -76,13 +293,8 @@ function main(config) {
 #   $prepend:
 #     - "DOMAIN-SUFFIX,google.com,DIRECT"
 "#
-        }
-    };
-    write_file_secure(&content_path, default_content)
-        .map_err(|e| format!("Failed to create content file: {e}"))?;
-
-    // create_item atomically assigns order and persists — no race condition
-    overrides_store::create_item(&state, item)
+        .to_owned(),
+    }
 }
 
 /// Update metadata fields of an override item (not content).
@@ -587,7 +799,17 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 /// Uses the unified `fetch_url_content` function from `fetch_util` for consistent
 /// security measures (SSRF protection, DNS pinning, redirect validation).
 async fn download_remote_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
-    let content = fetch_url_content(url, proxy_port).await?;
+    let mut content = fetch_url_content(url, proxy_port).await?;
+    // Strip UTF-8 BOM in-place to avoid interfering with content detection
+    if content.starts_with('\u{feff}') {
+        content.drain(..'\u{feff}'.len_utf8());
+    }
+    // Reject empty responses — aligned with subscription.rs empty content check
+    if content.trim().is_empty() {
+        return Err(
+            "Remote override returned empty content. The URL may be invalid or the resource unavailable.".to_owned(),
+        );
+    }
     check_input_size(&content, "Remote override content")?;
     Ok(content)
 }
