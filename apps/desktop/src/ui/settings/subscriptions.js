@@ -1192,8 +1192,11 @@ export function initSubscriptionSettings({
                 item.classList.add('opacity-50', 'pointer-events-none');
 
                 try {
-                    await switchToConfig(name, customArgs);
-                    showNotification(t.configSuccess, 'success');
+                    const result = await switchToConfig(name, customArgs);
+                    // 只在没有回退时显示成功通知（回退时已显示警告）
+                    if (!result.fallbackOccurred) {
+                        showNotification(t.configSuccess, 'success');
+                    }
                     await renderConfigs();
                     Bus.emit(Events.CONFIG_UPDATED);
                     await syncCoreConfig();
