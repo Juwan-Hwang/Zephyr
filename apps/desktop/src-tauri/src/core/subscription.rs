@@ -160,13 +160,19 @@ fn resolve_url_from_metadata(
     super::config_manager::get_config_url(app, name)
 }
 
+#[derive(serde::Serialize)]
+pub struct DownloadSubResult {
+    pub name: String,
+    pub message: String,
+}
+
 pub(crate) async fn download_sub_inner(
     app: &AppHandle,
     url: String,
     name: String,
     user_agent: Option<String>,
     overwrite: bool,
-) -> Result<String, String> {
+) -> Result<DownloadSubResult, String> {
     download_sub_inner_raw(app, url, name, user_agent, overwrite)
         .await
         .map_err(redact_url_in_string)
@@ -179,7 +185,7 @@ async fn download_sub_inner_raw(
     name: String,
     user_agent: Option<String>,
     overwrite: bool,
-) -> Result<String, String> {
+) -> Result<DownloadSubResult, String> {
     let safe_name = validate_subscription_name(&name).map_err(|e| e.to_string())?;
 
     let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
@@ -519,7 +525,10 @@ async fn download_sub_inner_raw(
         let _ = std::fs::remove_file(bp);
     }
 
-    Ok(format!("Config saved as {clean_name}"))
+    Ok(DownloadSubResult {
+        message: format!("Config saved as {clean_name}"),
+        name: clean_name,
+    })
 }
 
 fn log_sub_update_failure(name: &str, err: &str) {
@@ -542,7 +551,7 @@ pub async fn download_sub(
     user_agent: Option<String>,
     overwrite: Option<bool>,
     rate_limiter: State<'_, crate::RateLimiter>,
-) -> Result<String, String> {
+) -> Result<DownloadSubResult, String> {
     crate::rate_limit!(rate_limiter, "download_sub", 5000);
     let resolved_url = match resolve_url_from_metadata(&app, &name, url) {
         Ok(u) => u,

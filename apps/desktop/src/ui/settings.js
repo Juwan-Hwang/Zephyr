@@ -34,6 +34,7 @@ import { applyTheme } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
 import { invalidateSettingsCache } from './cache.js';
+import { postRestartRecovery } from './lifecycle.js';
 import { saveSetting, saveSettings } from './settings-helpers.js';
 import { initNetworkOptim } from './network-optim.js';
 import {
@@ -803,8 +804,8 @@ export async function initSettings() {
                 await save();
                 abortLatencyTests();
                 await restartCore(configPath, customArgs);
+                await postRestartRecovery(configPath);
                 showNotification(t.notifRestartSuccess || "Core restarted successfully", 'success');
-                syncCoreConfig();
             } catch (err) {
                 const error = toError(err);
                 showNotification(error.toString(), 'error');
@@ -1467,6 +1468,7 @@ export async function initSettings() {
             const customArgs = geoSettings.custom_args || [];
             abortLatencyTests();
             await restartCore(configPath, customArgs);
+            await postRestartRecovery(configPath);
         } catch (err) {
             const error = toError(err);
             showNotification(error.toString(), 'error');
