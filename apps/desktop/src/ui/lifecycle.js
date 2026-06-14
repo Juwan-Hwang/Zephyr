@@ -2,7 +2,7 @@
 /**
  * 核心生命周期管理模块
  *
- * 负责订阅切换等高层 orchestration 逻辑。
+ * 负责订阅切换、重启后恢复等高层 orchestration 逻辑。
  * 此模块可以导入 api.js 和 UI 模块，避免 api.js 出现分层违规。
  */
 
@@ -96,49 +96,9 @@ export async function switchToConfig(configName, customArgs = []) {
   const configToPersist = actualConfig || configName;
   await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: configToPersist });
   invalidateSettingsCache();
-  invalidateRunConfigCache();
 
-  // 重建 prism patches（__when__.profile 条件需要重新评估）
-  try {
-    const { rebuild } = await import('./prism.js');
-    await rebuild();
-  } catch (e) {
-    apiLogger.warn('[switchToConfig] prism.rebuild failed:', e);
-  }
-
-  // 重新应用所有启用的覆写脚本（JS 覆写可能修改 proxy-groups 等，
-  // 切换订阅后必须重新执行，否则规则引用的代理组可能不存在）
-  try {
-    const { overrideApplyAll } = await import('./prism.js');
-    const logs = await overrideApplyAll();
-    const successCount = logs?.filter(l => l.success).length ?? 0;
-    const failCount = logs?.filter(l => !l.success).length ?? 0;
-    if (logs && logs.length > 0) {
-      apiLogger.info(`[switchToConfig] override_apply_all: ${successCount} succeeded, ${failCount} failed`);
-    }
-  } catch (e) {
-    apiLogger.warn('[switchToConfig] override_apply_all failed:', e);
-  }
-
-  // 恢复代理选择（使用实际加载的配置）
-  try {
-    const { restoreProxySelection } = await import('./proxy-memory.js');
-    await restoreProxySelection(configToPersist);
-  } catch (e) {
-    apiLogger.warn('[switchToConfig] restoreProxySelection failed:', e);
-  }
-
-  // 刷新前端代理组数据（复用「保存并执行」的逻辑）
-  // 覆写脚本可能修改 proxy-groups，必须清缓存并重新渲染
-  invalidateProxiesCache();
-  invalidateConfigCache();
-  (async () => {
-    const { renderProxies, startSmartAutoTest } = await import('./proxies.js');
-    const { waitForMihomoReady } = await import('./proxy-memory.js');
-    await waitForMihomoReady();
-    await renderProxies();
-    startSmartAutoTest();
-  })().catch(e => apiLogger.warn('[switchToConfig] renderProxies failed:', e));
+  // Post-restart recovery: rebuild prism, reapply overrides, restore proxy, refresh UI
+  await postRestartRecovery(configToPersist);
 
   return {
     ...coreResult,
@@ -147,4 +107,63 @@ export async function switchToConfig(configName, customArgs = []) {
     /** @type {string|null} The actual config that was loaded */
     actualConfig: actualConfig,
   };
+}
+
+/**
+ * Post-restart recovery: rebuild prism patches, reapply all override scripts,
+ * restore the last proxy selection, and refresh the proxy UI.
+ *
+ * Must be called after every `restartCore()` invocation — `restartCore`
+ * rewrites `run_config.yaml` from the raw profile, so all previously-applied
+ * overrides (JS proxy-groups, Prism YAML patches, etc.) are lost.
+ *
+ * @param {string} configName - The active profile name (used for restoreProxySelection).
+ */
+export async function postRestartRecovery(configName) {
+  invalidateRunConfigCache();
+
+  // 1. Rebuild prism patches (__when__.profile conditions need re-evaluation)
+  try {
+    const { rebuild } = await import('./prism.js');
+    await rebuild();
+  } catch (e) {
+    apiLogger.warn('[postRestartRecovery] prism.rebuild failed:', e);
+  }
+
+  // 2. Re-apply all enabled override scripts
+  //    JS overrides may modify proxy-groups; without re-execution, rules
+  //    referencing those groups will fail.
+  try {
+    const { overrideApplyAll } = await import('./prism.js');
+    const logs = await overrideApplyAll();
+    const overrideLogs = Array.isArray(logs) ? logs : [];
+    const successCount = overrideLogs.filter(l => l?.success).length;
+    const failCount = overrideLogs.filter(l => !l?.success).length;
+    if (overrideLogs.length > 0) {
+      apiLogger.info(`[postRestartRecovery] override_apply_all: ${successCount} succeeded, ${failCount} failed`);
+    }
+  } catch (e) {
+    apiLogger.warn('[postRestartRecovery] override_apply_all failed:', e);
+  }
+
+  // 3. Restore last proxy selection for this profile
+  try {
+    const { restoreProxySelection } = await import('./proxy-memory.js');
+    await restoreProxySelection(configName);
+  } catch (e) {
+    apiLogger.warn('[postRestartRecovery] restoreProxySelection failed:', e);
+  }
+
+  // 4. Refresh frontend proxy display (overrides may have modified proxy-groups)
+  invalidateProxiesCache();
+  invalidateConfigCache();
+  (async () => {
+    const { Bus, Events } = await import('./events.js');
+    const { startSmartAutoTest, syncCoreConfig } = await import('./proxies.js');
+    const { waitForMihomoReady } = await import('./proxy-memory.js');
+    await waitForMihomoReady();
+    await syncCoreConfig();
+    Bus.emit(Events.CONFIG_UPDATED);
+    startSmartAutoTest();
+  })().catch(e => apiLogger.warn('[postRestartRecovery] refresh proxies failed:', e));
 }
