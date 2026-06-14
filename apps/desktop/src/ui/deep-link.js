@@ -13,12 +13,19 @@ import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from '../utils/logger.js';
 
 /**
+ * @typedef {Object} DeepLinkPayload
+ * @property {string} action
+ * @property {string} url
+ * @property {string} name
+ */
+
+/**
  * Initialize deep link event listener.
  * Should be called once during app startup.
  * @returns {Promise<() => void>} Unlisten function
  */
 export async function initDeepLink() {
-    return listen('deep-link', async (/** @type {{ payload: { action: string, url: string, name: string } }} */ event) => {
+    return listen('deep-link', async (/** @type {{ payload: DeepLinkPayload }} */ event) => {
         const { action, url, name } = event.payload;
 
         if (action === 'install-config') {
