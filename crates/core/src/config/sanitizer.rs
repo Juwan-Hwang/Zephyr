@@ -7,6 +7,16 @@ use std::path::Path;
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
 const MAX_YAML_DEPTH: usize = 100;
 
+#[inline]
+fn decode_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Internal implementation with depth tracking.
 #[allow(clippy::wildcard_enum_match_arm)]
 fn remove_dangerous_keys_internal(
@@ -93,45 +103,38 @@ pub fn remove_dangerous_keys_internal_pub(
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
 pub fn url_decode_complete(input: &str) -> String {
-    let mut result = input.to_owned();
+    let mut current = input.as_bytes().to_vec();
 
-    // Decode iteratively until no more changes (handles nested encoding)
-    let mut changed = true;
-    let max_iterations = 5; // Prevent infinite loops
-    let mut iterations = 0;
-
-    while changed && iterations < max_iterations {
-        changed = false;
-        iterations += 1;
-
-        // Handle standard percent-encoded characters
-        let mut decoded = String::new();
-        let chars: Vec<char> = result.chars().collect();
+    for _ in 0..5 {
+        let mut changed = false;
+        let mut decoded = Vec::with_capacity(current.len());
         let mut i = 0;
 
-        while i < chars.len() {
-            if chars.get(i) == Some(&'%') && i + 2 < chars.len() {
-                // Try to decode %XX
-                if let Some(hex_chars) = chars.get(i + 1..i + 3) {
-                    let hex: String = hex_chars.iter().collect();
-                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                        decoded.push(byte as char);
-                        i += 3;
-                        changed = true;
-                        continue;
-                    }
+        while i < current.len() {
+            if current[i] == b'%' && i + 2 < current.len() {
+                if let (Some(hi), Some(lo)) = (
+                    decode_hex_digit(current[i + 1]),
+                    decode_hex_digit(current[i + 2]),
+                ) {
+                    decoded.push((hi << 4) | lo);
+                    i += 3;
+                    changed = true;
+                    continue;
                 }
             }
-            if let Some(c) = chars.get(i) {
-                decoded.push(*c);
-            }
+
+            decoded.push(current[i]);
             i += 1;
         }
 
-        result = decoded;
+        current = decoded;
+        if !changed {
+            break;
+        }
     }
 
-    result
+    String::from_utf8(current)
+        .unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
 }
 
 /// Common base filename sanitization shared by config and prism file handlers.
