@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use clash_prism_smart::history::NodeHistory;
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap as _;
+use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::mpsc;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -35,6 +36,21 @@ pub enum ChangeRecord {
     /// 清空信号（不序列化到 WAL）
     #[serde(skip)]
     Clear,
+}
+
+struct HistorySnapshot<'a>(&'a [(String, NodeHistory)]);
+
+impl Serialize for HistorySnapshot<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (node_name, history) in self.0 {
+            map.serialize_entry(node_name, history)?;
+        }
+        map.end()
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -318,14 +334,13 @@ impl SmartState {
         histories: &DashMap<String, NodeHistory>,
         data_path: &Path,
     ) -> Result<(), String> {
-        // 使用 BTreeMap 保证序列化顺序确定性，避免 iter_over_hash_type lint
-        let snapshot: BTreeMap<String, NodeHistory> = histories
+        let mut snapshot: Vec<(String, NodeHistory)> = histories
             .iter()
             .map(|e| (e.key().clone(), e.value().clone()))
             .collect();
+        snapshot.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-        // 使用紧凑格式 (生产环境)
-        let json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
+        let json = serde_json::to_vec(&HistorySnapshot(&snapshot)).map_err(|e| e.to_string())?;
 
         // 原子写入：创建文件 → 写入 → sync → rename
         let temp_path = data_path.with_extension("tmp");
@@ -333,9 +348,7 @@ impl SmartState {
             .await
             .map_err(|e| e.to_string())?;
         use tokio::io::AsyncWriteExt as _;
-        file.write_all(json.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
+        file.write_all(&json).await.map_err(|e| e.to_string())?;
         file.sync_all().await.map_err(|e| e.to_string())?;
         drop(file);
         tokio::fs::rename(&temp_path, data_path)

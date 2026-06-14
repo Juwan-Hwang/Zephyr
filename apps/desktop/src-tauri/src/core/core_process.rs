@@ -691,6 +691,28 @@ pub struct GlobalPreferences {
     pub unified_delay: Option<bool>,
 }
 
+fn yaml_key(key: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(key.to_owned())
+}
+
+fn yaml_number(number: u16) -> serde_yaml::Value {
+    serde_yaml::Value::Number(serde_yaml::Number::from(number))
+}
+
+fn insert_yaml(mapping: &mut serde_yaml::Mapping, key: &str, value: serde_yaml::Value) {
+    mapping.insert(yaml_key(key), value);
+}
+
+fn insert_default_yaml(
+    mapping: &mut serde_yaml::Mapping,
+    key: &str,
+    value: impl FnOnce() -> serde_yaml::Value,
+) {
+    if !mapping.keys().any(|k| k.as_str() == Some(key)) {
+        mapping.insert(yaml_key(key), value());
+    }
+}
+
 #[must_use]
 pub fn prepare_runtime_config(
     content: &str,
@@ -704,20 +726,19 @@ pub fn prepare_runtime_config(
 
     let config_port = parse_external_controller_port(&yaml_val);
     if let Some(mapping) = yaml_val.as_mapping_mut() {
-        mapping.insert(
-            serde_yaml::Value::String("external-controller".to_owned()),
+        insert_yaml(
+            mapping,
+            "external-controller",
             serde_yaml::Value::String(format!("127.0.0.1:{config_port}")),
         );
-        mapping.insert(
-            serde_yaml::Value::String("secret".to_owned()),
+        insert_yaml(
+            mapping,
+            "secret",
             serde_yaml::Value::String(secret.to_owned()),
         );
 
         // Default unified-delay to true if missing
-        let unified_delay_key = serde_yaml::Value::String("unified-delay".to_owned());
-        if !mapping.contains_key(&unified_delay_key) {
-            mapping.insert(unified_delay_key, serde_yaml::Value::Bool(true));
-        }
+        insert_default_yaml(mapping, "unified-delay", || serde_yaml::Value::Bool(true));
 
         // Network performance defaults (Google Cloud TCP best practices)
         // Only inject when the profile doesn't already specify a value,
@@ -726,22 +747,13 @@ pub fn prepare_runtime_config(
         // tcp-concurrent: attempt TCP connections to all resolved IPs
         // simultaneously and use the fastest one. Reduces handshake
         // latency especially when a proxy node has both IPv4 and IPv6.
-        let tcp_concurrent_key = serde_yaml::Value::String("tcp-concurrent".to_owned());
-        if !mapping.contains_key(&tcp_concurrent_key) {
-            mapping.insert(tcp_concurrent_key, serde_yaml::Value::Bool(true));
-        }
+        insert_default_yaml(mapping, "tcp-concurrent", || serde_yaml::Value::Bool(true));
 
         // keep-alive-interval: TCP keep-alive probe interval in seconds.
         // Prevents idle connections from being dropped by middleboxes
         // (NATs, firewalls), aligning with Google's recommendation to
         // maintain persistent connections and avoid slow-start after idle.
-        let keep_alive_key = serde_yaml::Value::String("keep-alive-interval".to_owned());
-        if !mapping.contains_key(&keep_alive_key) {
-            mapping.insert(
-                keep_alive_key,
-                serde_yaml::Value::Number(serde_yaml::Number::from(30)),
-            );
-        }
+        insert_default_yaml(mapping, "keep-alive-interval", || yaml_number(30));
 
         // keep-alive-idle: maximum idle time (seconds) before TCP keep-alive
         // probes begin. Default is 15s which is too aggressive — connections
@@ -749,21 +761,15 @@ pub fn prepare_runtime_config(
         // Setting to 600 (10 minutes) keeps connections alive through typical
         // web browsing pauses, reducing TCP+TLS handshake round-trips.
         // (Google: persistent connections reduced TTFB from 230ms to 123ms)
-        let keep_alive_idle_key = serde_yaml::Value::String("keep-alive-idle".to_owned());
-        if !mapping.contains_key(&keep_alive_idle_key) {
-            mapping.insert(
-                keep_alive_idle_key,
-                serde_yaml::Value::Number(serde_yaml::Number::from(600)),
-            );
-        }
+        insert_default_yaml(mapping, "keep-alive-idle", || yaml_number(600));
 
         // profile.store-fake-ip: persist fake-ip mapping table to disk so
         // that on restart, previously resolved domains reuse the same fake-ip
         // address. This avoids DNS re-resolution and connection disruption,
         // aligning with Google's recommendation to minimize DNS queries
         // as a key latency contributor.
-        let profile_key = serde_yaml::Value::String("profile".to_owned());
-        let store_fake_ip_key = serde_yaml::Value::String("store-fake-ip".to_owned());
+        let profile_key = yaml_key("profile");
+        let store_fake_ip_key = yaml_key("store-fake-ip");
         // Handle three cases: existing Mapping, existing Null/non-Mapping, or missing key
         let needs_insert =
             if let Some(serde_yaml::Value::Mapping(profile_map)) = mapping.get_mut(&profile_key) {
@@ -776,10 +782,7 @@ pub fn prepare_runtime_config(
             };
         if needs_insert {
             let mut profile_map = serde_yaml::Mapping::new();
-            profile_map.insert(
-                serde_yaml::Value::String("store-fake-ip".to_owned()),
-                serde_yaml::Value::Bool(true),
-            );
+            profile_map.insert(yaml_key("store-fake-ip"), serde_yaml::Value::Bool(true));
             mapping.insert(profile_key, serde_yaml::Value::Mapping(profile_map));
         }
 
@@ -787,75 +790,55 @@ pub fn prepare_runtime_config(
         // each connection. Required for accurate rule-based routing in
         // TUN mode and better connection visibility.
         // (Not a TCP optimization — improves routing accuracy)
-        let find_process_key = serde_yaml::Value::String("find-process-mode".to_owned());
-        if !mapping.contains_key(&find_process_key) {
-            mapping.insert(
-                find_process_key,
-                serde_yaml::Value::String("always".to_owned()),
-            );
-        }
+        insert_default_yaml(mapping, "find-process-mode", || {
+            serde_yaml::Value::String("always".to_owned())
+        });
 
         // Inject global user preferences (override YAML profile values)
         if let Some(p) = prefs {
             if let Some(mode) = &p.mode {
                 // Validate mode against supported values
                 if matches!(mode.as_str(), "rule" | "global" | "direct") {
-                    mapping.insert(
-                        serde_yaml::Value::String("mode".to_owned()),
-                        serde_yaml::Value::String(mode.clone()),
-                    );
+                    insert_yaml(mapping, "mode", serde_yaml::Value::String(mode.clone()));
                 }
             }
             if let Some(tun) = p.tun_enabled {
-                let tun_key = serde_yaml::Value::String("tun".to_owned());
-                let tun_val = mapping.get_mut(&tun_key);
-                if let Some(serde_yaml::Value::Mapping(tun_map)) = tun_val {
-                    tun_map.insert(
-                        serde_yaml::Value::String("enable".to_owned()),
-                        serde_yaml::Value::Bool(tun),
-                    );
+                let mut found_mapping = None;
+                for (k, v) in mapping.iter_mut() {
+                    if k.as_str() == Some("tun") {
+                        if let serde_yaml::Value::Mapping(m) = v {
+                            found_mapping = Some(m);
+                        }
+                        break;
+                    }
+                }
+                if let Some(tun_map) = found_mapping {
+                    tun_map.insert(yaml_key("enable"), serde_yaml::Value::Bool(tun));
                 } else {
                     let mut tun_map = serde_yaml::Mapping::new();
-                    tun_map.insert(
-                        serde_yaml::Value::String("enable".to_owned()),
-                        serde_yaml::Value::Bool(tun),
-                    );
-                    mapping.insert(tun_key, serde_yaml::Value::Mapping(tun_map));
+                    tun_map.insert(yaml_key("enable"), serde_yaml::Value::Bool(tun));
+                    mapping.insert(yaml_key("tun"), serde_yaml::Value::Mapping(tun_map));
                 }
             }
             if let Some(port) = p.mixed_port {
-                mapping.insert(
-                    serde_yaml::Value::String("mixed-port".to_owned()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
-                );
+                insert_yaml(mapping, "mixed-port", yaml_number(port));
             }
             if let Some(port) = p.socks_port {
-                mapping.insert(
-                    serde_yaml::Value::String("socks-port".to_owned()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
-                );
+                insert_yaml(mapping, "socks-port", yaml_number(port));
             }
             if let Some(port) = p.http_port {
-                mapping.insert(
-                    serde_yaml::Value::String("port".to_owned()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(port)),
-                );
+                insert_yaml(mapping, "port", yaml_number(port));
             }
             if let Some(ipv6) = p.ipv6 {
-                mapping.insert(
-                    serde_yaml::Value::String("ipv6".to_owned()),
-                    serde_yaml::Value::Bool(ipv6),
-                );
+                insert_yaml(mapping, "ipv6", serde_yaml::Value::Bool(ipv6));
             }
             if let Some(allow_lan) = p.allow_lan {
-                mapping.insert(
-                    serde_yaml::Value::String("allow-lan".to_owned()),
-                    serde_yaml::Value::Bool(allow_lan),
-                );
+                insert_yaml(mapping, "allow-lan", serde_yaml::Value::Bool(allow_lan));
             }
             if let Some(unified_delay) = p.unified_delay {
-                mapping.insert(
-                    serde_yaml::Value::String("unified-delay".to_owned()),
+                insert_yaml(
+                    mapping,
+                    "unified-delay",
                     serde_yaml::Value::Bool(unified_delay),
                 );
             }
