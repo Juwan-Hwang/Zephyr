@@ -116,7 +116,7 @@ Zephyr 采用纵深防御策略：
 
 | 层级 | 防护手段 | 实现方式 |
 |------|----------|----------|
-| **加密** | 机器绑定加密 | 以硬件指纹派生密钥加密订阅元数据；代理配置（YAML）明文存储 |
+| **加密** | 机器绑定加密 | 以硬件指纹派生密钥加密订阅元数据；代理配置支持可选加密（v2.3.7+） |
 | **网络** | SSRF 防护 | 订阅与规则 URL 下载前进行 DNS 验证；重定向至内网地址将被拦截 |
 | **网络** | DNS 防泄漏 | TUN 模式自动注入 `dns-hijack`，将全部 DNS 流量劫持至 Mihomo |
 | **配置** | 配置清洗 | 递归移除危险 YAML 字段，限制 provider 路径遍历 |
@@ -124,7 +124,7 @@ Zephyr 采用纵深防御策略：
 | **输入** | 输入验证 | IPC 命令入口进行长度、格式及 UTF-8 安全校验 |
 | **限流** | 双重限流 | 常规命令固定冷却 + Prism 命令滑动窗口 |
 | **文件** | 文件安全 | 安全权限、UUID 临时文件、压缩包路径遍历防护、符号链接拒绝、压缩炸弹检测 |
-| **更新** | 更新完整性 | SHA256 校验、可信主机限制、原子更新与自动回滚 |
+| **更新** | 更新完整性 | SHA256 校验 + Minisign Ed25519 签名验证、可信主机限制、原子更新与自动回滚 |
 | **深链** | 深链安全 | 限制 `clash://` 协议入口与 URL scheme |
 | **构建** | CSP 与加固 | 限制脚本与连接来源，release 启用 LTO、strip、`panic=abort` |
 
@@ -136,6 +136,17 @@ Zephyr 采用纵深防御策略：
 - Windows UWP 环回免除
 - Mihomo 核心、GeoIP / GeoSite 数据及 Zephyr 客户端更新
 - 开机自启、系统通知、配置目录打开
+
+### 网络优化
+
+- 三层优化体系：Mihomo 配置默认值（tcp-concurrent、keep-alive、fake-ip 持久化）+ OS TCP 调优（Fast Open、ECN、buffer）+ DNS 优化
+- 独立 UI：手动 Apply / Revert / Status 查看
+- Linux 持久化至 `/etc/sysctl.d/`
+
+### 轻量模式
+
+- 关闭窗口时销毁 WebView 释放内存，仅保留系统托盘
+- 设置入口：Settings → General → Lightweight Mode
 
 ### UI / UX
 
