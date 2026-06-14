@@ -40,7 +40,12 @@ impl Bucket {
             let retry_after = self
                 .timestamps
                 .first()
-                .map(|&t| t.duration_since(now) + Duration::from_nanos(1))
+                .map(|&t| {
+                    t.checked_add(self.window)
+                        .and_then(|t_limit| t_limit.checked_duration_since(now))
+                        .unwrap_or_default()
+                        + Duration::from_nanos(1)
+                })
                 .unwrap_or(Duration::from_secs(1));
             Err(retry_after)
         } else {
