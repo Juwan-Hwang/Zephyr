@@ -11,10 +11,9 @@
 import {
     invoke,
     restartCore,
-    reloadConfig,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -337,15 +336,23 @@ export function initSubscriptionSettings({
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
-                await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+                /** @type {{name: string, message?: string}} */
+                const savedConfig = await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+                const savedConfigName = savedConfig.name;
 
                 invalidateConfigsCache();
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = subSettings.last_config || 'config.yaml';
-                if (name === currentConfig || name === `${currentConfig}.yaml`) {
-                    await reloadConfig();
+                const normalizeConfigName = (/** @type {string} */ configName) => configName.replace(/\.(ya?ml)$/i, '');
+                if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
+                    abortLatencyTests();
+                    const customArgs = subSettings.custom_args || [];
+                    await restartCore(savedConfigName, customArgs);
+                    await postRestartRecovery(savedConfigName);
+                    Bus.emit(Events.CONFIG_UPDATED);
+                    syncCoreConfig();
                 }
 
                 /** @type {any} */
@@ -414,6 +421,9 @@ export function initSubscriptionSettings({
             if (wasCurrentUpdated && successCount > 0) {
                 abortLatencyTests();
                 await restartCore(currentConfig, customArgs);
+                await postRestartRecovery(currentConfig);
+                Bus.emit(Events.CONFIG_UPDATED);
+                syncCoreConfig();
             }
 
             if (icon) icon.classList.remove('animate-spin');
@@ -1170,6 +1180,9 @@ export function initSubscriptionSettings({
                             abortLatencyTests();
                             const cfgCustomArgs = cfgSettings.custom_args || [];
                             await restartCore(configInfo.name, cfgCustomArgs);
+                            await postRestartRecovery(configInfo.name);
+                            Bus.emit(Events.CONFIG_UPDATED);
+                            syncCoreConfig();
                         }
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
                         renderConfigs();
