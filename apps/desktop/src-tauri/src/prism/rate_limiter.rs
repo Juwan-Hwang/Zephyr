@@ -28,7 +28,12 @@ impl Bucket {
     /// Returns `Ok(())` if the call is allowed, `Err(retry_after)` if rate-limited.
     fn check(&mut self) -> Result<(), Duration> {
         let now = Instant::now();
-        let cutoff = now - self.window;
+        let cutoff = now.checked_sub(self.window).unwrap_or_else(|| {
+            self.timestamps
+                .first()
+                .and_then(|t| t.checked_sub(Duration::from_nanos(1)))
+                .unwrap_or(now)
+        });
 
         let first_valid = self.timestamps.partition_point(|&t| t <= cutoff);
         if first_valid > 0 {
@@ -40,7 +45,12 @@ impl Bucket {
             let retry_after = self
                 .timestamps
                 .first()
-                .map(|&t| t.duration_since(now) + Duration::from_nanos(1))
+                .map(|&t| {
+                    t.checked_add(self.window)
+                        .and_then(|t_limit| t_limit.checked_duration_since(now))
+                        .unwrap_or(self.window)
+                        .saturating_add(Duration::from_nanos(1))
+                })
                 .unwrap_or(Duration::from_secs(1));
             Err(retry_after)
         } else {
