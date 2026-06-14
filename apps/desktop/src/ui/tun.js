@@ -12,6 +12,7 @@ import { translations, currentLang } from '../i18n.js';
 import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
+import { postRestartRecovery } from './lifecycle.js';
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -28,6 +29,7 @@ export function initTunToggle() {
             const currentConfig = settings.last_config || 'config.yaml';
             const customArgs = settings.custom_args || [];
             await restartCore(currentConfig, customArgs);
+            await postRestartRecovery(currentConfig);
         } catch (recoverErr) {
             tunLogger.error('recovery failed', recoverErr);
         }
@@ -94,6 +96,7 @@ export function initTunToggle() {
                         const customArgs = settings.custom_args || [];
                         await new Promise(r => setTimeout(r, 1000));
                         await restartCore(currentConfig, customArgs);
+                        await postRestartRecovery(currentConfig);
                     } catch (restartErr) {
                         tunLogger.error('failed to disable TUN', restartErr);
                     }
@@ -163,6 +166,7 @@ export function initTunToggle() {
                             const currentConfig = settings.last_config || 'config.yaml';
                             const customArgs = settings.custom_args || [];
                             const coreResult = await restartCore(currentConfig, customArgs);
+                            await postRestartRecovery(currentConfig);
                             if (coreResult?.secret) {
                                 setSecret(coreResult.secret);
                                 setWsSecret(coreResult.secret);
@@ -187,6 +191,7 @@ export function initTunToggle() {
                                 const currentConfig = settings.last_config || 'config.yaml';
                                 const customArgs = settings.custom_args || [];
                                 await restartCore(currentConfig, customArgs);
+                                await postRestartRecovery(currentConfig);
                             } catch (restartErr) {
                                 tunLogger.error('Core restart without TUN also failed', restartErr);
                             }
