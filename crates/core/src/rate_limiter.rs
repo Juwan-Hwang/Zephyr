@@ -29,8 +29,10 @@ impl Bucket {
         let now = Instant::now();
         let cutoff = now - self.window;
 
-        // Prune expired timestamps
-        self.timestamps.retain(|&t| t > cutoff);
+        let first_valid = self.timestamps.partition_point(|&t| t <= cutoff);
+        if first_valid > 0 {
+            self.timestamps.drain(..first_valid);
+        }
 
         if self.timestamps.len() >= self.max_calls as usize {
             // Calculate when the oldest entry expires
