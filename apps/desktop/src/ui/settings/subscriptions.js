@@ -11,24 +11,23 @@
 import {
     invoke,
     restartCore,
-    reloadConfig,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showModal, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
-import { Bus, Events } from '../events.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
 import { formatFileSize } from '../../utils/format.js';
 import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
 import { SVG_ICONS } from '../icons.js';
-import { syncCoreConfig } from '../proxies.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
+
+const normalizeConfigName = (/** @type {string | null | undefined} */ configName) => typeof configName === 'string' ? configName.toLowerCase().replace(/\.(ya?ml)$/i, '') : '';
 
 /**
  * Extract a human-readable name from a subscription URL.
@@ -337,15 +336,20 @@ export function initSubscriptionSettings({
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
-                await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+                /** @type {{name: string, message?: string}} */
+                const savedConfig = await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+                const savedConfigName = savedConfig.name;
 
                 invalidateConfigsCache();
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = subSettings.last_config || 'config.yaml';
-                if (name === currentConfig || name === `${currentConfig}.yaml`) {
-                    await reloadConfig();
+                if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
+                    abortLatencyTests();
+                    const customArgs = subSettings.custom_args || [];
+                    await restartCore(savedConfigName, customArgs);
+                    await postRestartRecovery(savedConfigName);
                 }
 
                 /** @type {any} */
@@ -379,51 +383,58 @@ export function initSubscriptionSettings({
             if (icon) icon.classList.add('animate-spin');
             updateAllSubBtn.classList.add('opacity-50', 'pointer-events-none');
 
-            let successCount = 0;
-            let failCount = 0;
-            showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
+            try {
+                let successCount = 0;
+                let failCount = 0;
+                showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
 
-            // Build batch items: only names needed, URLs resolved internally by backend
-            const userAgent = getSubscriptionUserAgent();
-            const batchItems = subConfigs.map(/** @param {any} c */ (c) => ({ name: c.name }));
+                // Build batch items: only names needed, URLs resolved internally by backend
+                const userAgent = getSubscriptionUserAgent();
+                const batchItems = subConfigs.map(/** @param {any} c */ (c) => ({ name: c.name }));
 
-            // Single batch call — no per-item rate limiting
-            /** @type {Array<{name: string, success: boolean, error?: string}>} */
-            const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
-                items: batchItems,
-                userAgent: userAgent || null,
-            });
+                // Single batch call — no per-item rate limiting
+                /** @type {Array<{name: string, success: boolean, error?: string}>} */
+                const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
+                    items: batchItems,
+                    userAgent: userAgent || null,
+                });
 
-            for (const r of results) {
-                if (r.success) {
-                    successCount++;
-                } else {
-                    failCount++;
-                    rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
+                for (const r of results) {
+                    if (r.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                        rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
+                    }
                 }
-            }
 
-            invalidateConfigsCache();
+                invalidateConfigsCache();
 
-            /** @type {any} */
-            const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-            const currentConfig = subSettings.last_config || 'config.yaml';
-            const customArgs = subSettings.custom_args || [];
-            const wasCurrentUpdated = subConfigs.some(/** @param {any} c */ (c) => c.name === currentConfig);
+                /** @type {any} */
+                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
+                const currentConfig = subSettings.last_config || 'config.yaml';
+                const customArgs = subSettings.custom_args || [];
+                const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
 
-            if (wasCurrentUpdated && successCount > 0) {
-                abortLatencyTests();
-                await restartCore(currentConfig, customArgs);
-            }
+                if (isCurrentConfigUpdated) {
+                    abortLatencyTests();
+                    await restartCore(currentConfig, customArgs);
+                    await postRestartRecovery(currentConfig);
+                }
 
-            if (icon) icon.classList.remove('animate-spin');
-            updateAllSubBtn.classList.remove('opacity-50', 'pointer-events-none');
-            renderConfigs();
+                renderConfigs();
 
-            if (failCount === 0) {
-                showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
-            } else {
-                showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'info');
+                if (failCount === 0) {
+                    showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
+                } else {
+                    showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'info');
+                }
+            } catch (err) {
+                const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
+                showNotification(error.toString(), 'error');
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+                updateAllSubBtn.classList.remove('opacity-50', 'pointer-events-none');
             }
         };
     }
@@ -1170,6 +1181,7 @@ export function initSubscriptionSettings({
                             abortLatencyTests();
                             const cfgCustomArgs = cfgSettings.custom_args || [];
                             await restartCore(configInfo.name, cfgCustomArgs);
+                            await postRestartRecovery(configInfo.name);
                         }
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
                         renderConfigs();
@@ -1198,8 +1210,6 @@ export function initSubscriptionSettings({
                         showNotification(t.configSuccess, 'success');
                     }
                     await renderConfigs();
-                    Bus.emit(Events.CONFIG_UPDATED);
-                    await syncCoreConfig();
                 } catch (err) {
                     const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                     showNotification(error.toString(), 'error');
