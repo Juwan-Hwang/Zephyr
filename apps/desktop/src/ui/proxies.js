@@ -25,6 +25,7 @@ import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType } from 
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
+import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 
 // Re-export switchPage for external consumers that import from this module
@@ -1236,17 +1237,8 @@ async function handleCoreRestart(btn, tObj, context) {
         const configPath = settings?.last_config || 'config.yaml';
         const customArgs = settings?.custom_args || [];
         await restartCore(configPath, customArgs);
+        await postRestartRecovery(configPath);
         showNotification(tObj.coreRestarted || 'Core restarted', 'success');
-        (async () => {
-            try {
-                const { invalidateProxiesCache, invalidateConfigCache } = await import('./cache.js');
-                invalidateProxiesCache();
-                invalidateConfigCache();
-                await renderProxies();
-            } catch (error) {
-                proxyLogger.error('Failed to re-render proxies after restart', error);
-            }
-        })();
     } catch (err) {
         proxyLogger.error(`Failed to restart core from ${context}`, err);
         showNotification(String(err), 'error');
