@@ -2,8 +2,10 @@
 //!
 //! Entire file is pure logic with no platform dependencies.
 
-use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use dashmap::DashMap;
 
 /// Per-key rate limit configuration.
 struct Bucket {
@@ -27,7 +29,7 @@ impl Bucket {
     /// Returns `Ok(())` if the call is allowed, `Err(retry_after)` if rate-limited.
     fn check(&mut self) -> Result<(), Duration> {
         let now = Instant::now();
-        let cutoff = now - self.window;
+        let cutoff = now.checked_sub(self.window).unwrap_or(now);
 
         let first_valid = self.timestamps.partition_point(|&t| t <= cutoff);
         if first_valid > 0 {
@@ -39,7 +41,12 @@ impl Bucket {
             let retry_after = self
                 .timestamps
                 .first()
-                .map(|&t| t.duration_since(now) + Duration::from_nanos(1))
+                .map(|&t| {
+                    t.checked_add(self.window)
+                        .and_then(|t_limit| t_limit.checked_duration_since(now))
+                        .unwrap_or(self.window)
+                        .saturating_add(Duration::from_nanos(1))
+                })
                 .unwrap_or(Duration::from_secs(1));
             Err(retry_after)
         } else {
@@ -49,13 +56,16 @@ impl Bucket {
     }
 }
 
-/// Multi-key rate limiter.
+/// Multi-key rate limiter backed by a sharded concurrent map.
+///
+/// Each key's `Bucket` is wrapped in `Arc<Mutex<>>` so that `check()` can
+/// clone the Arc, release the DashMap shard read lock immediately, then lock
+/// only the individual bucket. Concurrent calls to different keys never
+/// contend, even when they hash to the same shard.
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct RateLimiter {
-    buckets: Arc<std::sync::Mutex<HashMap<String, Bucket>>>,
+    buckets: DashMap<String, Arc<Mutex<Bucket>>>,
 }
-
-use std::sync::Arc;
 
 impl Default for RateLimiter {
     fn default() -> Self {
@@ -69,25 +79,32 @@ impl RateLimiter {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     pub fn new() -> Self {
         Self {
-            buckets: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            buckets: DashMap::new(),
         }
     }
 
     /// Register a rate limit rule for a command key.
     pub fn register(&self, key: String, max_calls: u32, window_ms: u64) {
-        let mut buckets = self.buckets.lock().unwrap();
-        buckets.insert(
+        self.buckets.insert(
             key,
-            Bucket::new(max_calls, Duration::from_millis(window_ms)),
+            Arc::new(Mutex::new(Bucket::new(
+                max_calls,
+                Duration::from_millis(window_ms),
+            ))),
         );
     }
 
     /// Check if a call to `key` is allowed. Returns true if allowed, false if rate-limited.
     /// If no rule is registered for `key`, always allows.
     pub fn check(&self, key: &str) -> bool {
-        let mut buckets = self.buckets.lock().unwrap();
-        if let Some(bucket) = buckets.get_mut(key) {
-            bucket.check().is_ok()
+        // Clone the Arc to release the DashMap shard read lock immediately,
+        // then lock only the per-bucket mutex.
+        if let Some(bucket) = self.buckets.get(key).map(|r| Arc::clone(r.value())) {
+            bucket
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .check()
+                .is_ok()
         } else {
             true
         }

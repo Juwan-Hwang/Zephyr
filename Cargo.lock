@@ -7242,6 +7242,7 @@ dependencies = [
  "base64 0.22.1",
  "clash-prism-core",
  "clash-prism-smart",
+ "dashmap",
  "rand 0.9.4",
  "regex",
  "serde",
