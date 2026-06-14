@@ -115,6 +115,29 @@ pub fn merge_yaml(base: &mut YamlValue, patch: &YamlValue, depth: usize) -> Resu
     Ok(())
 }
 
+fn merge_yaml_owned(base: &mut YamlValue, patch: YamlValue, depth: usize) -> Result<(), String> {
+    if depth > 50 {
+        return Err("YAML nesting depth exceeded limit".to_owned());
+    }
+    match (base, patch) {
+        (YamlValue::Mapping(a), YamlValue::Mapping(b)) => {
+            for (k, v) in b {
+                if v.is_null() {
+                    a.remove(&k);
+                } else if let Some(a_v) = a.get_mut(&k) {
+                    merge_yaml_owned(a_v, v, depth + 1)?;
+                } else {
+                    a.insert(k, v);
+                }
+            }
+        }
+        (a, b) => {
+            *a = b;
+        }
+    }
+    Ok(())
+}
+
 // ── ConfigIo trait for testable file operations ────────────────────────────
 
 /// Trait for file system operations used by config management.
@@ -171,7 +194,7 @@ pub fn update_config_core<I: ConfigIo>(
     // 3. SECURITY: Remove dangerous keys before merging
     remove_dangerous_keys_internal_pub(&mut current_yaml, false);
     let security_settings = extract_security_settings(&current_yaml);
-    merge_yaml(&mut current_yaml, &patch_yaml, 0)?;
+    merge_yaml_owned(&mut current_yaml, patch_yaml, 0)?;
     remove_dangerous_keys_internal_pub(&mut current_yaml, false);
     restore_security_settings(&mut current_yaml, &security_settings);
 
