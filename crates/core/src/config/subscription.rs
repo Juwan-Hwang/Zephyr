@@ -9,6 +9,16 @@ use std::net::IpAddr;
 /// Maximum response size for subscription downloads (10 MB).
 pub const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
 
+#[inline]
+fn decode_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 // ── Pure functions for subscription content sanitization ─────────────────
 
 /// Quote `short-id` values in YAML content before parsing.
@@ -117,20 +127,17 @@ pub fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes.get(i) == Some(&b'%') && i + 2 < bytes.len() {
-            if let Some(hex) = bytes.get(i + 1..i + 3) {
-                if let Ok(s) = std::str::from_utf8(hex) {
-                    if let Ok(byte) = u8::from_str_radix(s, 16) {
-                        result.push(byte);
-                        i += 3;
-                        continue;
-                    }
-                }
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                decode_hex_digit(bytes[i + 1]),
+                decode_hex_digit(bytes[i + 2]),
+            ) {
+                result.push((hi << 4) | lo);
+                i += 3;
+                continue;
             }
         }
-        if let Some(&b) = bytes.get(i) {
-            result.push(b);
-        }
+        result.push(bytes[i]);
         i += 1;
     }
     String::from_utf8(result).unwrap_or_else(|_| input.to_owned())
@@ -140,7 +147,13 @@ pub fn percent_decode(input: &str) -> String {
 /// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
 /// and contain a `proxies:` key (required for a valid Clash config).
 pub fn try_decode_base64_content(content: &str) -> Option<String> {
-    let trimmed = content.replace(&['\r', '\n', ' ', '\t'][..], "");
+    let mut trimmed = String::with_capacity(content.len());
+    trimmed.extend(
+        content
+            .bytes()
+            .filter(|byte| !matches!(byte, b'\r' | b'\n' | b' ' | b'\t'))
+            .map(char::from),
+    );
     let decoded_bytes = base64::engine::general_purpose::STANDARD
         .decode(&trimmed)
         .ok()?;
@@ -325,25 +338,27 @@ pub fn classify_sub_error(e: String) -> u16 {
 /// Migrated from `src-tauri/src/core/subscription.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn redact_url_in_string(s: String) -> String {
-    let mut result = s;
+    let mut result = String::with_capacity(s.len());
     let mut start_idx = 0;
-    while start_idx < result.len() {
-        let remaining = &result[start_idx..];
+    while start_idx < s.len() {
+        let remaining = &s[start_idx..];
         let found_http = remaining.find("http://");
         let found_https = remaining.find("https://");
         let found_offset = found_http.into_iter().chain(found_https).min();
         let Some(offset) = found_offset else {
+            result.push_str(remaining);
             break;
         };
         let start = start_idx + offset;
+        result.push_str(&s[start_idx..start]);
         // Find end of URL (whitespace or end of string)
-        let mut url_end = result[start..]
+        let mut url_end = s[start..]
             .find(|c: char| c.is_whitespace())
             .map(|pos| start + pos)
-            .unwrap_or(result.len());
+            .unwrap_or(s.len());
         // Trim trailing punctuation/delimiters that are likely not part of the URL
         while url_end > start {
-            let last_char = result[..url_end].chars().next_back();
+            let last_char = s[..url_end].chars().next_back();
             if let Some(c) = last_char {
                 if matches!(
                     c,
@@ -357,13 +372,14 @@ pub fn redact_url_in_string(s: String) -> String {
                 break;
             }
         }
-        let url_str = &result[start..url_end];
+        let url_str = &s[start..url_end];
         if url::Url::parse(url_str).is_ok() {
             let redacted = crate::config::merge::mask_url(url_str.to_owned());
-            result.replace_range(start..url_end, &redacted);
-            start_idx = start + redacted.len();
+            result.push_str(&redacted);
+            start_idx = url_end;
         } else {
-            start_idx = start + 4; // Skip past "http" to avoid infinite loop
+            result.push_str(&s[start..start + 4]);
+            start_idx = start + 4;
         }
     }
     result

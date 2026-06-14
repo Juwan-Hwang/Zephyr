@@ -127,7 +127,12 @@ async fn read_response_body(resp: reqwest::Response) -> Result<Vec<u8>, String> 
     }
 
     use futures_util::StreamExt as _;
-    let mut bytes = Vec::new();
+    let capacity = resp
+        .content_length()
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or(0)
+        .min(MAX_RESPONSE_SIZE);
+    let mut bytes = Vec::with_capacity(capacity);
     let mut stream = resp.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {e}"))?;
@@ -330,7 +335,8 @@ async fn download_sub_inner_raw(
         }
     })?;
 
-    let mut content = String::from_utf8_lossy(&bytes).into_owned();
+    let mut content = String::from_utf8(bytes)
+        .map_err(|e| format!("Subscription response is not valid UTF-8: {e}"))?;
 
     // Reject empty responses — typically caused by expired subscriptions,
     // server-side errors, or CDN edge returning an empty 200.
