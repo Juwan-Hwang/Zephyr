@@ -14,7 +14,7 @@ import {
     reloadConfig,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -346,6 +346,9 @@ export function initSubscriptionSettings({
                 const currentConfig = subSettings.last_config || 'config.yaml';
                 if (name === currentConfig || name === `${currentConfig}.yaml`) {
                     await reloadConfig();
+                    await postRestartRecovery(currentConfig);
+                    Bus.emit(Events.CONFIG_UPDATED);
+                    syncCoreConfig();
                 }
 
                 /** @type {any} */
@@ -414,6 +417,9 @@ export function initSubscriptionSettings({
             if (wasCurrentUpdated && successCount > 0) {
                 abortLatencyTests();
                 await restartCore(currentConfig, customArgs);
+                await postRestartRecovery(currentConfig);
+                Bus.emit(Events.CONFIG_UPDATED);
+                syncCoreConfig();
             }
 
             if (icon) icon.classList.remove('animate-spin');
@@ -1170,6 +1176,9 @@ export function initSubscriptionSettings({
                             abortLatencyTests();
                             const cfgCustomArgs = cfgSettings.custom_args || [];
                             await restartCore(configInfo.name, cfgCustomArgs);
+                            await postRestartRecovery(configInfo.name);
+                            Bus.emit(Events.CONFIG_UPDATED);
+                            syncCoreConfig();
                         }
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
                         renderConfigs();
