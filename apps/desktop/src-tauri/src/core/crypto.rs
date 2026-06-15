@@ -21,6 +21,10 @@ pub(super) struct ConfigMetadata {
     pub last_updated: Option<u64>, // Unix timestamp (seconds) of last successful update
     #[serde(default)]
     pub auto_update_interval: Option<u64>, // Auto-update interval in seconds for this subscription (0 = disabled)
+    /// Per-subscription User-Agent override. When set, used instead of the global
+    /// `subscription_user_agent` for downloading/updating this subscription.
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 /// Machine key file name for persistent storage
@@ -519,6 +523,8 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
                 sub_info: v.sub_info.as_ref().and_then(|s| obfuscate_string(s).ok()),
                 last_updated: v.last_updated,
                 auto_update_interval: v.auto_update_interval,
+                // user_agent is not sensitive — store as-is (no obfuscation)
+                user_agent: v.user_agent.clone(),
             },
         );
     }
