@@ -666,14 +666,15 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
     let meta = overrides_store::load_meta(&state)?;
 
-    // Collect all enabled overrides by type.
+    // Collect all enabled JS overrides with their content.
     // Pre-execution errors (empty file, read failure) are included in the returned logs
     // so the UI can display them alongside execution results.
+    // Scope filtering: global=true OR profile_ids contains current profile.
     let mut scripts: Vec<(String, String, String)> = Vec::new(); // (id, name, content)
     let mut pre_logs: Vec<OverrideLog> = Vec::new();
     for item in meta.items.iter().filter(|i| i.enabled) {
         if item.ext != OverrideExt::Js {
-            continue; // JS overrides collected separately for Phase 2
+            continue; // Only JS overrides in Phase 1
         }
 
         // Scope filtering: skip if not global and not matching current profile
@@ -741,172 +742,55 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         };
     }
 
-    let has_prism_yaml = meta
-        .items
-        .iter()
-        .any(|i| i.enabled && i.ext == OverrideExt::PrismYaml);
-    if scripts.is_empty() && !has_prism_yaml {
+    if scripts.is_empty() {
         return Ok(pre_logs);
     }
 
-    let mut all_logs = pre_logs;
-
-    // Phase 1: Apply Prism YAML overrides
-    // Prism DSL runs first so JS overrides can read and modify Prism's output.
-    // Each Prism YAML override writes a patch file and calls ext.apply() which
-    // compiles all patches together.
-    for item in meta
-        .items
+    // Use batch pipeline: single load → all scripts in memory → single write → single reload
+    let script_refs: Vec<(&str, &str)> = scripts
         .iter()
-        .filter(|i| i.enabled && i.ext == OverrideExt::PrismYaml)
-    {
-        // Scope filtering: skip if not global and not matching current profile
-        let in_scope = item.global
-            || current_profile_id
-                .as_ref()
-                .is_some_and(|pid| item.profile_ids.contains(pid));
-        if !in_scope {
-            continue;
-        }
+        .map(|(_, name, content)| (content.as_str(), name.as_str()))
+        .collect();
 
-        let content = match overrides_store::read_content(&state, &item.id) {
-            Ok(c) if !c.is_empty() => c,
-            Ok(_) => {
-                let log = OverrideLog {
-                    script_id: item.id.clone(),
-                    script_name: item.name.clone(),
-                    executed_at: chrono::Utc::now().timestamp_millis(),
-                    duration_us: 0,
-                    success: false,
-                    config_modified: false,
-                    error: Some("Prism YAML override file is empty".to_owned()),
-                    logs: vec![LogEntry {
-                        level: "Error".to_owned(),
-                        message: "Prism YAML override content file is empty".to_owned(),
-                    }],
-                };
-                if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Failed to save log for '{}': {e}",
-                        item.name
-                    );
-                }
-                all_logs.push(log);
-                continue;
+    let results = execute_batch_pipeline(&state, &script_refs, true)?;
+
+    // Convert pipeline results to override logs
+    let exec_logs: Vec<OverrideLog> = scripts
+        .iter()
+        .zip(results.iter())
+        .map(|((id, name, _), result)| {
+            let log = OverrideLog {
+                script_id: id.clone(),
+                script_name: name.clone(),
+                executed_at: chrono::Utc::now().timestamp_millis(),
+                duration_us: result.duration_us,
+                success: result.success,
+                config_modified: result.config_modified,
+                error: result.error.clone(),
+                logs: result
+                    .logs
+                    .iter()
+                    .map(|l| LogEntry {
+                        level: l.level.clone(),
+                        message: l.message.clone(),
+                    })
+                    .collect(),
+            };
+            // Persist individual logs (ignore errors)
+            if let Err(e) = overrides_store::save_log(&state, id, &log) {
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "Failed to save log for '{id}': {e}"
+                );
             }
-            Err(e) => {
-                let log = OverrideLog {
-                    script_id: item.id.clone(),
-                    script_name: item.name.clone(),
-                    executed_at: chrono::Utc::now().timestamp_millis(),
-                    duration_us: 0,
-                    success: false,
-                    config_modified: false,
-                    error: Some(format!("Failed to read Prism YAML override: {e}")),
-                    logs: vec![LogEntry {
-                        level: "Error".to_owned(),
-                        message: format!("Failed to read Prism YAML override content: {e}"),
-                    }],
-                };
-                if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Failed to save log for '{}': {e}",
-                        item.name
-                    );
-                }
-                all_logs.push(log);
-                continue;
-            }
-        };
+            log
+        })
+        .collect();
 
-        match execute_prism_yaml_write(&state, item, &content) {
-            Ok(log) => {
-                if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Failed to save log for '{}': {e}",
-                        item.name
-                    );
-                }
-                all_logs.push(log);
-            }
-            Err(e) => {
-                let log = OverrideLog {
-                    script_id: item.id.clone(),
-                    script_name: item.name.clone(),
-                    executed_at: chrono::Utc::now().timestamp_millis(),
-                    duration_us: 0,
-                    success: false,
-                    config_modified: false,
-                    error: Some(e),
-                    logs: vec![],
-                };
-                if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Failed to save log for '{}': {e}",
-                        item.name
-                    );
-                }
-                all_logs.push(log);
-            }
-        }
-    }
-
-    // Phase 2: Execute JS overrides via batch pipeline
-    // JS overrides run after Prism so they can modify Prism's output.
-    if !scripts.is_empty() {
-        // Use batch pipeline: single load → all scripts in memory → single write → single reload
-        let script_refs: Vec<(&str, &str)> = scripts
-            .iter()
-            .map(|(_, name, content)| (content.as_str(), name.as_str()))
-            .collect();
-
-        let results = execute_batch_pipeline(&state, &script_refs, true)?;
-
-        // Convert pipeline results to override logs
-        let exec_logs: Vec<OverrideLog> = scripts
-            .iter()
-            .zip(results.iter())
-            .map(|((id, name, _), result)| {
-                let log = OverrideLog {
-                    script_id: id.clone(),
-                    script_name: name.clone(),
-                    executed_at: chrono::Utc::now().timestamp_millis(),
-                    duration_us: result.duration_us,
-                    success: result.success,
-                    config_modified: result.config_modified,
-                    error: result.error.clone(),
-                    logs: result
-                        .logs
-                        .iter()
-                        .map(|l| LogEntry {
-                            level: l.level.clone(),
-                            message: l.message.clone(),
-                        })
-                        .collect(),
-                };
-                // Persist individual logs (ignore errors)
-                if let Err(e) = overrides_store::save_log(&state, id, &log) {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Failed to save log for '{id}': {e}"
-                    );
-                }
-                log
-            })
-            .collect();
-
-        all_logs.extend(exec_logs);
-    }
-
+    // Merge pre-execution errors with execution results
+    let mut all_logs = pre_logs;
+    all_logs.extend(exec_logs);
     Ok(all_logs)
 }
 
