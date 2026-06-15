@@ -336,7 +336,7 @@ pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))?;
     value
         .get("success")
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .ok_or_else(|| "success field not found in log".to_owned())
 }
 
