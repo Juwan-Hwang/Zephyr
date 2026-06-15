@@ -306,14 +306,33 @@ export function startUnifiedSync() {
 
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const [realSysProxyState, actualMode] = await Promise.all([
+            const [realSysProxyState, actualMode, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.GET_TRAY_STATUS),
+                invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
 
             if (realSysProxyState !== appStore.get('isSysProxyEnabled')) {
                 appStore.set('isSysProxyEnabled', realSysProxyState);
                 import('./sysproxy.js').then(m => m.updateSysProxyUI());
+            }
+
+            // Guard: if we own the proxy but it was disabled externally, restore it
+            if (!realSysProxyState && hasOwnership) {
+                try {
+                    const { getConfig } = await import('../api.js');
+                    /** @type {Record<string, any>} */
+                    const currentConfig = await getConfig();
+                    const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || 7890;
+                    await invoke(COMMANDS.ENABLE_SYSPROXY, {
+                        server: `127.0.0.1:${currentPort}`,
+                        bypass: null,
+                    });
+                    appStore.set('isSysProxyEnabled', true);
+                    import('./sysproxy.js').then(m => m.updateSysProxyUI());
+                } catch (restoreErr) {
+                    trayLogger.error('Failed to restore system proxy', restoreErr);
+                }
             }
 
             let expectedMode;
