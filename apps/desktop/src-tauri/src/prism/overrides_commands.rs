@@ -478,7 +478,7 @@ fn execute_override_write(
 /// to avoid redundant core reloads.
 fn execute_prism_yaml_batch(
     state: &PrismState,
-    patches: &[(String, String, String)], // (id, name, content)
+    patches: &[(String, String, String, String)], // (id, name, patch_filename, content)
     trigger_reload: bool,
 ) -> Result<Vec<OverrideLog>, String> {
     use crate::prism::pipeline::RUN_CONFIG_LOCK;
@@ -489,21 +489,11 @@ fn execute_prism_yaml_batch(
 
     let start = std::time::Instant::now();
 
-    // Load meta once to resolve patch filenames
-    let meta = overrides_store::load_meta(state)?;
-
     // Step 1: Write all patch files to the Prism workspace
     let prism_dir = crate::prism::prism_data_dir(&state.app)?;
 
-    for (id, name, content) in patches {
-        let item = meta
-            .items
-            .iter()
-            .find(|i| i.id == *id)
-            .ok_or_else(|| format!("Override item '{name}' not found in meta"))?;
-
-        let patch_filename = item.patch_filename();
-        let patch_path = prism_dir.join(&patch_filename);
+    for (_id, name, patch_filename, content) in patches {
+        let patch_path = prism_dir.join(patch_filename);
         write_file_secure(&patch_path, content)
             .map_err(|e| format!("Failed to write Prism patch for '{name}': {e}"))?;
     }
@@ -545,7 +535,7 @@ fn execute_prism_yaml_batch(
 
     let logs: Vec<OverrideLog> = patches
         .iter()
-        .map(|(id, name, _)| OverrideLog {
+        .map(|(id, name, _, _)| OverrideLog {
             script_id: id.clone(),
             script_name: name.clone(),
             executed_at: chrono::Utc::now().timestamp_millis(),
@@ -760,7 +750,7 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
     // Pre-execution errors (empty file, read failure) are included in the returned logs
     // so the UI can display them alongside execution results.
     let mut js_scripts: Vec<(String, String, String)> = Vec::new(); // (id, name, content)
-    let mut prism_patches: Vec<(String, String, String)> = Vec::new(); // (id, name, content)
+    let mut prism_patches: Vec<(String, String, String, String)> = Vec::new(); // (id, name, patch_filename, content)
     let mut pre_logs: Vec<OverrideLog> = Vec::new();
     for item in meta.items.iter().filter(|i| i.enabled) {
         // Scope filtering: skip if not global and not matching current profile
@@ -776,7 +766,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         match overrides_store::read_content(&state, &item.id) {
             Ok(c) if !c.is_empty() => {
                 if item.ext == OverrideExt::PrismYaml {
-                    prism_patches.push((item.id.clone(), item.name.clone(), c));
+                    prism_patches.push((
+                        item.id.clone(),
+                        item.name.clone(),
+                        item.patch_filename(),
+                        c,
+                    ));
                 } else {
                     js_scripts.push((item.id.clone(), item.name.clone(), c));
                 }
