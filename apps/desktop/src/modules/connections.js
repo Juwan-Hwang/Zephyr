@@ -66,6 +66,8 @@ let _unsubI18n = null;
 let _unsubTheme = null;
 /** Generation counter to invalidate stale poll callbacks on re-init */
 let _pollGeneration = 0;
+/** @type {(() => void) | null} Visibility change handler, cleaned up on destroy. */
+let _visibilityHandler = null;
 
 // HTML template for the connections page (injected into DOM on init)
 const PAGE_HTML = `
@@ -202,7 +204,7 @@ _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
             // Skip if a new init invalidated this generation
             if (generation !== _pollGeneration) return;
             const pageEl = document.querySelector('[data-page="connections"]');
-            if (pageEl && !pageEl.classList.contains('hidden')) {
+            if (pageEl && !pageEl.classList.contains('hidden') && !document.hidden) {
                 await fetchAndRenderConnections();
             }
             // Only schedule next poll if not destroyed during await
@@ -212,7 +214,16 @@ _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
         }, interval);
     }
     schedulePoll();
+
+    // Immediately refresh connections when the window becomes visible again
+    _visibilityHandler = () => {
+        if (!document.hidden && connectionsPollTimer != null) {
+            fetchAndRenderConnections();
+        }
+    };
+    document.addEventListener('visibilitychange', _visibilityHandler);
 }
+
 
 /**
  * Clean up resources when navigating away.
@@ -221,6 +232,10 @@ export function destroyConnectionsPage() {
     if (connectionsPollTimer != null) {
         clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
+    }
+    if (_visibilityHandler) {
+        document.removeEventListener('visibilitychange', _visibilityHandler);
+        _visibilityHandler = null;
     }
     if (_unsubI18n) { _unsubI18n(); _unsubI18n = null; }
     if (_unsubTheme) { _unsubTheme(); _unsubTheme = null; }
