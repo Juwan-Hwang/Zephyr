@@ -22,7 +22,7 @@ use core_manager::{
     kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, open_log_folder,
     read_config_file, rename_config, restart_core_as_root_cmd, set_tun_enabled,
     smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
-    update_subscription_interval, write_config_file, CoreData, MihomoState,
+    update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -1001,6 +1001,7 @@ pub fn run() {
             list_configs,
             update_config_url,
             update_subscription_interval,
+            update_subscription_ua,
             download_sub,
             download_sub_batch,
             delete_config,

@@ -33,6 +33,9 @@ pub struct ConfigInfo {
     pub last_updated: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_update_interval: Option<u64>,
+    /// Per-subscription User-Agent override (exposed to frontend for the edit panel).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 pub struct CoreData {
@@ -171,7 +174,7 @@ pub mod tun_manager;
 pub use config_manager::{
     delete_config, export_logs, list_configs, open_config_folder, open_log_folder,
     read_config_file, rename_config, update_config_url, update_subscription_interval,
-    write_config_file,
+    update_subscription_ua, write_config_file,
 };
 pub use core_log::read_core_log;
 pub use core_process::{
