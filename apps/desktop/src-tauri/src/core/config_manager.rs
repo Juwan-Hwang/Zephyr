@@ -33,6 +33,7 @@ fn update_metadata_entry<F>(
                 sub_info: None,
                 last_updated: None,
                 auto_update_interval: None,
+                user_agent: None,
             }
         });
     update(entry);
@@ -81,13 +82,14 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
-                        let (url, sub_info, last_updated, auto_update_interval) =
+                        let (url, sub_info, last_updated, auto_update_interval, user_agent) =
                             if let Some(meta) = metadata.configs.get(name) {
                                 (
                                     meta.url.clone(),
                                     meta.sub_info.clone(),
                                     meta.last_updated,
                                     meta.auto_update_interval,
+                                    meta.user_agent.clone(),
                                 )
                             } else {
                                 // Fallback to reading old comments
@@ -107,7 +109,7 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                                         }
                                     }
                                 }
-                                (url, sub_info, None, None)
+                                (url, sub_info, None, None, None)
                             };
 
                         let url_display = url.as_ref().map(|u| mask_url(u));
@@ -119,6 +121,7 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
                             sub_info,
                             last_updated,
                             auto_update_interval,
+                            user_agent,
                         });
                     }
                 }
@@ -199,6 +202,32 @@ pub async fn update_subscription_interval(
     let mut metadata = load_metadata(&paths);
     update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
         entry.auto_update_interval = (interval > 0).then_some(interval);
+    });
+    save_metadata(&paths, &metadata)?;
+
+    Ok(())
+}
+
+/// Update the per-subscription User-Agent override.
+/// When `user_agent` is `None` or empty, the subscription falls back to the
+/// global `subscription_user_agent` from settings.
+#[tauri::command]
+pub async fn update_subscription_ua(
+    app: AppHandle,
+    name: String,
+    user_agent: Option<String>,
+) -> Result<(), String> {
+    let (paths, safe_name) = validate_config_for_update(&app, &name)?;
+
+    let normalized = user_agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let mut metadata = load_metadata(&paths);
+    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
+        entry.user_agent.clone_from(&normalized);
     });
     save_metadata(&paths, &metadata)?;
 

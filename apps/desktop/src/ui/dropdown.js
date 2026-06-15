@@ -122,7 +122,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             const val = item.getAttribute(optionAttr);
-            if (!val || val === select.value) { closeMenu(); return; }
+            if (val === null || val === select.value) { closeMenu(); return; }
             select.value = val;
             syncUI();
             closeMenu();
