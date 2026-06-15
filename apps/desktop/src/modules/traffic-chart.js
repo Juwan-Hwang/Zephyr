@@ -46,6 +46,41 @@ let _chartFrameId = null;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _chartResizeDebounce = null;
 
+/* ---- visibility state ---- */
+
+/** @type {boolean} Whether the document is currently visible. */
+let _isVisible = !document.hidden;
+
+/** @type {boolean} Whether data was received while hidden (needs re-render on visible). */
+let _pendingRender = false;
+
+function _onVisibilityChange() {
+  const wasHidden = !_isVisible;
+  _isVisible = !document.hidden;
+  // When becoming visible again, render any data that accumulated while hidden
+  if (wasHidden && _isVisible && _pendingRender) {
+    _pendingRender = false;
+    scheduleRender();
+  }
+}
+
+/**
+ * Start listening for document visibility changes.
+ * Called automatically by initChart().
+ * @private
+ */
+function _initVisibilityListener() {
+  document.addEventListener('visibilitychange', _onVisibilityChange);
+}
+
+/**
+ * Remove the visibility listener. Called by cleanupChart().
+ * @private
+ */
+function _destroyVisibilityListener() {
+  document.removeEventListener('visibilitychange', _onVisibilityChange);
+}
+
 /* ---- colour state ---- */
 
 /**
@@ -158,6 +193,9 @@ export function initChart() {
   // Immediately adopt the current theme colours
   updateChartTheme();
 
+  // Start listening for visibility changes (pause rendering when hidden)
+  _initVisibilityListener();
+
   // Clean up any pre-existing listeners
   if (_chartResizeHandler) {
     window.removeEventListener('resize', _chartResizeHandler);
@@ -200,6 +238,8 @@ export function initChart() {
  * Release all chart resources — call when unmounting or switching pages.
  */
 export function cleanupChart() {
+  _destroyVisibilityListener();
+
   if (_chartFrameId !== null) {
     cancelAnimationFrame(_chartFrameId);
     _chartFrameId = null;
@@ -246,7 +286,12 @@ export function updateTrafficData(data) {
     trafficHistory.shift();
   }
 
-  scheduleRender();
+  // Skip rendering when the document is hidden; mark for deferred render
+  if (!_isVisible) {
+    _pendingRender = true;
+  } else {
+    scheduleRender();
+  }
 
   // Update the numeric speed display in the DOM
   const upValEl = document.getElementById('speed-up-val');

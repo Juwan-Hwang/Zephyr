@@ -202,7 +202,7 @@ _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
             // Skip if a new init invalidated this generation
             if (generation !== _pollGeneration) return;
             const pageEl = document.querySelector('[data-page="connections"]');
-            if (pageEl && !pageEl.classList.contains('hidden')) {
+            if (pageEl && !pageEl.classList.contains('hidden') && !document.hidden) {
                 await fetchAndRenderConnections();
             }
             // Only schedule next poll if not destroyed during await
