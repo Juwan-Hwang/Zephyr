@@ -447,11 +447,13 @@ async fn download_sub_inner_raw(
         .map_err(|e| e.to_string())?;
 
     let mut metadata = load_metadata(&paths);
-    // Preserve existing auto_update_interval to avoid silently disabling scheduled updates
-    let preserved_interval = metadata
+    // Preserve existing auto_update_interval and per-subscription user_agent
+    // to avoid silently resetting user-configured settings
+    let (preserved_interval, preserved_ua) = metadata
         .configs
         .get(&clean_name)
-        .and_then(|m| m.auto_update_interval);
+        .map(|m| (m.auto_update_interval, m.user_agent.clone()))
+        .unwrap_or((None, None));
     metadata.configs.insert(
         clean_name.clone(),
         super::crypto::ConfigMetadata {
@@ -468,6 +470,7 @@ async fn download_sub_inner_raw(
                     .unwrap_or(0),
             ),
             auto_update_interval: preserved_interval,
+            user_agent: preserved_ua,
         },
     );
     let final_content = content;
@@ -592,12 +595,17 @@ pub struct BatchUpdateResult {
 }
 
 /// Tauri command: batch update multiple subscriptions without per-item rate limiting.
+/// Per-subscription UA (stored in metadata) takes priority over the provided global `user_agent`.
 #[tauri::command]
 pub async fn download_sub_batch(
     app: AppHandle,
     items: Vec<BatchUpdateItem>,
     user_agent: Option<String>,
 ) -> Result<Vec<BatchUpdateResult>, String> {
+    // Load metadata once to resolve per-subscription UA overrides
+    let paths = ensure_app_storage(&app)?;
+    let metadata = load_metadata(&paths);
+
     let mut results = Vec::with_capacity(items.len());
     for item in items {
         let name = item.name.clone();
@@ -613,8 +621,13 @@ pub async fn download_sub_batch(
                 continue;
             }
         };
-        let result =
-            download_sub_inner(&app, resolved_url, name.clone(), user_agent.clone(), true).await;
+        // Per-subscription UA takes priority over global user_agent
+        let ua_for_this = metadata
+            .configs
+            .get(&name)
+            .and_then(|m| m.user_agent.clone())
+            .or_else(|| user_agent.clone());
+        let result = download_sub_inner(&app, resolved_url, name.clone(), ua_for_this, true).await;
         match result {
             Ok(_) => results.push(BatchUpdateResult {
                 name,

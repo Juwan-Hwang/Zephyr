@@ -83,9 +83,32 @@ let moduleRenderConfigs = null;
 /** @type {any} */
 let activeEditDropdown = null;
 
+/** UA client options — mirrors the global fake-client dropdown.
+ *  `labelKey` entries are resolved via i18n at render time. */
+const UA_OPTIONS = [
+    { value: '', label: 'Use Global', labelKey: 'uaUseGlobal' },
+    { value: 'clash-verge', label: 'Clash Verge Rev' },
+    { value: 'mihomo-party', label: 'mihomo-party' },
+    { value: 'Flclash', label: 'Flclash' },
+    { value: 'Shadowrocket', label: 'Shadowrocket' },
+];
+
+/**
+ * Resolve the display label for a UA option, using i18n when available.
+ * @param {{ value: string, label: string, labelKey?: string }} opt
+ * @param {Record<string, string>} t
+ */
+function uaLabel(opt, t) {
+    return (opt.labelKey && t[opt.labelKey]) || opt.label;
+}
+
+/** Track active edit modal UA dropdown for proper cleanup. */
+/** @type {any} */
+let activeEditUADropdown = null;
+
 /**
  * Show the edit panel for a subscription.
- * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null}} configInfo
+ * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null, user_agent?: string | null}} configInfo
  */
 async function showEditPanel(configInfo) {
     const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
@@ -94,6 +117,9 @@ async function showEditPanel(configInfo) {
 
     // Get current auto-update interval for this subscription (stored in metadata)
     const currentInterval = configInfo.auto_update_interval || 0;
+
+    // Per-subscription UA (stored in metadata). Match by prefix to handle versioned values.
+    const currentUA = configInfo.user_agent || '';
 
     // Auto-update options
     const autoUpdateOptions = [
@@ -109,11 +135,27 @@ async function showEditPanel(configInfo) {
         `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
     ).join('');
 
+    // Determine which UA option is currently selected (prefix match for versioned values)
+    const matchedUAOpt = UA_OPTIONS.find(o => {
+        if (o.value === '') return currentUA === '';
+        return currentUA.startsWith(o.value);
+    });
+    const currentUALabel = matchedUAOpt ? uaLabel(matchedUAOpt, t) : (t.uaUseGlobal || 'Use Global');
+    const currentUAValue = matchedUAOpt?.value ?? '';
+
+    // Build UA dropdown menu items
+    const uaMenuItems = UA_OPTIONS.map(opt => {
+        const lbl = uaLabel(opt, t);
+        return `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(lbl)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(lbl)}</button>`;
+    }).join('');
+
     // Remove any existing modal to prevent duplicate IDs
     const existingModal = document.getElementById('edit-subscription-modal');
     if (existingModal) {
         activeEditDropdown?.dispose();
         activeEditDropdown = null;
+        activeEditUADropdown?.dispose();
+        activeEditUADropdown = null;
         existingModal.remove();
     }
 
@@ -145,6 +187,23 @@ async function showEditPanel(configInfo) {
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
                     <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-[var(--text-tertiary)]">
+                </div>
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
+                    <div id="edit-ua-wrap" class="relative">
+                        <button id="edit-ua-trigger" type="button" class="select-common w-full flex items-center justify-between text-xs py-1.5">
+                            <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
+                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                        </button>
+                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                            <div class="menu-scroll">
+                                ${uaMenuItems}
+                            </div>
+                        </div>
+                        <select id="edit-ua-select" class="hidden">
+                            ${UA_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value === currentUAValue ? 'selected' : ''}>${escapeHtml(uaLabel(opt, t))}</option>`).join('')}
+                        </select>
+                    </div>
                 </div>
             </div>
             <!-- Auto-update dropdown in bottom right -->
@@ -195,7 +254,7 @@ async function showEditPanel(configInfo) {
     const editNameInput = /** @type {HTMLInputElement} */ (modal.querySelector('#edit-name'));
     if (editNameInput) editNameInput.value = currentStem;
 
-    // Initialize custom dropdown
+    // Initialize custom dropdowns
     const autoUpdateDropdown = initCustomDropdown({
         wrapId: 'edit-auto-update-wrap',
         triggerId: 'edit-auto-update-trigger',
@@ -205,11 +264,22 @@ async function showEditPanel(configInfo) {
     });
     activeEditDropdown = autoUpdateDropdown;
 
+    const uaDropdown = initCustomDropdown({
+        wrapId: 'edit-ua-wrap',
+        triggerId: 'edit-ua-trigger',
+        menuId: 'edit-ua-menu',
+        labelId: 'edit-ua-label',
+        selectId: 'edit-ua-select',
+    });
+    activeEditUADropdown = uaDropdown;
+
     const closeModal = () => {
         if (isClosing || isSaving) return;
         isClosing = true;
         autoUpdateDropdown?.dispose();
+        uaDropdown?.dispose();
         activeEditDropdown = null;
+        activeEditUADropdown = null;
         if (panel) {
             panel.style.opacity = '0';
             panel.style.transform = 'scale(0.95)';
@@ -244,7 +314,7 @@ async function showEditPanel(configInfo) {
         if (cancelBtn) cancelBtn.classList.add('opacity-50', 'pointer-events-none');
 
         try {
-            // Update URL and interval on the current name first.
+            // Update URL, interval, and UA on the current name first.
             // This ensures that if an update fails, the state remains consistent
             // under the original name (more recoverable than a failed rename).
             if (newUrl) {
@@ -252,6 +322,15 @@ async function showEditPanel(configInfo) {
             }
             if (newInterval !== currentInterval) {
                 await invoke(COMMANDS.UPDATE_SUBSCRIPTION_INTERVAL, { name: configInfo.name, interval: newInterval });
+            }
+            // Save per-subscription UA (resolve prefix to full versioned UA)
+            const editUAEl = document.getElementById('edit-ua-select');
+            const newUAPrefix = (editUAEl instanceof HTMLSelectElement ? editUAEl.value : '');
+            const resolvedUA = await resolvePerSubUA(newUAPrefix);
+            // Only save if UA actually changed (avoid unnecessary IPC)
+            const prevResolvedUA = currentUA || null;
+            if (resolvedUA !== prevResolvedUA) {
+                await invoke(COMMANDS.UPDATE_SUBSCRIPTION_UA, { name: configInfo.name, userAgent: resolvedUA });
             }
 
             // Rename last — if this fails, updates are still applied under the old name
@@ -297,6 +376,29 @@ function getFakeClientUA() {
         return custom ? custom : null;
     }
     return type || null;
+}
+
+/**
+ * Resolve a UA prefix (from the per-subscription dropdown) to a full versioned UA string.
+ * Uses latest client versions from the backend to build the full UA.
+ * @param {string} prefix - e.g. 'clash-verge', 'mihomo-party', 'Flclash', 'Shadowrocket', or ''
+ * @returns {Promise<string | null>} Full versioned UA or null for 'Use Global'
+ */
+async function resolvePerSubUA(prefix) {
+    if (!prefix) return null;
+    // Shadowrocket uses plain UA string (no version suffix)
+    if (prefix === 'Shadowrocket') return 'Shadowrocket';
+    try {
+        /** @type {{verge: string, mihomo_party: string, flclash: string}} */
+        const versions = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSIONS);
+        if (prefix === 'clash-verge') return versions.verge;
+        if (prefix === 'mihomo-party') return versions.mihomo_party;
+        if (prefix === 'Flclash') return versions.flclash;
+    } catch {
+        // Fallback: return prefix as-is if version fetch fails
+        return prefix;
+    }
+    return prefix;
 }
 
 /** @returns {string | null} */
@@ -615,7 +717,7 @@ export function initSubscriptionSettings({
      * Show a context menu anchored at (x, y) for the given subscription card.
      *
      * @param {MouseEvent} e
-     * @param {{ name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null }} configInfo
+     * @param {{ name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null, user_agent?: string | null }} configInfo
      */
     const showSubscriptionContextMenu = async (e, configInfo) => {
         e.preventDefault();
@@ -636,7 +738,7 @@ export function initSubscriptionSettings({
         editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             removeContextMenu();
-            showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval });
+            showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval, user_agent: configInfo.user_agent });
         });
         menuScroll.appendChild(editItem);
 
@@ -1169,7 +1271,8 @@ export function initSubscriptionSettings({
                     e.stopPropagation();
                     updateBtn.classList.add('animate-spin');
                     try {
-                        const userAgent = getSubscriptionUserAgent();
+                        // Prefer per-subscription UA, fall back to global fake-client UA
+                        const userAgent = configInfo.user_agent || getSubscriptionUserAgent();
                         /** @type {any} */
                         const invokeArgs = { name: configInfo.name, overwrite: true };
                         if (userAgent) {
