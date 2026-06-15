@@ -323,6 +323,26 @@ pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))
 }
 
+/// Read only the `success` field from the last execution log.
+/// Cheaper than `read_log` as it does not allocate a vector of `LogEntry`.
+/// Serde skips unknown fields during deserialization without allocating,
+/// so the potentially large `logs` array is never materialized in memory.
+pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
+    let dir = overrides_dir(state)?;
+    let path = dir.join(format!("{id}.log.json"));
+    if !path.exists() {
+        return Err("No log found".to_owned());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read log: {e}"))?;
+    #[derive(serde::Deserialize)]
+    struct SuccessOnly {
+        success: bool,
+    }
+    let partial: SuccessOnly =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))?;
+    Ok(partial.success)
+}
+
 // ===========================================================================
 // Internal helpers (no locking — caller must hold META_LOCK)
 // ===========================================================================
