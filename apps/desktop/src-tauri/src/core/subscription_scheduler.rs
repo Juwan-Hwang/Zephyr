@@ -157,8 +157,9 @@ async fn check_and_update_subscriptions(
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
-    // Read subscription_user_agent from in-memory SettingsState (set by frontend)
-    let user_agent: Option<String> = {
+    // Read global subscription_user_agent from in-memory SettingsState (set by frontend).
+    // Per-subscription UA overrides are read from metadata below.
+    let global_user_agent: Option<String> = {
         let ss = app.state::<crate::SettingsState>();
         let lock = ss.0.lock();
         match lock {
@@ -179,8 +180,8 @@ async fn check_and_update_subscriptions(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // Collect subscriptions that need updating
-    let to_update: Vec<(String, String)> = metadata
+    // Collect subscriptions that need updating, with per-subscription UA override
+    let to_update: Vec<(String, String, Option<String>)> = metadata
         .configs
         .iter()
         .filter_map(|(name, meta)| {
@@ -198,7 +199,16 @@ async fn check_and_update_subscriptions(
             let elapsed = now.saturating_sub(last_updated);
 
             // Only include if interval has passed
-            (elapsed >= interval_secs).then(|| (name.clone(), url.clone()))
+            (elapsed >= interval_secs).then(|| {
+                // Per-subscription UA takes precedence over global UA
+                let ua = meta
+                    .user_agent
+                    .as_ref()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .or_else(|| global_user_agent.clone());
+                (name.clone(), url.clone(), ua)
+            })
         })
         .collect();
 
@@ -209,7 +219,7 @@ async fn check_and_update_subscriptions(
     // Serialize downloads to avoid metadata.json write races
     // (each download_sub_inner does load_metadata + save_metadata)
     let mut updated = 0;
-    for (name, url) in to_update {
+    for (name, url, per_sub_ua) in to_update {
         // Check shutdown before each download
         if state.should_shutdown() {
             break;
@@ -218,7 +228,7 @@ async fn check_and_update_subscriptions(
         // Use timeout to prevent hanging on slow servers
         let result = timeout(
             Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
-            download_sub_inner(app, url, name.clone(), user_agent.clone(), true),
+            download_sub_inner(app, url, name.clone(), per_sub_ua, true),
         )
         .await;
 

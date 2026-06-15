@@ -14,6 +14,10 @@ pub struct ConfigMetadata {
     pub last_updated: Option<u64>,
     #[serde(default)]
     pub auto_update_interval: Option<u64>,
+    /// Per-subscription User-Agent override. When set, used instead of the global
+    /// `subscription_user_agent` for downloading/updating this subscription.
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 /// Collection of metadata for all config profiles, stored encrypted on disk.
