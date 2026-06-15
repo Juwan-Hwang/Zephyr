@@ -20,6 +20,7 @@ dependencies = [
  "glib 0.22.7",
  "hex",
  "hmac",
+ "libc",
  "minisign",
  "mockall",
  "pbkdf2",
