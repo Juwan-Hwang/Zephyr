@@ -304,16 +304,47 @@ export function startUnifiedSync() {
         win._sysProxyPollInterval = null;
     }
 
+    // Crash recovery: if ownership marker exists from a previous crash, restore proxy immediately
+    (async () => {
+        try {
+            const [sysProxyOn, hasOwnership] = await Promise.all([
+                invoke(COMMANDS.GET_SYS_PROXY),
+                invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
+            ]);
+            if (!sysProxyOn && hasOwnership) {
+                await invoke(COMMANDS.RESTORE_SYS_PROXY);
+                appStore.set('isSysProxyEnabled', true);
+                import('./sysproxy.js').then(m => m.updateSysProxyUI());
+            }
+        } catch (_) {
+            // Non-critical: periodic sync will retry
+        }
+    })();
+
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const [realSysProxyState, actualMode] = await Promise.all([
+            const [realSysProxyState, actualMode, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.GET_TRAY_STATUS),
+                invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
 
             if (realSysProxyState !== appStore.get('isSysProxyEnabled')) {
                 appStore.set('isSysProxyEnabled', realSysProxyState);
                 import('./sysproxy.js').then(m => m.updateSysProxyUI());
+            }
+
+            // Guard: if we own the proxy but it was disabled externally, restore it
+            if (!realSysProxyState && hasOwnership) {
+                (async () => {
+                    try {
+                        await invoke(COMMANDS.RESTORE_SYS_PROXY);
+                        appStore.set('isSysProxyEnabled', true);
+                        import('./sysproxy.js').then(m => m.updateSysProxyUI());
+                    } catch (restoreErr) {
+                        trayLogger.error('Failed to restore system proxy', restoreErr);
+                    }
+                })();
             }
 
             let expectedMode;

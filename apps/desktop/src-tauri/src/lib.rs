@@ -30,7 +30,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use sys_proxy::{clear_sys_proxy, disable_sysproxy, enable_sysproxy, get_sys_proxy};
+use sys_proxy::{
+    clear_sys_proxy, disable_sysproxy, enable_sysproxy, get_sys_proxy, has_sysproxy_ownership,
+    restore_sys_proxy,
+};
 use tauri::Manager as _;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
@@ -937,8 +940,8 @@ pub fn run() {
                         // User explicitly wants to quit
                         explicit_exit.store(true, std::sync::atomic::Ordering::SeqCst);
                         kill_mihomo();
-                        let _ = clear_sys_proxy();
                         let app = window.app_handle();
+                        let _ = clear_sys_proxy(app);
                         app.cleanup_before_exit();
                         app.exit(0);
                     }
@@ -1011,6 +1014,8 @@ pub fn run() {
             enable_sysproxy,
             disable_sysproxy,
             get_sys_proxy,
+            has_sysproxy_ownership,
+            restore_sys_proxy,
             get_settings,
             save_settings,
             patch_settings,

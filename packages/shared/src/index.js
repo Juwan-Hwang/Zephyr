@@ -50,6 +50,8 @@ export const SYS_PROXY = Object.freeze({
     ENABLE_SYSPROXY: "enable_sysproxy",
     DISABLE_SYSPROXY: "disable_sysproxy",
     GET_SYS_PROXY: "get_sys_proxy",
+    HAS_SYSPROXY_OWNERSHIP: "has_sysproxy_ownership",
+    RESTORE_SYS_PROXY: "restore_sys_proxy",
 });
 
 // ---------------------------------------------------------------------------

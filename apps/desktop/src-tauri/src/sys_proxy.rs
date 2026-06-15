@@ -1,7 +1,9 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 use tauri::command;
+use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -15,7 +17,77 @@ use winreg::enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
-/// Validates that the proxy server address is a valid local address.
+// ── System Proxy Ownership Guard ─────────────────────────────────────────
+//
+// When Zephyr enables the system proxy, it writes an ownership marker file
+// (`.sys-proxy-ownership`) to the app data directory containing the server
+// address. On every periodic sync (10 s), if the marker exists but the system
+// proxy has been disabled by an external program, Zephyr automatically
+// re-enables it. On normal exit the marker is deleted together with the proxy.
+// If the app crashes, the marker persists and the proxy is restored on next
+// launch.
+
+/// Name of the ownership marker file (stored in app data dir).
+const OWNERSHIP_FILE: &str = ".sys-proxy-ownership";
+
+/// Return the path to the ownership marker file.
+fn ownership_path(app: &AppHandle) -> Option<PathBuf> {
+    crate::core_manager::resolve_app_paths(app)
+        .ok()
+        .map(|p| p.app_data_dir.join(OWNERSHIP_FILE))
+}
+
+/// Write the ownership marker with the given server address.
+fn write_ownership(app: &AppHandle, server: &str) {
+    if let Some(path) = ownership_path(app) {
+        if let Err(e) = std::fs::write(&path, server) {
+            emit_warn!(
+                System,
+                SYS_PROXY_FAILED,
+                "Failed to write proxy ownership marker: {e}"
+            );
+        }
+    }
+}
+
+/// Delete the ownership marker file.
+fn remove_ownership(app: &AppHandle) {
+    if let Some(path) = ownership_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Read the server address from the ownership marker, if it exists.
+#[must_use]
+pub fn read_ownership(app: &AppHandle) -> Option<String> {
+    let path = ownership_path(app)?;
+    std::fs::read_to_string(path)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// Check whether Zephyr currently owns the system proxy (marker exists).
+#[must_use]
+pub fn has_ownership(app: &AppHandle) -> bool {
+    read_ownership(app).is_some()
+}
+
+/// Restore the system proxy from the ownership marker.
+/// Called during startup (crash recovery) and during periodic guard checks.
+#[command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn restore_sys_proxy(app: AppHandle) -> Result<(), String> {
+    let server = read_ownership(&app).ok_or("No proxy ownership marker found")?;
+    enable_sysproxy(app, server, None)?;
+    Ok(())
+}
+
+/// Clean up the ownership marker on normal exit.
+pub fn cleanup_ownership(app: &AppHandle) {
+    remove_ownership(app);
+}
+
+// ── Proxy validation ────────────────────────────────────────────────────
 /// This prevents proxy hijacking by ensuring only loopback addresses are allowed.
 fn validate_proxy_server(server: &str) -> Result<(), String> {
     if server.is_empty() {
@@ -423,7 +495,11 @@ fn enable_xfce_proxy(host: &str, port: &str) -> bool {
 
 #[command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String, String> {
+pub fn enable_sysproxy(
+    app: AppHandle,
+    server: String,
+    bypass: Option<String>,
+) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         validate_proxy_server(&server)?;
@@ -472,6 +548,7 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
             }
         }
 
+        write_ownership(&app, &server);
         Ok("System proxy enabled".to_owned())
     }
 
@@ -496,6 +573,7 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
             }
             Ok(())
         })?;
+        write_ownership(&app, &server);
         Ok(format!("System proxy enabled on macOS (HTTP+HTTPS+SOCKS)"))
     }
 
@@ -510,6 +588,7 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
         let success = gnome_ok || kde_ok || xfce_ok;
 
         if success {
+            write_ownership(&app, &server);
             Ok("System proxy enabled on Linux".to_owned())
         } else {
             Err(
@@ -521,7 +600,8 @@ pub fn enable_sysproxy(server: String, bypass: Option<String>) -> Result<String,
 }
 
 #[command]
-pub fn disable_sysproxy() -> Result<String, String> {
+#[allow(clippy::needless_pass_by_value)]
+pub fn disable_sysproxy(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -548,6 +628,7 @@ pub fn disable_sysproxy() -> Result<String, String> {
             }
         }
 
+        remove_ownership(&app);
         Ok("System proxy disabled".to_owned())
     }
 
@@ -559,6 +640,7 @@ pub fn disable_sysproxy() -> Result<String, String> {
             run_networksetup(&["-setsocksfirewallproxystate", service, "off"])?;
             Ok(())
         })?;
+        remove_ownership(&app);
         Ok("System proxy disabled on macOS".to_owned())
     }
 
@@ -646,6 +728,7 @@ pub fn disable_sysproxy() -> Result<String, String> {
         }
 
         if success {
+            remove_ownership(&app);
             Ok("System proxy disabled on Linux".to_owned())
         } else {
             Err(
@@ -657,11 +740,20 @@ pub fn disable_sysproxy() -> Result<String, String> {
 }
 
 // 供内部调用（如退出时清理）
-pub fn clear_sys_proxy() -> Result<(), String> {
-    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-    {
-        disable_sysproxy().map(|_| ())
-    }
+pub fn clear_sys_proxy(app: &AppHandle) -> Result<(), String> {
+    let result = disable_sysproxy(app.clone());
+    // Always clean up ownership marker even if disable failed,
+    // to avoid a stale marker triggering unwanted restore on next launch.
+    cleanup_ownership(app);
+    result.map(|_| ())
+}
+
+/// Check whether Zephyr currently owns the system proxy (for frontend guard).
+#[command]
+#[must_use]
+#[allow(clippy::needless_pass_by_value)]
+pub fn has_sysproxy_ownership(app: AppHandle) -> bool {
+    has_ownership(&app)
 }
 
 #[must_use]
