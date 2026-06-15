@@ -66,6 +66,8 @@ let _unsubI18n = null;
 let _unsubTheme = null;
 /** Generation counter to invalidate stale poll callbacks on re-init */
 let _pollGeneration = 0;
+/** @type {(() => void) | null} Visibility change handler, cleaned up on destroy. */
+let _visibilityHandler = null;
 
 // HTML template for the connections page (injected into DOM on init)
 const PAGE_HTML = `
@@ -202,8 +204,13 @@ _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
             // Skip if a new init invalidated this generation
             if (generation !== _pollGeneration) return;
             const pageEl = document.querySelector('[data-page="connections"]');
-            if (pageEl && !pageEl.classList.contains('hidden')) {
+            if (pageEl && !pageEl.classList.contains('hidden') && !document.hidden) {
                 await fetchAndRenderConnections();
+            } else {
+                // Window or page is hidden — pause the poll loop entirely.
+                // The visibilitychange handler will restart it when appropriate.
+                connectionsPollTimer = null;
+                return;
             }
             // Only schedule next poll if not destroyed during await
             if (connectionsPollTimer != null && generation === _pollGeneration) {
@@ -212,7 +219,22 @@ _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
         }, interval);
     }
     schedulePoll();
+
+    // Restart polling when the window becomes visible again
+    if (_visibilityHandler) {
+        document.removeEventListener('visibilitychange', _visibilityHandler);
+    }
+    _visibilityHandler = () => {
+        const pageEl = document.querySelector('[data-page="connections"]');
+        const isPageActive = pageEl && !pageEl.classList.contains('hidden');
+        if (!document.hidden && isPageActive && connectionsPollTimer == null && generation === _pollGeneration) {
+            fetchAndRenderConnections();
+            schedulePoll();
+        }
+    };
+    document.addEventListener('visibilitychange', _visibilityHandler);
 }
+
 
 /**
  * Clean up resources when navigating away.
@@ -221,6 +243,10 @@ export function destroyConnectionsPage() {
     if (connectionsPollTimer != null) {
         clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
+    }
+    if (_visibilityHandler) {
+        document.removeEventListener('visibilitychange', _visibilityHandler);
+        _visibilityHandler = null;
     }
     if (_unsubI18n) { _unsubI18n(); _unsubI18n = null; }
     if (_unsubTheme) { _unsubTheme(); _unsubTheme = null; }
