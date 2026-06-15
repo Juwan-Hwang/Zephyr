@@ -323,6 +323,27 @@ pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))
 }
 
+/// Read only the `success` field from the last execution log.
+/// Cheaper than `read_log` as it does not allocate a vector of `LogEntry`.
+/// Uses `BufReader` to stream the file instead of loading it entirely into memory.
+pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
+    let dir = overrides_dir(state)?;
+    let path = dir.join(format!("{id}.log.json"));
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err("No log found".to_owned()),
+        Err(e) => return Err(format!("Failed to open log: {e}")),
+    };
+    let reader = std::io::BufReader::new(file);
+    #[derive(serde::Deserialize)]
+    struct SuccessOnly {
+        success: bool,
+    }
+    let partial: SuccessOnly =
+        serde_json::from_reader(reader).map_err(|e| format!("Failed to parse log: {e}"))?;
+    Ok(partial.success)
+}
+
 // ===========================================================================
 // Internal helpers (no locking — caller must hold META_LOCK)
 // ===========================================================================
