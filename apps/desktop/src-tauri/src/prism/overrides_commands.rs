@@ -470,6 +470,103 @@ fn execute_override_write(
     })
 }
 
+/// Execute a batch of Prism YAML overrides efficiently.
+///
+/// Writes all patch files first, then performs a single `ext.apply()` compilation,
+/// a single write to `run_config.yaml`, and a single hot-reload.
+/// If `trigger_reload` is false (JS overrides will follow), hot-reload is deferred
+/// to avoid redundant core reloads.
+fn execute_prism_yaml_batch(
+    state: &PrismState,
+    patches: &[(String, String, String, String)], // (id, name, patch_filename, content)
+    trigger_reload: bool,
+) -> Result<Vec<OverrideLog>, String> {
+    use crate::prism::pipeline::RUN_CONFIG_LOCK;
+
+    let _guard = RUN_CONFIG_LOCK
+        .lock()
+        .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+
+    let start = std::time::Instant::now();
+
+    // Step 1: Write all patch files to the Prism workspace
+    let prism_dir = crate::prism::prism_data_dir(&state.app)?;
+
+    for (_id, name, patch_filename, content) in patches {
+        let patch_path = prism_dir.join(patch_filename);
+        write_file_secure(&patch_path, content)
+            .map_err(|e| format!("Failed to write Prism patch for '{name}': {e}"))?;
+    }
+
+    // Step 2: Single compilation via ext.apply()
+    let lock = state.lock_inner()?;
+    let ext = lock
+        .extension
+        .as_ref()
+        .ok_or_else(|| "Prism extension not initialized".to_owned())?;
+    let result = match ext.apply(ApplyOptions::default()) {
+        Ok(res) => res,
+        Err(err) => {
+            drop(lock);
+            let duration_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+            let logs: Vec<OverrideLog> = patches
+                .iter()
+                .map(|(id, name, _, _)| OverrideLog {
+                    script_id: id.clone(),
+                    script_name: name.clone(),
+                    executed_at: chrono::Utc::now().timestamp_millis(),
+                    duration_us,
+                    success: false,
+                    config_modified: false,
+                    error: Some(err.to_string()),
+                    logs: vec![],
+                })
+                .collect();
+            return Ok(logs);
+        }
+    };
+    drop(lock);
+
+    let duration_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+
+    // Step 3: Write the output config back to run_config.yaml
+    let paths = crate::core_manager::ensure_app_storage(&state.app)?;
+    let run_config_path = paths.core_dir.join("run_config.yaml");
+    write_file_secure(&run_config_path, &result.output_config)
+        .map_err(|e| format!("Failed to write run_config.yaml: {e}"))?;
+
+    // Step 4: Trigger hot-reload only if no JS overrides will follow
+    if trigger_reload {
+        crate::prism::pipeline::trigger_hot_reload(state)?;
+    }
+
+    // Build logs for each patch (all share the same compilation result)
+    let trace_logs: Vec<LogEntry> = result
+        .trace
+        .iter()
+        .map(|t| LogEntry {
+            level: "info".to_owned(),
+            message: format!("{t:?}"),
+        })
+        .collect();
+
+    let logs: Vec<OverrideLog> = patches
+        .iter()
+        .map(|(id, name, _, _)| OverrideLog {
+            script_id: id.clone(),
+            script_name: name.clone(),
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_us,
+            success: true,
+            config_modified: true,
+            error: None,
+            logs: trace_logs.clone(),
+        })
+        .collect();
+
+    Ok(logs)
+}
+
 /// Execute a Prism YAML override by writing it to the Prism workspace and applying.
 ///
 /// This writes the Prism YAML content as a patch file in the Prism workspace,
@@ -666,17 +763,13 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
     let meta = overrides_store::load_meta(&state)?;
 
-    // Collect all enabled JS overrides with their content.
+    // Collect enabled overrides by type with scope filtering.
     // Pre-execution errors (empty file, read failure) are included in the returned logs
     // so the UI can display them alongside execution results.
-    // Scope filtering: global=true OR profile_ids contains current profile.
-    let mut scripts: Vec<(String, String, String)> = Vec::new(); // (id, name, content)
+    let mut js_scripts: Vec<(String, String, String)> = Vec::new(); // (id, name, content)
+    let mut prism_patches: Vec<(String, String, String, String)> = Vec::new(); // (id, name, patch_filename, content)
     let mut pre_logs: Vec<OverrideLog> = Vec::new();
     for item in meta.items.iter().filter(|i| i.enabled) {
-        if item.ext != OverrideExt::Js {
-            continue; // Only JS overrides in Phase 1
-        }
-
         // Scope filtering: skip if not global and not matching current profile
         let in_scope = item.global
             || current_profile_id
@@ -689,7 +782,16 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         let now = chrono::Utc::now().timestamp_millis();
         match overrides_store::read_content(&state, &item.id) {
             Ok(c) if !c.is_empty() => {
-                scripts.push((item.id.clone(), item.name.clone(), c));
+                if item.ext == OverrideExt::PrismYaml {
+                    prism_patches.push((
+                        item.id.clone(),
+                        item.name.clone(),
+                        item.patch_filename(),
+                        c,
+                    ));
+                } else {
+                    js_scripts.push((item.id.clone(), item.name.clone(), c));
+                }
             }
             Ok(_) => {
                 let log = OverrideLog {
@@ -742,55 +844,87 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         };
     }
 
-    if scripts.is_empty() {
+    if js_scripts.is_empty() && prism_patches.is_empty() {
         return Ok(pre_logs);
     }
 
-    // Use batch pipeline: single load → all scripts in memory → single write → single reload
-    let script_refs: Vec<(&str, &str)> = scripts
-        .iter()
-        .map(|(_, name, content)| (content.as_str(), name.as_str()))
-        .collect();
+    let mut all_logs = pre_logs;
+    let mut prism_success = false;
 
-    let results = execute_batch_pipeline(&state, &script_refs, true)?;
-
-    // Convert pipeline results to override logs
-    let exec_logs: Vec<OverrideLog> = scripts
-        .iter()
-        .zip(results.iter())
-        .map(|((id, name, _), result)| {
-            let log = OverrideLog {
-                script_id: id.clone(),
-                script_name: name.clone(),
-                executed_at: chrono::Utc::now().timestamp_millis(),
-                duration_us: result.duration_us,
-                success: result.success,
-                config_modified: result.config_modified,
-                error: result.error.clone(),
-                logs: result
-                    .logs
-                    .iter()
-                    .map(|l| LogEntry {
-                        level: l.level.clone(),
-                        message: l.message.clone(),
-                    })
-                    .collect(),
-            };
-            // Persist individual logs (ignore errors)
-            if let Err(e) = overrides_store::save_log(&state, id, &log) {
+    // Phase 1: Apply Prism YAML overrides (batch: write all patches → single compile → single write)
+    // Prism DSL runs first so JS overrides can read and modify Prism's output.
+    if !prism_patches.is_empty() {
+        let prism_logs = execute_prism_yaml_batch(&state, &prism_patches, js_scripts.is_empty())?;
+        if let Some(first_log) = prism_logs.first() {
+            prism_success = first_log.success;
+        }
+        for log in &prism_logs {
+            if let Err(e) = overrides_store::save_log(&state, &log.script_id, log) {
                 emit_warn!(
                     Override,
                     OVERRIDE_APPLY_FAILED,
-                    "Failed to save log for '{id}': {e}"
+                    "Failed to save log for '{}': {e}",
+                    log.script_name
                 );
             }
-            log
-        })
-        .collect();
+        }
+        all_logs.extend(prism_logs);
+    }
 
-    // Merge pre-execution errors with execution results
-    let mut all_logs = pre_logs;
-    all_logs.extend(exec_logs);
+    // Phase 2: Execute JS overrides via batch pipeline
+    // JS overrides run after Prism so they can modify Prism's output.
+    if !js_scripts.is_empty() {
+        // Use batch pipeline: single load → all scripts in memory → single write → single reload
+        let script_refs: Vec<(&str, &str)> = js_scripts
+            .iter()
+            .map(|(_, name, content)| (content.as_str(), name.as_str()))
+            .collect();
+
+        let results = execute_batch_pipeline(&state, &script_refs, false)?;
+
+        // Convert pipeline results to override logs
+        let exec_logs: Vec<OverrideLog> = js_scripts
+            .iter()
+            .zip(results.iter())
+            .map(|((id, name, _), result)| {
+                let log = OverrideLog {
+                    script_id: id.clone(),
+                    script_name: name.clone(),
+                    executed_at: chrono::Utc::now().timestamp_millis(),
+                    duration_us: result.duration_us,
+                    success: result.success,
+                    config_modified: result.config_modified,
+                    error: result.error.clone(),
+                    logs: result
+                        .logs
+                        .iter()
+                        .map(|l| LogEntry {
+                            level: l.level.clone(),
+                            message: l.message.clone(),
+                        })
+                        .collect(),
+                };
+                // Persist individual logs (ignore errors)
+                if let Err(e) = overrides_store::save_log(&state, id, &log) {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Failed to save log for '{name}': {e}"
+                    );
+                }
+                log
+            })
+            .collect();
+
+        // Trigger hot-reload if any JS script modified the config or Prism YAML patches succeeded
+        let js_modified = results.iter().any(|r| r.success && r.config_modified);
+        if js_modified || prism_success {
+            crate::prism::pipeline::trigger_hot_reload(&state)?;
+        }
+
+        all_logs.extend(exec_logs);
+    }
+
     Ok(all_logs)
 }
 
