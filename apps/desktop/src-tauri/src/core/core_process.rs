@@ -32,6 +32,74 @@ use super::{AppPaths, CoreStartResult, MihomoState, CORE_STARTING};
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
 
+// ── Windows Job Object for auto-killing mihomo when Tauri exits ──────────
+#[cfg(target_os = "windows")]
+mod win_job {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::System::JobObjects::*;
+    use windows_sys::Win32::System::Threading::*;
+
+    /// Wrapper to make HANDLE Send+Sync so it can live in a static.
+    /// Safety: Job Object handles are kernel objects; access is serialized by
+    /// the kernel, so sharing the handle across threads is safe.
+    struct SendSyncHandle(HANDLE);
+    unsafe impl Send for SendSyncHandle {}
+    unsafe impl Sync for SendSyncHandle {}
+
+    /// Handle to a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
+    /// When the Tauri process exits (even from Task Manager), Windows closes
+    /// this handle and automatically terminates all processes in the Job.
+    static JOB: OnceLock<SendSyncHandle> = OnceLock::new();
+
+    /// Create (once) and return the Job Object handle.
+    fn get_or_create_job() -> HANDLE {
+        JOB.get_or_init(|| {
+            // Safety: CreateJobObjectW is a well-defined Windows API.
+            let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if job == 0 {
+                return SendSyncHandle(job);
+            }
+
+            let mut info: JOBOBJECT_BASIC_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+            info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+            let mut extended_info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION =
+                unsafe { std::mem::zeroed() };
+            extended_info.BasicLimitInformation = info;
+
+            // Safety: SetInformationJobObject with these parameters is safe.
+            let result = unsafe {
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &extended_info as *const _ as *const _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+
+            if result == 0 {
+                // Failed to set info — job won't auto-kill, but don't crash.
+                unsafe { CloseHandle(job) };
+                return SendSyncHandle(0);
+            }
+
+            SendSyncHandle(job)
+        })
+        .0
+    }
+
+    /// Assign a process to the auto-kill Job Object.
+    pub fn assign_to_job(process_handle: HANDLE) -> bool {
+        let job = get_or_create_job();
+        if job == 0 {
+            return false;
+        }
+        // Safety: AssignProcessToJobObject is a well-defined Windows API.
+        unsafe { AssignProcessToJobObject(job, process_handle) != 0 }
+    }
+}
+
 // ── ProcessIo trait for testable process operations ────────────────────────
 
 /// Trait for process operations used by `core_process`.
@@ -1049,6 +1117,47 @@ async fn spawn_with_cache_retry(
             use std::os::windows::process::CommandExt as _;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            // Place mihomo in its own process group so we can kill the entire
+            // group (including any child processes mihomo may spawn) without
+            // affecting the Tauri main process.
+            cmd.process_group(0);
+            #[cfg(target_os = "linux")]
+            {
+                // Ask the kernel to send SIGTERM to mihomo when its parent
+                // (the Tauri main process) dies — even from SIGKILL.
+                // This prevents mihomo from becoming an orphan process.
+                #[allow(clippy::cast_possible_wrap)]
+                let parent_pid = std::process::id() as libc::pid_t;
+                // Safety: pre_exec runs between fork and exec; prctl and getppid
+                // are async-signal-safe syscalls with no memory safety implications.
+                #[allow(clippy::multiple_unsafe_ops_per_block)]
+                unsafe {
+                    cmd.pre_exec(move || {
+                        if libc::prctl(
+                            libc::PR_SET_PDEATHSIG,
+                            libc::SIGTERM as libc::c_ulong,
+                            0 as libc::c_ulong,
+                            0 as libc::c_ulong,
+                            0 as libc::c_ulong,
+                        ) == -1
+                        {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        // Prevent race condition if parent died before prctl was set.
+                        // getppid is async-signal-safe.
+                        // Use from_raw_os_error to avoid heap allocation (not
+                        // async-signal-safe) in the pre_exec closure.
+                        if libc::getppid() != parent_pid {
+                            return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+                        }
+                        Ok(())
+                    });
+                }
+            }
+        }
         cmd.args(["-d", "."]);
         cmd.args(["-f", "run_config.yaml"]);
         for arg in safe_custom_args {
@@ -1373,7 +1482,7 @@ pub async fn start_core(
         );
     }
 
-    stop_core_inner(&app, &state)?;
+    tokio::task::block_in_place(|| stop_core_inner(&app, &state))?;
 
     let resolved_secret = secret.unwrap_or_else(generate_secret);
 
@@ -1471,6 +1580,22 @@ pub async fn start_core(
     )
     .await?;
 
+    // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
+    // mihomo is automatically terminated if the Tauri process dies (even from
+    // Task Manager). This is the Windows equivalent of Linux PR_SET_PDEATHSIG.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::io::AsRawHandle as _;
+        let handle = child.as_raw_handle();
+        if !win_job::assign_to_job(handle as _) {
+            emit_warn!(
+                Core,
+                CORE_START_FAILED,
+                "Failed to assign mihomo to Job Object (auto-kill on exit disabled)"
+            );
+        }
+    }
+
     // Use config port directly, rely on health check to verify
     let port = config_port;
 
@@ -1518,12 +1643,56 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
     };
 
     if let Some(mut child_process) = child {
-        // Force kill the process (cross-platform safe)
-        let _ = child_process.kill();
-        let _ = child_process.wait();
+        #[cfg(unix)]
+        {
+            // Kill the entire process group (mihomo + any child processes it spawned).
+            // Negative PID signals the process group whose ID equals |pid|.
+            #[allow(clippy::cast_possible_wrap)]
+            let pid = child_process.id() as libc::pid_t;
+            let mut killed_group = false;
+            if pid > 1 {
+                let pgid = -pid;
+                // Safety: libc::kill is a well-defined POSIX syscall. Negative pgid
+                // signals the process group, which is standard POSIX behavior.
+                if unsafe { libc::kill(pgid, libc::SIGTERM) } == 0 {
+                    // Wait up to 500ms for the process group to exit gracefully.
+                    // This ensures ports are released before we return, preventing
+                    // port binding conflicts on restart.
+                    for _ in 0..5 {
+                        if let Ok(Some(_)) = child_process.try_wait() {
+                            killed_group = true;
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    if !killed_group {
+                        // Safety: same as above — force-kill the process group.
+                        let _ = unsafe { libc::kill(pgid, libc::SIGKILL) };
+                        let _ = child_process.wait();
+                        killed_group = true;
+                    }
+                }
+            }
+            // Fallback: if process group kill failed or pid <= 1, kill the child directly
+            if !killed_group {
+                let _ = child_process.kill();
+                let _ = child_process.wait();
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            // Force kill the process (cross-platform safe)
+            let _ = child_process.kill();
+            let _ = child_process.wait();
+        }
     }
 
-    if let Ok(paths) = ensure_app_storage(app) {
+    cleanup_run_config(app);
+    Ok(())
+}
+
+fn cleanup_run_config(app: &AppHandle) {
+    if let Ok(paths) = resolve_app_paths(app) {
         let run_config_path = paths.core_dir.join("run_config.yaml");
         if run_config_path.exists() {
             if let Err(e) = fs::remove_file(&run_config_path) {
@@ -1535,8 +1704,6 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
             }
         }
     }
-
-    Ok(())
 }
 
 #[tauri::command]
