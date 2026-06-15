@@ -502,6 +502,7 @@ export async function traceFilterBySource(source) {
  * @property {number} order
  * @property {number|null} updatedAt
  * @property {number} createdAt
+ * @property {boolean|null} lastSuccess
  */
 
 /**

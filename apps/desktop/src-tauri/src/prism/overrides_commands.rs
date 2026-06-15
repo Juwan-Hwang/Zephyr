@@ -25,6 +25,12 @@ pub fn override_list(state: State<PrismState>) -> Result<Vec<OverrideItem>, Stri
     let meta = overrides_store::load_meta(&state)?;
     let mut items = meta.items;
     items.sort_by_key(|i| i.order);
+    // Populate last_success from execution logs
+    for item in &mut items {
+        if let Ok(success) = overrides_store::read_log_success(&state, &item.id) {
+            item.last_success = Some(success);
+        }
+    }
     Ok(items)
 }
 
@@ -518,7 +524,7 @@ fn execute_prism_yaml_batch(
                     duration_us,
                     success: false,
                     config_modified: false,
-                    error: Some(err.to_string()),
+                    error: Some(err.clone()),
                     logs: vec![],
                 })
                 .collect();
