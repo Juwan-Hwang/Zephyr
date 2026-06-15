@@ -63,7 +63,7 @@ let activeOverrideName = '';
 
 /**
  * Current override items list (for reorder).
- * @type {Array<{id: string, enabled?: boolean, name?: string, ext?: string, global?: boolean, profileIds?: string[], type?: string}>}
+ * @type {import('./prism.js').OverrideItem[]}
  */
 let overrideItems = [];
 
@@ -877,7 +877,7 @@ async function loadOverrides() {
 
 /**
  * @param {HTMLElement} container
- * @param {Array<{id: string, name?: string, enabled?: boolean, [key: string]: any}>} items
+ * @param {import('./prism.js').OverrideItem[]} items
  * @param {string} filter
  */
 function renderOverrideCards(container, items, filter) {
@@ -944,10 +944,19 @@ function updateOverrideCardContent(card, item) {
     // Update status indicator
     const statusDot = card.querySelector('.rounded-full[title]');
     if (statusDot instanceof HTMLElement) {
-        const statusColor = item.enabled ? 'bg-emerald-400' : 'bg-[var(--text-tertiary)]';
-        const summaryText = item.enabled
-            ? t('overrideEnabled')
-            : t('overrideDisabled');
+        const statusColor = !item.enabled
+            ? 'bg-[var(--text-tertiary)]'
+            : item.lastSuccess === false
+                ? 'bg-red-400'
+                : 'bg-emerald-400';
+        let summaryText;
+        if (!item.enabled) {
+            summaryText = t('overrideDisabled');
+        } else if (item.lastSuccess === false) {
+            summaryText = t('overrideFailed');
+        } else {
+            summaryText = t('overrideEnabled');
+        }
         statusDot.className = `w-2 h-2 rounded-full shrink-0 ${statusColor}`;
         statusDot.title = summaryText;
     }
@@ -968,9 +977,16 @@ function updateOverrideCardContent(card, item) {
     // Update status text
     const statusText = card.querySelector('[data-override-status]');
     if (statusText) {
-        statusText.textContent = item.enabled
-            ? t('overrideEnabled')
-            : t('overrideDisabled');
+        if (!item.enabled) {
+            statusText.textContent = t('overrideDisabled');
+            statusText.className = 'text-xs text-[var(--text-muted)]';
+        } else if (item.lastSuccess === false) {
+            statusText.textContent = t('overrideFailed');
+            statusText.className = 'text-xs text-red-400';
+        } else {
+            statusText.textContent = t('overrideEnabled');
+            statusText.className = 'text-xs text-[var(--text-muted)]';
+        }
     }
 
     // Update toggle button
@@ -1002,7 +1018,7 @@ function updateOverrideCardContent(card, item) {
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * @param {{id: string, enabled?: boolean, name?: string, ext?: string, global?: boolean, profileIds?: string[], type?: string}} item
+ * @param {import('./prism.js').OverrideItem} item
  * @returns {HTMLElement}
  */
 function buildOverrideCard(item) {
@@ -1024,14 +1040,25 @@ function buildOverrideCard(item) {
             : t('overrideScopeNone'));
 
     // ── Status indicator ───────────────────────────────────────
-    const statusColor = item.enabled
-        ? 'bg-emerald-400'
-        : 'bg-[var(--text-tertiary)]';
+    const statusColor = !item.enabled
+        ? 'bg-[var(--text-tertiary)]'
+        : item.lastSuccess === false
+            ? 'bg-red-400'
+            : 'bg-emerald-400';
 
     // ── Status summary line ────────────────────────────────────
-    const summaryText = item.enabled
-        ? t('overrideEnabled')
-        : t('overrideDisabled');
+    let summaryText;
+    let summaryClass;
+    if (!item.enabled) {
+        summaryText = t('overrideDisabled');
+        summaryClass = 'text-[var(--text-muted)]';
+    } else if (item.lastSuccess === false) {
+        summaryText = t('overrideFailed');
+        summaryClass = 'text-red-400';
+    } else {
+        summaryText = t('overrideEnabled');
+        summaryClass = 'text-[var(--text-muted)]';
+    }
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     card.innerHTML = `
@@ -1045,7 +1072,7 @@ function buildOverrideCard(item) {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
-                    <span class="text-xs text-[var(--text-muted)]" data-override-status>${summaryText}</span>
+                    <span class="text-xs ${summaryClass}" data-override-status>${summaryText}</span>
                 </div>
             </div>
         </div>
