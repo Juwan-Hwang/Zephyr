@@ -27,8 +27,8 @@ pub fn override_list(state: State<PrismState>) -> Result<Vec<OverrideItem>, Stri
     items.sort_by_key(|i| i.order);
     // Populate last_success from execution logs
     for item in &mut items {
-        if let Ok(log) = overrides_store::read_log(&state, &item.id) {
-            item.last_success = Some(log.success);
+        if let Ok(success) = overrides_store::read_log_success(&state, &item.id) {
+            item.last_success = Some(success);
         }
     }
     Ok(items)

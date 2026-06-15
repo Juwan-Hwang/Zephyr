@@ -323,6 +323,23 @@ pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))
 }
 
+/// Read only the `success` field from the last execution log.
+/// Cheaper than `read_log` as it does not allocate a vector of `LogEntry`.
+pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
+    let dir = overrides_dir(state)?;
+    let path = dir.join(format!("{id}.log.json"));
+    if !path.exists() {
+        return Err("No log found".to_owned());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read log: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))?;
+    value
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| "success field not found in log".to_owned())
+}
+
 // ===========================================================================
 // Internal helpers (no locking — caller must hold META_LOCK)
 // ===========================================================================
