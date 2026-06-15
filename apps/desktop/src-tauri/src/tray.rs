@@ -272,7 +272,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             }
             let state = app.state::<MihomoState>();
             let _ = crate::core_manager::stop_core_inner(app, &state);
-            if let Err(e) = sys_proxy::clear_sys_proxy() {
+            if let Err(e) = sys_proxy::clear_sys_proxy(app) {
                 emit_warn!(
                     System,
                     SYS_PROXY_FAILED,
@@ -322,7 +322,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
     let new_state = !current;
 
     let result = if current {
-        sys_proxy::disable_sysproxy()
+        sys_proxy::disable_sysproxy(app.clone())
     } else {
         // Get the current PROXY port from core state (not the API port)
         let state = app.state::<MihomoState>();
@@ -333,7 +333,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
             .last_proxy_port()
             .unwrap_or(DEFAULT_MIXED_PORT);
         let server = format!("127.0.0.1:{port}");
-        sys_proxy::enable_sysproxy(server, None)
+        sys_proxy::enable_sysproxy(app.clone(), server, None)
     };
 
     if let Err(e) = result {
