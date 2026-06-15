@@ -155,15 +155,27 @@ export async function postRestartRecovery(configName) {
   }
 
   // 4. Refresh frontend proxy display (overrides may have modified proxy-groups)
-  invalidateProxiesCache();
-  invalidateConfigCache();
-  (async () => {
+  //    Cache invalidations happen AFTER overrides are applied and BEFORE rendering.
+  //    The earlier invalidation at the top of this function may have been
+  //    repopulated by the CORE_RESTARTED → renderProxies() handler, which runs
+  //    concurrently and can re-fill run_config/proxies caches with pre-override
+  //    data (race condition — see GH#603).
+  try {
     const { Bus, Events } = await import('./events.js');
     const { startSmartAutoTest, syncCoreConfig } = await import('./proxies.js');
     const { waitForMihomoReady } = await import('./proxy-memory.js');
     await waitForMihomoReady();
+    // Re-invalidate all caches after overrides applied, before rendering.
+    // This clears any stale data repopulated by the CORE_RESTARTED render cycle.
+    // Rendering is handled by the CONFIG_UPDATED event below — no need for
+    // an explicit renderProxies() call (which would cause a redundant double render).
+    invalidateProxiesCache();
+    invalidateConfigCache();
+    invalidateRunConfigCache();
     await syncCoreConfig();
     Bus.emit(Events.CONFIG_UPDATED);
     startSmartAutoTest();
-  })().catch(e => apiLogger.warn('[postRestartRecovery] refresh proxies failed:', e));
+  } catch (e) {
+    apiLogger.warn('[postRestartRecovery] refresh proxies failed:', e);
+  }
 }
