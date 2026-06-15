@@ -76,12 +76,10 @@ export function initTunToggle() {
                             showNotification(t.tunAuthFailed || 'Authorization failed', 'error');
                         }
                         toggle.checked = false;
-                        if (spinner) spinner.classList.add('hidden');
                         if (statusText) {
                             statusText.textContent = t.virtualAdapter;
                             statusText.classList.remove('text-accent');
                         }
-                        appStore.set('isNetworkUpdating', false);
                         return;
                     }
                 } else {
@@ -125,9 +123,6 @@ export function initTunToggle() {
                 statusText.textContent = enable ? t.proxyActive : t.virtualAdapter;
                 if (!enable) statusText.classList.remove('text-accent');
             }
-            if (spinner) spinner.classList.add('hidden');
-            appStore.set('isNetworkUpdating', false);
-            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
         } catch (_err) {
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
@@ -135,7 +130,6 @@ export function initTunToggle() {
                 statusText.textContent = t.virtualAdapter;
                 statusText.classList.remove('text-accent');
             }
-            if (spinner) spinner.classList.add('hidden');
 
             const isLinux = navigator.userAgent.toLowerCase().includes('linux');
             if (isLinux && enable) {
@@ -180,8 +174,6 @@ export function initTunToggle() {
                                 statusText.classList.add('text-accent');
                             }
                             showNotification(t.configSuccess, 'success');
-                            appStore.set('isNetworkUpdating', false);
-                            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
                             return;
                         } catch (retryErr) {
                             tunLogger.error('TUN retry failed after permission grant', retryErr);
@@ -203,8 +195,10 @@ export function initTunToggle() {
                 showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
             }
 
+        } finally {
+            if (spinner) spinner.classList.add('hidden');
             appStore.set('isNetworkUpdating', false);
-            try { await invoke(COMMANDS.RELEASE_TUN_TOGGLE); } catch (_) {}
+            invoke(COMMANDS.RELEASE_TUN_TOGGLE).catch(() => {});
         }
     };
 }
