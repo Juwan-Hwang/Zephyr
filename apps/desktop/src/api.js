@@ -597,6 +597,7 @@ export async function restartCore(configPath, customArgs = []) {
     configPath,
     test: false,
     customArgs,
+    force: true,
   });
   setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
   setSecret(coreResult.secret);

@@ -165,6 +165,17 @@ async function initApp() {
     });
     apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
 
+    // 如果 start_core 发生了静默回退（请求的配置文件不存在），
+    // 用实际加载的配置名纠正 last_config，避免下次冷启动仍然指向已不存在的文件。
+    if (coreResult.active_config && coreResult.active_config !== configPath) {
+      apiLogger.info(`[Zephyr] config fallback detected: requested "${configPath}" but loaded "${coreResult.active_config}", updating last_config`);
+      try {
+        await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: coreResult.active_config });
+      } catch (e) {
+        apiLogger.warn(`[Zephyr] failed to update last_config after fallback: ${e}`);
+      }
+    }
+
     secret = coreResult.secret;
     const port = coreResult.port;
 
