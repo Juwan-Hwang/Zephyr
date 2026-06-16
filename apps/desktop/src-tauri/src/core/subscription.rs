@@ -63,8 +63,8 @@ fn build_http_client_with_proxy(
     });
 
     let mut client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
         .redirect(redirect_policy)
         .no_proxy();
 
@@ -163,6 +163,59 @@ fn resolve_url_from_metadata(
 
     // Reuse the existing, sanitized logic from config_manager
     super::config_manager::get_config_url(app, name)
+}
+
+/// 获取 mihomo API 的客户端、URL 和 secret。
+/// 失败时返回 None（核心未运行或端口未就绪）。
+fn mihomo_api_client(app: &AppHandle) -> Option<(reqwest::Client, String, String)> {
+    let (api_port, secret) = {
+        let state = app.state::<MihomoState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.process()?;
+        (guard.last_port()?, guard.last_secret().to_owned())
+    };
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .ok()?;
+    let url = format!("http://127.0.0.1:{api_port}/configs");
+    Some((client, url, secret))
+}
+
+/// 获取 mihomo 当前的代理模式（rule / global / direct）。
+/// 失败时返回 None，调用方可据此跳过 global 回退。
+async fn get_mihomo_mode(app: &AppHandle) -> Option<String> {
+    let (client, url, secret) = mihomo_api_client(app)?;
+    let mut req = client.get(&url);
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("mode")?
+        .as_str()
+        .map(std::borrow::ToOwned::to_owned)
+}
+
+/// 通过 mihomo API 切换代理模式。失败时返回 None。
+async fn set_mihomo_mode(app: &AppHandle, mode: &str) -> Option<()> {
+    let (client, url, secret) = mihomo_api_client(app)?;
+    let mut req = client
+        .patch(&url)
+        .json(&serde_json::json!({ "mode": mode }));
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    resp.status().is_success().then_some(())
 }
 
 #[derive(serde::Serialize)]
@@ -285,7 +338,7 @@ async fn download_sub_inner_raw(
             guard.and_then(|g| {
                 g.process()
                     .is_some()
-                    .then(|| format!("http://127.0.0.1:{}", g.last_port().unwrap_or(7890)))
+                    .then(|| format!("http://127.0.0.1:{}", g.last_proxy_port().unwrap_or(7890)))
             })
         };
 
@@ -299,11 +352,16 @@ async fn download_sub_inner_raw(
             // - ⚠️  Proxy-side SSRF (proxy resolving to internal IPs) is NOT
             //     preventable client-side — this is inherent to any proxy architecture.
             //     Mitigate by only configuring trusted proxies.
-            let client_mihomo =
-                build_http_client_with_proxy(user_agent.as_deref(), None, Some(proxy_url_val));
+            let client_mihomo = build_http_client_with_proxy(
+                user_agent.as_deref(),
+                None,
+                Some(proxy_url_val.clone()),
+            );
             match client_mihomo {
                 Ok(client) => match do_download(client, url.clone()).await {
-                    Ok(data) => result = Some(data),
+                    Ok(data) => {
+                        result = Some(data);
+                    }
                     Err(e) => {
                         last_error = match direct_error.as_deref() {
                             Some(de) => format!("{de} | Proxy: {e}"),
@@ -315,6 +373,44 @@ async fn download_sub_inner_raw(
                     last_error = match direct_error.as_deref() {
                         Some(de) => format!("{de} | Proxy client build: {e}"),
                         None => format!("Proxy client build: {e}"),
+                    }
+                }
+            }
+
+            // ── Tier 3: 临时切换 global 模式重试 ──────────────────────────────
+            // 直连和普通代理都失败后，尝试临时把 mihomo 切到 global 模式，
+            // 让所有流量走当前选中的代理节点（绕过分流规则可能导致的不可达），
+            // 下载完成后切回原模式。
+            if result.is_none() {
+                // 只有成功获取到当前模式且不是 global 时才切换，
+                // 否则切到 global 后无法切回（original_mode 为 None 时跳过恢复）。
+                if let Some(orig) = get_mihomo_mode(app).await {
+                    if orig != "global" && set_mihomo_mode(app, "global").await.is_some() {
+                        // 切换后短暂等待 mihomo 生效
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+
+                        let client_global = build_http_client_with_proxy(
+                            user_agent.as_deref(),
+                            None,
+                            Some(proxy_url_val),
+                        );
+                        if let Ok(client) = client_global {
+                            match do_download(client, url).await {
+                                Ok(data) => {
+                                    result = Some(data);
+                                }
+                                Err(e) => {
+                                    last_error = if last_error.is_empty() {
+                                        format!("Global-mode: {e}")
+                                    } else {
+                                        format!("{last_error} | Global-mode: {e}")
+                                    };
+                                }
+                            }
+                        }
+
+                        // 无论成功失败都切回原模式
+                        let _ = set_mihomo_mode(app, &orig).await;
                     }
                 }
             }
