@@ -217,6 +217,10 @@ struct Settings {
     /// Max single log file size in MB.
     #[serde(default = "default_log_max_file_mb")]
     log_max_file_mb: u32,
+    /// Shell format for copying proxy environment variables.
+    /// Values: "bash", "fish", "cmd", "powershell", "nushell".
+    #[serde(default = "default_copy_env_format")]
+    copy_env_format: String,
 }
 
 const fn default_log_retention_days() -> u32 {
@@ -224,6 +228,14 @@ const fn default_log_retention_days() -> u32 {
 }
 const fn default_log_max_file_mb() -> u32 {
     50
+}
+
+fn default_copy_env_format() -> String {
+    if cfg!(target_os = "windows") {
+        "powershell".to_owned()
+    } else {
+        "bash".to_owned()
+    }
 }
 
 impl Settings {
@@ -342,6 +354,7 @@ fn patch_settings(
             patch_field!(log_core_enabled);
             patch_field!(log_retention_days);
             patch_field!(log_max_file_mb);
+            patch_field!(copy_env_format);
         }
         if !modified {
             return Ok(());
@@ -870,6 +883,7 @@ pub fn run() {
                     log_core_enabled: false,
                     log_retention_days: default_log_retention_days(),
                     log_max_file_mb: default_log_max_file_mb(),
+                    copy_env_format: default_copy_env_format(),
                 }
             };
             app.manage(SettingsState(Arc::new(Mutex::new(settings))));

@@ -318,6 +318,13 @@ export const translations = {
         trayProxyMode: "Proxy Mode",
         traySubscriptions: "Subscriptions",
         trayProxies: "Proxies",
+        trayCopyEnv: "Copy Proxy Env",
+        trayCopyEnvSuccess: "Proxy env vars copied",
+        copyProxyEnv: "Copy Proxy Env",
+        copyProxyEnvDesc: "Copy proxy env vars for terminal use",
+        copyEnvFormat: "Shell Format",
+        copyEnvCopied: "Copied",
+        copy: "Copy",
 
         // Rule buttons
         moveToTop: "Move to Top",
@@ -980,6 +987,13 @@ export const translations = {
         trayProxyMode: "代理模式",
         traySubscriptions: "订阅选择",
         trayProxies: "节点选择",
+        trayCopyEnv: "复制代理环境变量",
+        trayCopyEnvSuccess: "代理环境变量已复制",
+        copyProxyEnv: "复制代理环境变量",
+        copyProxyEnvDesc: "复制代理环境变量到剪贴板，方便终端使用",
+        copyEnvFormat: "Shell 格式",
+        copyEnvCopied: "已复制",
+        copy: "复制",
 
         // Rule buttons
         moveToTop: "移至顶部",
@@ -1538,6 +1552,13 @@ export const translations = {
         overrideCoreNotRunning: '⚠ コア未起動、検証不可',
         auto: '自動',
         dismiss: "閉じる",
+        trayCopyEnv: "プロキシ環境変数をコピー",
+        trayCopyEnvSuccess: "プロキシ環境変数をコピーしました",
+        copyProxyEnv: "プロキシ環境変数をコピー",
+        copyProxyEnvDesc: "ターミナル用にプロキシ環境変数をコピー",
+        copyEnvFormat: "シェル形式",
+        copyEnvCopied: "コピー済み",
+        copy: "コピー",
     },
 
     ko: {
@@ -1626,6 +1647,13 @@ export const translations = {
         logLevelFatal: "치명적",
         logPaused: "일시 정지",
         logLines: "줄",
+        trayCopyEnv: "프록시 환경변수 복사",
+        trayCopyEnvSuccess: "프록시 환경변수 복사됨",
+        copyProxyEnv: "프록시 환경변수 복사",
+        copyProxyEnvDesc: "터미널 사용을 위해 프록시 환경변수 복사",
+        copyEnvFormat: "셸 형식",
+        copyEnvCopied: "복사됨",
+        copy: "복사",
     },
 };
 
