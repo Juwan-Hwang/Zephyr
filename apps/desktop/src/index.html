@@ -393,16 +393,19 @@
             </div>
 
             <!-- Settings Page -->
+            <!-- Settings Page -->
             <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
 
                 <h2 class="text-2xl font-light text-[var(--text-primary)] mb-8 relative z-10" data-i18n="settingsTitle">Settings</h2>
-                
+
                 <div class="space-y-6 relative z-10">
-                    <!-- General Settings -->
+
+                    <!-- 1. Appearance -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="general">General</h3>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAppearance">Appearance</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
                         <div class="glass-card p-5 space-y-4">
-                            <!-- Language Switching -->
+                            <!-- Language -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
@@ -435,27 +438,6 @@
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- UI Scale -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uiScale">UI Scale</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <button type="button" id="ui-scale-100" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">100%</button>
-                                    <button type="button" id="ui-scale-110" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">110%</button>
-                                    <button type="button" id="ui-scale-125" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">125%</button>
-                                    <button type="button" id="ui-scale-150" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">150%</button>
-                                </div>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
                             <!-- Theme Mode -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
@@ -477,81 +459,7 @@
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Close Behavior -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="minToTray">Hide on Close</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="minToTrayDesc">Hide to tray instead of quitting when closing window</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-close-tray">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="lightweightMode">Lightweight Mode</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="lightweightModeDesc">Destroy WebView on close to save memory, tray click to restore</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-lightweight-mode">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="nodeScrolling">Node Name Scroll</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="nodeScrollingDesc">Enable scrolling for long node names</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-node-scroll">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-                            
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Autostart -->
-                            <div id="row-autostart" class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autostart">Launch at Login</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autostartDesc">Start the application automatically when you sign in</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-autostart">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Theme Selection -->
+                            <!-- Theme Color -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
@@ -574,13 +482,14 @@
                                     </div>
                                 </div>
                             </div>
+
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Transparency Adjustment -->
+                            <!-- App Transparency -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 4.2c1.44 1.06 2.34 2.76 2.34 4.61v6.5c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-6.5c0-1.85.9-3.55 2.34-4.61L12 2.69z"/><path d="M12 22v-6"/><path d="M8 22v-3"/><path d="M16 22v-3"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="appOpacity">App Transparency</p>
@@ -595,27 +504,112 @@
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Restore Defaults -->
+                            <!-- UI Scale -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="restoreDefaults">Restore Defaults</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="restoreDefaultsDesc">Reset all settings to default values</p>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uiScale">UI Scale</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
                                     </div>
                                 </div>
-                                <button id="btn-restore-defaults" class="btn-ghost" data-i18n="restoreDefaults">
-                                    Restore Defaults
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" id="ui-scale-100" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">100%</button>
+                                    <button type="button" id="ui-scale-110" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">110%</button>
+                                    <button type="button" id="ui-scale-125" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">125%</button>
+                                    <button type="button" id="ui-scale-150" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">150%</button>
+                                </div>
                             </div>
                         </div>
                     </section>
 
-                    <!-- Network & Routing Settings -->
+                    <!-- 2. App Behavior -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="networkRouting">Network & Routing</h3>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAppBehavior">App Behavior</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAppBehaviorDesc">Window lifecycle, startup and runtime behavior</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Close Behavior -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="minToTray">Hide on Close</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="minToTrayDesc">Hide to tray instead of quitting when closing window</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-close-tray">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Launch at Login -->
+                            <div id="row-autostart" class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autostart">Launch at Login</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autostartDesc">Start the application automatically when you sign in</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-autostart">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Lightweight Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="lightweightMode">Lightweight Mode</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="lightweightModeDesc">Destroy WebView on close to save memory, tray click to restore</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-lightweight-mode">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Node Name Scroll -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="nodeScrolling">Node Name Scroll</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="nodeScrollingDesc">Enable scrolling for long node names</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-node-scroll">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 3. Proxy Behavior -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsProxyBehavior">Proxy Behavior</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsProxyBehaviorDesc">How proxy selection, testing and failover work</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Unified Delay -->
                             <div class="flex items-center justify-between">
@@ -630,44 +624,6 @@
                                 </div>
                                 <label class="ios-switch">
     <input type="checkbox" id="setting-unified-delay" checked>
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-                            
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- IPv6 -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ipv6Support">IPv6 Support</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="ipv6SupportDesc">Enable IPv6 routing and connections</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-ipv6">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Allow LAN -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="allowLan">Allow LAN</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="allowLanDesc">Allow local network devices to connect</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-allow-lan">
     <span class="switch-slider"></span>
 </label>
                             </div>
@@ -712,88 +668,91 @@
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Copy Proxy Env -->
+                            <!-- Smart Proxy Selector -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                                     </div>
                                     <div>
                                         <div class="flex items-center gap-3">
-                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="copyProxyEnv">Copy Proxy Env</p>
-                                            <button id="copy-env-format-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure shell format">
-                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartProxy">Smart Proxy Selector</p>
+                                            <button id="smart-config-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure" aria-label="Configure Smart Proxy">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <circle cx="12" cy="12" r="3"/>
+                                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                                </svg>
                                             </button>
                                         </div>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="copyProxyEnvDesc">Copy proxy env vars for terminal use</p>
-                                    </div>
-                                </div>
-                                <button id="copy-env-btn" class="btn-ghost">
-                                    <span data-i18n="copy">Copy</span>
-                                </button>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Encrypt Configs -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="encryptConfigs">Encrypt Configs</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="encryptConfigsDesc">Encrypt config files with machine key, preventing use on other devices</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="smartProxyDesc">Auto-select best proxy using EMA scoring</p>
                                     </div>
                                 </div>
                                 <label class="ios-switch">
-                                    <input type="checkbox" id="setting-encrypt-configs">
+                                    <input type="checkbox" id="smart-toggle">
                                     <span class="switch-slider"></span>
                                 </label>
                             </div>
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Log Persistence -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                                    </div>
-                                    <div>
-                                        <div class="flex items-center gap-3">
-                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="logSettings">Log Settings</p>
-                                            <button id="log-settings-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure">
-                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                                            </button>
-                                        </div>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="logSettingsDesc">Persist and export application and core logs</p>
-                                    </div>
-                                </div>
-                                <button id="log-export-btn" class="btn-ghost">
-                                    <span data-i18n="logExport">Export</span>
-                                </button>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Network Optimization -->
+                            <!-- Auto Speed Test -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="networkOptim">Network Optimization</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="networkOptimDesc">Optimize TCP parameters for better throughput</p>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartAutoTest">Auto Speed Test</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="smartAutoTestDesc">Periodically test all proxies to keep scores accurate</p>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <div id="network-optim-status-dot" class="w-2 h-2 rounded-full bg-[var(--text-tertiary)] transition-colors"></div>
-                                    <button id="network-optim-btn" class="btn-ghost">
-                                        <span data-i18n="networkOptimApply">Apply</span>
-                                    </button>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="smart-auto-test-toggle">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 4. Network -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsNetwork">Network</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsNetworkDesc">Local ports, DNS, LAN access and port forwarding</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- IPv6 -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ipv6Support">IPv6 Support</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="ipv6SupportDesc">Enable IPv6 routing and connections</p>
+                                    </div>
                                 </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-ipv6">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Allow LAN -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="allowLan">Allow LAN</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="allowLanDesc">Allow local network devices to connect</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-allow-lan">
+    <span class="switch-slider"></span>
+</label>
                             </div>
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
@@ -807,7 +766,7 @@
                                         </div>
                                         <div class="flex items-center gap-3">
                                             <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Rewrite</p>
-                                            <button id="dns-config-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure DNS Servers">
+                                            <button id="dns-config-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure DNS Servers" aria-label="Configure DNS Servers">
                                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                     <circle cx="12" cy="12" r="3"/>
                                                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -825,7 +784,7 @@
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Port Settings -->
+                            <!-- Port Settings (值行) -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
@@ -836,143 +795,91 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="portSettingsDesc">Configure proxy and DNS ports</p>
                                     </div>
                                 </div>
-                                <button id="port-config-btn" class="btn-ghost">
+                                <button id="port-config-btn" class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
                                     <span id="current-port-display">7890</span>
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- GeoData Update -->
+                            <!-- Copy Proxy Env (低权重动作行) -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="geoData">Geo Databases</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="geoDataDesc">Update GeoIP and GeoSite routing databases</p>
+                                        <div class="flex items-center gap-3">
+                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="copyProxyEnv">Copy Proxy Env</p>
+                                            <button id="copy-env-format-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure shell format" aria-label="Configure shell format">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                            </button>
+                                        </div>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="copyProxyEnvDesc">Copy proxy env vars for terminal use</p>
                                     </div>
                                 </div>
-                                <button id="update-geo-btn" class="btn-ghost">
-                                    <svg id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
-                                    <span data-i18n="updateNow">Update Now</span>
+                                <button id="copy-env-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                    <span data-i18n="copy">Copy</span>
                                 </button>
                             </div>
-                        </div>
-                    </section>
 
-                    <!-- Core Settings -->
-                    <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="core">Mihomo Core</h3>
-                        <div class="glass-card p-5 space-y-4">
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Network Optimization (状态点 + 低权重动作) -->
                             <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="curVersion">Current Version</p>
-                                    <p class="text-2xs text-[var(--text-muted)]"><span data-i18n="appVersion">App</span>: <span id="app-version-text">-</span> | <span data-i18n="coreVersion">Core</span>: <span id="core-version-text">Checking...</span></p>
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="networkOptim">Network Optimization</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="networkOptimDesc">Optimize TCP parameters for better throughput</p>
+                                    </div>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button id="check-update-btn" class="btn-ghost" data-i18n="checkUpdate">
-                                        Check for Updates
+                                    <div id="network-optim-status-dot" class="w-2 h-2 rounded-full bg-[var(--text-tertiary)] transition-colors"></div>
+                                    <button id="network-optim-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                        <span data-i18n="networkOptimApply">Apply</span>
                                     </button>
                                 </div>
                             </div>
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-                            
-                            <!-- Auto Check Core Update -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoCheckUpdate">Auto Check Core Updates</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoCheckUpdateDesc">Automatically check for core updates on startup</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-auto-update">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Auto Check Client Update -->
-                            <div id="row-client-update" class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                            <!-- Port Forwarding (折叠区) -->
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-[var(--text-secondary)]">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 9 9-18"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunnels">Port Forwarding</p>
+                                            <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunnelsDesc">Forward local ports to remote servers</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoUpdateClient">Auto-check client updates</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoUpdateClientDesc">Automatically check for Zephyr client updates on startup</p>
+                                    <svg class="w-4 h-4 text-[var(--text-muted)] transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </summary>
+                                <div class="mt-4 pl-9 pr-2">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="tunnelsList">Rules</span>
+                                        <button id="add-tunnel-btn" class="text-xs text-accent hover:text-accent/80 transition-colors" data-i18n="add">Add</button>
                                     </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-auto-update-client">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
-                            
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="configFolder">Config Folder</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="configFolderDesc">Open the YAML directory for drag-and-drop imports</p>
+                                    <div id="tunnels-list" class="space-y-3">
+                                        <!-- Dynamic Tunnels Rendered Here -->
+                                        <div class="text-center text-xs text-[var(--text-tertiary)] py-4" id="tunnels-empty" data-i18n="noTunnels">No port forwarding rules configured</div>
                                     </div>
                                 </div>
-                                <button id="open-config-folder-btn" class="btn-ghost" data-i18n="openFolder">
-                                    Open Folder
-                                </button>
-                            </div>
+                            </details>
                         </div>
                     </section>
 
-                    <!-- System Utilities -->
+                    <!-- 5. Subscription & Rules -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="utilities">System Utilities</h3>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSubscriptionRulesDesc">Subscription download behavior and rule file management</p>
                         <div class="glass-card p-5 space-y-4">
-                            <!-- Global Shortcuts -->
-                            <div>
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-4">
-                                        <div class="text-[var(--text-secondary)]">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
-                                        </div>
-                                        <div>
-                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="globalShortcut">Global Shortcuts</p>
-                                            <p class="text-2xs text-[var(--text-muted)]" data-i18n="globalShortcutDesc">Configure keyboard shortcuts</p>
-                                        </div>
-                                    </div>
-                                    <button id="open-shortcut-settings-btn" class="btn-ghost text-xs px-3 py-1" data-i18n="configure">Configure</button>
-                                </div>
-                                <div class="h-px bg-[var(--zephyr-bg-muted)] my-4"></div>
-                            </div>
-
-                            <div id="uwp-loopback-item">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-4">
-                                        <div class="text-[var(--text-secondary)]">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
-                                        </div>
-                                        <div>
-                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uwpLoopback">UWP Loopback Exemption</p>
-                                            <p class="text-2xs text-[var(--text-muted)]" data-i18n="uwpLoopbackDesc">Allow Windows Store apps to use local proxy</p>
-                                        </div>
-                                    </div>
-                                    <button id="exempt-uwp-btn" class="btn-ghost group">
-                                        <svg id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
-                                        <span data-i18n="exemptUwp">Exempt All UWP</span>
-                                    </button>
-                                </div>
-                                <div class="h-px bg-[var(--zephyr-bg-muted)] my-4"></div>
-                            </div>
-
                             <!-- Subscription Fake Client -->
                             <div class="flex items-start justify-between flex-col gap-3">
                                 <div class="flex items-center justify-between w-full">
@@ -990,7 +897,7 @@
     <span class="switch-slider"></span>
 </label>
                                 </div>
-                                
+
                                 <div id="fake-client-options" class="w-full pl-9 pr-2 transition-all duration-300 max-h-0 opacity-0 overflow-hidden">
                                     <div class="glass-card p-3 mt-2 space-y-3">
                                         <div>
@@ -1026,74 +933,10 @@
                                     <svg id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin mx-auto mt-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
                                 </div>
                             </div>
-                        </div>
-                    </section>
 
-                    <!-- Port Forwarding (Tunnels) -->
-                    <section>
-                        <div class="flex items-center justify-between mb-4 ml-1">
-                            <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider" data-i18n="tunnels">Port Forwarding</h3>
-                            <button id="add-tunnel-btn" class="text-2xs font-bold text-accent hover:text-accent/80 transition-colors uppercase tracking-wider" data-i18n="add">Add</button>
-                        </div>
-                        <div class="glass-card p-5 space-y-4">
-                            <div id="tunnels-list" class="space-y-3">
-                                <!-- Dynamic Tunnels Rendered Here -->
-                                <div class="text-center text-xs text-[var(--text-tertiary)] py-4" id="tunnels-empty" data-i18n="noTunnels">No port forwarding rules configured</div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Smart Proxy Selector -->
-                    <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="smartProxy">Smart Proxy Selector</h3>
-                        <div class="glass-card p-5 space-y-4">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                                    </div>
-                                    <div>
-                                        <div class="flex items-center gap-3">
-                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartProxy">Smart Proxy Selector</p>
-                                            <button id="smart-config-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure">
-                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <circle cx="12" cy="12" r="3"/>
-                                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="smartProxyDesc">Auto-select best proxy using EMA scoring</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-                                    <input type="checkbox" id="smart-toggle">
-                                    <span class="switch-slider"></span>
-                                </label>
-                            </div>
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-                            <!-- Smart Auto-Test -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartAutoTest">Auto Speed Test</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="smartAutoTestDesc">Periodically test all proxies to keep scores accurate</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-                                    <input type="checkbox" id="smart-auto-test-toggle">
-                                    <span class="switch-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </section>
 
-                    <!-- Extension Rules -->
-                    <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-4 ml-1" data-i18n="ruleLibrary">Extension Rules</h3>
-                        <div class="glass-card p-5 space-y-4">
+                            <!-- Extension Rules Auto Apply -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
@@ -1109,7 +952,10 @@
                                     <span class="switch-slider"></span>
                                 </label>
                             </div>
+
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Manage Rule Files (低权重链接行) -->
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
@@ -1120,35 +966,245 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="ruleLibraryManageFilesDesc">Open the prism rules directory in file manager</p>
                                     </div>
                                 </div>
-                                <button id="manage-rule-files-btn" class="btn-ghost" data-i18n="ruleLibraryManageFiles">
-                                    Manage Rule Files
+                                <button id="manage-rule-files-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                    <span data-i18n="ruleLibraryManageFiles">Manage Rule Files</span>
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
                         </div>
                     </section>
 
-                    <!-- Settings Sub-menus -->
+                    <!-- 6. Security & Diagnostics -->
                     <section>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div id="btn-goto-advanced" class="glass-card p-5 cursor-pointer group hover:translate-y-[-2px] transition-[transform,color] duration-300 hover:border-accent/30">
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSecurityDiagnostics">Security & Diagnostics</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSecurityDiagnosticsDesc">Config encryption and log diagnostics</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Encrypt Configs -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="encryptConfigs">Encrypt Configs</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="encryptConfigsDesc">Encrypt config files with machine key, preventing use on other devices</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="setting-encrypt-configs">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Log Settings (Export 移入行尾低权重) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                    </div>
+                                    <div>
+                                        <div class="flex items-center gap-3">
+                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="logSettings">Log Settings</p>
+                                            <button id="log-settings-btn" class="text-[var(--text-muted)] hover:text-accent transition-colors" title="Configure" aria-label="Configure log settings">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                            </button>
+                                        </div>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="logSettingsDesc">Persist and export application and core logs</p>
+                                    </div>
+                                </div>
+                                <button id="log-export-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                    <span data-i18n="logExport">Export</span>
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 7. Core & Updates -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsCoreUpdates">Core & Updates</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsCoreUpdatesDesc">Core engine, client updates and Geo data maintenance</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Version Info (Check Updates 行尾低权重) -->
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="curVersion">Current Version</p>
+                                    <p class="text-2xs text-[var(--text-muted)]"><span data-i18n="appVersion">App</span>: <span id="app-version-text">-</span> | <span data-i18n="coreVersion">Core</span>: <span id="core-version-text">Checking...</span></p>
+                                </div>
+                                <button id="check-update-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="checkUpdate">
+                                    Check for Updates
+                                </button>
+                            </div>
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Auto Check Core Update -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoCheckUpdate">Auto Check Core Updates</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoCheckUpdateDesc">Automatically check for core updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Auto Check Client Update -->
+                            <div id="row-client-update" class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoUpdateClient">Auto-check client updates</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoUpdateClientDesc">Automatically check for Zephyr client updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update-client">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Geo Data Update (低权重动作行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="geoData">Geo Databases</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="geoDataDesc">Update GeoIP and GeoSite routing databases</p>
+                                    </div>
+                                </div>
+                                <button id="update-geo-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1.5">
+                                    <svg id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <span data-i18n="updateNow">Update Now</span>
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Config Folder (低权重链接行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="configFolder">Config Folder</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="configFolderDesc">Open the YAML directory for drag-and-drop imports</p>
+                                    </div>
+                                </div>
+                                <button id="open-config-folder-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                    <span data-i18n="openFolder">Open Folder</span>
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 8. System & Compatibility -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSystemCompatibility">System & Compatibility</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSystemCompatibilityDesc">System integration, platform compatibility and advanced entries</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Global Shortcuts -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="globalShortcut">Global Shortcuts</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="globalShortcutDesc">Configure keyboard shortcuts</p>
+                                    </div>
+                                </div>
+                                <button id="open-shortcut-settings-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                    <span data-i18n="configure">Configure</span>
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+
+                            <!-- UWP Loopback (divider included so it hides with the row on non-Windows) -->
+                            <div id="uwp-loopback-item" class="flex flex-col">
+                                <div class="h-px bg-[var(--zephyr-bg-muted)] mb-4"></div>
+                                <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uwpLoopback">UWP Loopback Exemption</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="uwpLoopbackDesc">Allow Windows Store apps to use local proxy</p>
+                                    </div>
+                                </div>
+                                <button id="exempt-uwp-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1.5">
+                                    <svg id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <span data-i18n="exemptUwp">Exempt All UWP</span>
+                                </button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Advanced Settings (Drill-in) -->
+                            <div id="btn-goto-advanced" class="flex items-center justify-between cursor-pointer group">
                                 <div class="flex items-center gap-4">
                                     <div class="w-10 h-10 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="advancedTitle">Advanced Settings</p>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)] group-hover:text-accent transition-colors" data-i18n="advancedTitle">Advanced Settings</p>
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="advancedSubtitle">Dynamic Config Engine</p>
                                     </div>
                                 </div>
+                                <svg class="w-4 h-4 text-[var(--text-muted)] group-hover:text-accent transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                             </div>
-                            <div id="btn-goto-github" class="glass-card p-5 cursor-pointer group hover:translate-y-[-2px] transition-[transform,color] duration-300 hover:border-[var(--zephyr-border-strong)]">
+                        </div>
+                    </section>
+
+                    <!-- 9. About -->
+                    <section>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAbout">About</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAboutDesc">Project links and danger zone</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- GitHub Homepage (链接行) -->
+                            <div id="btn-goto-github" class="flex items-center justify-between cursor-pointer group">
                                 <div class="flex items-center gap-4">
                                     <div class="w-10 h-10 rounded-md bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] group-hover:bg-[var(--zephyr-bg-muted)] group-hover:text-[var(--text-primary)] transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="githubHomepage">GitHub Homepage</p>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)] group-hover:text-accent transition-colors" data-i18n="githubHomepage">GitHub Homepage</p>
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="githubHomepageDesc">Star & Contribute</p>
+                                    </div>
+                                </div>
+                                <svg class="w-4 h-4 text-[var(--text-muted)] group-hover:text-accent transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+                            </div>
+
+                            <!-- Danger Zone: Restore Defaults -->
+                            <div class="border-t mt-6 pt-4" style="border-color: rgba(239, 68, 68, 0.2);">
+                                <div id="btn-restore-defaults" class="flex items-center justify-between cursor-pointer group">
+                                    <div class="flex items-center gap-4">
+                                        <div class="w-10 h-10 rounded-md bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 group-hover:bg-red-500/20 transition-colors">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-red-500 group-hover:text-red-400 transition-colors" data-i18n="restoreDefaults">Restore Defaults</p>
+                                            <p class="text-2xs text-[var(--text-muted)]" data-i18n="restoreDefaultsDesc">Reset all settings to default values</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
