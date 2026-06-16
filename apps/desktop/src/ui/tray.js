@@ -150,6 +150,7 @@ export async function updateTrayMenu(forceRefresh = false) {
                 directText: t.direct || "Direct",
                 subscriptionsText: t.traySubscriptions || "Subscriptions",
                 proxiesText: t.trayProxies || "Proxies",
+                copyEnvText: t.trayCopyEnv || "Copy Proxy Env",
                 sysProxyEnabled,
                 tunEnabled,
                 configs,
@@ -286,6 +287,24 @@ export async function initTrayEventListeners() {
         }
     });
     _trayEventUnlisteners.push(unlisten5);
+
+    // Listen for copy proxy env from tray
+    const unlisten6 = await listen('tray-copy-env', async () => {
+        try {
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const format = resolveEnvFormat(settings?.copy_env_format);
+            const currentConfig = /** @type {any} */ (await getConfig());
+            const port = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+            const text = generateProxyEnvVars(format, port);
+            await copyToClipboard(text);
+            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+            const t = /** @type {Record<string, string>} */(translations[langKey]);
+            showNotification(t.trayCopyEnvSuccess || 'Proxy env vars copied', 'info');
+        } catch (err) {
+            trayLogger.error('Failed to copy proxy env vars', err);
+        }
+    });
+    _trayEventUnlisteners.push(unlisten6);
 }
 
 // --- Unified periodic sync ---
@@ -365,5 +384,77 @@ export function stopUnifiedSync() {
     if (_unifiedSyncInterval) {
         clearInterval(_unifiedSyncInterval);
         _unifiedSyncInterval = null;
+    }
+}
+
+// --- Proxy env var generation ---
+
+/**
+ * Detect the default shell format based on the current platform.
+ * @returns {string} Shell format key: bash, cmd, powershell, fish, nushell
+ */
+export function detectDefaultShellFormat() {
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes('windows')) return 'powershell';
+    return 'bash';
+}
+
+/**
+ * Resolve the effective shell format from the user's setting.
+ * Falls back to platform detection if the stored value is empty or invalid.
+ * @param {string} format - Format from settings
+ * @returns {string} Resolved format key
+ */
+export function resolveEnvFormat(format) {
+    const validFormats = ['bash', 'fish', 'cmd', 'powershell', 'nushell'];
+    if (format && validFormats.includes(format)) return format;
+    return detectDefaultShellFormat();
+}
+
+/**
+ * Generate proxy environment variable strings for various shell formats.
+ * @param {string} format - Shell format: bash, fish, cmd, powershell, nushell
+ * @param {number} port - Proxy port number
+ * @returns {string} Formatted env var string ready to copy
+ */
+export function generateProxyEnvVars(format, port = 7890) {
+    const proxy = `http://127.0.0.1:${port}`;
+    switch (format) {
+        case 'bash':
+            return `export https_proxy=${proxy} http_proxy=${proxy} all_proxy=${proxy}`;
+        case 'fish':
+            return `set -x http_proxy ${proxy}; set -x https_proxy ${proxy}; set -x all_proxy ${proxy}`;
+        case 'cmd':
+            return `set http_proxy=${proxy}\nset https_proxy=${proxy}\nset all_proxy=${proxy}`;
+        case 'powershell':
+            return `$env:HTTP_PROXY="${proxy}"; $env:HTTPS_PROXY="${proxy}"; $env:ALL_PROXY="${proxy}"`;
+        case 'nushell':
+            return `$env.HTTP_PROXY = "${proxy}"; $env.HTTPS_PROXY = "${proxy}"; $env.ALL_PROXY = "${proxy}"`;
+        default:
+            return `export https_proxy=${proxy} http_proxy=${proxy} all_proxy=${proxy}`;
+    }
+}
+
+/**
+ * Copy text to clipboard with fallback for environments without clipboard API.
+ * @param {string} text
+ * @returns {Promise<void>}
+ */
+export async function copyToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_) {
+        // Fallback for environments without clipboard API
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+        } finally {
+            document.body.removeChild(textarea);
+        }
     }
 }
