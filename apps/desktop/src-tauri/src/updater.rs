@@ -789,6 +789,7 @@ pub async fn update_core(
         false,
         last_args,
         last_secret,
+        Some(true),
     )
     .await;
     match result {
