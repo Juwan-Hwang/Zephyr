@@ -1,8 +1,9 @@
 use crate::core_manager::MihomoState;
+use crate::{persist_settings, SettingsState};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Manager as _};
+use tauri::{AppHandle, Manager as _, State};
 use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
@@ -243,8 +244,102 @@ pub async fn update_subscription_ua(
     Ok(())
 }
 
+/// Strip `.yaml`/`.yml` 扩展名（大小写不敏感），返回剩余部分；无扩展名则原样返回。
+/// 用于配置名比较时忽略扩展名差异（如 "foo.yaml" vs "foo.yml" / "foo.YAML" / "foo.Yaml"）。
+/// 在 Windows/macOS 等大小写不敏感文件系统上，扩展名可能是任意大小写组合。
+fn strip_yaml_ext(name: &str) -> &str {
+    if name.len() >= 5 && name[name.len() - 5..].eq_ignore_ascii_case(".yaml") {
+        &name[..name.len() - 5]
+    } else if name.len() >= 4 && name[name.len() - 4..].eq_ignore_ascii_case(".yml") {
+        &name[..name.len() - 4]
+    } else {
+        name
+    }
+}
+
+/// 删除配置后检查 `last_config` 是否悬空（指向已删除的文件）。
+/// 如果是，重置为第一个可用配置；如果没有任何配置，置为 `None`。
+fn cleanup_dangling_last_config(
+    app: &AppHandle,
+    state: &State<'_, SettingsState>,
+    paths: &super::AppPaths,
+    deleted_name: &str,
+) {
+    // 判断 last_config 是否指向已删除的配置（规范化 + strip 扩展名后比较）
+    // 提取为闭包便于两段锁内复用，避免 TOCTOU 竞态时第二段锁无条件覆盖并发更新
+    let is_same_config = |lc: &str| -> bool {
+        if lc == deleted_name {
+            return true;
+        }
+        let norm_lc = sanitize_config_file_name(lc.to_owned())
+            .or_else(|_| sanitize_config_file_name(format!("{lc}.yaml")))
+            .unwrap_or_default();
+        let norm_del = sanitize_config_file_name(deleted_name.to_owned()).unwrap_or_default();
+        !norm_lc.is_empty() && strip_yaml_ext(&norm_lc) == strip_yaml_ext(&norm_del)
+    };
+
+    // 第一段持锁：只判断是否需要清理，避免在锁内做阻塞 I/O 导致锁竞争
+    let needs_cleanup = {
+        let settings_guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        settings_guard
+            .last_config
+            .as_deref()
+            .is_some_and(is_same_config)
+    };
+
+    if !needs_cleanup {
+        return;
+    }
+
+    // 锁外执行阻塞文件系统 I/O：找到第一个可用的配置文件作为替代
+    let new_config = super::core_process::first_available_profile(paths).and_then(|p| {
+        p.file_name()
+            .and_then(|name| name.to_str())
+            .map(std::borrow::ToOwned::to_owned)
+    });
+
+    // 第二段持锁：再次确认 last_config 仍指向已删除的配置才覆盖，避免并发修改被丢弃
+    let (settings_clone, updated) = {
+        let mut settings_guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if settings_guard
+            .last_config
+            .as_deref()
+            .is_some_and(is_same_config)
+        {
+            settings_guard.last_config = new_config;
+            (settings_guard.clone(), true)
+        } else {
+            (settings_guard.clone(), false)
+        }
+    };
+
+    if !updated {
+        return;
+    }
+
+    if let Err(e) = persist_settings(app, &settings_clone) {
+        eprintln!("[delete_config] failed to persist settings after last_config cleanup: {e}");
+    }
+    if let Some(name) = &settings_clone.last_config {
+        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to '{name}'");
+    } else {
+        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to None (no profiles left)");
+    }
+}
+
 #[tauri::command]
-pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
+#[allow(private_interfaces)]
+pub async fn delete_config(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    name: String,
+) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
     // Ensure the name has a .yaml extension
@@ -274,6 +369,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
             let mut metadata = load_metadata(&paths);
             metadata.configs.remove(&yml_name);
             save_metadata(&paths, &metadata)?;
+            cleanup_dangling_last_config(&app, &state, &paths, &yml_name);
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
@@ -302,6 +398,10 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
         metadata.configs.remove(&name);
     }
     save_metadata(&paths, &metadata)?;
+
+    // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
+    // 避免悬空指针导致下次冷启动加载到错误的配置。
+    cleanup_dangling_last_config(&app, &state, &paths, &clean_name);
 
     Ok(format!("Config {name} deleted"))
 }
