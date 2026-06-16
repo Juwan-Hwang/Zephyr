@@ -1720,9 +1720,14 @@ fn cleanup_run_config(app: &AppHandle) {
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn stop_core(app: AppHandle, state: State<'_, MihomoState>) -> Result<String, String> {
-    stop_core_inner(&app, &state)?;
+pub async fn stop_core(app: AppHandle) -> Result<String, String> {
+    let app_clone = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let state = app_clone.state::<MihomoState>();
+        stop_core_inner(&app_clone, &state)
+    })
+    .await
+    .map_err(|e| format!("Failed to stop core: {e}"))??;
     Ok("Core stopped and cleaned up".to_owned())
 }
 
