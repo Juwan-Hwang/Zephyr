@@ -42,6 +42,7 @@ pub struct TrayLabels {
     pub rule: String,
     pub global: String,
     pub direct: String,
+    pub copy_env: String,
 }
 
 impl Default for TrayLabels {
@@ -54,6 +55,7 @@ impl Default for TrayLabels {
             rule: "Rule".to_owned(),
             global: "Global".to_owned(),
             direct: "Direct".to_owned(),
+            copy_env: "Copy Proxy Env".to_owned(),
         }
     }
 }
@@ -293,6 +295,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             crate::backend_event::emit_to_main(app, "tray-mode-changed", mode);
         }
         _ => {
+            // Handle copy env (single menu item)
+            if id == "copy_env" {
+                crate::backend_event::emit_to_main(app, "tray-copy-env", ());
+            }
             // Handle subscription switching (prefix: sub_)
             if let Some(sub_name) = id.strip_prefix("sub_") {
                 crate::backend_event::emit_to_main(app, "tray-subscription-changed", sub_name);
@@ -400,6 +406,7 @@ pub struct TrayMenuParams {
     pub direct_text: String,
     pub subscriptions_text: String,
     pub proxies_text: String,
+    pub copy_env_text: String,
     pub sys_proxy_enabled: bool,
     pub tun_enabled: bool,
     pub configs: Vec<ConfigInfo>,
@@ -433,6 +440,7 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
         rule: params.rule_text.clone(),
         global: params.global_text.clone(),
         direct: params.direct_text.clone(),
+        copy_env: params.copy_env_text.clone(),
     };
     drop(guard);
 
@@ -502,6 +510,14 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
         .item(&rule_i)
         .item(&global_i)
         .item(&direct_i);
+
+    // Build Copy Proxy Env menu item
+    let env_sep = PredefinedMenuItem::separator(&app)
+        .map_err(|e| format!("Failed to create separator: {e}"))?;
+    let copy_env_i = MenuItem::with_id(&app, "copy_env", &params.copy_env_text, true, None::<&str>)
+        .map_err(|e| format!("Failed to create copy env item: {e}"))?;
+
+    builder = builder.item(&env_sep).item(&copy_env_i);
 
     // Build separate Subscriptions and Proxies submenus
     let has_configs = !params.configs.is_empty();
@@ -685,6 +701,17 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         Err(_) => return,
     };
 
+    // Copy Proxy Env menu item
+    let env_sep = match PredefinedMenuItem::separator(app) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let copy_env_i = match MenuItem::with_id(app, "copy_env", &labels.copy_env, true, None::<&str>)
+    {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
     let sep2 = match PredefinedMenuItem::separator(app) {
         Ok(s) => s,
         Err(_) => return,
@@ -703,6 +730,8 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         .item(&rule_i)
         .item(&global_i)
         .item(&direct_i)
+        .item(&env_sep)
+        .item(&copy_env_i)
         .item(&sep2)
         .item(&quit_i)
         .build();

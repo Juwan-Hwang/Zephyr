@@ -318,6 +318,13 @@ export const translations = {
         trayProxyMode: "Proxy Mode",
         traySubscriptions: "Subscriptions",
         trayProxies: "Proxies",
+        trayCopyEnv: "Copy Proxy Env",
+        trayCopyEnvSuccess: "Proxy env vars copied",
+        copyProxyEnv: "Copy Proxy Env",
+        copyProxyEnvDesc: "Copy proxy env vars for terminal use",
+        copyEnvFormat: "Shell Format",
+        copyEnvCopied: "Copied",
+        copy: "Copy",
 
         // Rule buttons
         moveToTop: "Move to Top",
@@ -980,6 +987,13 @@ export const translations = {
         trayProxyMode: "代理模式",
         traySubscriptions: "订阅选择",
         trayProxies: "节点选择",
+        trayCopyEnv: "复制代理环境变量",
+        trayCopyEnvSuccess: "代理环境变量已复制",
+        copyProxyEnv: "复制代理环境变量",
+        copyProxyEnvDesc: "复制代理环境变量到剪贴板，方便终端使用",
+        copyEnvFormat: "Shell 格式",
+        copyEnvCopied: "已复制",
+        copy: "复制",
 
         // Rule buttons
         moveToTop: "移至顶部",

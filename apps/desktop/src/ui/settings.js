@@ -135,6 +135,160 @@ async function syncUserAgentToBackend() {
 const debouncedSyncUA = debounce(() => syncUserAgentToBackend(), 500);
 
 // ---------------------------------------------------------------------------
+//  Copy Proxy Env Settings
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect the default shell format based on the current platform.
+ * @returns {string} Shell format key: bash, cmd, powershell, fish, nushell
+ */
+function detectDefaultShellFormat() {
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = navigator.platform?.toLowerCase() || '';
+    if (ua.includes('windows')) return 'powershell';
+    if (platform.includes('mac')) return 'bash';
+    if (ua.includes('linux')) return 'bash';
+    return 'bash';
+}
+
+/**
+ * Resolve the effective shell format from the user's setting.
+ * Falls back to platform detection if the stored value is empty or invalid.
+ * @param {string} format - Format from settings
+ * @returns {string} Resolved format key
+ */
+function resolveEnvFormat(format) {
+    const validFormats = ['bash', 'fish', 'cmd', 'powershell', 'nushell'];
+    if (format && validFormats.includes(format)) return format;
+    return detectDefaultShellFormat();
+}
+
+/**
+ * Initialize the "Copy Proxy Env" settings row:
+ * - Copy button: copies env vars in the configured format
+ * - Gear button: opens a modal to select the shell format
+ */
+function initCopyEnvSettings() {
+    const copyBtn = document.getElementById('copy-env-btn');
+    const formatBtn = document.getElementById('copy-env-format-btn');
+
+    /** @type {() => Record<string, any>} */
+    const getT = () => /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+
+    // --- Copy button ---
+    copyBtn?.addEventListener('click', async () => {
+        try {
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const format = resolveEnvFormat(settings.copy_env_format);
+            const { getConfig } = await import('../api.js');
+            const currentConfig = /** @type {any} */ (await getConfig());
+            const port = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+            const { generateProxyEnvVars, copyToClipboard } = await import('./tray.js');
+            const text = generateProxyEnvVars(format, port);
+            await copyToClipboard(text);
+            const t = getT();
+            // Visual feedback: briefly change button text
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = t.copyEnvCopied || 'Copied';
+            copyBtn.style.color = 'var(--accent-primary, #6366f1)';
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+                copyBtn.style.color = '';
+            }, 1500);
+        } catch (err) {
+            settingsLogger.error('[copy-env] Failed to copy:', err);
+        }
+    });
+
+    // --- Format selection modal (gear icon) ---
+    formatBtn?.addEventListener('click', async () => {
+        document.getElementById('copy-env-format-modal')?.remove();
+
+        const t = getT();
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        const currentFormat = resolveEnvFormat(settings.copy_env_format);
+
+        const formats = [
+            { key: 'bash', label: 'Bash / Zsh' },
+            { key: 'fish', label: 'Fish' },
+            { key: 'cmd', label: 'CMD' },
+            { key: 'powershell', label: 'PowerShell' },
+            { key: 'nushell', label: 'Nushell' },
+        ];
+
+        const modal = document.createElement('div');
+        modal.id = 'copy-env-format-modal';
+        modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+        modal.innerHTML = `
+            <div class="glass-card w-[360px] p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.copyEnvFormat || 'Shell Format'}</h3>
+                    <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="space-y-1">
+                    ${formats.map(f => `
+                        <button class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}">
+                            <span class="text-xs text-[var(--text-primary)]">${f.label}</span>
+                            ${f.key === currentFormat ? '<svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        document.body.style.overflow = 'hidden';
+
+        // Animate in
+        requestAnimationFrame(() => {
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                requestAnimationFrame(() => {
+                    panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                    panel.style.transform = 'scale(1)';
+                    panel.style.opacity = '1';
+                });
+            }
+        });
+
+        const closeModal = () => {
+            document.body.style.overflow = '';
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transition = 'all 0.15s ease-in';
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                setTimeout(() => modal.remove(), 150);
+            } else {
+                modal.remove();
+            }
+        };
+
+        document.getElementById('copy-env-modal-close')?.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        // Format selection
+        modal.querySelectorAll('.copy-env-format-option').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const selectedFormat = btn.getAttribute('data-format');
+                if (!selectedFormat) return;
+                try {
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { copy_env_format: selectedFormat } });
+                } catch (err) {
+                    settingsLogger.error('[copy-env] Failed to save format:', err);
+                }
+                closeModal();
+            });
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
 //  initUwpExemption
 // ---------------------------------------------------------------------------
 export function initUwpExemption() {
@@ -1957,6 +2111,8 @@ export async function initSettings() {
 
     // Initialize log settings modal
     initLogSettingsModal();
+
+    initCopyEnvSettings();
 
     initFakeClient();
 
