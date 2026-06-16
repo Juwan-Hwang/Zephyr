@@ -1,8 +1,9 @@
 use crate::core_manager::MihomoState;
+use crate::{persist_settings, SettingsState};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Manager as _};
+use tauri::{AppHandle, Manager as _, State};
 use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
@@ -243,8 +244,78 @@ pub async fn update_subscription_ua(
     Ok(())
 }
 
+/// 删除配置后检查 `last_config` 是否悬空（指向已删除的文件）。
+/// 如果是，重置为第一个可用配置；如果没有任何配置，置为 `None`。
+fn cleanup_dangling_last_config(
+    app: &AppHandle,
+    state: &State<'_, SettingsState>,
+    paths: &super::AppPaths,
+    deleted_name: &str,
+) {
+    let mut settings_guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    let needs_cleanup = settings_guard
+        .last_config
+        .as_deref()
+        .is_some_and(|lc| lc == deleted_name);
+
+    if !needs_cleanup {
+        return;
+    }
+
+    // 找到第一个可用的配置文件作为替代
+    let new_config = first_available_profile_name(&paths.profiles_dir);
+    settings_guard.last_config.clone_from(&new_config);
+    let settings_clone = settings_guard.clone();
+    drop(settings_guard);
+
+    if let Err(e) = persist_settings(app, &settings_clone) {
+        eprintln!("[delete_config] failed to persist settings after last_config cleanup: {e}");
+    }
+    if let Some(name) = &new_config {
+        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to '{name}'");
+    } else {
+        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to None (no profiles left)");
+    }
+}
+
+/// 扫描 `profiles_dir`，返回第一个可用的 `.yaml`/`.yml` 配置文件名（排除 `run_config.yaml`）。
+fn first_available_profile_name(profiles_dir: &std::path::Path) -> Option<String> {
+    let entries = fs::read_dir(profiles_dir).ok()?;
+    let mut configs: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_yaml = path
+            .extension()
+            .map(|ext| ext == "yaml" || ext == "yml")
+            .unwrap_or(false);
+        let is_run_config = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == "run_config.yaml")
+            .unwrap_or(false);
+        if path.is_file() && is_yaml && !is_run_config {
+            configs.push(path);
+        }
+    }
+    configs.sort();
+    configs
+        .first()?
+        .file_name()?
+        .to_str()
+        .map(std::borrow::ToOwned::to_owned)
+}
+
 #[tauri::command]
-pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
+#[allow(private_interfaces)]
+pub async fn delete_config(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    name: String,
+) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
     // Ensure the name has a .yaml extension
@@ -274,6 +345,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
             let mut metadata = load_metadata(&paths);
             metadata.configs.remove(&yml_name);
             save_metadata(&paths, &metadata)?;
+            cleanup_dangling_last_config(&app, &state, &paths, &yml_name);
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
@@ -302,6 +374,10 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
         metadata.configs.remove(&name);
     }
     save_metadata(&paths, &metadata)?;
+
+    // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
+    // 避免悬空指针导致下次冷启动加载到错误的配置。
+    cleanup_dangling_last_config(&app, &state, &paths, &clean_name);
 
     Ok(format!("Config {name} deleted"))
 }

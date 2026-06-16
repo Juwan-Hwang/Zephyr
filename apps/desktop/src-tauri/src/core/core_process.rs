@@ -1338,6 +1338,7 @@ pub async fn start_core(
     test: bool,
     custom_args: Vec<String>,
     secret: Option<String>,
+    force: Option<bool>,
 ) -> Result<CoreStartResult, String> {
     // Wait for any previous core start operation to complete (max 10s)
     let mut wait_ms = 0;
@@ -1392,7 +1393,7 @@ pub async fn start_core(
                 let same_config = lock
                     .last_config_path()
                     .is_some_and(|current| current == config_path);
-                if same_config {
+                if same_config && !force.unwrap_or(false) {
                     if let Some(port) = lock.last_port() {
                         let active = lock.last_config_path().map(std::borrow::ToOwned::to_owned);
                         return Ok(CoreStartResult {
@@ -1403,7 +1404,7 @@ pub async fn start_core(
                     }
                     None
                 } else {
-                    // Core is running with a different config — prepare drain info
+                    // Core is running with a different config (or force restart) — prepare drain info
                     lock.last_port()
                         .map(|port| (port, lock.last_secret().to_owned()))
                 }
