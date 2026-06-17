@@ -38,7 +38,6 @@ mod win_job {
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::System::JobObjects::*;
-    use windows_sys::Win32::System::Threading::*;
 
     /// Wrapper to make HANDLE Send+Sync so it can live in a static.
     struct SendSyncHandle(HANDLE);
@@ -58,7 +57,7 @@ mod win_job {
         JOB.get_or_init(|| {
             // Safety: CreateJobObjectW is a well-defined Windows API.
             let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-            if job == 0 {
+            if job.is_null() {
                 return SendSyncHandle(job);
             }
 
@@ -88,7 +87,7 @@ mod win_job {
                 // Failed to set info — job won't auto-kill, but don't crash.
                 // Safety: `job` is a valid, non-null handle to a Job Object.
                 unsafe { CloseHandle(job) };
-                return SendSyncHandle(0);
+                return SendSyncHandle(std::ptr::null_mut());
             }
 
             SendSyncHandle(job)
@@ -99,7 +98,7 @@ mod win_job {
     /// Assign a process to the auto-kill Job Object.
     pub fn assign_to_job(process_handle: HANDLE) -> bool {
         let job = get_or_create_job();
-        if job == 0 {
+        if job.is_null() {
             return false;
         }
         // Safety: AssignProcessToJobObject is a well-defined Windows API.
