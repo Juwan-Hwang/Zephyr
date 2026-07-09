@@ -83,6 +83,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell"
 ] }
 winreg = "0.52"
+# webview2-com: direct dependency for ProcessFailed crash recovery.
+# MUST match the version in Cargo.lock (transitive via tauri → wry → webview2-com).
+# Re-check this version whenever Tauri is upgraded.
+webview2-com = "=0.38.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS specific dependencies will be added as needed
