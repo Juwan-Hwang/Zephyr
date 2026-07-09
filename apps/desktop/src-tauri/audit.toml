@@ -1,0 +1,15 @@
+# cargo-audit configuration
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+ignore = [
+  # rand 0.8 unsound with custom logger using rand::rng()
+  # Indirect dep via clash-prism-script v0.1.3 (latest, still uses rand 0.8)
+  # Our code pins rand = "0.10.1" directly; fix requires clash-prism-script to upgrade rand
+  "RUSTSEC-2026-0097",
+  # rustls-webpki name constraints issues
+  # Indirect dep via reqwest -> hyper-rustls -> tokio-rustls -> rustls -> rustls-webpki
+  # Fixed by rustls 0.23.40 + webpki 0.103.13; kept in ignore for compatibility
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+]
