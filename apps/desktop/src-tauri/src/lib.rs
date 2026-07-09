@@ -12,6 +12,8 @@ pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
 pub mod uwp_loopback;
+#[cfg(target_os = "windows")]
+pub mod webview_recovery;
 
 use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
@@ -28,6 +30,7 @@ use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use sys_proxy::{
@@ -260,6 +263,218 @@ pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
 /// close button with `close_to_tray` disabled). Prevents `ExitRequested`
 /// from blocking the shutdown.
 pub(crate) struct ExplicitExitFlag(pub(crate) Arc<std::sync::atomic::AtomicBool>);
+
+/// Tracks webview liveness via a heartbeat from the frontend (Layer 2).
+///
+/// Uses a lock-free `AtomicI64` storing Unix-millis of the last heartbeat.
+/// If the heartbeat goes stale (> `HEARTBEAT_TIMEOUT_SECS`), the webview is
+/// considered dead (e.g. `WebView2` crash on a non-Windows platform, or
+/// Layer 1 missed an event) and the window will be recreated on the next
+/// show attempt.
+///
+/// This is a pure fallback — Layer 1 (`ProcessFailed`) handles the 95% case
+/// with millisecond latency. The heartbeat only fires when Layer 1 is absent
+/// (non-Windows) or silently fails.
+pub(crate) struct WebviewHealth {
+    /// Unix-millis timestamp of the last heartbeat from the frontend.
+    /// Updated atomically — no mutex, no allocation, nanosecond-level cost.
+    ///
+    /// Sentinel: `0` means "explicitly invalidated" (written only by
+    /// `invalidate_heartbeat()` after window destroy). The initial value is
+    /// `monotonic_ms()` (app startup time), **never** `0`, so the cold-start
+    /// window before the first frontend heartbeat arrives is not mistaken for
+    /// a dead webview.
+    pub last_heartbeat_ms: AtomicI64,
+    /// Idempotent reconstruction gate. When `true`, a reconstruction is
+    /// already in progress and concurrent callers should skip.
+    /// Toggled via `compare_exchange` for lock-free mutual exclusion.
+    pub reconstructing: std::sync::atomic::AtomicBool,
+}
+
+impl Default for WebviewHealth {
+    fn default() -> Self {
+        Self {
+            // Initialise to app-startup time so the cold-start window
+            // (before the first heartbeat arrives) is not falsely judged dead.
+            last_heartbeat_ms: AtomicI64::new(monotonic_ms()),
+            reconstructing: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+/// Heartbeat send interval (frontend side): 15 seconds.
+///
+/// Deliberately lazy — Layer 1 handles instant recovery, so the heartbeat
+/// only needs to catch the rare case where Layer 1 is absent or fails.
+/// At 15 s, that's ~5 760 IPC calls/day — negligible.
+pub(crate) const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+
+/// Consecutive missed heartbeats before declaring the webview dead.
+///
+/// 3 × 15 s = 45 s worst-case detection latency. Tolerates one or two
+/// transient IPC hiccups without false-positive recreation.
+pub(crate) const HEARTBEAT_MISSED_THRESHOLD: u64 = 3;
+
+/// Effective timeout: `HEARTBEAT_INTERVAL_SECS * HEARTBEAT_MISSED_THRESHOLD`.
+pub(crate) const HEARTBEAT_TIMEOUT_SECS: u64 = HEARTBEAT_INTERVAL_SECS * HEARTBEAT_MISSED_THRESHOLD;
+
+/// Monotonic milliseconds since application startup.
+///
+/// Uses `Instant` (monotonic clock) instead of `SystemTime` to be immune
+/// to system clock adjustments (NTP sync, timezone changes, manual resets,
+/// CMOS battery failure). This is critical because `SystemTime` jumping
+/// backward could make `monotonic_ms()` return `0` — the sentinel for
+/// "invalidated heartbeat" — triggering an infinite window recreation loop.
+///
+/// The returned value is always ≥ 1 (never `0`, the sentinel).
+pub(crate) fn monotonic_ms() -> i64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let startup = *START.get_or_init(Instant::now);
+    let millis = Instant::now()
+        .saturating_duration_since(startup)
+        .as_millis();
+    i64::try_from(millis).unwrap_or(i64::MAX).max(1)
+}
+
+/// Atomically update the heartbeat timestamp.
+pub(crate) fn touch_heartbeat(app: &tauri::AppHandle) {
+    if let Some(health) = app.try_state::<WebviewHealth>() {
+        health
+            .last_heartbeat_ms
+            .store(monotonic_ms(), Ordering::Relaxed);
+    }
+}
+
+/// Mark the heartbeat as stale (e.g. after window destroy).
+///
+/// This is the **only** place that writes `0` — the sentinel for
+/// "explicitly invalidated". `is_webview_alive` checks `last == 0` first
+/// and returns `false` immediately, so the window is guaranteed to be
+/// recreated on the next show attempt.
+pub(crate) fn invalidate_heartbeat(app: &tauri::AppHandle) {
+    if let Some(health) = app.try_state::<WebviewHealth>() {
+        health.last_heartbeat_ms.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Try to acquire the reconstruction gate.
+///
+/// Returns `true` if this caller "wins" and should proceed with
+/// reconstruction. Returns `false` if another caller is already
+/// reconstructing — the caller should silently skip.
+///
+/// The gate is released by [`release_reconstruct_gate`].
+pub(crate) fn try_acquire_reconstruct_gate(app: &tauri::AppHandle) -> bool {
+    if let Some(health) = app.try_state::<WebviewHealth>() {
+        health
+            .reconstructing
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+    } else {
+        true
+    }
+}
+
+/// Release the reconstruction gate after reconstruction finishes.
+pub(crate) fn release_reconstruct_gate(app: &tauri::AppHandle) {
+    if let Some(health) = app.try_state::<WebviewHealth>() {
+        health.reconstructing.store(false, Ordering::Release);
+    }
+}
+
+/// Check whether the webview is alive based on the last heartbeat timestamp.
+///
+/// Returns `true` if the heartbeat is recent (< `HEARTBEAT_TIMEOUT_SECS`),
+/// if the window is currently hidden (browser engine throttles JS timers
+/// when hidden, so the heartbeat naturally stops), or if the health state
+/// is not yet registered.
+pub(crate) fn is_webview_alive(app: &tauri::AppHandle) -> bool {
+    // If the window is hidden, the browser engine throttles JS timers,
+    // so the heartbeat will naturally stop. Treat the webview as alive
+    // to avoid false-positive recreation when showing.
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            return true;
+        }
+    }
+    if let Some(health) = app.try_state::<WebviewHealth>() {
+        let last = health.last_heartbeat_ms.load(Ordering::Relaxed);
+        if last == 0 {
+            return false;
+        }
+        let elapsed_ms = monotonic_ms() - last;
+        let timeout_ms = i64::try_from(HEARTBEAT_TIMEOUT_SECS)
+            .ok()
+            .and_then(|t| t.checked_mul(1000))
+            .unwrap_or(i64::MAX);
+        elapsed_ms < timeout_ms
+    } else {
+        true
+    }
+}
+
+/// Show or recreate the main window, detecting dead webviews.
+///
+/// This is the unified entry point for all "show window" paths:
+/// - `show_main_window` command (called from frontend)
+/// - Tray icon click
+/// - Single-instance plugin (second launch)
+///
+/// If the window exists but the webview heartbeat is stale (`WebView2` crash
+/// not caught by Layer 1, or non-Windows platform), the zombie window is
+/// destroyed and a fresh one is created.
+pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
+    // Fast path: window exists and webview is alive — just show it.
+    if let Some(window) = app.get_webview_window("main") {
+        if is_webview_alive(app) {
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+    }
+
+    // Slow path: window missing or webview dead.
+    // Acquire the reconstruction gate BEFORE destroying the zombie window.
+    // If another caller already holds the gate, we must not destroy the
+    // existing window — otherwise the app is left in a windowless state.
+    if !try_acquire_reconstruct_gate(app) {
+        eprintln!("[lib] Reconstruction already in progress — skipping");
+        return;
+    }
+
+    // Double-check: another caller may have already recreated the window
+    // while we were waiting for the gate.
+    if let Some(window) = app.get_webview_window("main") {
+        if is_webview_alive(app) {
+            let _ = window.show();
+            let _ = window.set_focus();
+            release_reconstruct_gate(app);
+            return;
+        }
+    }
+
+    // Destroy zombie if it exists (now safe — we hold the gate).
+    if let Some(window) = app.get_webview_window("main") {
+        eprintln!("[lib] Webview heartbeat stale — recreating window");
+        let _ = window.destroy();
+    }
+
+    match recreate_main_window(app) {
+        Ok(window) => {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        Err(e) => {
+            eprintln!("[lib] Failed to recreate main window: {e}");
+            emit_error!(
+                System,
+                SYS_WINDOW_RECREATE_FAILED,
+                "Failed to recreate main window: {e}"
+            );
+        }
+    }
+    release_reconstruct_gate(app);
+}
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -543,44 +758,72 @@ pub(crate) fn persist_settings(app: &tauri::AppHandle, settings: &Settings) -> R
     Ok(())
 }
 
+/// Frontend heartbeat — called periodically by `main.js` to signal that
+/// the webview is alive (Layer 2). If this stops arriving (3 consecutive
+/// missed = 45 s), `is_webview_alive` returns `false` and the next
+/// `show_main_window` / tray click will recreate the window.
+///
+/// Implementation: a single `AtomicI64` store — no lock, no allocation,
+/// nanosecond-level cost.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn heartbeat(state: tauri::State<WebviewHealth>) {
+    state
+        .last_heartbeat_ms
+        .store(monotonic_ms(), Ordering::Relaxed);
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn show_main_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    } else {
-        // Window was destroyed by lightweight mode — recreate it
-        match recreate_main_window(&app) {
-            Ok(window) => {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            Err(e) => {
-                eprintln!("Failed to recreate main window: {e}");
-                emit_error!(
-                    System,
-                    SYS_WINDOW_RECREATE_FAILED,
-                    "Failed to recreate main window: {e}"
-                );
-            }
-        }
-    }
+    show_or_recreate_main_window(&app);
 }
 
-/// Recreate the main window with the same configuration as the initial window.
-/// Uses conditional compilation for `.transparent()` which requires
-/// `macos-private-api` feature on macOS.
+/// Recreate the main window with the same configuration as `tauri.conf.json`.
+/// Dimensions and properties mirror the config-defined window so that the
+/// recreated window is visually identical to the original.
+///
+/// The `on_page_load` callback re-arms the `WebView2` crash recovery handler
+/// (Layer 1) once the new webview finishes loading — this covers both the
+/// initial creation and every subsequent recreation.
 pub(crate) fn recreate_main_window(
     app: &tauri::AppHandle,
 ) -> Result<tauri::WebviewWindow, tauri::Error> {
+    // Touch heartbeat immediately so that a show request arriving during
+    // page load doesn't mistake the fresh webview for a dead one (which
+    // would cause an infinite destroy→recreate loop). The `on_page_load`
+    // callback will touch again once the page finishes loading.
+    touch_heartbeat(app);
+
+    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let window_builder =
         tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
             .title("Zephyr")
-            .inner_size(960.0, 680.0)
-            .min_inner_size(640.0, 420.0)
+            .inner_size(860.0, 620.0)
+            .min_inner_size(720.0, 540.0)
+            .center()
             .decorations(false)
-            .visible(true);
+            .visible(true)
+            .on_page_load({
+                let armed = armed.clone();
+                move |webview_window, payload| {
+                    if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                        #[cfg(target_os = "windows")]
+                        {
+                            if !armed.swap(true, Ordering::Relaxed) {
+                                if let Err(e) =
+                                    webview_recovery::arm_crash_recovery(&webview_window)
+                                {
+                                    eprintln!("[lib] Failed to arm crash recovery: {e}");
+                                }
+                            }
+                        }
+                        // Reset heartbeat timestamp so Layer 2 doesn't falsely
+                        // detect the fresh webview as dead during initialisation.
+                        touch_heartbeat(webview_window.app_handle());
+                    }
+                }
+            });
 
     #[cfg(not(target_os = "macos"))]
     #[allow(clippy::shadow_reuse)]
@@ -782,17 +1025,8 @@ pub fn run() {
     #[cfg(all(desktop, not(debug_assertions)))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Focus the existing window when a second instance is started.
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            } else {
-                // Window was destroyed by lightweight mode — recreate it
-                if let Ok(window) = recreate_main_window(app) {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+            // Focus the existing window, or recreate it if the webview is dead.
+            show_or_recreate_main_window(app);
             // Forward deep link arguments from the second instance to the first.
             for arg in args {
                 if arg.starts_with("clash://") {
@@ -807,6 +1041,7 @@ pub fn run() {
         .manage(TrayState::default())
         .manage(RateLimiter::new())
         .manage(ShortcutRegistry::default())
+        .manage(WebviewHealth::default())
         .setup(|app| {
             backend_event::init_app_handle(app.handle());
             core_event_bridge::install_core_event_bridge();
@@ -927,6 +1162,18 @@ pub fn run() {
             // (protocol associations on Windows/macOS pass URLs via argv)
             deep_link::handle_cli_deep_links(app.handle());
 
+            // Arm Layer 1 crash recovery for the initial window (created by
+            // tauri.conf.json). `recreate_main_window` arms it via `on_page_load`,
+            // but the initial window bypasses that path.
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(e) = webview_recovery::arm_crash_recovery(&window) {
+                        eprintln!("[lib] Failed to arm crash recovery for initial window: {e}");
+                    }
+                }
+            }
+
             Ok(())
         })
         .on_window_event(move |window, event| {
@@ -959,6 +1206,11 @@ pub fn run() {
                         app.cleanup_before_exit();
                         app.exit(0);
                     }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Mark the heartbeat as stale so the next show attempt
+                    // recreates the window instead of finding a zombie.
+                    invalidate_heartbeat(window.app_handle());
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     let app = window.app_handle();
@@ -1080,6 +1332,7 @@ pub fn run() {
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            heartbeat,
             // Prism Engine commands
             prism::prism_apply,
             prism::prism_status,
