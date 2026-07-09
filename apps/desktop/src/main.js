@@ -8,6 +8,7 @@
 
 import {
   invoke,
+  listen,
   setBaseUrl,
   setSecret,
   setCoreReachable,
@@ -390,6 +391,59 @@ async function initApp() {
   registerCleanup(() => { cleanupTrayEventListeners(); });
 
   window.addEventListener('beforeunload', () => runCleanup());
+
+  // 10. Heartbeat — let the backend know the webview is alive (Layer 2).
+  // If this stops arriving (e.g. `WebView2` crash not caught by Layer 1),
+  // the backend will recreate the window on the next show attempt.
+  //
+  // Interval is deliberately lazy (15 s) — Layer 1 handles instant recovery;
+  // this is pure fallback. The timer is paused when the window is hidden
+  // (close-to-tray / lightweight mode) to eliminate background overhead.
+  const HEARTBEAT_INTERVAL_MS = 15_000;
+  let _heartbeatTimer = null;
+
+  function startHeartbeat() {
+    // Defensive: always clear first so rapid hide/show cycles
+    // never accumulate duplicate intervals.
+    stopHeartbeat();
+    // Fire one immediately on resume — don't wait for the next 15 s cycle.
+    // Without this, the backend sees a stale timestamp from before the
+    // window was hidden and might falsely trigger reconstruction.
+    invoke(COMMANDS.HEARTBEAT).catch(() => {});
+    _heartbeatTimer = setInterval(() => {
+      invoke(COMMANDS.HEARTBEAT).catch(() => {});
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  function stopHeartbeat() {
+    if (_heartbeatTimer !== null) {
+      clearInterval(_heartbeatTimer);
+      _heartbeatTimer = null;
+    }
+  }
+
+// Start initially only if the window is visible on load.
+// If the app autostarts minimized to tray, the heartbeat will be
+// started when the window is first shown.
+if (!document.hidden) {
+  startHeartbeat();
+}
+
+  // Pause when hidden, resume when shown — zero overhead while in tray.
+  listen('tauri://window-hidden', () => stopHeartbeat()).then((unlisten) => registerCleanup(unlisten));
+  listen('tauri://window-shown', () => startHeartbeat()).then((unlisten) => registerCleanup(unlisten));
+  // Also respect native visibilitychange (covers system sleep / tab switch).
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      stopHeartbeat();
+    } else {
+      startHeartbeat();
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  registerCleanup(() => document.removeEventListener('visibilitychange', handleVisibilityChange));
+
+  registerCleanup(() => stopHeartbeat());
 
   apiLogger.info(`[Zephyr] ✅ App ready! Total: ${(performance.now() - t0).toFixed(0)}ms`);
 }
