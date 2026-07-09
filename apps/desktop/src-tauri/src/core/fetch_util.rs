@@ -167,11 +167,19 @@ pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<Str
     match direct_result {
         Ok(content) => Ok(content),
         Err(direct_err) => {
-            eprintln!("[fetch_url_content] Direct download failed: {direct_err}");
+            crate::emit_warn!(
+                Subscription,
+                SUB_DIRECT_DOWNLOAD_FAILED,
+                "Direct download failed: {direct_err}"
+            );
 
             // Try proxy fallback if available
             if let Some(port) = proxy_port.filter(|&p| p > 0) {
-                eprintln!("[fetch_url_content] Retrying with proxy...");
+                crate::emit_info!(
+                    Subscription,
+                    SUB_PROXY_RETRY,
+                    "Retrying with proxy on port {port}..."
+                );
                 match try_proxy_download(url, port).await {
                     Ok(content) => Ok(content),
                     Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),

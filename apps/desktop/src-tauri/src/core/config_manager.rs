@@ -334,12 +334,24 @@ fn cleanup_dangling_last_config(
     }
 
     if let Err(e) = persist_settings(app, &settings_clone) {
-        eprintln!("[delete_config] failed to persist settings after last_config cleanup: {e}");
+        crate::emit_warn!(
+            Config,
+            CONFIG_PERSIST_FAILED,
+            "Failed to persist settings after last_config cleanup: {e}"
+        );
     }
     if let Some(name) = &settings_clone.last_config {
-        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to '{name}'");
+        crate::emit_info!(
+            Config,
+            CONFIG_DANGLING_REF_CLEANED,
+            "last_config was dangling (pointed to deleted '{deleted_name}'), reset to '{name}'"
+        );
     } else {
-        eprintln!("[delete_config] last_config was dangling (pointed to deleted '{deleted_name}'), reset to None (no profiles left)");
+        crate::emit_info!(
+            Config,
+            CONFIG_DANGLING_REF_CLEANED,
+            "last_config was dangling (pointed to deleted '{deleted_name}'), reset to None (no profiles left)"
+        );
     }
 }
 

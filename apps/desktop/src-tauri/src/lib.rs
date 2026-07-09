@@ -455,7 +455,11 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
     // If another caller already holds the gate, we must not destroy the
     // existing window — otherwise the app is left in a windowless state.
     if !try_acquire_reconstruct_gate(app) {
-        eprintln!("[lib] Reconstruction already in progress — skipping");
+        emit_info!(
+            System,
+            SYS_RECONSTRUCTION_SKIPPED,
+            "Reconstruction already in progress — skipping"
+        );
         return;
     }
 
@@ -483,7 +487,11 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
 
     // Destroy zombie if it exists (now safe — we hold the gate).
     if let Some(window) = app.get_webview_window("main") {
-        eprintln!("[lib] Webview heartbeat stale — recreating window");
+        emit_info!(
+            System,
+            SYS_HEARTBEAT_STALE,
+            "Webview heartbeat stale — recreating window"
+        );
         let _ = window.destroy();
     }
 
@@ -493,7 +501,6 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
             let _ = window.set_focus();
         }
         Err(e) => {
-            eprintln!("[lib] Failed to recreate main window: {e}");
             emit_error!(
                 System,
                 SYS_WINDOW_RECREATE_FAILED,
@@ -839,7 +846,11 @@ pub(crate) fn recreate_main_window(
                     {
                         if !armed.swap(true, Ordering::Relaxed) {
                             if let Err(e) = webview_recovery::arm_crash_recovery(&webview_window) {
-                                eprintln!("[lib] Failed to arm crash recovery: {e}");
+                                emit_error!(
+                                    System,
+                                    SYS_CRASH_RECOVERY_ARM_FAILED,
+                                    "Failed to arm crash recovery: {e}"
+                                );
                             }
                         }
                     }
@@ -1193,7 +1204,11 @@ pub fn run() {
             {
                 if let Some(window) = app.get_webview_window("main") {
                     if let Err(e) = webview_recovery::arm_crash_recovery(&window) {
-                        eprintln!("[lib] Failed to arm crash recovery for initial window: {e}");
+                        emit_error!(
+                            System,
+                            SYS_CRASH_RECOVERY_ARM_INITIAL,
+                            "Failed to arm crash recovery for initial window: {e}"
+                        );
                     }
                 }
             }

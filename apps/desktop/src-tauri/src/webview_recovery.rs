@@ -80,7 +80,11 @@ pub fn arm_crash_recovery(window: &WebviewWindow) -> tauri::Result<()> {
         let core = match unsafe { controller.CoreWebView2() } {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[webview_recovery] Failed to get CoreWebView2: {e}");
+                crate::emit_error!(
+                    System,
+                    SYS_WEBVIEW2_COM_INIT_FAILED,
+                    "Failed to get CoreWebView2 COM interface: {e}"
+                );
                 return;
             }
         };
@@ -96,7 +100,11 @@ pub fn arm_crash_recovery(window: &WebviewWindow) -> tauri::Result<()> {
         // created by `ProcessFailedEventHandler::create`) is reference-counted
         // by the COM runtime and kept alive as long as it is registered.
         if let Err(e) = unsafe { core.add_ProcessFailed(&handler, &mut token) } {
-            eprintln!("[webview_recovery] add_ProcessFailed failed: {e}");
+            crate::emit_error!(
+                System,
+                SYS_WEBVIEW2_HANDLER_FAILED,
+                "Failed to register ProcessFailed event handler: {e}"
+            );
         }
     })?;
     Ok(())
@@ -110,7 +118,11 @@ fn handle_process_failed(
     >,
 ) {
     let Some(a) = event_args else {
-        eprintln!("[webview_recovery] ProcessFailed but no event args");
+        crate::emit_warn!(
+            System,
+            SYS_WEBVIEW2_HANDLER_FAILED,
+            "ProcessFailed callback received no event args"
+        );
         return;
     };
 
@@ -118,12 +130,20 @@ fn handle_process_failed(
     // SAFETY: `ProcessFailedKind` is a simple getter that writes an i32
     // enum value into the output pointer. No lifetime concerns.
     if let Err(e) = unsafe { a.ProcessFailedKind(&mut raw_kind) } {
-        eprintln!("[webview_recovery] ProcessFailed but could not read kind: {e}");
+        crate::emit_error!(
+            System,
+            SYS_WEBVIEW2_HANDLER_FAILED,
+            "ProcessFailed: could not read failure kind: {e}"
+        );
         return;
     }
 
     if raw_kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
-        eprintln!("[webview_recovery] Browser process exited — recreating window");
+        crate::emit_info!(
+            System,
+            SYS_WEBVIEW_BROWSER_EXITED,
+            "Browser process exited — recreating window"
+        );
         UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
         recreate_window(app);
     } else if raw_kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
@@ -144,12 +164,18 @@ fn handle_process_failed(
             1
         };
 
-        eprintln!("[webview_recovery] Render process exited ({count}/{EXIT_THRESHOLD})");
+        crate::emit_info!(
+            System,
+            SYS_WEBVIEW_RENDER_EXITED,
+            "Render process exited ({count}/{EXIT_THRESHOLD})"
+        );
         UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
 
         if count >= EXIT_THRESHOLD {
-            eprintln!(
-                "[webview_recovery] Render process crashing repeatedly — escalating to full window recreation"
+            crate::emit_warn!(
+                System,
+                SYS_WEBVIEW_RENDER_CRASH_LOOP,
+                "Render process crashing repeatedly — escalating to full window recreation"
             );
             EXIT_COUNT.store(0, Ordering::Relaxed);
             recreate_window(app);
@@ -165,17 +191,25 @@ fn handle_process_failed(
             UNRESPONSIVE_COUNT.store(1, Ordering::Relaxed);
             1
         };
-        eprintln!(
-            "[webview_recovery] Render process unresponsive ({count}/{UNRESPONSIVE_THRESHOLD})"
+        crate::emit_info!(
+            System,
+            SYS_WEBVIEW_UNRESPONSIVE,
+            "Render process unresponsive ({count}/{UNRESPONSIVE_THRESHOLD})"
         );
         if count >= UNRESPONSIVE_THRESHOLD {
-            eprintln!("[webview_recovery] Unresponsive threshold reached — force reloading");
+            crate::emit_warn!(
+                System,
+                SYS_WEBVIEW_UNRESPONSIVE,
+                "Unresponsive threshold reached — force reloading"
+            );
             UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
             reload_webview(app);
         }
     } else {
-        eprintln!(
-            "[webview_recovery] ProcessFailed kind: {raw_kind:?} — no action needed (auto-recovered)"
+        crate::emit_info!(
+            System,
+            SYS_WEBVIEW_PROCESS_FAILED_OTHER,
+            "ProcessFailed kind: {raw_kind:?} — no action needed (auto-recovered)"
         );
         UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
     }
@@ -189,7 +223,11 @@ fn handle_process_failed(
 fn reload_webview(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if let Err(e) = window.reload() {
-            eprintln!("[webview_recovery] reload failed: {e}");
+            crate::emit_error!(
+                System,
+                SYS_WEBVIEW_RELOAD_FAILED,
+                "WebView reload() failed: {e}"
+            );
         }
     }
 }
@@ -208,13 +246,21 @@ fn recreate_window(app: &AppHandle) {
     let cloned = app.clone();
     let _ = app.run_on_main_thread(move || {
         if !crate::try_acquire_reconstruct_gate(&cloned) {
-            eprintln!("[webview_recovery] Reconstruction already in progress — skipping");
+            crate::emit_info!(
+                System,
+                SYS_RECONSTRUCTION_SKIPPED,
+                "Reconstruction already in progress — skipping"
+            );
             return;
         }
         // Double-check: another path may have already recreated the window
         // while we were queued on the main thread.
         if cloned.get_webview_window("main").is_some() && crate::is_webview_alive(&cloned) {
-            eprintln!("[webview_recovery] Window already recreated and alive — skipping");
+            crate::emit_info!(
+                System,
+                SYS_RECONSTRUCTION_SKIPPED,
+                "Window already recreated and alive — skipping"
+            );
             crate::release_reconstruct_gate(&cloned);
             return;
         }
@@ -230,7 +276,6 @@ fn recreate_window(app: &AppHandle) {
                 let _ = window.set_focus();
             }
             Err(e) => {
-                eprintln!("[webview_recovery] recreate_main_window failed: {e}");
                 crate::emit_error!(
                     System,
                     SYS_WINDOW_RECREATE_FAILED,

@@ -21,10 +21,10 @@ pub(crate) static RUN_CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
 // Use eprintln for logging since tracing is not available in this crate
 macro_rules! log_error {
-    ($($arg:tt)*) => { emit_error!(Prism, PRISM_SCRIPT_ERROR, $($arg)*) };
+    ($($arg:tt)*) => { emit_error!(Prism, PRISM_SCRIPT_EXEC_FAILED, $($arg)*) };
 }
 macro_rules! log_info {
-    ($($arg:tt)*) => { emit_info!(Prism, PRISM_SCRIPT_ERROR, $($arg)*) };
+    ($($arg:tt)*) => { emit_info!(Prism, PRISM_SCRIPT_INFO, $($arg)*) };
 }
 
 /// Result of executing a script with write-back.
