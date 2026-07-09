@@ -391,6 +391,27 @@ async function initApp() {
 
   window.addEventListener('beforeunload', () => runCleanup());
 
+  // 10. Heartbeat — let the backend know the webview is alive (Layer 2).
+  // If this stops arriving (e.g. `WebView2` crash not caught by Layer 1),
+  // the backend will recreate the window on the next show attempt.
+  //
+  // The heartbeat runs unconditionally — even when the window is hidden —
+  // because a single `invoke` call every 15 s is negligible overhead,
+  // and keeping it running simplifies the logic (no pause/resume events
+  // needed, which Tauri does not emit natively for hide/show).
+  const HEARTBEAT_INTERVAL_MS = 15_000;
+  const sendHeartbeat = () => invoke(COMMANDS.HEARTBEAT).catch(() => {});
+  sendHeartbeat();
+  const _heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+  // Send an immediate heartbeat when the window gains focus. This ensures
+  // that after showing a previously hidden window, the backend receives a
+  // fresh heartbeat right away instead of waiting up to 15s.
+  window.addEventListener('focus', sendHeartbeat);
+  registerCleanup(() => {
+    clearInterval(_heartbeatTimer);
+    window.removeEventListener('focus', sendHeartbeat);
+  });
+
   apiLogger.info(`[Zephyr] ✅ App ready! Total: ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
