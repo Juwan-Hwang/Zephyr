@@ -1,0 +1,37 @@
+# cargo-audit configuration
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+ignore = [
+  # rand 0.8 unsound with custom logger using rand::rng()
+  # Indirect dep via clash-prism-script v0.1.3 (latest, still uses rand 0.8)
+  # Our code pins rand = "0.10.1" directly; fix requires clash-prism-script to upgrade rand
+  "RUSTSEC-2026-0097",
+  # rustls-webpki name constraints issues
+  # Indirect dep via reqwest -> hyper-rustls -> tokio-rustls -> rustls -> rustls-webpki
+  # Fixed by rustls 0.23.40 + webpki 0.103.13; kept in ignore for compatibility
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+  # gtk-rs GTK3 bindings — unmaintained (Linux-only, pulled by tauri/wry)
+  # Cannot fix: Tauri v2 still uses gtk3 on Linux. Will resolve when Tauri upgrades to gtk4.
+  "RUSTSEC-2024-0411", # gdkwayland-sys
+  "RUSTSEC-2024-0412", # gdk
+  "RUSTSEC-2024-0413", # atk
+  "RUSTSEC-2024-0414", # gdkx11-sys
+  "RUSTSEC-2024-0415", # gtk
+  "RUSTSEC-2024-0416", # atk-sys
+  "RUSTSEC-2024-0417", # gdkx11
+  "RUSTSEC-2024-0419", # gtk3-macros
+  "RUSTSEC-2024-0420", # gtk-sys
+  "RUSTSEC-2024-0429", # glib (unsound)
+  # proc-macro-error — unmaintained (transitive dep, no fix available)
+  "RUSTSEC-2024-0370",
+  # unic-* — unmaintained (transitive dep via uniffi, no fix available)
+  "RUSTSEC-2025-0075", # unic-char-range
+  "RUSTSEC-2025-0080", # unic-common
+  "RUSTSEC-2025-0081", # unic-char-property
+  "RUSTSEC-2025-0098", # unic-ucd-version
+  "RUSTSEC-2025-0100", # unic-ucd-ident
+  # anyhow — unsound downcast_mut (transitive dep, fix requires upstream release)
+  "RUSTSEC-2026-0190",
+]
