@@ -11,16 +11,21 @@ ignore = [
   "RUSTSEC-2026-0099",
 ]
 # RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
-#   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
-#   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
+#   Indirect dependency via clash-prism-script v0.1.3 (latest, still uses rand 0.8)
+#   Our code pins rand = "0.10.1" directly; fix requires clash-prism-script to upgrade rand
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
 #
-# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki 0.103.11 name constraints issues
+# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki name constraints issues
 #   Indirect dependency via reqwest -> hyper-rustls -> tokio-rustls -> rustls -> rustls-webpki
-#   Fix requires rustls >= 0.23.39 (pins webpki >=0.103.12); currently blocked on upstream release
-#   Track:
-#     https://rustsec.org/advisories/RUSTSEC-2026-0098.html
-#     https://rustsec.org/advisories/RUSTSEC-2026-0099.html
+#   Fixed by rustls 0.23.40 + webpki 0.103.13 (>=0.103.12); kept in ignore for older lock files
+#
+# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml DoS vulnerabilities
+#   Fixed by upgrading plist 1.9.0 → 1.10.0 (quick-xml 0.39.4 → 0.41.0)
+#   and tauri-winrt-notification 0.7.2 → 0.7.3 (removed quick-xml 0.37.5 entirely)
+#
+# RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
+#   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)
+#
 # RUSTSEC-2024-0418: gdk-sys / gtk-rs GTK3 bindings unmaintained
 #   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
 #   Already handled by unmaintained = "warn" but listed for visibility
