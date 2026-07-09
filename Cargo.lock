@@ -45,6 +45,7 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "url",
  "uuid",
+ "webview2-com",
  "windows-sys 0.59.0",
  "winreg 0.52.0",
  "zephyr-core",
