@@ -242,23 +242,10 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Show the main window, or recreate it if it was destroyed (lightweight mode).
+/// Show the main window, or recreate it if it was destroyed (lightweight mode)
+/// or if the webview is dead (detected via stale heartbeat).
 fn show_or_recreate_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    } else {
-        // Window was destroyed by lightweight mode — recreate it
-        match crate::recreate_main_window(app) {
-            Ok(window) => {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            Err(e) => {
-                eprintln!("Failed to recreate main window: {e}");
-            }
-        }
-    }
+    crate::show_or_recreate_main_window(app);
 }
 
 /// Handle tray menu events
