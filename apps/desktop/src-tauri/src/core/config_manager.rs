@@ -466,6 +466,27 @@ pub fn write_config_file(
     config_path: String,
     content: String,
 ) -> Result<String, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        write_config_file_inner(app, config_path, content)
+    }))
+    .map_err(|payload| {
+        let msg = crate::backend_event::panic_to_string(payload);
+        crate::emit_error!(
+            Config,
+            CONFIG_PANIC_GUARD,
+            "Panic in write_config_file: {msg}"
+        );
+        format!("Internal error in write_config_file: {msg}")
+    })
+    .and_then(std::convert::identity)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn write_config_file_inner(
+    app: AppHandle,
+    config_path: String,
+    content: String,
+) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
     let config_file_name = sanitize_config_file_name(config_path).map_err(|e| e.to_string())?;
     let (resolved_path, base_dir) = if config_file_name == "run_config.yaml" {

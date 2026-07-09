@@ -36,6 +36,40 @@ struct GithubAsset {
     digest: Option<String>,
 }
 
+/// Extract a valid SHA256 hex hash from a GitHub API digest string (e.g. `"sha256:abc…"`).
+/// Returns `None` if the digest is missing, malformed, or not SHA256.
+#[must_use]
+fn parse_digest(digest: &str) -> Option<String> {
+    let hash = digest.strip_prefix("sha256:")?;
+    (hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())).then(|| hash.to_lowercase())
+}
+
+/// In-memory cache of asset digests from the last successful REST API fetch.
+///
+/// Populated by [`fetch_latest_release`] when the API path wins, so that
+/// [`get_expected_sha256`] can look up the hash without a second API call
+/// (which may be rate-limited at 60 req/hour unauthenticated).
+type DigestCache = Option<(String, Vec<(String, String)>)>;
+static DIGEST_CACHE: std::sync::Mutex<DigestCache> = std::sync::Mutex::new(None);
+
+/// Store all asset digests from a release into the in-memory cache.
+fn cache_digests(release: &GithubRelease) {
+    let digests: Vec<(String, String)> = release
+        .assets
+        .iter()
+        .filter_map(|a| {
+            a.digest
+                .as_ref()
+                .and_then(|d| parse_digest(d).map(|h| (a.name.clone(), h)))
+        })
+        .collect();
+    if !digests.is_empty() {
+        if let Ok(mut cache) = DIGEST_CACHE.lock() {
+            *cache = Some((release.tag_name.clone(), digests));
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct CoreDownloadStatus {
     status_text: String,
@@ -43,6 +77,7 @@ struct CoreDownloadStatus {
 }
 
 const MIHOMO_RELEASE_API: &str = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest";
+const MIHOMO_ATOM_FEED: &str = "https://github.com/MetaCubeX/mihomo/releases.atom";
 
 /// Trusted hosts for core updates - GitHub only for security
 const TRUSTED_HOSTS: [&str; 3] = [
@@ -106,9 +141,11 @@ fn build_asset_download_url(version: &str, asset_name: &str) -> String {
     format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}")
 }
 
-async fn fetch_latest_release() -> Result<GithubRelease, String> {
-    let client = build_github_client()?;
-
+/// Fetch the latest release info from the GitHub REST API (primary source).
+///
+/// Returns full release information including the complete asset list.
+/// Subject to rate limiting (60 req/hour unauthenticated).
+async fn fetch_release_from_api(client: reqwest::Client) -> Result<GithubRelease, String> {
     let response = client
         .get(MIHOMO_RELEASE_API)
         .send()
@@ -132,6 +169,209 @@ async fn fetch_latest_release() -> Result<GithubRelease, String> {
         .json::<GithubRelease>()
         .await
         .map_err(|e| format!("Failed to parse release info: {e}"))
+}
+
+/// Returns `true` if the version tag looks like a pre-release
+/// (e.g. `v1.19.28-alpha`, `v1.19.28-rc1`, `v1.19.28-beta.2`).
+#[must_use]
+fn is_prerelease(tag: &str) -> bool {
+    let lower = tag.to_lowercase();
+    lower.contains("-alpha")
+        || lower.contains("-beta")
+        || lower.contains("-rc")
+        || lower.contains("-pre")
+        || lower.contains("-draft")
+        || lower.contains("-dev")
+}
+
+/// Extract the `<title>` text from a single Atom `<entry>` block.
+///
+/// Handles `<title>` and `<title type="...">` variants.
+fn extract_title_from_entry(entry: &str) -> Result<String, String> {
+    let title_start = entry
+        .find("<title")
+        .ok_or_else(|| "No <title> in Atom entry".to_owned())?;
+    let title_content_start = entry[title_start..]
+        .find('>')
+        .map(|i| title_start + i + 1)
+        .ok_or_else(|| "Malformed <title> tag".to_owned())?;
+    let title_close = entry[title_content_start..]
+        .find("</title>")
+        .map(|i| title_content_start + i)
+        .ok_or_else(|| "Malformed <title> tag".to_owned())?;
+    let tag = entry[title_content_start..title_close].trim();
+    if tag.is_empty() {
+        return Err("Empty version tag in Atom feed".to_owned());
+    }
+    Ok(tag.to_owned())
+}
+
+/// Parse the latest **stable** release tag from an Atom feed XML string.
+///
+/// Iterates through `<entry>` blocks (newest first) and returns the first
+/// tag that is NOT a pre-release.  This matches the behaviour of the REST
+/// API `/releases/latest` endpoint, which also excludes pre-releases.
+///
+/// Handles `<entry>` and `<entry xmlns="...">` variants, as well as
+/// `<title>` and `<title type="...">` variants.
+fn parse_tag_from_atom_feed(xml: &str) -> Result<String, String> {
+    let mut search_from = 0;
+    loop {
+        // Find the next <entry ...> tag.
+        let rel_start = xml[search_from..]
+            .find("<entry")
+            .ok_or_else(|| "No stable release found in Atom feed".to_owned())?;
+        let entry_start = search_from + rel_start;
+
+        // Skip to the end of the <entry ...> opening tag.
+        let entry_tag_end = xml[entry_start..]
+            .find('>')
+            .map(|i| entry_start + i + 1)
+            .ok_or_else(|| "Malformed Atom feed: unclosed <entry> tag".to_owned())?;
+        let entry_end = xml[entry_tag_end..]
+            .find("</entry>")
+            .map(|i| entry_tag_end + i)
+            .ok_or_else(|| "Malformed Atom feed: missing </entry>".to_owned())?;
+        let entry = &xml[entry_tag_end..entry_end];
+
+        // Skip malformed entries instead of failing — a single bad entry
+        // should not prevent finding a valid stable release.
+        let tag = if let Ok(t) = extract_title_from_entry(entry) {
+            t
+        } else {
+            search_from = entry_end + "</entry>".len();
+            continue;
+        };
+
+        // Return the first non-pre-release tag.
+        if !is_prerelease(&tag) {
+            return Ok(tag);
+        }
+
+        // Advance past this entry to search for the next one.
+        search_from = entry_end + "</entry>".len();
+    }
+}
+
+/// Fetch the latest release tag from the GitHub Atom feed (secondary source).
+///
+/// The Atom feed (`/releases.atom`) is served from the web frontend and
+/// is **not** subject to the REST API rate limit.  It returns XML; we
+/// extract the first `<entry>`'s `<title>` which is the latest release tag.
+async fn fetch_tag_from_atom_feed(client: reqwest::Client) -> Result<String, String> {
+    let response = client
+        .get(MIHOMO_ATOM_FEED)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Atom feed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Atom feed returned status: {}", response.status()));
+    }
+
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read Atom feed: {e}"))?;
+
+    parse_tag_from_atom_feed(&text)
+}
+
+/// Construct a `GithubRelease` from a tag when only the Atom feed is available.
+///
+/// Generates all plausible asset names (v3, compatible, plain) so that
+/// `select_release_asset` can pick the right one using its existing logic.
+fn construct_release_from_tag(tag: &str) -> Result<GithubRelease, String> {
+    let (os_tag, arch_tag) = current_platform_tags()?;
+    // Windows uses .zip; all other platforms (including macOS) use .gz.
+    // Verified against actual MetaCubeX/mihomo release assets.
+    let ext = if os_tag == "windows" { "zip" } else { "gz" };
+
+    let mut assets = Vec::new();
+
+    // v3/compatible variants exist for all amd64 platforms
+    // (Linux, Windows, and macOS — verified against actual releases).
+    if arch_tag == "amd64" {
+        assets.push(GithubAsset {
+            name: format!("mihomo-{os_tag}-{arch_tag}-v3-{tag}.{ext}"),
+            digest: None,
+        });
+        assets.push(GithubAsset {
+            name: format!("mihomo-{os_tag}-{arch_tag}-compatible-{tag}.{ext}"),
+            digest: None,
+        });
+    }
+    // Always include the plain variant (common to all arches).
+    assets.push(GithubAsset {
+        name: format!("mihomo-{os_tag}-{arch_tag}-{tag}.{ext}"),
+        digest: None,
+    });
+
+    Ok(GithubRelease {
+        tag_name: tag.to_owned(),
+        assets,
+        body: None,
+    })
+}
+
+async fn fetch_latest_release() -> Result<GithubRelease, String> {
+    let client = build_github_client()?;
+
+    // ── Dual-source racing: REST API vs Atom Feed ──
+    //
+    // The REST API is rate-limited (60 req/hour unauthenticated).
+    // The Atom Feed (`/releases.atom`) is served from the web frontend
+    // and has no such limit.  We race both; first success wins.
+    //
+    // If the API wins, we get the full release incl. asset list.
+    // If the Atom Feed wins, we get just the tag and construct the
+    // expected asset names from the known naming pattern.
+
+    // Spawn both fetches as independent tasks so we can race their
+    // `JoinHandle`s.  Unlike `tokio::select!` on pinned async-fn futures,
+    // awaiting a completed `JoinHandle` is safe (it simply returns the
+    // stored result) — no risk of "polled after completion" panics.
+    let mut api_handle = tokio::spawn(fetch_release_from_api(client.clone()));
+    let mut atom_handle = tokio::spawn(fetch_tag_from_atom_feed(client));
+
+    tokio::select! {
+        result = &mut api_handle => {
+            match result {
+                Ok(Ok(release)) => {
+                    // Cache digests so get_expected_sha256 can skip the
+                    // rate-limited API call during the actual update.
+                    cache_digests(&release);
+                    Ok(release)
+                }
+                Ok(Err(_)) => {
+                    // API failed — fall back to Atom Feed.
+                    atom_handle.await
+                        .map_err(|e| format!("Atom task failed: {e}"))
+                        .and_then(|r| r)
+                        .and_then(|tag| construct_release_from_tag(&tag))
+                }
+                Err(e) => Err(format!("API task panicked: {e}")),
+            }
+        }
+        result = &mut atom_handle => {
+            match result {
+                Ok(Ok(tag)) => {
+                    // Atom Feed won — construct release from tag.
+                    construct_release_from_tag(&tag)
+                }
+                Ok(Err(_)) => {
+                    // Atom failed — fall back to API.
+                    api_handle.await
+                        .map_err(|e| format!("API task failed: {e}"))
+                        .and_then(|r| r)
+                        .inspect(|release| {
+                            cache_digests(release);
+                        })
+                }
+                Err(e) => Err(format!("Atom task panicked: {e}")),
+            }
+        }
+    }
 }
 
 fn is_trusted_update_url(url: &str) -> bool {
@@ -167,15 +407,29 @@ fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(),
     }
 }
 
-/// Fetch SHA256 hash from GitHub API asset digest field
+/// Resolve the expected SHA256 hash for a release asset.
+///
+/// Strategy (fastest → slowest):
+/// 1. **In-memory cache** — populated during `fetch_latest_release` when the
+///    REST API path succeeds.  Zero network I/O; bypasses rate limiting.
+/// 2. **REST API fallback** — fetches `/releases/tags/{version}` and extracts
+///    the `digest` field.  Subject to 60 req/hour unauthenticated rate limit.
 async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .connect_timeout(Duration::from_secs(10))
-        .user_agent("Zephyr-Update-Checker")
-        .build()
-        .map_err(|e| format!("Failed to build client: {e}"))?;
+    // ── 1. Check digest cache ──
+    if let Ok(cache) = DIGEST_CACHE.lock() {
+        if let Some((cached_tag, digests)) = &*cache {
+            if cached_tag == version {
+                for (name, hash) in digests {
+                    if name == asset_name {
+                        return Ok(hash.clone());
+                    }
+                }
+            }
+        }
+    }
 
+    // ── 2. Fall back to REST API ──
+    let client = build_github_client()?;
     let api_url = format!("https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}");
 
     let response = client
@@ -200,15 +454,10 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
         .ok_or_else(|| "No assets found in release".to_owned())?;
 
     for asset in assets {
-        if let Some(name) = asset["name"].as_str() {
-            if name == asset_name {
-                if let Some(digest) = asset["digest"].as_str() {
-                    if digest.starts_with("sha256:") {
-                        let hash = digest.strip_prefix("sha256:").unwrap_or(digest);
-                        if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                            return Ok(hash.to_lowercase());
-                        }
-                    }
+        if asset["name"].as_str() == Some(asset_name) {
+            if let Some(digest) = asset["digest"].as_str() {
+                if let Some(hash) = parse_digest(digest) {
+                    return Ok(hash);
                 }
             }
         }
@@ -296,21 +545,98 @@ async fn download_release_asset(
     Ok(())
 }
 
-fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
-    let (os_tag, arch_tag) = current_platform_tags()?;
-    let key = format!("mihomo-{os_tag}-{arch_tag}");
-    let is_windows = os_tag == "windows";
-    let mut candidates = assets
+/// Detect x86_64-v3 microarchitecture-level support at runtime.
+///
+/// The v3 feature set requires: AVX, AVX2, BMI1, BMI2, F16C, FMA,
+/// LZCNT, MOVBE, OSXSAVE.  `is_x86_feature_detected!` checks both
+/// CPUID flags *and* OS/hypervisor XSAVE enablement, so a bare-metal
+/// CPU that supports AVX but runs under an OS that hasn't enabled
+/// XSAVE will correctly return `false`.
+#[cfg(target_arch = "x86_64")]
+fn supports_x86_64_v3() -> bool {
+    std::is_x86_feature_detected!("avx")
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("bmi1")
+        && std::is_x86_feature_detected!("bmi2")
+        && std::is_x86_feature_detected!("f16c")
+        && std::is_x86_feature_detected!("fma")
+        && std::is_x86_feature_detected!("lzcnt")
+        && std::is_x86_feature_detected!("movbe")
+}
+
+/// Pure selection logic — separated from runtime detection for testability.
+///
+/// # Three-branch asset selection
+///
+/// | # | Condition | Target asset |
+/// |---|-----------|--------------|
+/// | 1 | `x86_64` + v3 supported + v3 asset present | `mihomo-{os}-amd64-v3-{ver}.{ext}` |
+/// | 2 | `x86_64` + (v3 unsupported **or** v3 asset absent) | `mihomo-{os}-amd64-compatible-{ver}.{ext}` |
+/// | 3 | ARM64 / other arch | `mihomo-{os}-{arch}-{ver}.{ext}` (plain) |
+///
+/// Go-version variants (`go120`, `go121`, …) are always excluded so
+/// we pick the canonical build.
+fn select_release_asset_inner<'a>(
+    assets: &'a [GithubAsset],
+    os_tag: &str,
+    arch_tag: &str,
+    supports_v3: bool,
+) -> Result<&'a GithubAsset, String> {
+    let prefix = format!("mihomo-{os_tag}-{arch_tag}");
+
+    // Candidate filter: correct prefix, correct extension, no go-version variant.
+    let candidates: Vec<&GithubAsset> = assets
         .iter()
-        .filter(|a| a.name.contains(&key) && (a.name.ends_with(".zip") || a.name.ends_with(".gz")))
-        .collect::<Vec<_>>();
-    if is_windows {
-        candidates.sort_by_key(|a| if a.name.contains("compatible") { 0 } else { 1 });
+        .filter(|a| {
+            a.name.starts_with(&prefix)
+                && (a.name.ends_with(".zip") || a.name.ends_with(".gz"))
+                && !a.name.contains("-go")
+        })
+        .collect();
+
+    // ARM64 / non-amd64: no v3 or compatible variants exist.
+    if arch_tag != "amd64" {
+        return candidates
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("Could not find release asset for {os_tag}-{arch_tag}"));
     }
+
+    // ── x86_64 branch 1: v3 (preferred) ──
+    if supports_v3 {
+        if let Some(v3) = candidates.iter().find(|a| a.name.contains("-v3-")) {
+            return Ok(v3);
+        }
+        // v3 asset missing — fall through to compatible.
+    }
+
+    // ── x86_64 branch 2: compatible (fallback) ──
+    if let Some(compat) = candidates.iter().find(|a| a.name.contains("-compatible-")) {
+        return Ok(compat);
+    }
+
+    // ── x86_64 branch 3: plain (no variant suffix) ──
+    // Filter out -v3- assets: running a v3 binary on a non-v3 CPU causes SIGILL.
     candidates
         .into_iter()
-        .next()
+        .find(|a| !a.name.contains("-v3-") && !a.name.contains("-compatible-"))
         .ok_or_else(|| format!("Could not find release asset for {os_tag}-{arch_tag}"))
+}
+
+/// Select the best mihomo release asset for the current platform.
+///
+/// On `x86_64`, performs runtime v3 feature detection and prefers the
+/// v3 build when available, falling back to `compatible` if the CPU
+/// lacks v3 features **or** the v3 asset is absent from the release.
+fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
+    let (os_tag, arch_tag) = current_platform_tags()?;
+
+    #[cfg(target_arch = "x86_64")]
+    let supports_v3 = supports_x86_64_v3();
+    #[cfg(not(target_arch = "x86_64"))]
+    let supports_v3 = false;
+
+    select_release_asset_inner(assets, os_tag, arch_tag, supports_v3)
 }
 
 fn extract_from_zip(
@@ -648,8 +974,7 @@ fn parse_github_release_info(url: &str) -> Option<(String, String)> {
     None
 }
 
-#[command]
-pub async fn update_core(
+async fn update_core_inner(
     window: Window,
     state: State<'_, MihomoState>,
     url: String,
@@ -825,6 +1150,27 @@ pub async fn update_core(
             }
         }
     }
+}
+
+/// Tauri command wrapper for `update_core_inner` with `catch_unwind` guard.
+#[command]
+pub async fn update_core(
+    window: Window,
+    state: State<'_, MihomoState>,
+    url: String,
+) -> Result<core_manager::CoreStartResult, String> {
+    use futures_util::future::FutureExt as _;
+    use std::panic::AssertUnwindSafe;
+
+    AssertUnwindSafe(update_core_inner(window, state, url))
+        .catch_unwind()
+        .await
+        .map_err(|payload| {
+            let msg = crate::backend_event::panic_to_string(payload);
+            crate::emit_error!(Updater, UPDATE_PANIC_GUARD, "Panic in update_core: {msg}");
+            format!("Internal error in update_core: {msg}")
+        })
+        .and_then(std::convert::identity)
 }
 
 #[command]
@@ -1299,5 +1645,288 @@ mod tests {
     #[test]
     fn test_lowercase_v_priority_over_uppercase() {
         assert_eq!(strip_version_prefix("vV1.0"), "V1.0");
+    }
+
+    // ── select_release_asset_inner tests ──
+
+    fn make_asset(name: &str) -> GithubAsset {
+        GithubAsset {
+            name: name.to_owned(),
+            digest: None,
+        }
+    }
+
+    /// Path 1: v3-capable CPU + v3 asset present → selects v3.
+    #[test]
+    fn test_select_asset_v3_on_v3_cpu() {
+        let assets = vec![
+            make_asset("mihomo-windows-amd64-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-compatible-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-v3-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-v3-go120-v1.19.28.zip"),
+        ];
+        let sel = select_release_asset_inner(&assets, "windows", "amd64", true).unwrap();
+        assert_eq!(sel.name, "mihomo-windows-amd64-v3-v1.19.28.zip");
+    }
+
+    /// Path 2: non-v3 CPU → selects compatible.
+    #[test]
+    fn test_select_asset_compatible_on_old_cpu() {
+        let assets = vec![
+            make_asset("mihomo-windows-amd64-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-compatible-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-v3-v1.19.28.zip"),
+        ];
+        let sel = select_release_asset_inner(&assets, "windows", "amd64", false).unwrap();
+        assert_eq!(sel.name, "mihomo-windows-amd64-compatible-v1.19.28.zip");
+    }
+
+    /// Path 3: ARM64 → selects plain arm64 asset (no variant logic).
+    #[test]
+    fn test_select_asset_arm64() {
+        let assets = vec![
+            make_asset("mihomo-linux-arm64-v1.19.28.gz"),
+            make_asset("mihomo-windows-arm64-v1.19.28.zip"),
+        ];
+        let sel = select_release_asset_inner(&assets, "windows", "arm64", false).unwrap();
+        assert_eq!(sel.name, "mihomo-windows-arm64-v1.19.28.zip");
+    }
+
+    /// Path 4: v3 CPU but v3 asset missing → falls back to compatible.
+    #[test]
+    fn test_select_asset_v3_missing_fallback() {
+        let assets = vec![
+            make_asset("mihomo-linux-amd64-v1.19.28.gz"),
+            make_asset("mihomo-linux-amd64-compatible-v1.19.28.gz"),
+            // No -v3- asset!
+        ];
+        let sel = select_release_asset_inner(&assets, "linux", "amd64", true).unwrap();
+        assert_eq!(sel.name, "mihomo-linux-amd64-compatible-v1.19.28.gz");
+    }
+
+    /// Go-version variants (go120, go121, …) must never be selected.
+    #[test]
+    fn test_select_asset_excludes_go_variants() {
+        let assets = vec![
+            make_asset("mihomo-windows-amd64-v3-go120-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-v3-go124-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-compatible-v1.19.28.zip"),
+        ];
+        // v3 is "supported" but only go-variants exist → should fall back to compatible.
+        let sel = select_release_asset_inner(&assets, "windows", "amd64", true).unwrap();
+        assert_eq!(sel.name, "mihomo-windows-amd64-compatible-v1.19.28.zip");
+    }
+
+    /// No matching asset at all → error.
+    #[test]
+    fn test_select_asset_not_found() {
+        let assets = vec![make_asset("mihomo-darwin-arm64-v1.19.28.gz")];
+        let result = select_release_asset_inner(&assets, "windows", "amd64", true);
+        assert!(result.is_err());
+    }
+
+    /// Branch 3 safety: non-v3 CPU, no compatible asset, v3 asset present →
+    /// must select the plain asset, never the v3 asset (would cause SIGILL).
+    #[test]
+    fn test_select_asset_branch3_never_v3_on_old_cpu() {
+        let assets = vec![
+            make_asset("mihomo-windows-amd64-v3-v1.19.28.zip"),
+            make_asset("mihomo-windows-amd64-v1.19.28.zip"),
+        ];
+        let sel = select_release_asset_inner(&assets, "windows", "amd64", false).unwrap();
+        assert_eq!(sel.name, "mihomo-windows-amd64-v1.19.28.zip");
+    }
+
+    /// Branch 3 safety: v3 CPU but no v3/compatible assets, only plain →
+    /// should select the plain asset.
+    #[test]
+    fn test_select_asset_branch3_plain_only() {
+        let assets = vec![make_asset("mihomo-linux-amd64-v1.19.28.gz")];
+        let sel = select_release_asset_inner(&assets, "linux", "amd64", true).unwrap();
+        assert_eq!(sel.name, "mihomo-linux-amd64-v1.19.28.gz");
+    }
+
+    // ── construct_release_from_tag tests ──
+
+    /// Constructing from a tag produces assets that `select_release_asset_inner` can resolve.
+    #[test]
+    fn test_construct_release_amd64_v3() {
+        let release = construct_release_from_tag("v1.19.28").unwrap();
+        assert_eq!(release.tag_name, "v1.19.28");
+        let (os_tag, arch_tag) = current_platform_tags().unwrap();
+        // v3/compatible variants are generated for all amd64 platforms
+        // (Linux, Windows, macOS — verified against actual releases).
+        if arch_tag == "amd64" {
+            assert!(release.assets.len() >= 3); // v3 + compatible + plain
+            let sel = select_release_asset_inner(&release.assets, os_tag, arch_tag, true).unwrap();
+            assert!(sel.name.contains("-v3-"));
+        }
+    }
+
+    /// Atom feed XML parsing: extract tag from a minimal valid feed.
+    #[test]
+    fn test_atom_feed_parsing() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+  <entry>
+    <id>tag:github.com,2008:repository/123</id>
+    <title>v1.19.28</title>
+  </entry>
+  <entry>
+    <title>v1.19.27</title>
+  </entry>
+</feed>"#;
+        let tag = parse_tag_from_atom_feed(xml).unwrap();
+        assert_eq!(tag, "v1.19.28");
+    }
+
+    /// Atom feed with `<title type="text">` attribute (GitHub uses this).
+    #[test]
+    fn test_atom_feed_parsing_with_attributes() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+  <entry>
+    <title type="text">v1.19.28</title>
+  </entry>
+</feed>"#;
+        let tag = parse_tag_from_atom_feed(xml).unwrap();
+        assert_eq!(tag, "v1.19.28");
+    }
+
+    /// Atom feed with `<entry xmlns="...">` attribute (namespace declarations).
+    #[test]
+    fn test_atom_feed_parsing_with_entry_attributes() {
+        let xml = r#"<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>v1.19.28</title>
+  </entry>
+</feed>"#;
+        let tag = parse_tag_from_atom_feed(xml).unwrap();
+        assert_eq!(tag, "v1.19.28");
+    }
+
+    /// Malformed feed with no entries.
+    #[test]
+    fn test_atom_feed_no_entries() {
+        let xml = r#"<?xml version="1.0"?><feed></feed>"#;
+        assert!(parse_tag_from_atom_feed(xml).is_err());
+    }
+
+    /// Atom feed with pre-release as the first entry → should skip it
+    /// and return the first stable release.
+    #[test]
+    fn test_atom_feed_skips_prereleases() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+  <entry>
+    <title>v1.19.29-alpha1</title>
+  </entry>
+  <entry>
+    <title>v1.19.28</title>
+  </entry>
+  <entry>
+    <title>v1.19.27</title>
+  </entry>
+</feed>"#;
+        let tag = parse_tag_from_atom_feed(xml).unwrap();
+        assert_eq!(tag, "v1.19.28");
+    }
+
+    /// All entries are pre-releases → error.
+    #[test]
+    fn test_atom_feed_all_prereleases() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+  <entry>
+    <title>v1.19.29-alpha1</title>
+  </entry>
+  <entry>
+    <title>v1.19.29-beta1</title>
+  </entry>
+</feed>"#;
+        assert!(parse_tag_from_atom_feed(xml).is_err());
+    }
+
+    // ── is_prerelease tests ──
+
+    #[test]
+    fn test_is_prerelease_alpha() {
+        assert!(is_prerelease("v1.19.29-alpha1"));
+    }
+
+    #[test]
+    fn test_is_prerelease_beta() {
+        assert!(is_prerelease("v1.19.29-beta2"));
+    }
+
+    #[test]
+    fn test_is_prerelease_rc() {
+        assert!(is_prerelease("v1.19.29-rc1"));
+    }
+
+    #[test]
+    fn test_is_prerelease_stable() {
+        assert!(!is_prerelease("v1.19.28"));
+    }
+
+    // ── parse_digest tests ──
+
+    #[test]
+    fn test_parse_digest_valid() {
+        let hash = "a".repeat(64);
+        let digest = format!("sha256:{hash}");
+        assert_eq!(parse_digest(&digest).as_deref(), Some(&hash[..]));
+    }
+
+    #[test]
+    fn test_parse_digest_uppercase_normalised() {
+        let hash = "A".repeat(64);
+        let digest = format!("sha256:{hash}");
+        assert_eq!(parse_digest(&digest).as_deref(), Some(&"a".repeat(64)[..]));
+    }
+
+    #[test]
+    fn test_parse_digest_wrong_prefix() {
+        assert_eq!(parse_digest("md5:abc"), None);
+    }
+
+    #[test]
+    fn test_parse_digest_too_short() {
+        assert_eq!(parse_digest("sha256:abc"), None);
+    }
+
+    #[test]
+    fn test_parse_digest_non_hex() {
+        let digest = format!("sha256:{}", "g".repeat(64));
+        assert_eq!(parse_digest(&digest), None);
+    }
+
+    // ── cache_digests + get_expected_sha256 cache lookup tests ──
+
+    #[test]
+    fn test_cache_digests_populates_cache() {
+        let release = GithubRelease {
+            tag_name: "v1.19.28".to_owned(),
+            assets: vec![
+                GithubAsset {
+                    name: "mihomo-windows-amd64-v3-v1.19.28.zip".to_owned(),
+                    digest: Some(format!("sha256:{}", "a".repeat(64))),
+                },
+                GithubAsset {
+                    name: "mihomo-linux-arm64-v1.19.28.gz".to_owned(),
+                    digest: None,
+                },
+            ],
+            body: None,
+        };
+        cache_digests(&release);
+
+        // Clone out of the lock to avoid holding the MutexGuard.
+        let (tag, digests) = DIGEST_CACHE.lock().unwrap().clone().unwrap();
+        assert_eq!(tag, "v1.19.28");
+        assert_eq!(digests.len(), 1); // Only the asset with a digest
+        let first = digests.first().unwrap();
+        assert_eq!(first.0, "mihomo-windows-amd64-v3-v1.19.28.zip");
     }
 }

@@ -25,10 +25,18 @@ jobs:
             args: ""
             target: ""
             arch: "x64"
+          - platform: "ubuntu-22.04-arm"
+            args: ""
+            target: ""
+            arch: "arm64"
           - platform: "windows-latest"
             args: ""
             target: ""
             arch: "x64"
+          - platform: "windows-latest"
+            args: "--target aarch64-pc-windows-msvc"
+            target: "aarch64-pc-windows-msvc"
+            arch: "arm64"
 
     runs-on: ${{ matrix.platform }}
     
@@ -42,7 +50,7 @@ jobs:
           cat > /tmp/download-bundled.sh << 'SCRIPT_EOF'
           #!/bin/bash
           # Unified script to download mihomo core and geo data with SHA256 verification
-          # Usage: download-bundled.sh <platform> <mihomo_version> <github_token>
+          # Usage: download-bundled.sh <platform> <mihomo_version> <github_token> <arch>
           set -e
           PLATFORM="$1"
           MIHOMO_VERSION="$2"
@@ -50,22 +58,31 @@ jobs:
           
           mkdir -p apps/desktop/src-tauri/bundled
           
-          # Determine mihomo asset name based on platform
+          # Determine mihomo asset name based on platform and arch
+          ARCH="$4"
           case "$PLATFORM" in
             windows-latest)
-              MIHOMO_ASSET="mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
+              if [ "$ARCH" = "arm64" ]; then
+                MIHOMO_ASSET="mihomo-windows-arm64-${MIHOMO_VERSION}.zip"
+              else
+                MIHOMO_ASSET="mihomo-windows-amd64-compatible-${MIHOMO_VERSION}.zip"
+              fi
               MIHOMO_EXT="zip"
               ;;
             macos-latest)
-              if [ "${{ matrix.arch }}" = "arm64" ]; then
+              if [ "$ARCH" = "arm64" ]; then
                 MIHOMO_ASSET="mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
               else
                 MIHOMO_ASSET="mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
               fi
               MIHOMO_EXT="gz"
               ;;
-            ubuntu-22.04)
-              MIHOMO_ASSET="mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
+            ubuntu-22.04|ubuntu-22.04-arm)
+              if [ "$ARCH" = "arm64" ]; then
+                MIHOMO_ASSET="mihomo-linux-arm64-${MIHOMO_VERSION}.gz"
+              else
+                MIHOMO_ASSET="mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
+              fi
               MIHOMO_EXT="gz"
               ;;
             *)
@@ -101,8 +118,8 @@ jobs:
           case "$MIHOMO_EXT" in
             zip)
               unzip -q "mihomo.zip"
-              mv mihomo-windows-amd64-compatible.exe apps/desktop/src-tauri/bundled/zephyr-mihomo.exe
-              rm mihomo.zip
+              mv mihomo-windows-*.exe apps/desktop/src-tauri/bundled/zephyr-mihomo.exe
+              rm -f mihomo.zip
               ;;
             gz)
               gunzip -f "mihomo.gz"
@@ -180,10 +197,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ (matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin') || (matrix.target == 'aarch64-pc-windows-msvc' && 'aarch64-pc-windows-msvc') || '' }}
 
-      - name: Install dependencies (Ubuntu only)
+      - name: Install dependencies (Ubuntu x64 only)
         if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies (Ubuntu ARM64 only)
+        if: matrix.platform == 'ubuntu-22.04-arm'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -217,7 +240,7 @@ jobs:
         if: matrix.platform != 'macos-latest' || matrix.arch == 'arm64'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN"
+        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
         shell: bash
 
       # macOS x64 uses different arch naming in mihomo releases
@@ -263,10 +286,15 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in target/release/bundle/nsis/*-setup.exe; do
+          if [ -n "${{ matrix.target }}" ]; then
+            BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+          else
+            BUNDLE_DIR="target/release/bundle"
+          fi
+          for f in $BUNDLE_DIR/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
           done
-          for f in target/release/bundle/msi/*.msi; do
+          for f in $BUNDLE_DIR/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
           done
         shell: bash
@@ -284,7 +312,7 @@ jobs:
         shell: bash
 
       - name: Collect Linux Full artifacts
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: |
           shopt -s nullglob
           for f in target/release/bundle/deb/*.deb; do
@@ -310,10 +338,15 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           shopt -s nullglob
-          for f in target/release/bundle/nsis/*-setup.exe; do
+          if [ -n "${{ matrix.target }}" ]; then
+            BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+          else
+            BUNDLE_DIR="target/release/bundle"
+          fi
+          for f in $BUNDLE_DIR/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
           done
-          for f in target/release/bundle/msi/*.msi; do
+          for f in $BUNDLE_DIR/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
           done
         shell: bash
@@ -331,7 +364,7 @@ jobs:
         shell: bash
 
       - name: Collect Linux Lite artifacts
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: |
           shopt -s nullglob
           for f in target/release/bundle/deb/*.deb; do
@@ -350,25 +383,25 @@ jobs:
 
       # ── Restore bundled for portable (reuses unified script) ──
       - name: Restore bundled for portable
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN"
+        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
         shell: bash
 
       - name: Clean bundle directory before portable build
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: |
           # Clean previous builds to ensure we get the correct portable artifact
           rm -rf target/release/bundle
         shell: bash
 
       - name: Build Tauri app (Portable)
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
 
       - name: Package Portable ZIP (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
         run: |
           mkdir -p portable/core portable/profiles portable/prism/plugins
           cp target/release/Zephyr.exe portable/
@@ -378,7 +411,7 @@ jobs:
         shell: bash
 
       - name: Package Portable AppImage (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: |
           # Get the freshly built AppImage (should be the only one after clean)
           APPIMAGE=$(ls -t target/release/bundle/appimage/Zephyr*.AppImage | head -1)
@@ -391,7 +424,8 @@ jobs:
           cp "$APPIMAGE" portable/
           cp apps/desktop/src-tauri/bundled/* portable/core/
           touch portable/.portable
-          cd portable && tar czf ../dist-artifacts/Zephyr-linux-portable.tar.gz . && cd ..
+          ARCH_SUFFIX="${{ matrix.arch }}"
+          cd portable && tar czf ../dist-artifacts/Zephyr-linux-${ARCH_SUFFIX}-portable.tar.gz . && cd ..
         shell: bash
 
       # ── Minisign: sign all release artifacts ──

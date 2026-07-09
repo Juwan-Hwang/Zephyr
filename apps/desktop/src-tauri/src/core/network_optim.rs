@@ -719,9 +719,16 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::unused_trait_names,
+    clippy::shadow_reuse,
+    clippy::cognitive_complexity,
+    clippy::assigning_clones,
+    clippy::or_fun_call
+)]
 pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
+    use std::os::windows::process::CommandExt as _;
 
     emit_info!(
         System,
@@ -820,7 +827,14 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::unused_trait_names,
+    clippy::shadow_reuse,
+    clippy::cognitive_complexity,
+    clippy::assigning_clones,
+    clippy::or_fun_call
+)]
 pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
     emit_info!(
         System,
@@ -828,7 +842,7 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
         "Reverting network optimizations (Windows)..."
     );
 
-    use std::os::windows::process::CommandExt;
+    use std::os::windows::process::CommandExt as _;
 
     // Try to restore from backup (app data dir, not temp); fall back to system defaults
     let backup =
@@ -1028,7 +1042,7 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::or_fun_call)]
 pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOptimStatus, String> {
     let config = WindowsTcpOptimConfig::from_level(get_optim_level());
 

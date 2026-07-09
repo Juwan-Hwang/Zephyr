@@ -34,6 +34,11 @@ use super::CREATE_NO_WINDOW;
 
 // ── Windows Job Object for auto-killing mihomo when Tauri exits ──────────
 #[cfg(target_os = "windows")]
+#[allow(
+    clippy::wildcard_imports,
+    clippy::doc_markdown,
+    clippy::cast_possible_truncation
+)]
 mod win_job {
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::*;
@@ -1329,8 +1334,7 @@ async fn health_check(port: u16) -> Result<(), String> {
 }
 
 #[allow(clippy::cognitive_complexity)]
-#[tauri::command]
-pub async fn start_core(
+async fn start_core_inner(
     app: AppHandle,
     state: State<'_, MihomoState>,
     config_path: String,
@@ -1640,6 +1644,42 @@ pub async fn start_core(
         port,
         active_config: active_config_name,
     })
+}
+
+/// Tauri command wrapper for `start_core_inner` with `catch_unwind` guard.
+///
+/// If the inner function panics, the error is caught and converted to a
+/// user-facing error string, preventing the entire app from crashing.
+#[tauri::command]
+pub async fn start_core(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    config_path: String,
+    test: bool,
+    custom_args: Vec<String>,
+    secret: Option<String>,
+    force: Option<bool>,
+) -> Result<CoreStartResult, String> {
+    use futures_util::future::FutureExt as _;
+    use std::panic::AssertUnwindSafe;
+
+    AssertUnwindSafe(start_core_inner(
+        app,
+        state,
+        config_path,
+        test,
+        custom_args,
+        secret,
+        force,
+    ))
+    .catch_unwind()
+    .await
+    .map_err(|payload| {
+        let msg = crate::backend_event::panic_to_string(payload);
+        crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
+        format!("Internal error in start_core: {msg}")
+    })
+    .and_then(std::convert::identity)
 }
 
 /// Internal: stop the core process (no rate limiter reset).
