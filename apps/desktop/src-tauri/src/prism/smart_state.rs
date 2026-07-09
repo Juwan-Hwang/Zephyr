@@ -242,7 +242,7 @@ impl SmartState {
                     // 1. 立即追加到 WAL (崩溃安全)
                     if let Some(ref mut file) = wal_file {
                         if let Err(e) = Self::append_wal_to_file(file, &record).await {
-                            emit_warn!(Smart, SMART_SELECT_FAILED, "WAL append failed: {e}");
+                            emit_warn!(Smart, SMART_WAL_APPEND_FAILED, "WAL append failed: {e}");
                         }
                     }
 
@@ -258,7 +258,11 @@ impl SmartState {
                             // Windows 需要先关闭文件句柄才能删除
                             drop(wal_file);
                             if let Err(e) = tokio::fs::remove_file(&config.wal_path).await {
-                                emit_warn!(Smart, SMART_SELECT_FAILED, "WAL remove failed: {e}");
+                                emit_warn!(
+                                    Smart,
+                                    SMART_WAL_REMOVE_FAILED,
+                                    "WAL remove failed: {e}"
+                                );
                             }
                             // 重新打开 WAL 文件
                             wal_file = Self::open_wal_file(&config.wal_path).await.ok();

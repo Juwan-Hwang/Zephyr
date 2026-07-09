@@ -329,7 +329,11 @@ fn toggle_sys_proxy(app: &AppHandle) {
     };
 
     if let Err(e) = result {
-        eprintln!("Failed to toggle system proxy: {e}");
+        emit_error!(
+            System,
+            SYS_PROXY_TOGGLE_FAILED,
+            "Failed to toggle system proxy: {e}"
+        );
         // Operation failed — do not update state, rebuild menu with current state
         rebuild_tray_menu_from_state(app);
         return;

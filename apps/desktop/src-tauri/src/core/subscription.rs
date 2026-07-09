@@ -398,8 +398,10 @@ async fn download_sub_inner_raw(
                                     let app = self.app.clone();
                                     tokio::spawn(async move {
                                         if set_mihomo_mode(&app, &orig).await.is_none() {
-                                            eprintln!(
-                                                "[subscription] failed to restore original mihomo mode '{orig}' on drop"
+                                            crate::emit_warn!(
+                                                Core,
+                                                CORE_MODE_RESTORE_DROPPED,
+                                                "Failed to restore original mihomo mode '{orig}' on drop"
                                             );
                                         }
                                     });
@@ -446,8 +448,10 @@ async fn download_sub_inner_raw(
                         // 避免 Drop 时重复执行恢复。
                         if let Some(orig) = restore_guard.orig_mode.take() {
                             if set_mihomo_mode(app, &orig).await.is_none() {
-                                eprintln!(
-                                    "[subscription] failed to restore original mihomo mode '{orig}'"
+                                crate::emit_warn!(
+                                    Core,
+                                    CORE_MODE_RESTORE_FAILED,
+                                    "Failed to restore original mihomo mode '{orig}'"
                                 );
                             }
                         }
@@ -794,7 +798,11 @@ pub struct BatchUpdateItem {
 #[tauri::command]
 pub async fn fetch_text(url: String) -> Result<String, String> {
     fetch_url_content(&url, None).await.map_err(|e| {
-        println!("Fetch failed: {e}");
+        crate::emit_error!(
+            Subscription,
+            SUB_NETWORK_ERROR,
+            "fetch_text failed for '{url}': {e}"
+        );
         "Network error occurred during fetch".to_owned()
     })
 }

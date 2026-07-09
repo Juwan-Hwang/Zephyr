@@ -395,7 +395,12 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[encrypt_all_profiles] skip {}: {e}", path.display());
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_READ_FAILED,
+                    "encrypt: skip {}: {e}",
+                    path.display()
+                );
                 failures += 1;
                 continue;
             }
@@ -406,12 +411,22 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         match obfuscate_string(&content) {
             Ok(encrypted) => {
                 if let Err(e) = write_file_secure(&path, &encrypted) {
-                    eprintln!("[encrypt_all_profiles] write {}: {e}", path.display());
+                    crate::emit_warn!(
+                        Config,
+                        CONFIG_ENCRYPT_WRITE_FAILED,
+                        "encrypt: write {}: {e}",
+                        path.display()
+                    );
                     failures += 1;
                 }
             }
             Err(e) => {
-                eprintln!("[encrypt_all_profiles] encrypt {}: {e}", path.display());
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_FAILED,
+                    "encrypt: encrypt {}: {e}",
+                    path.display()
+                );
                 failures += 1;
             }
         }
@@ -442,7 +457,12 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[decrypt_all_profiles] skip {}: {e}", path.display());
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_READ_FAILED,
+                    "decrypt: skip {}: {e}",
+                    path.display()
+                );
                 failures += 1;
                 continue;
             }
@@ -453,12 +473,22 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         match deobfuscate_string(&content) {
             Ok(decrypted) => {
                 if let Err(e) = write_file_secure(&path, &decrypted) {
-                    eprintln!("[decrypt_all_profiles] write {}: {e}", path.display());
+                    crate::emit_warn!(
+                        Config,
+                        CONFIG_DECRYPT_WRITE_FAILED,
+                        "decrypt: write {}: {e}",
+                        path.display()
+                    );
                     failures += 1;
                 }
             }
             Err(e) => {
-                eprintln!("[decrypt_all_profiles] decrypt {}: {e}", path.display());
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_FAILED,
+                    "decrypt: decrypt {}: {e}",
+                    path.display()
+                );
                 failures += 1;
             }
         }
