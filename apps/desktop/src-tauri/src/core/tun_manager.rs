@@ -753,10 +753,11 @@ pub async fn grant_linux_tun_permission(_app: tauri::AppHandle) -> Result<(), St
 
 /// Apply Windows TCP performance optimizations.
 /// This is now a no-op — TCP optimizations have been moved to the
-/// Network Optimization feature (network_optim module) and are no
+/// Network Optimization feature (`network_optim` module) and are no
 /// longer auto-applied during TUN mode.
 #[tauri::command]
 #[cfg(target_os = "windows")]
+#[allow(clippy::missing_const_for_fn)]
 pub fn apply_windows_tcp_optimizations() -> Result<(), String> {
     // No-op: TCP optimizations moved to network_optim module
     Ok(())
