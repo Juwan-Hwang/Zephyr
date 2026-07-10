@@ -142,6 +142,8 @@ export const MISC = Object.freeze({
     SEND_NOTIFICATION: "rate_limited_send_notification",
     EXEMPT_UWP_APPS: "exempt_uwp_apps",
     HEARTBEAT: "heartbeat",
+    EXPORT_BACKUP: "export_backup",
+    IMPORT_BACKUP: "import_backup",
 });
 
 // ---------------------------------------------------------------------------
