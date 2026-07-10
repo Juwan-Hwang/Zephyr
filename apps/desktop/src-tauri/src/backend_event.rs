@@ -309,6 +309,12 @@ pub mod codes {
     pub const SYS_PROXY_TOGGLE_FAILED: u16 = 6017;
     /// Other unhandled `ProcessFailedKind` (e.g. GPU, utility process — auto-recovered).
     pub const SYS_WEBVIEW_PROCESS_FAILED_OTHER: u16 = 6018;
+    /// System resumed from sleep — core health check initiated.
+    pub const SYS_RESUMED_HEALTH_CHECK: u16 = 6019;
+    /// System resumed from sleep — core health check failed, restarting core.
+    pub const SYS_RESUMED_CORE_RESTART: u16 = 6020;
+    /// System resumed from sleep — core health check passed, no action needed.
+    pub const SYS_RESUMED_CORE_HEALTHY: u16 = 6021;
 
     // Updater: 7000-7999
     pub const UPDATE_CHECK_FAILED: u16 = 7001;
