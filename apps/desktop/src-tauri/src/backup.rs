@@ -1,0 +1,591 @@
+//! Backup & restore system — transactional config export/import with manifest.
+//!
+//! ## Design
+//!
+//! **Export**: Collect `settings.json`, `run_config.yaml`, and all profile
+//! YAMLs into a ZIP archive with a `manifest.json` containing checksums
+//! and metadata. Reuses the zip-bomb detection logic from `updater.rs`
+//! and path-traversal protection from `sanitizer.rs`.
+//!
+//! **Import**: Three-phase transactional flow:
+//!   1. **Validate** — verify manifest, checksums, zip bomb, path traversal
+//!   2. **Stage** — extract files to a staging directory
+//!   3. **Commit** — atomically swap staged files into place; on any failure,
+//!      roll back to the pre-import state
+//!
+//! ## Security
+//!
+//! - Zip bomb: max 200 MB uncompressed, max 200:1 compression ratio (same as updater)
+//! - Path traversal: reject entries with `..`, absolute paths, null bytes, symlinks
+//! - Manifest: SHA-256 checksum per file, version field for forward compatibility
+//! - Atomicity: staging directory + rename swap, rollback on failure
+
+use crate::core_manager::{ensure_app_storage, AppPaths};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use std::fmt::Write as _;
+use std::fs;
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
+use tauri::AppHandle;
+use tauri_plugin_dialog::DialogExt as _;
+
+// ── Constants ─────────────────────────────────────────────────────────────
+
+/// Maximum total uncompressed size for a backup archive (200 MB).
+const MAX_BACKUP_SIZE: u64 = 200 * 1024 * 1024;
+
+/// Maximum compression ratio (uncompressed:compressed).
+const MAX_COMPRESSION_RATIO: u64 = 200;
+
+/// Current manifest format version.
+const MANIFEST_VERSION: u32 = 1;
+
+// ── Manifest ──────────────────────────────────────────────────────────────
+
+/// Backup manifest — embedded as `manifest.json` inside the ZIP archive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupManifest {
+    /// Manifest format version (for forward compatibility).
+    pub version: u32,
+    /// Zephyr app version that created the backup.
+    pub app_version: String,
+    /// ISO 8601 timestamp of when the backup was created.
+    pub created_at: String,
+    /// File entries with relative paths and SHA-256 checksums.
+    pub files: Vec<ManifestEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestEntry {
+    /// Relative path within the archive (e.g., "settings.json", "profiles/my-sub.yaml").
+    pub path: String,
+    /// SHA-256 hex digest of the file content.
+    pub sha256: String,
+    /// Uncompressed file size in bytes.
+    pub size: u64,
+}
+
+// ── Export ────────────────────────────────────────────────────────────────
+
+/// Collect all files that should be included in a backup.
+///
+/// Returns a list of `(relative_path, absolute_path)` pairs.
+fn collect_backup_files(paths: &AppPaths) -> Vec<(String, PathBuf)> {
+    let mut files = Vec::new();
+
+    // 1. settings.json
+    let settings = paths.app_data_dir.join("settings.json");
+    if settings.exists() {
+        files.push(("settings.json".to_owned(), settings));
+    }
+
+    // 2. run_config.yaml (runtime config)
+    let run_config = paths.core_dir.join("run_config.yaml");
+    if run_config.exists() {
+        files.push(("run_config.yaml".to_owned(), run_config));
+    }
+
+    // 3. All profile YAML files
+    if paths.profiles_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "yaml" || ext == "yml" {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            files.push((format!("profiles/{name}"), path));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Metadata file (subscription info, intervals, etc.)
+    let metadata = paths.app_data_dir.join("metadata.json");
+    if metadata.exists() {
+        files.push(("metadata.json".to_owned(), metadata));
+    }
+
+    files
+}
+
+/// Compute SHA-256 hex digest of a file.
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let data = fs::read(path).map_err(|e| format!("Failed to read {path:?}: {e}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&data);
+    Ok(hex_encode(&hasher.finalize()))
+}
+
+/// Encode bytes as lowercase hex string.
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Export all user configuration to a ZIP file with a manifest.
+///
+/// The user selects the save location via a native file dialog.
+/// Returns the path the file was saved to.
+#[tauri::command]
+pub async fn export_backup(app: AppHandle) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+    let files = collect_backup_files(&paths);
+
+    if files.is_empty() {
+        return Err("No configuration files found to backup".to_owned());
+    }
+
+    // Build manifest entries
+    let app_version = env!("CARGO_PKG_VERSION").to_owned();
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    let mut manifest_entries = Vec::with_capacity(files.len());
+    for (rel_path, abs_path) in &files {
+        let sha = sha256_file(abs_path)?;
+        let size = fs::metadata(abs_path).map(|m| m.len()).unwrap_or(0);
+        manifest_entries.push(ManifestEntry {
+            path: rel_path.clone(),
+            sha256: sha,
+            size,
+        });
+    }
+
+    let manifest = BackupManifest {
+        version: MANIFEST_VERSION,
+        app_version,
+        created_at,
+        files: manifest_entries,
+    };
+
+    // Prompt user for save location
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name("zephyr-backup.zip")
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let file_path = rx
+        .await
+        .map_err(|_err| "Dialog cancelled".to_owned())?
+        .ok_or_else(|| "Export cancelled".to_owned())?;
+
+    let save_path = file_path
+        .as_path()
+        .ok_or_else(|| "Invalid save path".to_owned())?
+        .to_path_buf();
+
+    // Create the ZIP archive on a blocking thread
+    let manifest_clone = manifest.clone();
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use zip::write::SimpleFileOptions;
+
+        let zip_file =
+            fs::File::create(&save_path).map_err(|e| format!("Failed to create zip: {e}"))?;
+        let mut zip_writer = zip::ZipWriter::new(zip_file);
+        let zip_options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        // Write manifest first
+        let manifest_json = serde_json::to_string_pretty(&manifest_clone)
+            .map_err(|e| format!("Failed to serialize manifest: {e}"))?;
+        zip_writer
+            .start_file("manifest.json", zip_options)
+            .map_err(|e| format!("Failed to write manifest: {e}"))?;
+        zip_writer
+            .write_all(manifest_json.as_bytes())
+            .map_err(|e| format!("Failed to write manifest content: {e}"))?;
+
+        // Write all files
+        for (rel_path, abs_path) in &files {
+            zip_writer
+                .start_file(rel_path.as_str(), zip_options)
+                .map_err(|e| format!("Failed to add {rel_path} to zip: {e}"))?;
+
+            let mut file = fs::File::open(abs_path)
+                .map_err(|e| format!("Failed to open {abs_path:?}: {e}"))?;
+            std::io::copy(&mut file, &mut zip_writer)
+                .map_err(|e| format!("Failed to copy {rel_path} to zip: {e}"))?;
+        }
+
+        zip_writer
+            .finish()
+            .map_err(|e| format!("Failed to finalize zip: {e}"))?;
+
+        Ok(save_path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("Export task failed: {e}"))?
+}
+
+// ── Import ────────────────────────────────────────────────────────────────
+
+/// Validate a path inside the archive — reject path traversal, absolute paths,
+/// null bytes, and symlinks.
+///
+/// This reuses the same security principles as `sanitizer.rs` and the
+/// zip extraction in `updater.rs`.
+fn is_safe_archive_path(path: &str) -> bool {
+    // Reject null bytes
+    if path.contains('\0') {
+        return false;
+    }
+
+    // Reject absolute paths (Unix and Windows)
+    if path.starts_with('/') || path.starts_with('\\') {
+        return false;
+    }
+
+    // Reject Windows drive letters (e.g., C:\, D:\)
+    if path.len() >= 2 {
+        let bytes = path.as_bytes();
+        if let (Some(&b1), Some(&b0)) = (bytes.get(1), bytes.first()) {
+            if b1 == b':' && b0.is_ascii_alphabetic() {
+                return false;
+            }
+        }
+    }
+
+    // Reject path traversal
+    if path.contains("..") {
+        return false;
+    }
+
+    true
+}
+
+/// Atomically move a file, falling back to copy + delete if `fs::rename`
+/// fails with `EXDEV` (cross-device link).
+///
+/// This is necessary because `staging_dir` (inside `app_data_dir`) and
+/// destination directories (`profiles_dir`, `core_dir`) may reside on
+/// different filesystems or mount points.
+fn atomic_rename(src: &Path, dst: &Path) -> Result<(), String> {
+    match fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => fs::copy(src, dst)
+            .and_then(|_| fs::remove_file(src))
+            .map_err(|e| {
+                format!(
+                    "Failed to move {src:?} to {dst:?}: \
+                         rename failed ({rename_err}), copy fallback failed ({e})"
+                )
+            }),
+    }
+}
+
+/// Verify a file's SHA-256 against the manifest.
+fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    let actual = sha256_file(path)?;
+    if actual != expected {
+        return Err(format!(
+            "Checksum mismatch for {path:?}: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
+}
+
+/// Import a backup ZIP file with transactional restore.
+///
+/// Flow:
+/// 1. Open ZIP, read manifest, validate version
+/// 2. Check each entry for path traversal / zip bomb
+/// 3. Extract to staging directory
+/// 4. Verify all checksums
+/// 5. Back up current files → swap staged files in → clean up
+/// 6. On any failure: delete staging, restore backup
+#[tauri::command]
+pub async fn import_backup(app: AppHandle) -> Result<String, String> {
+    let paths = ensure_app_storage(&app)?;
+
+    // Prompt user for file to import
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("ZIP", &["zip"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let file_path = rx
+        .await
+        .map_err(|_err| "Dialog cancelled".to_owned())?
+        .ok_or_else(|| "Import cancelled".to_owned())?;
+
+    let open_path = file_path
+        .as_path()
+        .ok_or_else(|| "Invalid file path".to_owned())?
+        .to_path_buf();
+
+    // Phase 1-4: Validate and stage (on blocking thread)
+    let paths_clone = paths.clone();
+    let staging_result = tokio::task::spawn_blocking(move || -> Result<(BackupManifest, PathBuf), String> {
+        // Open the archive
+        let file = fs::File::open(&open_path)
+            .map_err(|e| format!("Failed to open backup file: {e}"))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| format!("Failed to read ZIP archive: {e}"))?;
+
+        // Read manifest first
+        let manifest_entry = (0..archive.len())
+            .find_map(|i| {
+                let entry = archive.by_index(i).ok()?;
+                (entry.name() == "manifest.json").then_some(i)
+            })
+            .ok_or_else(|| "Backup archive is missing manifest.json".to_owned())?;
+
+        let mut manifest_str = String::new();
+        archive
+            .by_index(manifest_entry)
+            .map_err(|e| format!("Failed to read manifest entry: {e}"))?
+            .read_to_string(&mut manifest_str)
+            .map_err(|e| format!("Failed to read manifest: {e}"))?;
+
+        let manifest: BackupManifest = serde_json::from_str(&manifest_str)
+            .map_err(|e| format!("Failed to parse manifest: {e}"))?;
+
+        if manifest.version > MANIFEST_VERSION {
+            return Err(format!(
+                "Backup manifest version {} is newer than supported version {}. Please update Zephyr.",
+                manifest.version, MANIFEST_VERSION
+            ));
+        }
+
+        // Create staging directory
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let staging_dir = paths_clone.app_data_dir.join(format!(".backup-staging-{ts}"));
+        fs::create_dir_all(&staging_dir)
+            .map_err(|e| format!("Failed to create staging directory: {e}"))?;
+
+        // Track total uncompressed size for zip bomb detection
+        let mut total_uncompressed: u64 = 0;
+
+        // Extract and validate each file
+        for entry in &manifest.files {
+            if !is_safe_archive_path(&entry.path) {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(format!("Unsafe path in backup archive: {}", entry.path));
+            }
+
+            // Find the entry in the ZIP by name
+            let zip_index = (0..archive.len())
+                .find_map(|i| {
+                    let zentry = archive.by_index(i).ok()?;
+                    (zentry.name() == entry.path).then_some(i)
+                })
+                .ok_or_else(|| {
+                    let _ = fs::remove_dir_all(&staging_dir);
+                    format!("File '{}' listed in manifest not found in archive", entry.path)
+                })?;
+
+            let mut zip_entry = archive
+                .by_index(zip_index)
+                .map_err(|e| format!("Failed to read ZIP entry: {e}"))?;
+
+            // Reject symlinks
+            if zip_entry.is_symlink() {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(format!("Refusing to extract symlink: {}", entry.path));
+            }
+
+            // Zip bomb: check uncompressed size
+            let uncompressed = zip_entry.size();
+            total_uncompressed += uncompressed;
+            if total_uncompressed > MAX_BACKUP_SIZE {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err("Backup archive exceeds 200 MB uncompressed limit".to_owned());
+            }
+
+            // Zip bomb: check compression ratio
+            let compressed = zip_entry.compressed_size();
+            if compressed > 0 && uncompressed > compressed.saturating_mul(MAX_COMPRESSION_RATIO) {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err("Suspicious compression ratio detected (possible zip bomb)".to_owned());
+            }
+
+            // Verify size matches manifest
+            if uncompressed != entry.size {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(format!(
+                    "Size mismatch for {}: manifest says {} bytes, archive has {} bytes",
+                    entry.path, entry.size, uncompressed
+                ));
+            }
+
+            // Create parent directories if needed (e.g., profiles/)
+            let dest_path = staging_dir.join(&entry.path);
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directory: {e}"))?;
+            }
+
+            // Extract file
+            let mut out_file = fs::File::create(&dest_path)
+                .map_err(|e| format!("Failed to create {dest_path:?}: {e}"))?;
+            std::io::copy(&mut zip_entry, &mut out_file)
+                .map_err(|e| format!("Failed to extract {}: {e}", entry.path))?;
+            out_file
+                .sync_all()
+                .map_err(|e| format!("Failed to sync {dest_path:?}: {e}"))?;
+            drop(out_file);
+
+            // Verify checksum
+            if let Err(e) = verify_sha256(&dest_path, &entry.sha256) {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(e);
+            }
+        }
+
+        Ok((manifest, staging_dir))
+    })
+    .await
+    .map_err(|e| format!("Import task failed: {e}"))?;
+
+    // Phase 5: Commit — atomically swap files into place
+    let (manifest, staging_dir) = match staging_result {
+        Ok(res) => res,
+        Err(e) => return Err(e),
+    };
+
+    // Back up current files, then swap
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup_dir = paths.app_data_dir.join(format!(".backup-rollback-{ts}"));
+    fs::create_dir_all(&backup_dir)
+        .map_err(|e| format!("Failed to create rollback directory: {e}"))?;
+
+    // Map relative paths to absolute destinations
+    let dest_map = build_dest_map(&paths, &manifest);
+
+    // Back up current files that will be replaced
+    for (rel_path, dest_abs) in &dest_map {
+        if dest_abs.exists() {
+            let backup_path = backup_dir.join(rel_path);
+            if let Some(parent) = backup_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create backup dir: {e}"))?;
+            }
+            atomic_rename(dest_abs, &backup_path)?;
+        }
+    }
+
+    // Move staged files into place.
+    // Track newly created files (those without a prior backup) so we can
+    // delete them on rollback — otherwise they'd be left as orphans.
+    let mut newly_created: Vec<PathBuf> = Vec::new();
+
+    for (rel_path, dest_abs) in &dest_map {
+        let staged_path = staging_dir.join(rel_path);
+        if staged_path.exists() {
+            if let Some(parent) = dest_abs.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create dest dir: {e}"))?;
+            }
+
+            // A file is "new" if it was not backed up (didn't exist before).
+            let is_new = !backup_dir.join(rel_path).exists();
+
+            if let Err(e) = atomic_rename(&staged_path, dest_abs) {
+                // Rollback: delete newly created files, then restore backups
+                for created in &newly_created {
+                    let _ = fs::remove_file(created);
+                }
+                restore_rollback(&backup_dir, &paths);
+                let _ = fs::remove_dir_all(&staging_dir);
+                let _ = fs::remove_dir_all(&backup_dir);
+                return Err(format!(
+                    "Failed to apply {rel_path}: {e}. Rolled back to previous state."
+                ));
+            }
+
+            if is_new {
+                newly_created.push(dest_abs.clone());
+            }
+        }
+    }
+
+    // Success — clean up
+    let _ = fs::remove_dir_all(&staging_dir);
+    let _ = fs::remove_dir_all(&backup_dir);
+
+    Ok(format!(
+        "Backup restored successfully ({} files from v{})",
+        manifest.files.len(),
+        manifest.app_version
+    ))
+}
+
+/// Map manifest relative paths to absolute destination paths.
+fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, PathBuf)> {
+    manifest
+        .files
+        .iter()
+        .map(|entry| {
+            let dest = if entry.path.starts_with("profiles/") {
+                let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
+                paths.profiles_dir.join(file_name)
+            } else if entry.path == "settings.json" {
+                paths.app_data_dir.join("settings.json")
+            } else if entry.path == "run_config.yaml" {
+                paths.core_dir.join("run_config.yaml")
+            } else if entry.path == "metadata.json" {
+                paths.app_data_dir.join("metadata.json")
+            } else {
+                // Unknown files go to app_data_dir root
+                paths.app_data_dir.join(&entry.path)
+            };
+            (entry.path.clone(), dest)
+        })
+        .collect()
+}
+
+/// Restore all files from the rollback directory to their original locations.
+fn restore_rollback(backup_dir: &Path, paths: &AppPaths) {
+    // Walk the backup dir and restore files
+    fn walk_and_restore(dir: &Path, base: &Path, paths: &AppPaths) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk_and_restore(&path, base, paths);
+                } else {
+                    let rel = path.strip_prefix(base).unwrap_or(&path);
+                    let dest = map_rel_to_dest(rel, paths);
+                    if let Some(parent) = dest.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = atomic_rename(&path, &dest);
+                }
+            }
+        }
+    }
+    walk_and_restore(backup_dir, backup_dir, paths);
+}
+
+/// Map a relative path (from backup dir) to its absolute destination.
+fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> PathBuf {
+    let rel_str = rel.to_string_lossy();
+    if rel_str.starts_with("profiles/") {
+        let file_name = rel.strip_prefix("profiles/").unwrap_or(rel);
+        paths.profiles_dir.join(file_name)
+    } else if rel_str == "settings.json" {
+        paths.app_data_dir.join("settings.json")
+    } else if rel_str == "run_config.yaml" {
+        paths.core_dir.join("run_config.yaml")
+    } else if rel_str == "metadata.json" {
+        paths.app_data_dir.join("metadata.json")
+    } else {
+        paths.app_data_dir.join(rel)
+    }
+}

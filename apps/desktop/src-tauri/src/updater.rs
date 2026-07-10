@@ -70,8 +70,22 @@ fn cache_digests(release: &GithubRelease) {
     }
 }
 
+#[derive(Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateComponent {
+    /// Mihomo core binary update.
+    Core,
+    /// `GeoIP` + `GeoSite` database update.
+    GeoData,
+    /// Zephyr client (app) self-update.
+    Client,
+}
+
 #[derive(Clone, Serialize)]
 struct CoreDownloadStatus {
+    /// Which component is being updated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    component: Option<UpdateComponent>,
     status_text: String,
     progress: u8,
 }
@@ -126,11 +140,21 @@ fn build_github_client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-fn emit_core_download_status(window: &Window, status_text: impl Into<String>, progress: u8) {
+/// Emit a download status event with component identification.
+///
+/// The frontend uses `component` to route progress to the correct
+/// progress bar in the multi-component update UI.
+fn emit_download_status_ext(
+    window: &Window,
+    component: Option<UpdateComponent>,
+    status_text: impl Into<String>,
+    progress: u8,
+) {
     crate::backend_event::emit_to_main(
         window.app_handle(),
         "core-download-status",
         CoreDownloadStatus {
+            component,
             status_text: status_text.into(),
             progress,
         },
@@ -472,13 +496,14 @@ async fn download_release_asset(
     window: &Window,
     url: &str,
     dest_path: &std::path::Path,
+    component: UpdateComponent,
 ) -> Result<(), String> {
     if !is_trusted_update_url(url) {
         return Err("Untrusted download URL: only github.com is allowed".to_owned());
     }
 
     let client = build_github_client()?;
-    emit_core_download_status(window, "Downloading core from GitHub...", 24);
+    emit_download_status_ext(window, Some(component), "Downloading from GitHub...", 24);
 
     let response = client
         .get(url)
@@ -535,7 +560,12 @@ async fn download_release_asset(
         } else {
             52
         };
-        emit_core_download_status(window, format!("Downloading core... {progress}%"), progress);
+        emit_download_status_ext(
+            window,
+            Some(component),
+            format!("Downloading... {progress}%"),
+            progress,
+        );
     }
 
     if let Err(e) = file.sync_all() {
@@ -980,7 +1010,12 @@ async fn update_core_inner(
     url: String,
 ) -> Result<core_manager::CoreStartResult, String> {
     let app = window.app_handle();
-    emit_core_download_status(&window, "Preparing to update Mihomo core...", 4);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Core),
+        "Preparing to update Mihomo core...",
+        4,
+    );
 
     let (version, asset_name) = parse_github_release_info(&url).ok_or_else(|| {
         "Invalid update URL: only official MetaCubeX/mihomo GitHub releases are supported"
@@ -995,19 +1030,31 @@ async fn update_core_inner(
         .core_dir
         .join(format!("core_update_{temp_suffix}.tmp"));
 
-    if let Err(e) = download_release_asset(&window, &url, &archive_path).await {
+    if let Err(e) =
+        download_release_asset(&window, &url, &archive_path, UpdateComponent::Core).await
+    {
         let _ = std::fs::remove_file(&archive_path);
         return Err(e);
     }
 
-    emit_core_download_status(&window, "Verifying file integrity...", 82);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Core),
+        "Verifying file integrity...",
+        82,
+    );
     let expected_hash = get_expected_sha256(&version, &asset_name).await?;
     verify_sha256(&archive_path, &expected_hash).inspect_err(|e| {
         let _ = std::fs::remove_file(&archive_path);
         let _ = e;
     })?;
 
-    emit_core_download_status(&window, "Download complete, extracting core...", 84);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Core),
+        "Download complete, extracting core...",
+        84,
+    );
     let temp_exe_path = paths.core_dir.join(format!(
         "{}_{}.tmp",
         core_manager::core_binary_name(),
@@ -1020,7 +1067,12 @@ async fn update_core_inner(
     }
     let _ = std::fs::remove_file(&archive_path);
 
-    emit_core_download_status(&window, "Writing core files...", 92);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Core),
+        "Writing core files...",
+        92,
+    );
 
     // Stop core and wait for it to fully exit
     let _ = core_manager::stop_core_inner(app, &state);
@@ -1105,7 +1157,12 @@ async fn update_core_inner(
         (config, args, secret)
     };
 
-    emit_core_download_status(&window, "Update complete, restarting core...", 98);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Core),
+        "Update complete, restarting core...",
+        98,
+    );
 
     let result = core_manager::start_core(
         app.clone(),
@@ -1121,7 +1178,7 @@ async fn update_core_inner(
         Ok(r) => {
             // Step 3: New core started — delete backup
             let _ = std::fs::remove_file(&backup_path);
-            emit_core_download_status(&window, "Core ready", 100);
+            emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
             Ok(r)
         }
         Err(e) => {
@@ -1188,7 +1245,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let geosite_sha_url = "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat.sha256sum";
 
     // Fetch hashes first
-    emit_core_download_status(&window, "Fetching verification info...", 5);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Fetching verification info...",
+        5,
+    );
 
     let geoip_sha_res = client
         .get(geoip_sha_url)
@@ -1236,7 +1298,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let temp_suffix = uuid::Uuid::new_v4();
 
     // Download GeoIP
-    emit_core_download_status(&window, "Downloading GeoIP...", 10);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Downloading GeoIP...",
+        10,
+    );
     let geoip_path = paths.core_dir.join(format!("geoip_{temp_suffix}.dat.tmp"));
     let response = client
         .get(geoip_url)
@@ -1275,14 +1342,24 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         return Err(e.to_string());
     }
 
-    emit_core_download_status(&window, "Verifying GeoIP...", 45);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Verifying GeoIP...",
+        45,
+    );
     verify_sha256(&geoip_path, &geoip_expected_hash).inspect_err(|e| {
         let _ = std::fs::remove_file(&geoip_path);
         let _ = e;
     })?;
 
     // Download GeoSite
-    emit_core_download_status(&window, "Downloading GeoSite...", 50);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Downloading GeoSite...",
+        50,
+    );
     let geosite_path = paths
         .core_dir
         .join(format!("geosite_{temp_suffix}.dat.tmp"));
@@ -1323,7 +1400,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         return Err(e.to_string());
     }
 
-    emit_core_download_status(&window, "Verifying GeoSite...", 90);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Verifying GeoSite...",
+        90,
+    );
     verify_sha256(&geosite_path, &geosite_expected_hash).inspect_err(|e| {
         let _ = std::fs::remove_file(&geosite_path);
         let _ = e;
@@ -1331,7 +1413,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
 
     // Apply updates — atomic swap pattern with rollback on failure.
     // Both geo files must succeed or neither is applied.
-    emit_core_download_status(&window, "Applying updates...", 95);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Applying updates...",
+        95,
+    );
     let final_geoip = paths.core_dir.join("geoip.dat");
     let final_geosite = paths.core_dir.join("geosite.dat");
 
@@ -1389,7 +1476,12 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let _ = std::fs::remove_file(&old_geoip);
     let _ = std::fs::remove_file(&old_geosite);
 
-    emit_core_download_status(&window, "Geo database update complete", 100);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::GeoData),
+        "Geo database update complete",
+        100,
+    );
     Ok("Geo databases updated successfully".to_owned())
 }
 
@@ -1497,7 +1589,12 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
     }
 
-    emit_core_download_status(&window, "Checking for Zephyr updates...", 5);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Checking for Zephyr updates...",
+        5,
+    );
 
     let info = get_latest_client_version().await?;
 
@@ -1507,7 +1604,12 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         return Ok("Already up to date".to_owned());
     }
 
-    emit_core_download_status(&window, "Downloading Zephyr update...", 10);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Downloading Zephyr update...",
+        10,
+    );
 
     // Create temp directory for the installer
     let temp_dir = std::env::temp_dir().join(format!("zephyr_update_{}", uuid::Uuid::new_v4()));
@@ -1522,7 +1624,13 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     let dest_path = temp_dir.join(asset_name);
 
     // Download the installer
-    download_release_asset(&window, &info.download_url, &dest_path).await?;
+    download_release_asset(
+        &window,
+        &info.download_url,
+        &dest_path,
+        UpdateComponent::Client,
+    )
+    .await?;
 
     // Verify SHA256 if digest is available from GitHub API
     if let Some(digest) = &info.download_digest {
@@ -1530,7 +1638,12 @@ pub async fn update_client(window: Window) -> Result<String, String> {
             .strip_prefix("sha256:")
             .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
         {
-            emit_core_download_status(&window, "Verifying installer integrity...", 93);
+            emit_download_status_ext(
+                &window,
+                Some(UpdateComponent::Client),
+                "Verifying installer integrity...",
+                93,
+            );
             verify_sha256(&dest_path, hash).map_err(|e| {
                 let _ = std::fs::remove_file(&dest_path);
                 format!("SHA256 verification failed: {e}. Installer deleted for security.")
@@ -1547,7 +1660,12 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Verify Minisign Ed25519 signature
     let minisig_url = format!("{}.minisig", info.download_url);
-    emit_core_download_status(&window, "Downloading signature...", 94);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Downloading signature...",
+        94,
+    );
 
     let sig_client = build_github_client()?;
     let sig_response = sig_client.get(&minisig_url).send().await.map_err(|e| {
@@ -1585,7 +1703,12 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         format!("Invalid UTF-8 in signature: {e}. Installer deleted for security.")
     })?;
 
-    emit_core_download_status(&window, "Verifying signature...", 95);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Verifying signature...",
+        95,
+    );
     crate::minisign_verify::verify_minisign_signature(&dest_path, &signature_content).map_err(
         |e| {
             let _ = std::fs::remove_file(&dest_path);
@@ -1593,13 +1716,23 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         },
     )?;
 
-    emit_core_download_status(&window, "Opening installer...", 96);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Opening installer...",
+        96,
+    );
 
     // Open the installer with the system default application
     tauri_plugin_opener::open_path(&dest_path, None::<&str>)
         .map_err(|e| format!("Failed to open installer: {e}"))?;
 
-    emit_core_download_status(&window, "Installer launched", 100);
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Installer launched",
+        100,
+    );
 
     Ok(format!(
         "Zephyr {} installer downloaded and opened",
