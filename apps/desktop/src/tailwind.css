@@ -111,7 +111,6 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     --radius-2xl: 1rem;
     --ease-in: cubic-bezier(0.4, 0, 1, 1);
     --ease-out: cubic-bezier(0, 0, 0.2, 1);
-    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     --animate-spin: spin 1s linear infinite;
     --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --blur-sm: 8px;
@@ -947,6 +946,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .w-\[180px\] {
     width: 180px;
   }
+  .w-\[360px\] {
+    width: 360px;
+  }
   .w-\[400px\] {
     width: 400px;
   }
@@ -1133,6 +1135,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .list-disc {
     list-style-type: disc;
   }
+  .list-none {
+    list-style-type: none;
+  }
   .appearance-none {
     appearance: none;
   }
@@ -1316,6 +1321,10 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     border-style: var(--tw-border-style);
     border-width: 1px;
   }
+  .border-0 {
+    border-style: var(--tw-border-style);
+    border-width: 0px;
+  }
   .border-2 {
     border-style: var(--tw-border-style);
     border-width: 2px;
@@ -1405,6 +1414,12 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     border-color: color-mix(in srgb, oklch(72.3% 0.219 149.579) 20%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-green-500) 20%, transparent);
+    }
+  }
+  .border-red-500\/20 {
+    border-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 20%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-red-500) 20%, transparent);
     }
   }
   .border-rose-400\/20 {
@@ -1629,6 +1644,12 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .bg-red-500 {
     background-color: var(--color-red-500);
   }
+  .bg-red-500\/10 {
+    background-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-red-500) 10%, transparent);
+    }
+  }
   .bg-rose-400 {
     background-color: var(--color-rose-400);
   }
@@ -1719,6 +1740,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .to-transparent {
     --tw-gradient-to: transparent;
     --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
+  }
+  .p-0 {
+    padding: calc(var(--spacing) * 0);
   }
   .p-0\.5 {
     padding: calc(var(--spacing) * 0.5);
@@ -1821,6 +1845,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   }
   .pt-3 {
     padding-top: calc(var(--spacing) * 3);
+  }
+  .pt-4 {
+    padding-top: calc(var(--spacing) * 4);
   }
   .pr-1 {
     padding-right: calc(var(--spacing) * 1);
@@ -2073,6 +2100,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   }
   .text-red-400 {
     color: var(--color-red-400);
+  }
+  .text-red-500 {
+    color: var(--color-red-500);
   }
   .text-rose-300 {
     color: var(--color-rose-300);
@@ -2330,11 +2360,6 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
-  .transition-\[transform\,color\] {
-    transition-property: transform,color;
-    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
-    transition-duration: var(--tw-duration, var(--default-transition-duration));
-  }
   .transition-\[width\] {
     transition-property: width;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
@@ -2406,6 +2431,11 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   .\[any\:53\] {
     any: 53;
   }
+  .group-open\:rotate-90 {
+    &:is(:where(.group):is([open], :popover-open, :open) *) {
+      rotate: 90deg;
+    }
+  }
   .group-focus-within\:text-\[var\(--text-primary\)\] {
     &:is(:where(.group):focus-within *) {
       color: var(--text-primary);
@@ -2428,6 +2458,16 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
       }
     }
   }
+  .group-hover\:bg-red-500\/20 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        background-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 20%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--color-red-500) 20%, transparent);
+        }
+      }
+    }
+  }
   .group-hover\:text-\[var\(--text-primary\)\] {
     &:is(:where(.group):hover *) {
       @media (hover: hover) {
@@ -2439,6 +2479,13 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     &:is(:where(.group):hover *) {
       @media (hover: hover) {
         color: var(--color-accent);
+      }
+    }
+  }
+  .group-hover\:text-red-400 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        color: var(--color-red-400);
       }
     }
   }
@@ -2532,16 +2579,6 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     &:hover {
       @media (hover: hover) {
         border-color: var(--zephyr-border-subtle);
-      }
-    }
-  }
-  .hover\:border-accent\/30 {
-    &:hover {
-      @media (hover: hover) {
-        border-color: var(--color-accent);
-        @supports (color: color-mix(in lab, red, red)) {
-          border-color: color-mix(in oklab, var(--color-accent) 30%, transparent);
-        }
       }
     }
   }
@@ -4011,6 +4048,67 @@ html.dark #fullscreen-editor-title {
 }
 html.dark #fullscreen-editor-output {
   color: var(--zephyr-text-secondary);
+}
+.sr-zone {
+  align-items: center;
+  justify-content: center;
+}
+.sr-wrap {
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+.sr-svg {
+  display: block;
+}
+.sr-fill {
+  transition: stroke-dashoffset 0.5s cubic-bezier(0.32, 0.72, 0, 1), stroke 0.4s ease;
+}
+.sr-fill.sr-dashing {
+  animation: sr-dash 1.5s ease-in-out infinite;
+}
+.sr-turn.sr-spinning {
+  transform-origin: 20px 20px;
+  animation: sr-spin 1.15s cubic-bezier(0.55, 0.15, 0.35, 0.85) infinite;
+}
+@keyframes sr-dash {
+  0% {
+    stroke-dasharray: 15 86;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 50 51;
+    stroke-dashoffset: -25;
+  }
+  100% {
+    stroke-dasharray: 15 86;
+    stroke-dashoffset: -101;
+  }
+}
+@keyframes sr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.sr-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.sr-pct {
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+  color: var(--text-muted);
+}
+@keyframes sr-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 @property --tw-translate-x {
   syntax: "*";

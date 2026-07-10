@@ -49,6 +49,7 @@ import {
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
+import { createStatusRing } from './status-ring.js';
 import * as prism from './prism.js';
 
 // The following modules have not yet been extracted from ui.js.
@@ -1614,15 +1615,21 @@ export async function initSettings() {
         if (appStore.get('isNetworkUpdating')) return;
         appStore.set('isNetworkUpdating', true);
 
-        const spinner = document.getElementById('geo-spinner');
-        spinner?.classList.remove('hidden');
-        updateGeoBtn.classList.add('opacity-50', 'pointer-events-none');
+        const ring = createStatusRing(updateGeoBtn);
+        ring.show();
+        /** @type {(() => void) | undefined} */
+        let unlisten;
 
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.notifGeoUpdating || "Updating Geo databases...");
 
         try {
+            unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
+                if (event.payload.component === 'geo_data') {
+                    ring.setProgress(event.payload.progress);
+                }
+            });
             await invoke(COMMANDS.UPDATE_GEO_DATA);
             /** @type {any} */
             const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
@@ -1635,13 +1642,72 @@ export async function initSettings() {
             abortLatencyTests();
             await restartCore(configPath, customArgs);
             await postRestartRecovery(configPath);
+            ring.setSuccess();
+        } catch (err) {
+            ring.setError();
+            const error = toError(err);
+            showNotification(error.toString(), 'error');
+} finally {
+if (unlisten) unlisten();
+setTimeout(() => {
+ring.destroy();
+appStore.set('isNetworkUpdating', false);
+}, 3500);
+}
+    });
+
+    // ---- Backup & Restore ----
+    const exportBackupBtn = document.getElementById('export-backup-btn');
+    const importBackupBtn = document.getElementById('import-backup-btn');
+
+    exportBackupBtn?.addEventListener('click', async () => {
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        try {
+            const savedPath = await invoke(COMMANDS.MISC.EXPORT_BACKUP);
+            showNotification(
+                (t?.backupExportSuccess || 'Backup exported to') + ': ' + savedPath,
+                'success',
+            );
         } catch (err) {
             const error = toError(err);
             showNotification(error.toString(), 'error');
-        } finally {
-            appStore.set('isNetworkUpdating', false);
-            spinner?.classList.add('hidden');
-            updateGeoBtn.classList.remove('opacity-50', 'pointer-events-none');
+        }
+    });
+
+    importBackupBtn?.addEventListener('click', async () => {
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        const confirmed = await showConfirmModal(
+            t?.backupImportConfirm || 'Importing will replace your current configuration. Continue?',
+            '',
+        );
+        if (!confirmed) return;
+
+        try {
+            const result = await invoke(COMMANDS.MISC.IMPORT_BACKUP);
+            showNotification(result, 'success');
+            // Reload settings and restart core in the background to avoid
+            // blocking the UI. The import is already complete at this point.
+            (async () => {
+                try {
+                    await loadSettingsFromCore();
+                    const importedSettings = await invoke(COMMANDS.GET_SETTINGS);
+                    const configPath = importedSettings.last_config || 'config.yaml';
+                    const customArgs = importedSettings.custom_args || [];
+                    abortLatencyTests();
+                    await restartCore(configPath, customArgs);
+                    await postRestartRecovery(configPath);
+                    window.location.reload();
+                } catch (err) {
+                    // eslint-disable-next-line no-console
+                    console.error('Failed to restart core after backup restore:', err);
+                    showNotification((err ?? 'Failed to restart core after restore').toString(), 'error');
+                }
+            })();
+        } catch (err) {
+            const error = toError(err);
+            showNotification(error.toString(), 'error');
         }
     });
 
@@ -1773,10 +1839,23 @@ export async function initSettings() {
      * @param {string} downloadUrl
      */
     const performCoreUpdate = async (latestVersion, downloadUrl) => {
+        if (!checkUpdateBtn) return;
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         const confirmed = await showConfirmModal(t.notifUpdateFound, latestVersion);
-        if (confirmed) {
+        if (!confirmed) return;
+
+        const ring = createStatusRing(checkUpdateBtn);
+        ring.show();
+        /** @type {(() => void) | undefined} */
+        let unlisten;
+
+        try {
+            unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
+                if (event.payload.component === 'core') {
+                    ring.setProgress(event.payload.progress);
+                }
+            });
             showNotification(t.notifUpdating);
             /** @type {any} */
             const coreResult = await invoke(COMMANDS.UPDATE_CORE, {
@@ -1795,6 +1874,43 @@ export async function initSettings() {
             showNotification(t.notifUpdateSuccess, 'success');
             await loadCoreVersion();
             await syncCoreConfig();
+            ring.setSuccess();
+        } catch (err) {
+            ring.setError();
+            const error = toError(err);
+            showNotification(error.toString(), 'error');
+        } finally {
+            if (unlisten) unlisten();
+            setTimeout(() => ring.destroy(), 3500);
+        }
+    };
+
+    /**
+     * @param {string} version
+     */
+    const performClientUpdate = async (version) => {
+        if (!checkUpdateBtn) return;
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        const ring = createStatusRing(checkUpdateBtn);
+        ring.show();
+        /** @type {(() => void) | undefined} */
+        let unlisten;
+        try {
+            unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
+                if (event.payload.component === 'client') {
+                    ring.setProgress(event.payload.progress);
+                }
+            });
+            await invoke(COMMANDS.UPDATE_CLIENT);
+            ring.setSuccess();
+            showNotification(`${t.clientUpdateSuccess || 'Update downloaded'} (${version})`, 'success');
+        } catch (e) {
+            ring.setError();
+            showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
+        } finally {
+            if (unlisten) unlisten();
+            setTimeout(() => ring.destroy(), 3500);
         }
     };
 
@@ -1830,12 +1946,7 @@ export async function initSettings() {
                         `${t.coreUpdate || 'Core'}: ${currentCoreVersion} → ${latest.version}\n${t.clientUpdate || 'Client'}: ${currentAppVersion} → ${clientInfo.version}\n\n${t.recommendFullVersion || 'Recommend installing Full version'}`
                     );
                     if (confirmed) {
-                        try {
-                            await invoke(COMMANDS.UPDATE_CLIENT);
-                            showNotification(`${t.clientUpdateSuccess || 'Update downloaded'} (${clientInfo.version})`, 'success');
-                        } catch (e) {
-                            showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
-                        }
+                        await performClientUpdate(clientInfo.version);
                     }
                 } else if (coreHasUpdate) {
                     await performCoreUpdate(latest.version, latest.download_url);
@@ -1846,12 +1957,7 @@ export async function initSettings() {
                         clientInfo.release_notes || ''
                     );
                     if (confirmed) {
-                        try {
-                            await invoke(COMMANDS.UPDATE_CLIENT);
-                            showNotification(`${t.clientUpdateSuccess || 'Client update downloaded'} (${clientInfo.version})`, 'success');
-                        } catch (e) {
-                            showNotification(`${t.clientUpdateFailed || 'Client update failed'}: ${e}`, 'error');
-                        }
+                        await performClientUpdate(clientInfo.version);
                     }
                 }
             } catch (err) {

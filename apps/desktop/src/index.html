@@ -1055,6 +1055,26 @@
                                     Check for Updates
                                 </button>
                             </div>
+<div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+
+                            <!-- Backup & Restore -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="backupRestore">Backup & Restore</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="backupRestoreDesc">Export or import your configuration</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <button id="export-backup-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="exportBackup">Export</button>
+                                    <button id="import-backup-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="importBackup">Import</button>
+                                </div>
+                            </div>
+
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
                             <!-- Auto Check Core Update -->
