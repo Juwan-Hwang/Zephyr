@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod backend_event;
+pub mod backup;
 pub mod config_manager;
 pub mod core_event_bridge;
 pub mod core_manager;
@@ -30,6 +31,7 @@ use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -228,6 +230,14 @@ struct Settings {
     /// Values: "bash", "fish", "cmd", "powershell", "nushell".
     #[serde(default = "default_copy_env_format")]
     copy_env_format: String,
+    /// Settings schema version for automatic migration.
+    /// Increment when breaking changes are made to the Settings struct.
+    /// On load, if the stored version < `CURRENT_SCHEMA_VERSION`, migration
+    /// functions are applied in sequence. Missing field defaults to 0
+    /// (pre-migration era), so the first load of an old config triggers
+    /// the full migration chain.
+    #[serde(default)]
+    schema_version: u32,
 }
 
 const fn default_log_retention_days() -> u32 {
@@ -235,6 +245,110 @@ const fn default_log_retention_days() -> u32 {
 }
 const fn default_log_max_file_mb() -> u32 {
     50
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Settings schema version & automatic migration system
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Current settings schema version.
+///
+/// Bump this number whenever a breaking change is made to the `Settings`
+/// struct that requires programmatic migration of existing user data.
+/// Each bump must be accompanied by a new migration function registered
+/// in `migrate_settings`.
+const CURRENT_SCHEMA_VERSION: u32 = 1;
+
+/// Run the settings migration chain.
+///
+/// If the stored `schema_version` is older than `CURRENT_SCHEMA_VERSION`,
+/// apply each migration function in sequence (v0→v1, v1→v2, …).
+///
+/// On any migration failure: back up the original `settings.json` to
+/// `settings.json.pre-migration.<timestamp>`, reset to `Settings::default()`
+/// with `CURRENT_SCHEMA_VERSION`, and log a warning. This guarantees the
+/// app always starts with a usable config — the user never gets locked
+/// out by a corrupt migration.
+pub(crate) fn migrate_settings(mut settings: Settings, settings_file: &Path) -> Settings {
+    // Fast path: already up to date
+    if settings.schema_version >= CURRENT_SCHEMA_VERSION {
+        return settings;
+    }
+
+    let start_version = settings.schema_version;
+
+    // Migration v0 → v1: normalize legacy `last_proxy_selection` entries.
+    //
+    // Before the schema system existed, `last_proxy_selection` values could
+    // be either:
+    //   - Legacy: plain node name string (e.g., "JP-Tokyo-01")
+    //   - v2: JSON string { "group": "...", "node": "..." }
+    //
+    // This migration wraps any plain-string values into the v2 JSON format.
+    // If the value is already valid JSON, it's left untouched.
+    if settings.schema_version < 1 {
+        let mut migrated_count = 0;
+        #[allow(clippy::iter_over_hash_type)]
+        for value in settings.last_proxy_selection.values_mut() {
+            // Try to parse as JSON object containing "node" — if it succeeds,
+            // it's already v2.  We must check for Object specifically because
+            // JSON primitives like `1234`, `true`, or `null` would otherwise
+            // pass `from_str::<Value>` and skip migration incorrectly.
+            if let Ok(serde_json::Value::Object(map)) =
+                serde_json::from_str::<serde_json::Value>(value)
+            {
+                if map.contains_key("node") {
+                    continue;
+                }
+            }
+            // Wrap plain string into v2 format
+            let v2 = serde_json::json!({
+                "group": null,
+                "node": value.as_str(),
+            });
+            *value = v2.to_string();
+            migrated_count += 1;
+        }
+        if migrated_count > 0 {
+            eprintln!(
+                "[Settings] Migration v0→v1: normalized {migrated_count} legacy proxy selection entries"
+            );
+        }
+        settings.schema_version = 1;
+    }
+
+    // Future migrations go here:
+    // if settings.schema_version < 2 { ... settings.schema_version = 2; }
+
+    // Persist the migrated settings
+    settings.schema_version = CURRENT_SCHEMA_VERSION;
+    let json_str = match serde_json::to_string_pretty(&settings) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[Settings] Failed to serialize migrated settings: {e}");
+            return Settings {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                close_to_tray: true,
+                ..Default::default()
+            };
+        }
+    };
+    if let Err(e) = core_manager::write_file_secure(settings_file, &json_str) {
+        // The original settings file was successfully parsed (it is NOT
+        // corrupt), so we must NOT rename it away — that would leave the
+        // app with no settings.json on the next launch, causing the user
+        // to lose all their settings. Just log the error; the in-memory
+        // migrated settings are still returned and will be used for this
+        // session. The next save_settings call will retry persistence.
+        eprintln!("[Settings] Failed to persist migrated settings: {e}");
+    }
+
+    eprintln!(
+        "[Settings] Migration complete: v{start_version} → v{}",
+        settings.schema_version
+    );
+
+    settings
 }
 
 fn default_copy_env_format() -> String {
@@ -1116,8 +1230,49 @@ pub fn run() {
             let config_dir = paths.app_data_dir;
             let settings_file = config_dir.join("settings.json");
             let settings = if settings_file.exists() {
-                let content = fs::read_to_string(settings_file).unwrap_or_default();
-                serde_json::from_str::<Settings>(&content).unwrap_or_default()
+                match fs::read_to_string(&settings_file) {
+                    Ok(content) => serde_json::from_str::<Settings>(&content).unwrap_or_else(|e| {
+                        eprintln!("[Settings] Failed to parse settings.json: {e}");
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let backup_path = settings_file.with_extension(format!("corrupt.{ts}.json"));
+                        let _ = std::fs::rename(&settings_file, &backup_path);
+                        eprintln!(
+                            "[Settings] Corrupt settings backed up to {backup_path:?}"
+                        );
+                        let default_settings = Settings {
+                            close_to_tray: true,
+                            log_retention_days: default_log_retention_days(),
+                            log_max_file_mb: default_log_max_file_mb(),
+                            copy_env_format: default_copy_env_format(),
+                            schema_version: CURRENT_SCHEMA_VERSION,
+                            ..Default::default()
+                        };
+                        // Persist the default settings immediately so a valid
+                        // settings.json always exists on disk, even if the user
+                        // exits without saving.
+                        if let Ok(json_str) = serde_json::to_string(&default_settings) {
+                            let _ = core_manager::write_file_secure(&settings_file, &json_str);
+                        }
+                        default_settings
+                    }),
+                    Err(e) => {
+                        // Read failure (transient I/O, permission, etc.) — do
+                        // NOT treat as corruption. Return defaults without
+                        // touching the file so the user's settings survive.
+                        eprintln!("[Settings] Failed to read settings.json: {e}");
+                        Settings {
+                            close_to_tray: true,
+                            log_retention_days: default_log_retention_days(),
+                            log_max_file_mb: default_log_max_file_mb(),
+                            copy_env_format: default_copy_env_format(),
+                            schema_version: CURRENT_SCHEMA_VERSION,
+                            ..Default::default()
+                        }
+                    }
+                }
             } else {
                 Settings {
                     close_to_tray: true, // 默认开启
@@ -1159,9 +1314,14 @@ pub fn run() {
                     log_retention_days: default_log_retention_days(),
                     log_max_file_mb: default_log_max_file_mb(),
                     copy_env_format: default_copy_env_format(),
+                    schema_version: CURRENT_SCHEMA_VERSION,
                 }
             };
-            app.manage(SettingsState(Arc::new(Mutex::new(settings))));
+
+            // Run automatic settings migration if needed
+            let migrated_settings = migrate_settings(settings, &settings_file);
+
+            app.manage(SettingsState(Arc::new(Mutex::new(migrated_settings))));
 
             // Initialize app log writer if log persistence is enabled
             {
@@ -1377,6 +1537,9 @@ invalidate_heartbeat(window.app_handle());
             // Global shortcut commands (rate-limited wrappers)
             rate_limited_register_shortcut,
             rate_limited_unregister_shortcut,
+            // Backup & restore
+            backup::export_backup,
+            backup::import_backup,
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
