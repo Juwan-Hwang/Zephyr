@@ -201,6 +201,10 @@ struct Settings {
     /// Has no effect when `close_to_tray` is disabled (app exits on close).
     #[serde(default)]
     lightweight_mode: bool,
+    /// Silent start: when enabled, the main window stays hidden on launch
+    /// (tray icon only). The user can show the window by clicking the tray icon.
+    #[serde(default)]
+    silent_start: bool,
     /// Encrypt profile YAML files with the machine key.
     /// When enabled, config files are AES-256-GCM encrypted on disk and
     /// cannot be used on another machine. When toggled, existing files are
@@ -1148,6 +1152,7 @@ pub fn run() {
                     failover_enabled: false,
                     network_optim_auto_apply: false,
                     lightweight_mode: false,
+                    silent_start: false,
                     encrypt_configs: false,
                     log_app_enabled: false,
                     log_core_enabled: false,
@@ -1514,8 +1519,17 @@ invalidate_heartbeat(window.app_handle());
                 // Smart kill: only prompts for password if there's actually a root mihomo running
                 let _ = smart_kill_all_mihomo_as_root();
             }
+            tauri::RunEvent::Resumed => {
+                // System woke up from sleep. The mihomo core's TCP connections
+                // are likely stale or dead. Spawn an async task to:
+                // 1. Probe the core API (health check).
+                // 2. If unreachable, restart the core with the last-known config.
+                let app_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    handle_system_resume(&app_handle).await;
+                });
+            }
             tauri::RunEvent::Ready
-            | tauri::RunEvent::Resumed
             | tauri::RunEvent::MainEventsCleared
             | tauri::RunEvent::WindowEvent { .. }
             | tauri::RunEvent::WebviewEvent { .. }
@@ -1524,6 +1538,146 @@ invalidate_heartbeat(window.app_handle());
             | _ => {}
         }
     });
+}
+
+/// Handle system resume from sleep.
+///
+/// After waking from sleep, the mihomo core's TCP connections are often stale
+/// or dead. This function:
+/// 1. Reads the last-known core port from `MihomoState`.
+/// 2. Probes the core API via a lightweight TCP connect.
+/// 3. If unreachable after 3 attempts (3s), restarts the core using the
+///    last-known config path and custom args.
+///
+/// All steps emit backend events so the frontend can show status.
+async fn handle_system_resume(app: &tauri::AppHandle) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt as _;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio::net::TcpStream;
+
+    /// Guard: prevents concurrent resume handlers from racing.
+    /// Multiple `Resumed` events can fire in rapid succession on some OSes.
+    static RESUME_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+    if RESUME_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return; // Another resume handler is already running.
+    }
+
+    /// Drop guard: resets the flag when the handler completes (or panics).
+    struct ResumeGuard;
+    impl Drop for ResumeGuard {
+        fn drop(&mut self) {
+            RESUME_IN_PROGRESS.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = ResumeGuard;
+
+    crate::emit_info!(
+        System,
+        SYS_RESUMED_HEALTH_CHECK,
+        "System resumed from sleep — checking core health"
+    );
+
+    // Read the last-known core port + config from MihomoState.
+    let (port, config_path, custom_args) = {
+        let state = app.state::<MihomoState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            guard.last_port(),
+            guard.last_config_path().map(str::to_owned),
+            guard.last_custom_args().map(<[String]>::to_vec),
+        )
+    };
+
+    let Some(core_port) = port else {
+        // Core was never started — nothing to do.
+        return;
+    };
+
+    // Probe: try TCP connect + HTTP request, 3 attempts with 1s delay.
+    // Each operation has a 2s timeout to avoid hanging if the OS accepts
+    // connections but the process is frozen (common after sleep/wake).
+    let mut healthy = false;
+    for _ in 0..3 {
+        let connect_result = tokio::time::timeout(
+            Duration::from_secs(2),
+            TcpStream::connect(format!("127.0.0.1:{core_port}")),
+        )
+        .await;
+
+        if let Ok(Ok(mut stream)) = connect_result {
+            let request = format!(
+                "GET / HTTP/1.1\r\nHost: 127.0.0.1:{core_port}\r\nConnection: close\r\n\r\n"
+            );
+            let write_result =
+                tokio::time::timeout(Duration::from_secs(2), stream.write_all(request.as_bytes()))
+                    .await;
+            if matches!(write_result, Ok(Ok(()))) {
+                let mut buf = [0u8; 128];
+                let read_result =
+                    tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buf)).await;
+                if let Ok(Ok(n)) = read_result {
+                    let resp = String::from_utf8_lossy(buf.get(..n).unwrap_or(&[]));
+                    if resp.starts_with("HTTP/1.1 200")
+                        || resp.starts_with("HTTP/1.1 401")
+                        || resp.starts_with("HTTP/1.0 200")
+                        || resp.starts_with("HTTP/1.0 401")
+                    {
+                        healthy = true;
+                        break;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    if healthy {
+        crate::emit_info!(
+            System,
+            SYS_RESUMED_CORE_HEALTHY,
+            "Core health check passed after resume — no action needed"
+        );
+        return;
+    }
+
+    // Core is unresponsive — restart it.
+    // start_core_inner already handles stopping the old core process
+    // via spawn_blocking internally, so no manual stop is needed here.
+    crate::emit_warn!(
+        System,
+        SYS_RESUMED_CORE_RESTART,
+        "Core unresponsive after resume — restarting"
+    );
+
+    // Restart with the last-known config.
+    let config = config_path.unwrap_or_else(|| "config.yaml".to_owned());
+    let args = custom_args.unwrap_or_default();
+    let state = app.state::<MihomoState>();
+    if let Err(e) = core_manager::core::core_process::start_core_inner(
+        app.clone(),
+        state,
+        config,
+        false,
+        args,
+        None,
+        None,
+    )
+    .await
+    {
+        crate::emit_error!(
+            System,
+            SYS_RESUMED_CORE_RESTART,
+            "Failed to restart core after resume: {e}"
+        );
+    }
 }
 
 #[cfg(test)]
