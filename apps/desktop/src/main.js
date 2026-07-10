@@ -131,12 +131,17 @@ async function initApp() {
   // 3. Initialize window controls
   initWindowControls();
 
-  // 4. Show window
+  // 4. Show window (unless silent start is enabled)
   setTimeout(async () => {
     try {
-      await invoke(COMMANDS.SHOW_MAIN_WINDOW);
+      const settings = await invoke(COMMANDS.GET_SETTINGS);
+      if (!settings.silent_start) {
+        await invoke(COMMANDS.SHOW_MAIN_WINDOW);
+      } else {
+        apiLogger.info('[Zephyr] silent_start enabled — staying hidden in tray');
+      }
     } catch (e) {
-      apiLogger.warn('Failed to show window', e);
+      apiLogger.warn('Failed to check silent_start / show window', e);
     }
   }, 50);
 
