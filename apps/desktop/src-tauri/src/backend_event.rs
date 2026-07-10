@@ -214,6 +214,8 @@ pub mod codes {
     pub const CORE_MODE_RESTORE_FAILED: u16 = 1009;
     /// Mihomo mode restore failed in Drop guard (deferred path).
     pub const CORE_MODE_RESTORE_DROPPED: u16 = 1010;
+    /// Panic was caught by `catch_unwind` in a core operation.
+    pub const CORE_PANIC_GUARD: u16 = 1011;
 
     // Subscription: 2000-2999
     pub const SUB_UPDATE_FAILED: u16 = 2001;
@@ -267,6 +269,8 @@ pub mod codes {
     pub const CONFIG_PERSIST_FAILED: u16 = 4012;
     /// A dangling `last_config` reference was cleaned up.
     pub const CONFIG_DANGLING_REF_CLEANED: u16 = 4013;
+    /// Panic was caught by `catch_unwind` during config I/O.
+    pub const CONFIG_PANIC_GUARD: u16 = 4014;
 
     // Plugin: 5000-5999
     pub const PLUGIN_LOAD_FAILED: u16 = 5001;
@@ -310,6 +314,8 @@ pub mod codes {
     pub const UPDATE_CHECK_FAILED: u16 = 7001;
     pub const UPDATE_DOWNLOAD_FAILED: u16 = 7002;
     pub const UPDATE_LOCK_FAILED: u16 = 7003;
+    /// Panic was caught by `catch_unwind` during update.
+    pub const UPDATE_PANIC_GUARD: u16 = 7004;
 
     // Override: 8000-8999
     pub const OVERRIDE_APPLY_FAILED: u16 = 8001;
@@ -543,4 +549,23 @@ macro_rules! emit_info {
             )
         )
     };
+}
+
+// ── Panic Guard Utilities ──────────────────────────────────────────────────
+
+/// Convert a `catch_unwind` panic payload into a human-readable string.
+///
+/// Panics in Rust can carry `&'static str`, `String`, or arbitrary types.
+/// This function extracts the most common ones and falls back to a generic
+/// message for unknown payload types.
+#[must_use]
+#[allow(clippy::needless_pass_by_value)]
+pub fn panic_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_owned()
+    }
 }
