@@ -1334,7 +1334,7 @@ async fn health_check(port: u16) -> Result<(), String> {
 }
 
 #[allow(clippy::cognitive_complexity)]
-async fn start_core_inner(
+pub async fn start_core_inner(
     app: AppHandle,
     state: State<'_, MihomoState>,
     config_path: String,
