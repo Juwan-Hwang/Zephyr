@@ -45,7 +45,8 @@ export async function checkForClientUpdate() {
         const confirmed = await showUpdateDialog(info.version, info.release_notes, t);
         if (!confirmed) return;
 
-        // Listen for download progress
+        // Listen for download progress (logging only — the progress ring
+        // is handled by the caller via StatusRing)
         const unlisten = await listen('core-download-status', (/** @type {{ payload: { status_text: string, progress: number } }} */ event) => {
             const { status_text, progress } = event.payload;
             apiLogger.info(`[ClientUpdater] ${status_text} (${progress}%)`);

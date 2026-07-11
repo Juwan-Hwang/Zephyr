@@ -1104,3 +1104,72 @@ html.dark #fullscreen-editor-title {
 html.dark #fullscreen-editor-output {
     color: var(--zephyr-text-secondary);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Status Ring — compact circular progress indicator
+   Replaces update buttons during in-progress operations.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.sr-zone {
+    align-items: center;
+    justify-content: center;
+}
+
+.sr-wrap {
+    position: relative;
+    width: 40px;
+    height: 40px;
+}
+
+.sr-svg {
+    display: block;
+}
+
+.sr-fill {
+    transition: stroke-dashoffset 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+                stroke 0.4s ease;
+}
+
+/* Indeterminate: breathing dash + seamless rotation */
+.sr-fill.sr-dashing {
+    animation: sr-dash 1.5s ease-in-out infinite;
+}
+
+.sr-turn.sr-spinning {
+    transform-origin: 20px 20px;
+    animation: sr-spin 1.15s cubic-bezier(0.55, 0.15, 0.35, 0.85) infinite;
+}
+
+@keyframes sr-dash {
+    0%   { stroke-dasharray: 15 86; stroke-dashoffset: 0; }
+    50%  { stroke-dasharray: 50 51; stroke-dashoffset: -25; }
+    100% { stroke-dasharray: 15 86; stroke-dashoffset: -101; }
+}
+
+@keyframes sr-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Center overlay */
+.sr-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.sr-pct {
+    font-size: 9px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.3px;
+    color: var(--text-muted);
+}
+
+/* Icon draw animation */
+@keyframes sr-draw {
+    to { stroke-dashoffset: 0; }
+}
+
