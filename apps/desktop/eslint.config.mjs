@@ -128,7 +128,9 @@ export default [
             'src/js-yaml.min.js',
             'src/_shared/**',
             'src/cm6.bundle.js',
-            'src/tailwind.css',
+            'src/uno-generated.css',
+            'src/tokens-variables.css',
+            'src/tokens-theme.css',
         ],
     },
     {
