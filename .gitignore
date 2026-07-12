@@ -51,6 +51,11 @@ apps/desktop/src-tauri/target/
 # Generated: @zephyr/shared copied for import maps
 apps/desktop/src/_shared/
 
+# Generated: UnoCSS CLI output (build artifact, not source)
+apps/desktop/src/uno-generated.css
+apps/desktop/src/tokens-variables.css
+apps/desktop/src/tokens-theme.css
+
 # Installer files (should not be in repo)
 rustup-init.exe
 
