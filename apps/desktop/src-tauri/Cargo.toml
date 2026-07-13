@@ -97,7 +97,7 @@ webview2-com = "=0.38.2"
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
 [dev-dependencies]
-mockall = "0.13"
+mockall = "0.15"
 tempfile = "3.14"
 
 [lints]
