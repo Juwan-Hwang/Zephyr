@@ -190,7 +190,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: trufflesecurity/trufflehog@v3.95.2
+      - uses: trufflesecurity/trufflehog@v3.95.9
         with:
           extra_args: --only-verified
           path: .
