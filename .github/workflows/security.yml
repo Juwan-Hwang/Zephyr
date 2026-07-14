@@ -56,7 +56,6 @@ jobs:
         with:
           manifest-path: apps/desktop/src-tauri/Cargo.toml
           command: check
-          command-arguments: --config deny.toml
           log-level: warn
 
   # ============================================================
@@ -132,8 +131,8 @@ jobs:
           cache: pnpm
       - name: pnpm install
         run: pnpm install
-      - name: pnpm audit (production only, fail on moderate+)
-        run: pnpm audit --prod --audit-level=moderate
+      - name: npm audit (production only, fail on moderate+)
+        run: npm i --package-lock-only --ignore-scripts && npm audit --omit=dev --audit-level=moderate
 
   # ============================================================
   # Job 6: PR 依赖审查（仅 PR 触发）
