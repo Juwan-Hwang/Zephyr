@@ -34,7 +34,11 @@ export function createCollapsible(container, {
 
     // Header
     const header = document.createElement('div');
-    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--zephyr-bg-subtle)] active:bg-[var(--zephyr-bg-muted)] transition-all duration-200 select-none ${headerClass}`;
+    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--zephyr-bg-subtle)] active:bg-[var(--zephyr-bg-muted)] transition-all duration-[var(--zephyr-time-micro)] select-none ${headerClass}`;
+    header.setAttribute('role', 'button');
+    header.setAttribute('tabindex', '0');
+    header.setAttribute('aria-expanded', defaultOpen ? 'true' : 'false');
+    header.addEventListener('keydown', (e) => { if (e.target === header && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); header.click(); } });
 
     const leftPart = document.createElement('div');
     leftPart.className = 'flex items-center gap-2.5';
@@ -111,6 +115,12 @@ export function createCollapsible(container, {
     let isCollapsed = !defaultOpen;
 
     const updateCollapse = () => {
+        if (!contentWrapper.id) {
+            const contentId = 'collapsible-content-' + Math.random().toString(36).substring(2, 9);
+            contentWrapper.id = contentId;
+            header.setAttribute('aria-controls', contentId);
+        }
+        header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         if (isCollapsed) {
             contentWrapper.style.gridTemplateRows = '0fr';
             content.style.transform = 'translateY(-8px)';

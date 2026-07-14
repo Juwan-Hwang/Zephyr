@@ -1,3 +1,11 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+overrides:
+  brace-expansion: ">=5.0.6"
+  ws: ">=8.20.1"
+
+onlyBuiltDependencies:
+  - "@parcel/watcher"
+  - "esbuild"
