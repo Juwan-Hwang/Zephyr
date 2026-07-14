@@ -172,7 +172,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             const dot = document.createElement('div');
             let dotColor;
             if (isSelected) dotColor = 'bg-accent animate-pulse';
-            else if (proxy.udp) dotColor = 'bg-green-500';
+            else if (proxy.udp) dotColor = 'bg-success';
             else dotColor = 'bg-[var(--text-tertiary)]';
             dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
 

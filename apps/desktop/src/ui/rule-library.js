@@ -151,9 +151,9 @@ async function updateStatusBar() {
             const isError = state === 'error';
             const isCompiling = state === 'compiling';
             let dotColor;
-            if (isError) dotColor = 'bg-rose-500';
-            else if (isCompiling) dotColor = 'bg-amber-400 animate-pulse';
-            else dotColor = 'bg-emerald-400';
+            if (isError) dotColor = 'bg-danger';
+            else if (isCompiling) dotColor = 'bg-warning animate-pulse';
+            else dotColor = 'bg-success';
             let stateLabel;
             if (isError) stateLabel = t.ruleLibraryStatusError || 'Error';
             else if (isCompiling) stateLabel = t.ruleLibraryStatusCompiling || 'Compiling';
@@ -170,7 +170,7 @@ async function updateStatusBar() {
     } catch {
         // Fallback to local computation
         if (statusEl) {
-            const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>';
+            const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-success mr-1.5"></span>';
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
             statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready');
         }
@@ -456,7 +456,7 @@ function getSourceBadge(source) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const s = (source || '').toLowerCase();
     if (s.includes('extract') || s.includes('subscription')) {
-        return { cls: 'bg-blue-500/15 text-blue-400', label: t.ruleLibraryExtracted || 'Extracted' };
+        return { cls: 'bg-info/15 text-info', label: t.ruleLibraryExtracted || 'Extracted' };
     }
     if (s.includes('import')) {
         return { cls: 'bg-accent/15 text-accent', label: t.ruleLibraryImported || 'Imported' };
@@ -631,7 +631,7 @@ function renderActiveRules(container) {
                         <span class="text-[10px] text-[var(--text-muted)]">${ruleCount} rules</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="text-[10px] ${enabled ? 'text-emerald-500' : 'text-[var(--text-muted)]'}">${enabled ? '● ON' : '○ OFF'}</span>
+                        <span class="text-[10px] ${enabled ? 'text-success' : 'text-[var(--text-muted)]'}">${enabled ? '● ON' : '○ OFF'}</span>
                     </div>
                 `;
                 header.addEventListener('click', () => {
@@ -688,16 +688,15 @@ function renderActiveRules(container) {
 function getGroupBadgeColor(label) {
     // 预定义的柔和色彩方案（bg + text）
     const palette = [
-        'bg-blue-500/15 text-blue-400',
+        'bg-info/15 text-info',
         'bg-accent/15 text-accent',
-        'bg-emerald-500/15 text-emerald-400',
-        'bg-amber-500/15 text-amber-400',
-        'bg-rose-500/15 text-rose-400',
-        'bg-cyan-500/15 text-cyan-400',
-        'bg-orange-500/15 text-orange-400',
-        'bg-indigo-500/15 text-indigo-400',
-        'bg-teal-500/15 text-teal-400',
-        'bg-pink-500/15 text-pink-400',
+        'bg-success/15 text-success',
+        'bg-warning/15 text-warning',
+        'bg-danger/15 text-danger',
+        'bg-download/15 text-download',
+        'bg-orange/15 text-orange',
+        'bg-upload/15 text-upload',
+        'bg-pink/15 text-pink',
     ];
     // 简单哈希：取字符串 charCode 之和取模
     let hash = 0;
@@ -1384,28 +1383,28 @@ async function handleViewChanges(filename) {
         if (added.length > 0) {
             diffHtml += `<div class="space-y-1">
                 <div class="flex items-center gap-2 mb-1">
-                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-                    <span class="text-xs font-medium text-emerald-400">+${added.length} ${t.ruleLibraryDiffAdded || 'added'}</span>
+                    <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+                    <span class="text-xs font-medium text-success">+${added.length} ${t.ruleLibraryDiffAdded || 'added'}</span>
                 </div>
-                ${added.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${added.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-success/10 border border-success/20 text-xs text-success/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (removed.length > 0) {
             diffHtml += `<div class="space-y-1">
                 <div class="flex items-center gap-2 mb-1">
-                    <span class="inline-block w-2 h-2 rounded-full bg-rose-400"></span>
-                    <span class="text-xs font-medium text-rose-400">-${removed.length} ${t.ruleLibraryDiffRemoved || 'removed'}</span>
+                    <span class="inline-block w-2 h-2 rounded-full bg-danger"></span>
+                    <span class="text-xs font-medium text-danger">-${removed.length} ${t.ruleLibraryDiffRemoved || 'removed'}</span>
                 </div>
-                ${removed.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${removed.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (modified.length > 0) {
             diffHtml += `<div class="space-y-1">
                 <div class="flex items-center gap-2 mb-1">
-                    <span class="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
-                    <span class="text-xs font-medium text-amber-400">~${modified.length} ${t.ruleLibraryDiffModified || 'modified'}</span>
+                    <span class="inline-block w-2 h-2 rounded-full bg-warning"></span>
+                    <span class="text-xs font-medium text-warning">~${modified.length} ${t.ruleLibraryDiffModified || 'modified'}</span>
                 </div>
-                ${modified.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${modified.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-warning/10 border border-warning/20 text-xs text-warning/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
 

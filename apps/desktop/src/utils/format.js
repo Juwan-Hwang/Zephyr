@@ -14,16 +14,16 @@ import { getDateTimeFormat } from './intl-cache.js';
  * @returns {string} Tailwind text color class name
  *
  * @example
- * getDelayColorClass(120);  // 'text-emerald-400'
- * getDelayColorClass(350);  // 'text-amber-400'
- * getDelayColorClass(800);  // 'text-rose-400'
+ * getDelayColorClass(120);  // 'text-success'
+ * getDelayColorClass(350);  // 'text-warning'
+ * getDelayColorClass(800);  // 'text-danger'
  * getDelayColorClass(null); // 'text-[var(--zephyr-text-tertiary)]'
  */
 export function getDelayColorClass(delay) {
     if (delay === null || delay === 0 || delay >= 999999) return 'text-[var(--zephyr-text-tertiary)]';
-    if (delay < 200) return 'text-emerald-400';
-    if (delay < 500) return 'text-amber-400';
-    return 'text-rose-400';
+    if (delay < 200) return 'text-success';
+    if (delay < 500) return 'text-warning';
+    return 'text-danger';
 }
 
 /**
