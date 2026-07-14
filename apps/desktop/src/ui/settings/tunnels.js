@@ -137,15 +137,15 @@ export function initTunnelSettings({
             <div class="space-y-4">
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
-                    <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="input-mono">
+                    <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="form-control form-control-md form-control-mono">
                 </div>
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
-                    <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="input-mono">
+                    <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="form-control form-control-md form-control-mono">
                 </div>
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
-                    <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="input-mono">
+                    <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="form-control form-control-md form-control-mono">
                 </div>
                 <div class="flex gap-3 justify-end pt-2">
                     <button id="tunnel-cancel-btn" class="btn-ghost">${cancelText}</button>
