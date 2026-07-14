@@ -343,7 +343,7 @@ function renderArrayContent(container, arr, parentKey, _depth) {
         const items = arr;
         items.forEach((item, index) => {
             const itemCard = document.createElement('div');
-            itemCard.className = "bg-[var(--zephyr-bg-input)] rounded-lg p-3 space-y-2";
+            itemCard.className = "bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] p-3 space-y-2";
 
             const idxHeader = document.createElement('div');
             idxHeader.className = "text-2xs text-[var(--text-muted)] font-mono mb-2";
@@ -381,7 +381,7 @@ function renderArraySection(title, arr, fullKey, depth) {
         title,
         defaultOpen: false,
         badgeText: `${arr.length}`,
-        cardClass: 'bg-[var(--zephyr-bg-input)] rounded-lg overflow-hidden',
+        cardClass: 'bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] overflow-hidden',
         headerClass: 'p-3',
         contentClass: 'border-t border-[var(--zephyr-border-subtle)] space-y-2 p-3',
     });
@@ -401,9 +401,10 @@ function renderSimpleArrayEditor(container, arr, fullKey) {
     wrapper.className = "space-y-1";
 
     const textarea = document.createElement('textarea');
-    textarea.className = "w-full min-h-[60px] bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-md px-3 py-2 text-2xs text-[var(--text-secondary)] focus:outline-none focus:border-accent/50 transition-colors font-mono resize-y";
+    textarea.className = "form-control form-control-mono w-full min-h-[60px] px-3 py-2 text-2xs resize-y";
+    textarea.setAttribute('aria-label', `Edit ${fullKey}`);
     textarea.value = arr.join('\n');
-    textarea.rows = Math.min(arr.length, 10);
+    textarea.rows = Math.max(1, Math.min(arr.length, 10));
 
     textarea.onchange = () => {
         const newValue = textarea.value.split('\n').filter(line => line.trim() !== '');
@@ -509,15 +510,17 @@ function renderConfigItem(key, value, fullKey) {
         wrapper.appendChild(badge);
 
         const setBtn = document.createElement('button');
-        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
+        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] transition-colors";
         setBtn.title = "Set value";
+        setBtn.setAttribute('aria-label', 'Set value for ' + fullKey);
         // eslint-disable-next-line no-unsanitized/property -- static SVG constant
         setBtn.innerHTML = SVG_ICONS.plus;
         setBtn.onclick = (e) => {
             e.stopPropagation();
             const input = document.createElement('input');
             input.type = "text";
-            input.className = "w-full max-w-[120px] bg-[var(--zephyr-bg-input)] border border-accent/50 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] focus:outline-none font-mono";
+            input.className = "form-control w-full max-w-[120px] px-2 py-1 text-xs font-mono";
+            input.setAttribute('aria-label', `New value for ${fullKey}`);
             input.placeholder = "value...";
             input.onkeydown = (ev) => {
                 if (ev.key === 'Enter') {

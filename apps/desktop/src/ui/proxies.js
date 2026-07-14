@@ -1104,7 +1104,7 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
+        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-surface)] shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
         const scrollDiv = document.createElement('div');
         scrollDiv.className = 'menu-scroll max-h-[300px]';
@@ -1272,10 +1272,10 @@ function renderProxiesLoading(container, loadingText) {
         if (!existing) return;
         // Don't add button if it already exists
         if (document.getElementById('restart-core-btn')) return;
-        const tObj = /** @type {any} */ (translations)[currentLang];
+        const tObj = /** @type {any} */ (translations)[currentLang] || {};
         const btn = document.createElement('button');
         btn.id = 'restart-core-btn';
-        btn.className = 'mt-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
+        btn.className = 'mt-2 px-4 py-1.5 rounded-[var(--zephyr-radius-surface)] text-sm font-medium transition-all';
         btn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
         btn.textContent = tObj.restartCore || 'Restart Core';
         btn.addEventListener('click', () => handleCoreRestart(btn, tObj, 'loading state'));
@@ -1410,7 +1410,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         card.dataset.baseOrder = `${index}`;
         card.dataset.selected = isSelected ? '1' : '0';
         // Use h-full to maintain 96px height, use absolute positioning for badge
-        card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-[color,border-color,box-shadow] duration-300 group h-full w-full
+        card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-standard)] group h-full w-full
             ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-[var(--zephyr-bg-muted)]'}`;
 
         let lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
@@ -1429,7 +1429,11 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         top.className = 'flex items-center justify-between pointer-events-none w-full gap-2';
 
         const nameContainer = document.createElement('div');
-        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-300 ${isScrollingEnabled && name.length > 12 ? 'scrolling-text-container' : 'overflow-hidden'}`;
+        const isScrolling = isScrollingEnabled && name.length > 12;
+        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-[var(--zephyr-time-standard)] ${isScrolling ? 'scrolling-text-container pointer-events-auto' : 'overflow-hidden'}`;
+        if (isScrolling && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            nameContainer.setAttribute('tabindex', '0');
+        }
 
         const nameSpan = document.createElement('span');
         if (isScrollingEnabled && name.length > 12) {
@@ -1635,13 +1639,13 @@ export async function renderProxies() {
     if (!data || !data.proxies) {
         container.innerHTML = '';
         const errWrap = document.createElement('div');
-        errWrap.className = 'col-span-full text-center py-10 text-danger bg-danger/5 rounded-lg border border-danger/20 flex flex-col items-center gap-4';
+        errWrap.className = 'col-span-full text-center py-10 text-danger bg-danger/5 rounded-[var(--zephyr-radius-surface)] border border-danger/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);
         // Add restart core button on connection failure
         const restartBtn = document.createElement('button');
-        restartBtn.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
+        restartBtn.className = 'px-4 py-1.5 rounded-[var(--zephyr-radius-surface)] text-sm font-medium transition-all';
         restartBtn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
         restartBtn.textContent = t.restartCore || 'Restart Core';
         restartBtn.addEventListener('click', () => handleCoreRestart(restartBtn, t, 'error state'));
@@ -1653,7 +1657,7 @@ export async function renderProxies() {
     if (config?.mode?.toLowerCase() === 'direct') {
         container.innerHTML = '';
         const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
+        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         prompt.innerHTML = `
             ${SVG_ICONS.externalLink}

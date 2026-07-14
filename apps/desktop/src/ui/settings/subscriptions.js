@@ -193,9 +193,9 @@ async function showEditPanel(configInfo) {
                     <div id="edit-ua-wrap" class="relative">
                         <button id="edit-ua-trigger" type="button" class="select-common w-full flex items-center justify-between text-xs py-1.5">
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
-                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
                                 ${uaMenuItems}
                             </div>
@@ -213,9 +213,9 @@ async function showEditPanel(configInfo) {
                     <div id="edit-auto-update-wrap" class="relative">
                         <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
-                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
                             <div class="menu-scroll">
                                 ${dropdownMenuItems}
                             </div>
@@ -1263,10 +1263,11 @@ export function initSubscriptionSettings({
             // Update button (only if has URL)
             if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
-                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
+                updateBtn.className = 'p-1.5 rounded-[var(--zephyr-radius-control)] hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh;
                 updateBtn.title = t.update;
+                updateBtn.setAttribute('aria-label', t.update || 'Update');
                 updateBtn.onclick = async (e) => {
                     e.stopPropagation();
                     updateBtn.classList.add('animate-spin');
@@ -1351,6 +1352,8 @@ export function initSubscriptionSettings({
                     usageContainer.className = 'mt-3 mb-1 w-full';
 
                     const textRow = document.createElement('div');
+                    const labelId = 'sub-usage-label-' + Math.random().toString(36).substring(2, 9);
+                    textRow.id = labelId;
                     textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
                     textRow.innerHTML = `<span>${formatFileSize(used)} ${t.usedSpace || 'used'}</span><span>${formatFileSize(total)} ${t.totalSpace || 'total'}</span>`;
@@ -1359,9 +1362,15 @@ export function initSubscriptionSettings({
                     barBg.className = 'h-1.5 w-full bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden border border-[var(--zephyr-border-subtle)]';
 
                     const barFill = document.createElement('div');
-                    barFill.className = `h-full rounded-full transition-[width] duration-1000 ${percentage > 90 ? 'bg-danger' : 'bg-accent'}`;
-                    barFill.style.width = `${percentage}%`;
+                    const clampedPercentage = isNaN(percentage) || !isFinite(percentage) ? 0 : Math.max(0, Math.min(100, percentage));
+                    barFill.className = `h-full rounded-full transition-[width] duration-[var(--zephyr-time-page)] ${clampedPercentage > 90 ? 'bg-danger' : 'bg-accent'}`;
+                    barFill.style.width = `${clampedPercentage}%`;
 
+                    barBg.setAttribute('role', 'progressbar');
+                    barBg.setAttribute('aria-labelledby', labelId);
+                    barBg.setAttribute('aria-valuenow', String(Math.round(clampedPercentage)));
+                    barBg.setAttribute('aria-valuemin', '0');
+                    barBg.setAttribute('aria-valuemax', '100');
                     barBg.appendChild(barFill);
                     usageContainer.appendChild(textRow);
                     usageContainer.appendChild(barBg);
