@@ -85,8 +85,8 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   text-transform: var(--zephyr-button-transform);
   letter-spacing: var(--zephyr-button-tracking);
   transition-property: color, background-color, border-color, box-shadow, opacity;
-  transition-duration: var(--zephyr-transition-standard);
-  transition-timing-function: ease-out;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
   cursor: pointer;
 }
 
@@ -95,7 +95,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--zephyr-text-primary);
 }
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled):not([aria-disabled="true"]) {
   background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--zephyr-text-primary);
 }
@@ -110,7 +110,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
 }
-.btn-accent:hover {
+.btn-accent:hover:not(:disabled):not([aria-disabled="true"]) {
   background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
@@ -119,7 +119,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
   color: var(--zephyr-color-danger);
 }
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled):not([aria-disabled="true"]) {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
 }
 
@@ -128,7 +128,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
   color: var(--zephyr-color-warning);
 }
-.btn-warning:hover {
+.btn-warning:hover:not(:disabled):not([aria-disabled="true"]) {
   background-color: color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
 }
 
@@ -137,7 +137,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
 }
-.btn-success:hover {
+.btn-success:hover:not(:disabled):not([aria-disabled="true"]) {
   background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
@@ -146,14 +146,21 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   color: var(--zephyr-text-on-accent);
   box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled):not([aria-disabled="true"]) {
   opacity: 0.85;
 }
 
 /* ── Button State Matrix (PR3 §3.3) ── */
 /* Disabled — through native attribute, no extra class needed */
 .btn:disabled,
-.btn[disabled] {
+.btn[disabled],
+.form-control:disabled,
+.form-control[disabled],
+.select-common:disabled,
+.select-common[disabled],
+.btn[aria-disabled="true"],
+.form-control[aria-disabled="true"],
+.select-common[aria-disabled="true"] {
   opacity: 0.4;
   cursor: not-allowed !important;
 }
@@ -252,6 +259,11 @@ input[type="range"],
   --z-sticky: var(--zephyr-z-index-sticky);
   --z-modal: var(--zephyr-z-index-modal);
   --z-toast: var(--zephyr-z-index-toast);
+
+  /* Focus ring adapter */
+  --zephyr-focus-ring: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-ring-alpha, 0.5));
+  --zephyr-focus-ring-soft: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-ring-soft-alpha, 0.3));
+  --zephyr-focus-border: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-border-alpha, 0.5));
 }
 
 html:not(.dark) {
@@ -707,13 +719,10 @@ html:not(.dark) .script-output {
 /* Textarea — use form-control + form-control-mono + resize-none utility */
 
 /* Form control focus + placeholder (replaces old per-class overrides) */
-.form-control:focus-visible {
-  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
-  outline: none;
-}
-html:not(.dark) .form-control:focus-visible {
-  border-color: var(--color-accent);
+.form-control:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--zephyr-focus-border);
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
+  outline-color: transparent;
 }
 html:not(.dark) .form-control::placeholder,
 html:not(.dark) .select-common::placeholder {
@@ -944,23 +953,30 @@ html:not(.dark) .select-common::placeholder {
 /* ============================================
    Focus Visibility (theme-aware)
    ============================================ */
-:focus-visible {
-  outline: 4px solid rgba(var(--accent-rgb), 0.6);
-  outline-offset: 1px;
+/* Global outline for keyboard navigation visibility */
+:where(button, a, input, select, textarea, [tabindex]:not([tabindex^="-"])):focus-visible {
+  outline: 2px solid var(--zephyr-focus-ring);
+  outline-offset: 2px;
 }
 
-/* Button focus ring using box-shadow */
-button:focus-visible,
-[role="button"]:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
+/* Buttons get a soft box-shadow supplement (outline preserved) */
+button:focus-visible:not(:disabled):not([aria-disabled="true"]),
+[role="button"]:focus-visible:not([aria-disabled="true"]) {
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
+  outline-color: transparent;
 }
 
 /* Select focus (pill-shaped, keeps its own focus style) */
 .select-common:focus {
   box-shadow: none;
-  outline: none;
+  outline-color: transparent;
   border-color: var(--zephyr-border-strong);
+}
+
+.select-common:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  outline: 2px solid var(--zephyr-focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
 }
 
 /* ============================================
@@ -970,8 +986,54 @@ button:focus-visible,
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
+
+  /* Disable decorative animations */
+  .conn-line-dash,
+  .conn-pulse-dot,
+  .sr-fill.sr-dashing,
+  .sr-turn.sr-spinning,
+  .scrolling-text,
+  #connections-empty svg {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Transition System (PR4 4.5)
+   ============================================ */
+.form-control,
+.select-common,
+.dropdown-item,
+  .dropdown-panel {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+.glass-card {
+  transition-property: color, background-color, border-color, box-shadow, opacity, backdrop-filter, -webkit-backdrop-filter;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+.nav-button,
+.tab-button,
+.status-dot {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-micro);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+[data-page],
+#modal-container {
+  transition-property: opacity, transform;
+  transition-duration: var(--zephyr-time-page);
+  transition-timing-function: var(--zephyr-easing-smooth);
 }
 
 /* ============================================
