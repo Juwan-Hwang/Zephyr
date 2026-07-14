@@ -342,11 +342,11 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
     selectBtn.innerHTML = `
         <span class="select-label">${currentLabel}</span>
-        <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+        <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
     `;
 
     const dropdownMenu = document.createElement('div');
-    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
+    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
 
     const menuScroll = document.createElement('div');
     menuScroll.className = 'menu-scroll max-h-[200px]';
