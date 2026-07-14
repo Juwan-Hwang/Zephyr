@@ -12,7 +12,7 @@
  */
 export function getPolicyColor(policy) {
     const p = (policy || '').toUpperCase();
-    if (p === 'DIRECT') return 'text-green-400';
-    if (p === 'REJECT') return 'text-rose-500';
+    if (p === 'DIRECT') return 'text-success';
+    if (p === 'REJECT') return 'text-danger';
     return 'text-accent';
 }
