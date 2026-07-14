@@ -85,8 +85,8 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   text-transform: var(--zephyr-button-transform);
   letter-spacing: var(--zephyr-button-tracking);
   transition-property: color, background-color, border-color, box-shadow, opacity;
-  transition-duration: var(--zephyr-transition-standard);
-  transition-timing-function: ease-out;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
   cursor: pointer;
 }
 
@@ -95,7 +95,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--zephyr-text-primary);
 }
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--zephyr-text-primary);
 }
@@ -110,7 +110,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
 }
-.btn-accent:hover {
+.btn-accent:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
@@ -119,7 +119,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
   color: var(--zephyr-color-danger);
 }
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
 }
 
@@ -128,7 +128,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
   color: var(--zephyr-color-warning);
 }
-.btn-warning:hover {
+.btn-warning:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
 }
 
@@ -137,7 +137,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
 }
-.btn-success:hover {
+.btn-success:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
@@ -146,16 +146,21 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   color: var(--zephyr-text-on-accent);
   box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   opacity: 0.85;
 }
 
 /* ── Button State Matrix (PR3 §3.3) ── */
 /* Disabled — through native attribute, no extra class needed */
-.btn:disabled,
-.btn[disabled] {
+:is(button, input, select, textarea, .btn, .form-control, .select-common, .dropdown-item, [role="button"]):is(:disabled, [disabled], [aria-disabled="true"]) {
   opacity: 0.4;
   cursor: not-allowed !important;
+}
+
+/* Prevent hover background on disabled dropdown items and menu buttons */
+.dropdown-item:is(:disabled, [disabled], [aria-disabled="true"]):not(.active):hover,
+[id$="-menu"] button:is(:disabled, [disabled], [aria-disabled="true"]):not(.active):hover {
+  background: transparent !important;
 }
 
 /* Loading — through aria-busy attribute, synced with DOM semantics */
@@ -252,6 +257,11 @@ input[type="range"],
   --z-sticky: var(--zephyr-z-index-sticky);
   --z-modal: var(--zephyr-z-index-modal);
   --z-toast: var(--zephyr-z-index-toast);
+
+  /* Focus ring adapter — color-mix for theme-awareness */
+  --zephyr-focus-ring: color-mix(in srgb, var(--color-accent) var(--zephyr-focus-ring-alpha, 50%), transparent);
+  --zephyr-focus-ring-soft: color-mix(in srgb, var(--color-accent) var(--zephyr-focus-ring-soft-alpha, 30%), transparent);
+  --zephyr-focus-border: color-mix(in srgb, var(--color-accent) var(--zephyr-focus-border-alpha, 50%), transparent);
 }
 
 html:not(.dark) {
@@ -282,7 +292,6 @@ input[type=number] {
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-button);
   box-shadow: var(--zephyr-shadow-sm);
-  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), backdrop-filter var(--transition-fast);
 }
 
 .glass-card:hover {
@@ -465,8 +474,6 @@ html:not(.dark) #setting-lang-menu {
   background-color: var(--zephyr-surface-input);
   color: var(--text-primary);
   border: 1px solid var(--zephyr-border-subtle);
-  transition-property: color, background-color, border-color, box-shadow;
-  transition-duration: var(--zephyr-transition-standard);
 }
 .form-control::placeholder {
   color: var(--zephyr-text-tertiary);
@@ -670,7 +677,6 @@ html:not(.dark) .script-output {
 .dropdown-item,
 [id$="-menu"] button {
   border-radius: var(--radius-option);
-  transition: background var(--zephyr-transition-dropdown);
   margin-bottom: var(--zephyr-space-3);
   cursor: pointer;
 }
@@ -706,15 +712,7 @@ html:not(.dark) .script-output {
 
 /* Textarea — use form-control + form-control-mono + resize-none utility */
 
-/* Form control focus + placeholder (replaces old per-class overrides) */
-.form-control:focus-visible {
-  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
-  outline: none;
-}
-html:not(.dark) .form-control:focus-visible {
-  border-color: var(--color-accent);
-}
+/* Form control focus consolidated under Focus Visibility section below */
 html:not(.dark) .form-control::placeholder,
 html:not(.dark) .select-common::placeholder {
   color: var(--zephyr-text-tertiary);
@@ -727,7 +725,7 @@ html:not(.dark) .select-common::placeholder {
 /* Connection row hover animation */
 #connections-list > div {
   transition-property: background-color, border-color, opacity;
-  transition-duration: var(--transition-standard);
+  transition-duration: var(--zephyr-time-standard);
 }
 
 #connections-list > div:hover {
@@ -737,7 +735,7 @@ html:not(.dark) .select-common::placeholder {
 /* Rule badge pill animation */
 #connections-list .group span[class*="bg-"] {
   transition-property: background-color, color, opacity;
-  transition-duration: var(--transition-standard);
+  transition-duration: var(--zephyr-time-standard);
 }
 
 /* Close button reveal on hover */
@@ -923,7 +921,7 @@ html:not(.dark) .select-common::placeholder {
 /* Detail close button animation */
 #detail-close-btn {
   transition-property: color, background-color, opacity;
-  transition-duration: var(--transition-standard);
+  transition-duration: var(--zephyr-time-standard);
 }
 
 #detail-close-btn:hover:not(:disabled) {
@@ -944,23 +942,32 @@ html:not(.dark) .select-common::placeholder {
 /* ============================================
    Focus Visibility (theme-aware)
    ============================================ */
-:focus-visible {
-  outline: 4px solid rgba(var(--accent-rgb), 0.6);
-  outline-offset: 1px;
+/* Global outline for keyboard navigation visibility */
+:where(button, a, input, select, textarea, [tabindex], [contenteditable]):where(:not([tabindex^="-"], :disabled)):focus-visible {
+  outline: 2px solid var(--zephyr-focus-ring);
+  outline-offset: 2px;
 }
 
-/* Button focus ring using box-shadow */
-button:focus-visible,
+/* Buttons get a soft box-shadow supplement (outline hidden in standard mode, preserved for high-contrast) */
+.btn:focus-visible:not(:disabled),
+button:focus-visible:not(:disabled),
 [role="button"]:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring);
+  outline: 2px solid transparent;
 }
 
 /* Select focus (pill-shaped, keeps its own focus style) */
 .select-common:focus {
   box-shadow: none;
-  outline: none;
+  outline: 2px solid transparent;
   border-color: var(--zephyr-border-strong);
+}
+
+.form-control:focus-visible:not(:disabled),
+.select-common:focus-visible:not(:disabled) {
+  border-color: var(--zephyr-focus-border);
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring);
 }
 
 /* ============================================
@@ -970,8 +977,63 @@ button:focus-visible,
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
+
+  /* Exempt essential progress indicators (WCAG 2.2.2) */
+  .btn[aria-busy="true"]::after {
+    animation-duration: 1s !important;
+  }
+  .sr-turn.sr-spinning {
+    animation-duration: 2s !important;
+  }
+  .sr-fill.sr-dashing {
+    animation-duration: 2.5s !important;
+  }
+  .btn[aria-busy="true"]::after,
+  .sr-turn.sr-spinning,
+  .sr-fill.sr-dashing {
+    animation-iteration-count: infinite !important;
+  }
+    /* Disable decorative animations */
+  .conn-line-dash,
+  .conn-pulse-dot,
+  .scrolling-text,
+  #connections-empty svg {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Transition System (PR4 4.5)
+   ============================================ */
+.form-control,
+.select-common,
+.dropdown-item,
+[id$="-menu"] button,
+.dropdown-panel,
+.glass-card {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+.nav-button,
+.tab-button,
+.status-dot {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-micro);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+[data-page],
+#modal-container {
+  transition-property: opacity, transform;
+  transition-duration: var(--zephyr-time-page);
+  transition-timing-function: var(--zephyr-easing-smooth);
 }
 
 /* ============================================
