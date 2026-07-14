@@ -34,7 +34,7 @@ export function createCollapsible(container, {
 
     // Header
     const header = document.createElement('div');
-    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--zephyr-bg-subtle)] active:bg-[var(--zephyr-bg-muted)] transition-all duration-200 select-none ${headerClass}`;
+    header.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--zephyr-bg-subtle)] active:bg-[var(--zephyr-bg-muted)] transition-all duration-[var(--zephyr-time-micro)] select-none ${headerClass}`;
 
     const leftPart = document.createElement('div');
     leftPart.className = 'flex items-center gap-2.5';
