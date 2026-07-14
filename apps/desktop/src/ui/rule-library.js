@@ -1501,14 +1501,14 @@ async function handleImportRules() {
                 <textarea id="rl-import-text" class="w-full h-32 bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-xl p-3 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
             </div>
             <div id="rl-import-file" class="hidden space-y-3">
-                <input id="rl-import-file-path" type="text" class="input-modal w-full" placeholder="${escapeHtml(t.ruleLibraryImportFile || '')}" />
+                <input id="rl-import-file-path" type="text" class="form-control form-control-lg" placeholder="${escapeHtml(t.ruleLibraryImportFile || '')}" />
             </div>
             <div id="rl-import-url" class="hidden space-y-3">
-                <input id="rl-import-url-input" type="text" class="input-modal w-full" placeholder="https://..." />
+                <input id="rl-import-url-input" type="text" class="form-control form-control-lg" placeholder="https://..." />
             </div>
             <div class="space-y-2">
                 <label class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryGroupName || 'Name')}</label>
-                <input id="rl-import-name" type="text" class="input-modal w-full" placeholder="my-rules" />
+                <input id="rl-import-name" type="text" class="form-control form-control-lg" placeholder="my-rules" />
             </div>
             <div class="flex items-center justify-end gap-2 pt-2">
                 <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
