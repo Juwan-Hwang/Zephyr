@@ -392,14 +392,14 @@ function initLogSettingsModal() {
                         <div class="flex flex-col gap-1">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
                             <div class="flex items-center gap-1">
-                                <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="input-mono text-xs w-full">
+                                <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono text-xs w-full">
                                 <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
                             <div class="flex items-center gap-1">
-                                <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="input-mono text-xs w-full">
+                                <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono text-xs w-full">
                                 <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
                             </div>
                         </div>
@@ -419,14 +419,14 @@ function initLogSettingsModal() {
                         <div class="flex flex-col gap-1">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
                             <div class="flex items-center gap-1">
-                                <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="input-mono text-xs w-full">
+                                <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono text-xs w-full">
                                 <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
                             <div class="flex items-center gap-1">
-                                <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="input-mono text-xs w-full">
+                                <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono text-xs w-full">
                                 <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
                             </div>
                         </div>
@@ -574,11 +574,11 @@ function initLogSettingsModal() {
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex flex-col gap-1">
                         <label class="text-2xs text-[var(--text-muted)]">${t.logExportFrom || 'From'}</label>
-                        <input id="log-export-from" type="date" value="${threeDaysAgo}" class="input-mono text-xs">
+                        <input id="log-export-from" type="date" value="${threeDaysAgo}" class="form-control form-control-md form-control-mono text-xs">
                     </div>
                     <div class="flex flex-col gap-1">
                         <label class="text-2xs text-[var(--text-muted)]">${t.logExportTo || 'To'}</label>
-                        <input id="log-export-to" type="date" value="${today}" class="input-mono text-xs">
+                        <input id="log-export-to" type="date" value="${today}" class="form-control form-control-md form-control-mono text-xs">
                     </div>
                 </div>
 
@@ -2159,27 +2159,27 @@ appStore.set('isNetworkUpdating', false);
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightLatency || 'Latency Weight'}</label>
-                            <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="input-mono text-xs">
+                            <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightSuccess || 'Success Rate Weight'}</label>
-                            <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="input-mono text-xs">
+                            <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightStability || 'Stability Weight'}</label>
-                            <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="input-mono text-xs">
+                            <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyHalfLife || 'Half-life (hours)'}</label>
-                            <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="input-mono text-xs">
+                            <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMinInterval || 'Min Test Interval (s)'}</label>
-                            <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="input-mono text-xs">
+                            <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                         <div class="flex flex-col gap-1.5">
                             <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMaxInterval || 'Max Test Interval (s)'}</label>
-                            <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="input-mono text-xs">
+                            <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono text-xs">
                         </div>
                     </div>
                     <div class="flex justify-end pt-1">

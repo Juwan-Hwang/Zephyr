@@ -182,11 +182,11 @@ async function showEditPanel(configInfo) {
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
-                    <input id="edit-name" type="text" value="" class="input-common text-xs">
+                    <input id="edit-name" type="text" value="" class="form-control form-control-md text-xs">
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
-                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="input-common text-xs placeholder-[var(--text-tertiary)]">
+                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md text-xs placeholder-[var(--text-tertiary)]">
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
