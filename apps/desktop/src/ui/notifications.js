@@ -47,9 +47,9 @@ export function showNotification(message, type = 'info', title = null) {
 
     const colors = {
         info: 'border-accent text-accent',
-        success: 'border-emerald-500 text-emerald-400',
-        error: 'border-rose-500 text-rose-400',
-        warning: 'border-amber-500 text-amber-400',
+        success: 'border-success text-success',
+        error: 'border-danger text-danger',
+        warning: 'border-warning text-warning',
     };
     notif.className += ` ${colors[type] || colors.info}`;
     notif.dataset.priority = String(NOTIFICATION_PRIORITY[type] ?? 2);
@@ -249,7 +249,7 @@ export function showConfirmModal(title, message = '') {
          
         contentArea.innerHTML = '';
         const msgDiv = document.createElement('div');
-        msgDiv.className = 'rounded-lg border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+        msgDiv.className = 'rounded-lg border border-warning/20 bg-warning/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
         msgDiv.textContent = message;
         contentArea.appendChild(msgDiv);
 
