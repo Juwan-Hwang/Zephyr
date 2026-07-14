@@ -225,7 +225,7 @@ function initCopyEnvSettings() {
                 </div>
                 <div class="space-y-1">
                     ${formats.map(f => `
-                        <button class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}">
+                        <button type="button" class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-[var(--zephyr-radius-surface)] text-left transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}" aria-pressed="${f.key === currentFormat ? 'true' : 'false'}">
                             <span class="text-xs text-[var(--text-primary)]">${f.label}</span>
                             ${f.key === currentFormat ? '<svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
                         </button>
@@ -374,9 +374,9 @@ function initLogSettingsModal() {
                 </div>
 
                 <!-- Tab switcher -->
-                <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-1">
-                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logAppTab || 'App Logs'}</button>
-                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logCoreTab || 'Core Logs'}</button>
+                <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-1">
+                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-[var(--zephyr-radius-control)] transition-all">${t.logAppTab || 'App Logs'}</button>
+                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-[var(--zephyr-radius-control)] transition-all">${t.logCoreTab || 'Core Logs'}</button>
                 </div>
 
                 <!-- App Logs Tab -->
@@ -587,11 +587,11 @@ function initLogSettingsModal() {
                     <div id="log-level-wrap" class="relative w-full">
                         <button id="log-level-trigger" type="button" class="select-common w-full flex items-center justify-between">
                             <span id="log-level-label">INFO</span>
-                            <svg class="dropdown-arrow w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg class="dropdown-arrow w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="m6 9 6 6 6-6"></path>
                             </svg>
                         </button>
-                        <div id="log-level-menu" class="hidden absolute left-0 right-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                        <div id="log-level-menu" class="hidden absolute left-0 right-0 top-[calc(100%+8px)] w-full rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
                                 <button type="button" data-value="fatal" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">FATAL</button>
                                 <button type="button" data-value="error" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">ERROR</button>
