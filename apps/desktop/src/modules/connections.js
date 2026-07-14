@@ -124,8 +124,8 @@ const PAGE_HTML = `
     <div class="shrink-0">
         <!-- Tabs -->
         <div class="flex items-center px-4 pt-3 pb-0 gap-1">
-            <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors duration-200 text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
-            <button id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
+            <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
+            <button id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
             <div class="flex-1"></div>
             <span id="closed-count-badge" class="hidden text-2xs text-[var(--text-tertiary)] tabular-nums"></span>
         </div>
@@ -726,7 +726,7 @@ function buildConnectionRow(conn, mode) {
         : '';
 
     return `
-    <div class="conn-row group hover:bg-[var(--zephyr-bg-muted)] transition-[color,border-color] duration-200 items-center cursor-pointer border border-transparent hover:border-[var(--zephyr-border-subtle)] ${dimClass}" style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:0.75rem; align-items:center;" data-conn-id="${id}" data-mode="${mode}">
+    <div class="conn-row group hover:bg-[var(--zephyr-bg-muted)] transition-[color,border-color] duration-[var(--zephyr-time-micro)] items-center cursor-pointer border border-transparent hover:border-[var(--zephyr-border-subtle)] ${dimClass}" style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:var(--zephyr-radius-surface); align-items:center;" data-conn-id="${id}" data-mode="${mode}">
         <!-- Host + Destination subtitle -->
         <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding-left:0.25rem;">
             <span class="text-xs text-[var(--text-primary)] font-medium truncate" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${host}</span>
@@ -734,7 +734,7 @@ function buildConnectionRow(conn, mode) {
         </div>
         <!-- Rule -->
         <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-[var(--zephyr-radius-control)] text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
         </div>
         <!-- Chains -->
         <div style="text-align:right; min-width:0;">
@@ -814,7 +814,7 @@ function showConnDetail(conn, mode) {
 
     // Build close button HTML (only for active connections)
     const closeBtnHtml = mode === 'active'
-        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-sm bg-danger/10 border border-danger/20 text-2xs font-bold text-danger hover:bg-danger/20 transition-colors uppercase tracking-wider">
+        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[var(--zephyr-radius-control)] bg-danger/10 border border-danger/20 text-2xs font-bold text-danger hover:bg-danger/20 transition-colors uppercase tracking-wider">
              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
              <span>${t.closeConn || 'Close Connection'}</span>
            </button>`
@@ -828,20 +828,20 @@ function showConnDetail(conn, mode) {
                 <h3 class="text-lg font-light text-[var(--text-primary)] truncate">${host}</h3>
                 <p class="text-xs text-[var(--text-secondary)] mt-1 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-sm bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-[var(--zephyr-radius-control)] bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
 
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
-            <span class="inline-flex px-2.5 py-1 rounded-sm text-xs font-semibold ${ruleColorClass}">${rule}</span>
+            <span class="inline-flex px-2.5 py-1 rounded-[var(--zephyr-radius-control)] text-xs font-semibold ${ruleColorClass}">${rule}</span>
             <span class="text-xs text-[var(--text-secondary)] truncate">${chains}</span>
         </div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
                     <span class="text-2xs text-download/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
@@ -852,7 +852,7 @@ function showConnDetail(conn, mode) {
                     <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
                     <span class="text-2xs text-upload/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
@@ -884,7 +884,7 @@ function showConnDetail(conn, mode) {
     if (!bg) {
         bg = document.createElement('div');
         bg.id = 'conn-detail-bg';
-        bg.className = 'fixed inset-0 z-[105] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md transition-all duration-200 opacity-0';
+        bg.className = 'fixed inset-0 z-[105] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md transition-all duration-[var(--zephyr-time-micro)] opacity-0';
         document.body.appendChild(bg);
     }
 
