@@ -82,7 +82,7 @@ export function initTunnelSettings({
 
         currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
-            item.className = 'flex items-center justify-between bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg p-3 hover:border-[var(--zephyr-border-strong)] transition-[border-color]';
+            item.className = 'flex items-center justify-between bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-[var(--zephyr-radius-surface)] p-3 hover:border-[var(--zephyr-border-strong)] transition-[border-color]';
 
             const info = document.createElement('div');
             info.className = 'flex flex-col gap-1';
