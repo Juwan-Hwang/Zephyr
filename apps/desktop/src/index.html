@@ -21,11 +21,11 @@
         <div id="glow-home" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0"></div>
         <div id="glow-subscriptions" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-proxies" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-connections" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-cyan-500/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-connections" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-rule-library" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
         <div id="glow-logs" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-settings" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
-        <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-info/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
 
         <!-- Sidebar -->
         <nav id="sidebar-nav" class="w-20 flex flex-col items-center py-8 rounded-lg gap-8 relative z-10 backdrop-blur-sm" aria-label="Main navigation">
@@ -82,7 +82,7 @@
                     <span class="text-xs font-semibold text-[var(--text-secondary)] tracking-wide">Zephyr</span>
                 </div>
                 <div class="flex items-center gap-3">
-                    <button id="close-btn" class="group relative flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57]/80 transition-colors shadow-sm before:absolute before:-inset-1.5 before:content-['']" aria-label="Close window">
+                    <button id="close-btn" class="group relative flex items-center justify-center w-3.5 h-3.5 rounded-full bg-close-btn hover:bg-close-btn/80 transition-colors shadow-sm before:absolute before:-inset-1.5 before:content-['']" aria-label="Close window">
                         <svg class="opacity-0 group-hover:opacity-100 w-2 h-2 text-black/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -161,7 +161,7 @@
                     <!-- Proxy Mode Selector -->
                     <div class="glass-card p-4 relative z-10 group hover:translate-y-[-2px] transition-transform duration-300">
                         <div class="flex items-center gap-3 mb-3">
-                            <div class="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                            <div class="w-8 h-8 rounded-md bg-info/10 border border-info/20 flex items-center justify-center text-info">
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                             </div>
                             <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="mode">Proxy Mode</h3>
@@ -178,7 +178,7 @@
                     <div class="glass-card p-4 flex flex-col justify-between relative z-10 group hover:translate-y-[-2px] transition-transform duration-300">
                         <div class="flex items-center justify-between">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-md bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                                <div class="w-8 h-8 rounded-md bg-danger/10 border border-danger/20 flex items-center justify-center text-danger">
                                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                 </div>
                                 <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="tunMode">TUN Mode</h3>
@@ -205,11 +205,11 @@
                         <!-- Legend -->
                         <div class="flex items-center gap-4">
                             <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-purple-500/80"></div>
+                                <div class="w-2 h-2 rounded-sm bg-download/80"></div>
                                 <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="downstream">Down</span>
                             </div>
                             <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-blue-500/80"></div>
+                                <div class="w-2 h-2 rounded-sm bg-upload/80"></div>
                                 <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="upstream">Up</span>
                             </div>
                         </div>
@@ -361,7 +361,7 @@
                     </div>
                 </header>
                 <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
-                <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 relative z-10 shrink-0" data-flex-class="flex"></div>
+                <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-warning/10 border border-warning/20 relative z-10 shrink-0" data-flex-class="flex"></div>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
                 <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
@@ -470,11 +470,11 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <div data-theme="purple" class="w-6 h-6 rounded-full bg-[#AF52DE] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
-                                    <div data-theme="blue" class="w-6 h-6 rounded-full bg-[#007AFF] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
-                                    <div data-theme="green" class="w-6 h-6 rounded-full bg-[#34C759] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
-                                    <div data-theme="orange" class="w-6 h-6 rounded-full bg-[#FF9500] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
-                                    <div data-theme="pink" class="w-6 h-6 rounded-full bg-[#FF2D55] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
+                                    <div data-theme="purple" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-purple-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
+                                    <div data-theme="blue" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
+                                    <div data-theme="green" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
+                                    <div data-theme="orange" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
+                                    <div data-theme="pink" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div class="relative group">
                                         <input type="color" id="custom-theme-color" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
                                         <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 via-blue-500 to-pink-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
@@ -1233,14 +1233,14 @@
                             </div>
 
                             <!-- Danger Zone: Restore Defaults -->
-                            <div class="border-t mt-6 pt-4" style="border-color: rgba(239, 68, 68, 0.2);">
+                            <div class="border-t mt-6 pt-4" style="border-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);">
                                 <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-left">
                                     <div class="flex items-center gap-4">
-                                        <div class="w-10 h-10 rounded-md bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 group-hover:bg-red-500/20 transition-colors">
+                                        <div class="w-10 h-10 rounded-md bg-danger/10 border border-danger/20 flex items-center justify-center text-danger group-hover:bg-danger/20 transition-colors">
                                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                         </div>
                                         <div>
-                                            <p class="text-sm font-semibold text-red-500 group-hover:text-red-400 transition-colors" data-i18n="restoreDefaults">Restore Defaults</p>
+                                            <p class="text-sm font-semibold text-danger group-hover:text-danger/70 transition-colors" data-i18n="restoreDefaults">Restore Defaults</p>
                                             <p class="text-2xs text-[var(--text-muted)]" data-i18n="restoreDefaultsDesc">Reset all settings to default values</p>
                                         </div>
                                     </div>
@@ -1384,7 +1384,7 @@
             <div class="flex items-center justify-between px-6 py-4 border-b shrink-0" style="border-color: var(--border-primary, rgba(255,255,255,0.1));">
                 <div class="flex items-center gap-3">
                     <h3 id="fullscreen-editor-title" class="text-lg font-medium" data-i18n="overrideEditScript">编辑脚本</h3>
-                    <span id="fullscreen-editor-type-badge" class="text-2xs px-2 py-0.5 rounded-sm bg-blue-500/20 text-blue-400">JS</span>
+                    <span id="fullscreen-editor-type-badge" class="text-2xs px-2 py-0.5 rounded-sm bg-info/20 text-info">JS</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <button id="fullscreen-editor-validate-btn" class="btn-ghost text-sm">

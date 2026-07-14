@@ -257,7 +257,7 @@ export async function renderAdvancedSettings() {
         advancedLogger.error('Advanced settings render error', err);
         container.innerHTML = '';
         const errDiv = document.createElement('div');
-        errDiv.className = 'p-8 text-center text-rose-400 text-xs font-bold';
+        errDiv.className = 'p-8 text-center text-danger text-xs font-bold';
         errDiv.textContent = toError(err).message;
         container.appendChild(errDiv);
     }
