@@ -1429,7 +1429,12 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         top.className = 'flex items-center justify-between pointer-events-none w-full gap-2';
 
         const nameContainer = document.createElement('div');
-        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-300 ${isScrollingEnabled && name.length > 12 ? 'scrolling-text-container' : 'overflow-hidden'}`;
+        const isScrolling = isScrollingEnabled && name.length > 12;
+        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-300 ${isScrolling ? 'scrolling-text-container' : 'overflow-hidden'}`;
+        if (isScrolling && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            nameContainer.setAttribute('tabindex', '0');
+            nameContainer.setAttribute('role', 'marquee');
+        }
 
         const nameSpan = document.createElement('span');
         if (isScrollingEnabled && name.length > 12) {
