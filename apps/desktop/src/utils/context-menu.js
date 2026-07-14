@@ -46,7 +46,7 @@ export function createContextMenuContainer(e) {
     const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
 
     const menu = document.createElement('div');
-    menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-hidden shadow-xl border border-[var(--zephyr-border-default)] rounded-lg glass-card`;
+    menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-hidden shadow-xl border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-surface)] glass-card`;
     menu.style.left = `${e.clientX / uiScale}px`;
     menu.style.top = `${e.clientY / uiScale}px`;
 
