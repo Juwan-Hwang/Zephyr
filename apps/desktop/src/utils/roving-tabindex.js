@@ -35,6 +35,18 @@
 const TYPEAHEAD_TIMEOUT = 500;
 
 /**
+ * Check whether an element is disabled (native or ARIA).
+ * Non-native elements (div[role="button"], .dropdown-item, etc.) do not
+ * automatically block click events, so callers must guard activation.
+ *
+ * @param {HTMLElement} el
+ * @returns {boolean}
+ */
+function isDisabled(el) {
+    return el.matches(':disabled, [disabled], [aria-disabled="true"]');
+}
+
+/**
  * Create a roving tabindex controller.
  *
  * @param {HTMLElement} container
@@ -145,8 +157,11 @@ export function createRovingTabindex(container, options = {}) {
             case 'Enter':
             case ' ':
                 if (currentIndex >= 0 && currentIndex < items.length) {
+                    const item = items[currentIndex];
                     e.preventDefault();
-                    onActivate?.(items[currentIndex]);
+                    if (!isDisabled(item)) {
+                        onActivate?.(item);
+                    }
                 }
                 break;
 
@@ -163,14 +178,15 @@ export function createRovingTabindex(container, options = {}) {
         const target = e.target instanceof HTMLElement
             ? e.target.closest(itemSelector)
             : null;
-        if (target instanceof HTMLElement) {
-            const items = getItems();
-            const idx = items.indexOf(target);
-            if (idx !== -1) {
-                currentIndex = idx;
-                for (let i = 0; i < items.length; i++) {
-                    items[i].setAttribute('tabindex', i === idx ? '0' : '-1');
-                }
+        if (!(target instanceof HTMLElement)) return;
+        // Update roving tabindex state even for disabled items to keep
+        // keyboard navigation in sync (onActivate is guarded separately)
+        const items = getItems();
+        const idx = items.indexOf(target);
+        if (idx !== -1) {
+            currentIndex = idx;
+            for (let i = 0; i < items.length; i++) {
+                items[i].setAttribute('tabindex', i === idx ? '0' : '-1');
             }
         }
     }

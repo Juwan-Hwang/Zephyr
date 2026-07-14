@@ -27,15 +27,5 @@
     "typescript": "^6.0.2",
     "unocss": "^66.7.5",
     "vitest": "4.1.7"
-  },
-  "pnpm": {
-    "overrides": {
-      "brace-expansion": ">=5.0.6",
-      "ws": ">=8.20.1"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "esbuild"
-    ]
   }
 }
