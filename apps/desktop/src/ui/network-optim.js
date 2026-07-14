@@ -62,7 +62,7 @@ function updateUI() {
     btn.classList.remove('opacity-50');
 
     if (isApplied) {
-        dot.className = 'w-2 h-2 rounded-full bg-green-500 transition-colors';
+        dot.className = 'w-2 h-2 rounded-full bg-success transition-colors';
         const span = document.createElement('span');
         span.setAttribute('data-i18n', 'networkOptimRevert');
         span.textContent = t('networkOptimRevert');
@@ -124,7 +124,7 @@ async function showApplyModal() {
             wrapper.appendChild(changesBox);
 
             const infoBox = document.createElement('div');
-            infoBox.className = 'bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400';
+            infoBox.className = 'bg-info/10 border border-info/20 rounded-lg p-3 text-xs text-info';
             infoBox.textContent = t('networkOptimModalInfo');
             wrapper.appendChild(infoBox);
 
