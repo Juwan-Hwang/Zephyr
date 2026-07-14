@@ -249,7 +249,7 @@ export function showConfirmModal(title, message = '') {
          
         contentArea.innerHTML = '';
         const msgDiv = document.createElement('div');
-        msgDiv.className = 'rounded-lg border border-warning/20 bg-warning/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+        msgDiv.className = 'rounded-[var(--zephyr-radius-surface)] border border-warning/20 bg-warning/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
         msgDiv.textContent = message;
         contentArea.appendChild(msgDiv);
 
