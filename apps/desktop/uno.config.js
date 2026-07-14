@@ -39,4 +39,16 @@ export default defineConfig({
       '2xs': ['0.625rem', { lineHeight: '1.4' }],
     },
   },
+
+  // ── Static layout combinations (see PR3 §3.1 Component Carrier Boundary) ──
+  shortcuts: {
+    // Three-layer surface system
+    'surface-1': 'bg-transparent',
+    'surface-2': 'rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-surface-raised)]',
+    'surface-3': 'rounded-[var(--zephyr-radius-overlay)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-surface-elevated)] shadow-[var(--zephyr-shadow-md)]',
+
+    // Interactive panels
+    'panel': 'surface-2 px-4 py-3',
+    'panel-interactive': 'panel transition-colors hover:bg-[var(--zephyr-bg-muted)]',
+  },
 })

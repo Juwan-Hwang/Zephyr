@@ -150,6 +150,33 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   opacity: 0.85;
 }
 
+/* ── Button State Matrix (PR3 §3.3) ── */
+/* Disabled — through native attribute, no extra class needed */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+}
+
+/* Loading — through aria-busy attribute, synced with DOM semantics */
+.btn[aria-busy="true"] {
+  pointer-events: none;
+  opacity: 0.7;
+}
+.btn[aria-busy="true"]::after {
+  content: '';
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.5rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
 /* 极简滚动动画 */
 @keyframes text-scroll {
     0% { transform: translateX(0); }
