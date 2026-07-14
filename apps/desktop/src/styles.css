@@ -153,9 +153,21 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 /* ── Button State Matrix (PR3 §3.3) ── */
 /* Disabled — through native attribute, no extra class needed */
 .btn:disabled,
-.btn[disabled] {
+.btn[disabled],
+.form-control:disabled,
+.form-control[disabled],
+.select-common:disabled,
+.select-common[disabled] {
   opacity: 0.4;
   cursor: not-allowed !important;
+}
+
+.btn[aria-disabled="true"],
+.form-control[aria-disabled="true"],
+.select-common[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+  pointer-events: none;
 }
 
 /* Loading — through aria-busy attribute, synced with DOM semantics */
@@ -252,6 +264,11 @@ input[type="range"],
   --z-sticky: var(--zephyr-z-index-sticky);
   --z-modal: var(--zephyr-z-index-modal);
   --z-toast: var(--zephyr-z-index-toast);
+
+  /* Focus ring adapter — compose CSS expressions from cross-platform tokens */
+  --zephyr-focus-ring: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-ring-alpha));
+  --zephyr-focus-ring-soft: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-ring-soft-alpha));
+  --zephyr-focus-border: rgba(var(--accent-rgb, 175, 82, 222), var(--zephyr-focus-border-alpha));
 }
 
 html:not(.dark) {
@@ -708,12 +725,9 @@ html:not(.dark) .script-output {
 
 /* Form control focus + placeholder (replaces old per-class overrides) */
 .form-control:focus-visible {
-  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
-  outline: none;
-}
-html:not(.dark) .form-control:focus-visible {
-  border-color: var(--color-accent);
+  border-color: var(--zephyr-focus-border);
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
+  outline: 2px solid transparent;
 }
 html:not(.dark) .form-control::placeholder,
 html:not(.dark) .select-common::placeholder {
@@ -944,23 +958,30 @@ html:not(.dark) .select-common::placeholder {
 /* ============================================
    Focus Visibility (theme-aware)
    ============================================ */
-:focus-visible {
-  outline: 4px solid rgba(var(--accent-rgb), 0.6);
-  outline-offset: 1px;
+/* Global outline for keyboard navigation visibility */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--zephyr-focus-ring);
+  outline-offset: 2px;
 }
 
-/* Button focus ring using box-shadow */
+/* Buttons get a soft box-shadow supplement (outline preserved) */
 button:focus-visible,
 [role="button"]:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
+  outline: 2px solid transparent;
 }
 
 /* Select focus (pill-shaped, keeps its own focus style) */
 .select-common:focus {
   box-shadow: none;
-  outline: none;
+  outline: 2px solid transparent;
   border-color: var(--zephyr-border-strong);
+}
+
+.select-common:focus-visible {
+  outline: 2px solid var(--zephyr-focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring-soft);
 }
 
 /* ============================================
@@ -970,8 +991,53 @@ button:focus-visible,
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
+
+  /* Disable decorative animations */
+  .conn-line-dash,
+  .conn-pulse-dot,
+  .sr-fill.sr-dashing,
+  .sr-turn.sr-spinning {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Transition System (PR4 §4.5)
+   ============================================ */
+.btn,
+.form-control,
+.select-common,
+.dropdown-item,
+.dropdown-panel {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-transition-standard);
+  transition-timing-function: ease-out;
+}
+
+.glass-card {
+  transition-property: color, background-color, border-color, box-shadow, opacity, backdrop-filter, -webkit-backdrop-filter;
+  transition-duration: var(--zephyr-transition-standard);
+  transition-timing-function: ease-out;
+}
+
+.nav-button,
+.tab-button,
+.status-dot {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-transition-micro);
+  transition-timing-function: ease-out;
+}
+
+[data-page],
+#modal-container {
+  transition-property: opacity, transform;
+  transition-duration: var(--zephyr-transition-page);
+  transition-timing-function: ease-out;
 }
 
 /* ============================================
