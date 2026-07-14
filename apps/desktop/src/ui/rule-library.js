@@ -207,10 +207,10 @@ function render() {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
-                <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-200 ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+                <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryManageFiles || 'Manage Rule Files')}
                 </button>
-                <button data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-200 ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+                <button data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryActiveRules || 'Active Rules')}
                 </button>
             </div>
@@ -293,13 +293,13 @@ function renderRuleSets(container) {
                 <p class="text-[var(--text-muted)] text-sm">${escapeHtml(t.ruleLibraryEmpty || 'No extension rules yet')}</p>
                 <p class="text-[var(--text-secondary)] text-xs max-w-sm text-center">${escapeHtml(t.ruleLibraryEmptyHint || '')}</p>
                 <div class="flex items-center gap-2 mt-2">
-                    <button id="rl-btn-extract" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-200">
+                    <button id="rl-btn-extract" class="px-4 py-2 text-sm rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]">
                         ${escapeHtml(t.ruleLibraryExtract || 'Extract from Subscription')}
                     </button>
-                    <button id="rl-btn-import-empty" class="px-4 py-2 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
+                    <button id="rl-btn-import-empty" class="px-4 py-2 text-sm rounded-[var(--zephyr-radius-surface)] bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
                         ${escapeHtml(t.ruleLibraryImport || 'Import Rules')}
                     </button>
-                    <button id="rl-btn-create-file" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-200">
+                    <button id="rl-btn-create-file" class="px-4 py-2 text-sm rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]">
                         ${escapeHtml(t.ruleLibraryCreateFile || 'Create Rule File')}
                     </button>
                 </div>
@@ -367,7 +367,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Group header
     const header = document.createElement('div');
-    header.className = 'flex items-center justify-between py-2 px-3 rounded-xl bg-[var(--zephyr-bg-muted)] cursor-pointer group hover:bg-[var(--zephyr-bg-input)] transition-colors duration-200';
+    header.className = 'flex items-center justify-between py-2 px-3 rounded-[var(--zephyr-radius-overlay)] bg-[var(--zephyr-bg-muted)] cursor-pointer group hover:bg-[var(--zephyr-bg-input)] transition-colors duration-[var(--zephyr-time-micro)]';
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
     header.innerHTML = `
         <div class="flex items-center gap-2">
@@ -388,7 +388,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Toggle collapse
     const body = document.createElement('div');
-    body.className = 'space-y-2 pl-2 transition-all duration-300';
+    body.className = 'space-y-2 pl-2 transition-all duration-[var(--zephyr-time-standard)]';
 
     header.addEventListener('click', () => {
         const isCollapsed = body.style.display === 'none';
@@ -416,7 +416,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 function buildFileCard(file, _fileMap) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const card = document.createElement('div');
-    card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-300 cursor-pointer';
+    card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
 
     const sourceBadge = getSourceBadge(file.source);
 
@@ -565,7 +565,7 @@ function renderActiveRules(container) {
             <span class="text-xs text-[var(--text-tertiary)]">|</span>
             <span id="arl-rules-count" class="text-xs text-[var(--text-muted)]">${escapeHtml(String(totalRules))} ${t.ruleLibraryRules || 'rules'}</span>
         </div>
-        <button id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
+        <button id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-[var(--zephyr-radius-surface)] bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
             ${escapeHtml(t.ruleLibraryInsertRule || '+ Insert Rule')}
         </button>
     `;
@@ -622,11 +622,11 @@ function renderActiveRules(container) {
 
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
-                header.className = 'flex items-center justify-between p-2 rounded-lg bg-[var(--zephyr-bg-muted)] cursor-pointer select-none';
+                header.className = 'flex items-center justify-between p-2 rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] cursor-pointer select-none';
                 // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 header.innerHTML = `
                     <div class="flex items-center gap-3">
-                        <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-200 ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                        <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                         <span class="text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
                         <span class="text-[10px] text-[var(--text-muted)]">${ruleCount} rules</span>
                     </div>
@@ -655,7 +655,7 @@ function renderActiveRules(container) {
 
                 const el = document.createElement('div');
                 el.setAttribute('data-line-idx', String(idx));
-                el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-200';
+                el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-[var(--zephyr-time-micro)]';
                 // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
                 el.innerHTML = `
                     <div class="flex items-center gap-4 flex-1 min-w-0">
@@ -950,7 +950,7 @@ async function handleMoveToGroup(filename) {
 
     // Use a simple modal to pick group
     const optionsHtml = groupNames
-        .map((name, i) => `<button class="w-full text-left px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg" data-group-index="${i}">${escapeHtml(name)}</button>`)
+        .map((name, i) => `<button class="w-full text-left px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-[var(--zephyr-radius-surface)]" data-group-index="${i}">${escapeHtml(name)}</button>`)
         .join('');
 
     const result = await showModal(
@@ -1071,10 +1071,10 @@ function buildEditorHtml(t) {
         <div class="flex flex-col overflow-hidden" style="max-height: calc(65vh - 6rem)">
             <div class="flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
-                    <button id="rl-editor-toggle" class="px-3 py-1 text-xs rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                    <button id="rl-editor-toggle" class="px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                         ${escapeHtml(t.ruleLibrarySwitchToText || 'Text Editor')}
                     </button>
-                    <button id="rl-editor-add" class="px-3 py-1 text-xs rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                    <button id="rl-editor-add" class="px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                         + ${escapeHtml(t.ruleLibraryCreateRule || 'Create Rule')}
                     </button>
                 </div>
@@ -1085,11 +1085,11 @@ function buildEditorHtml(t) {
                 <div id="rl-vs-spacer-bottom" style="height:0"></div>
             </div>
             <div id="rl-editor-text" class="hidden flex-1 min-h-0 overflow-y-auto custom-scrollbar mt-4">
-                <textarea id="rl-editor-textarea" class="hidden w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl p-4 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors" spellcheck="false"></textarea>
-                <div id="rl-editor-cm6" class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl overflow-hidden"></div>
+                <textarea id="rl-editor-textarea" class="hidden w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-overlay)] p-4 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors" spellcheck="false"></textarea>
+                <div id="rl-editor-cm6" class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-overlay)] overflow-hidden"></div>
             </div>
             <div class="flex items-center justify-end gap-2 pt-3 border-t border-[var(--zephyr-border-subtle)] shrink-0">
-                <button id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
+                <button id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-[var(--zephyr-radius-surface)] bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
                     ${escapeHtml(t.ruleLibrarySave || 'Save')}
                 </button>
             </div>
@@ -1177,7 +1177,7 @@ async function handleEditRule(filename) {
             const isLast = index === rules.length - 1;
 
             const item = document.createElement('div');
-            item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-300 cursor-pointer';
+            item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
             item.draggable = true;
             item.style.setProperty('-webkit-user-drag', 'element');
             item.dataset.ruleIndex = String(index);
@@ -1191,10 +1191,10 @@ async function handleEditRule(filename) {
                 </div>
                 <div class="flex items-center gap-2">
                     <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
-                    <button class="btn-rl-rule-top opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst ? 'invisible' : ''}" title="${escapeAttr(t.moveToTop || 'Move to Top')}">
+                    <button class="btn-rl-rule-top opacity-0 group-hover:opacity-100 p-1.5 rounded-[var(--zephyr-radius-surface)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst ? 'invisible' : ''}" title="${escapeAttr(t.moveToTop || 'Move to Top')}">
                         ${SVG_ICONS.arrowUp}
                     </button>
-                    <button class="btn-rl-rule-bottom opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast ? 'invisible' : ''}" title="${escapeAttr(t.moveToBottom || 'Move to Bottom')}">
+                    <button class="btn-rl-rule-bottom opacity-0 group-hover:opacity-100 p-1.5 rounded-[var(--zephyr-radius-surface)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast ? 'invisible' : ''}" title="${escapeAttr(t.moveToBottom || 'Move to Bottom')}">
                         ${SVG_ICONS.arrowDown}
                     </button>
                     <button class="btn-rl-rule-del opacity-0 group-hover:opacity-100 btn-delete-icon">
@@ -1386,7 +1386,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-success"></span>
                     <span class="text-xs font-medium text-success">+${added.length} ${t.ruleLibraryDiffAdded || 'added'}</span>
                 </div>
-                ${added.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-success/10 border border-success/20 text-xs text-success/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${added.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-[var(--zephyr-radius-surface)] bg-success/10 border border-success/20 text-xs text-success/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (removed.length > 0) {
@@ -1395,7 +1395,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-danger"></span>
                     <span class="text-xs font-medium text-danger">-${removed.length} ${t.ruleLibraryDiffRemoved || 'removed'}</span>
                 </div>
-                ${removed.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${removed.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-[var(--zephyr-radius-surface)] bg-danger/10 border border-danger/20 text-xs text-danger/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
         if (modified.length > 0) {
@@ -1404,7 +1404,7 @@ async function handleViewChanges(filename) {
                     <span class="inline-block w-2 h-2 rounded-full bg-warning"></span>
                     <span class="text-xs font-medium text-warning">~${modified.length} ${t.ruleLibraryDiffModified || 'modified'}</span>
                 </div>
-                ${modified.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-lg bg-warning/10 border border-warning/20 text-xs text-warning/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
+                ${modified.map((/** @type {any} */ r) => `<div class="px-3 py-1.5 rounded-[var(--zephyr-radius-surface)] bg-warning/10 border border-warning/20 text-xs text-warning/70 font-mono">${escapeHtml(typeof r === 'string' ? r : JSON.stringify(r))}</div>`).join('')}
             </div>`;
         }
 
@@ -1487,18 +1487,18 @@ async function handleImportRules() {
         <div class="space-y-4">
             <p class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryImportHint || '')}</p>
             <div class="flex items-center gap-1 mb-2">
-                <button data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 bg-accent/20 text-accent">
+                <button data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] bg-accent/20 text-accent">
                     ${escapeHtml(t.ruleLibraryImportPaste || 'Paste rules text')}
                 </button>
-                <button data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                <button data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportFile || 'Select file')}
                 </button>
-                <button data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                <button data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportUrl || 'Import from URL')}
                 </button>
             </div>
             <div id="rl-import-paste" class="space-y-3">
-                <textarea id="rl-import-text" class="w-full h-32 bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-xl p-3 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
+                <textarea id="rl-import-text" class="w-full h-32 bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-overlay)] p-3 text-xs text-[var(--text-secondary)] font-mono resize-none focus:outline-none focus:border-accent/50 transition-colors custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
             </div>
             <div id="rl-import-file" class="hidden space-y-3">
                 <input id="rl-import-file-path" type="text" class="form-control form-control-lg" placeholder="${escapeHtml(t.ruleLibraryImportFile || '')}" />
@@ -1511,7 +1511,7 @@ async function handleImportRules() {
                 <input id="rl-import-name" type="text" class="form-control form-control-lg" placeholder="my-rules" />
             </div>
             <div class="flex items-center justify-end gap-2 pt-2">
-                <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-200">
+                <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-[var(--zephyr-radius-surface)] bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
                     ${escapeHtml(t.ruleLibraryImportConfirm || 'Import')}
                 </button>
             </div>
@@ -1537,9 +1537,9 @@ async function handleImportRules() {
                     importMode = /** @type {'paste'|'file'|'url'} */ (/** @type {HTMLElement} */ (tab).dataset.rlImportTab);
 
                     importTabs.forEach((tabItem) => {
-                        tabItem.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 text-[var(--text-muted)] hover:text-[var(--text-secondary)]';
+                        tabItem.className = 'rl-import-tab px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]';
                     });
-                    tab.className = 'rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-200 bg-accent/20 text-accent';
+                    tab.className = 'rl-import-tab px-3 py-1 text-xs rounded-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] bg-accent/20 text-accent';
 
                     pastePanel?.classList.toggle('hidden', importMode !== 'paste');
                     filePanel?.classList.toggle('hidden', importMode !== 'file');
@@ -1635,7 +1635,7 @@ async function handleExtractFromSubscription() {
             .map((/** @type {any} */ p, /** @type {number} */ i) => {
                 const pName = p.name || p.label || p.id || `Profile ${i + 1}`;
                 const pId = p.id || p.name || p;
-                return `<button class="w-full text-left px-4 py-3 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
+                return `<button class="w-full text-left px-4 py-3 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-[var(--zephyr-radius-surface)] flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
                     <span>${escapeHtml(String(pName))}</span>
                     <span class="text-xs text-[var(--text-muted)]">${escapeHtml(String(pId))}</span>
                 </button>`;
