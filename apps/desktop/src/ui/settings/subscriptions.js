@@ -1359,7 +1359,7 @@ export function initSubscriptionSettings({
                     barBg.className = 'h-1.5 w-full bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden border border-[var(--zephyr-border-subtle)]';
 
                     const barFill = document.createElement('div');
-                    barFill.className = `h-full rounded-full transition-[width] duration-1000 ${percentage > 90 ? 'bg-rose-500' : 'bg-accent'}`;
+                    barFill.className = `h-full rounded-full transition-[width] duration-1000 ${percentage > 90 ? 'bg-danger' : 'bg-accent'}`;
                     barFill.style.width = `${percentage}%`;
 
                     barBg.appendChild(barFill);

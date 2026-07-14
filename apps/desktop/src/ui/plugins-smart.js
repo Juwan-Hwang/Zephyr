@@ -118,7 +118,7 @@ async function renderPluginsList(plugins) {
         <div class="glass-card p-4">
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-md ${isLoaded ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-[var(--zephyr-bg-muted)] border-[var(--zephyr-border-subtle)] text-[var(--text-muted)]'} border flex items-center justify-center">
+                    <div class="w-10 h-10 rounded-md ${isLoaded ? 'bg-success/10 border-success/20 text-success' : 'bg-[var(--zephyr-bg-muted)] border-[var(--zephyr-border-subtle)] text-[var(--text-muted)]'} border flex items-center justify-center">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                     </div>
                     <div>
@@ -133,7 +133,7 @@ async function renderPluginsList(plugins) {
                     <button class="p-action-btn btn-ghost text-2xs" data-id="${esc(id)}" data-action="execute" title="Run entry script">
                         Run
                     </button>
-                    <button class="p-action-btn btn-ghost text-2xs text-red-400" data-id="${esc(id)}" data-action="delete">Delete</button>
+                    <button class="p-action-btn btn-ghost text-2xs text-danger" data-id="${esc(id)}" data-action="delete">Delete</button>
                 </div>
             </div>
         </div>`;
@@ -186,7 +186,7 @@ async function loadHooksList() {
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <span class="text-xs text-[var(--text-secondary)]">${esc(h.name)}</span>
                 <div class="flex items-center gap-2">
-                    ${h.isHighFrequency ? '<span class="text-2xs text-yellow-500">high-freq</span>' : ''}
+                    ${h.isHighFrequency ? '<span class="text-2xs text-warning">high-freq</span>' : ''}
                     <button class="hook-trigger-btn btn-ghost text-2xs" data-hook="${esc(h.name)}">Trigger</button>
                 </div>
             </div>
@@ -206,7 +206,7 @@ async function loadHooksList() {
         });
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-danger text-xs text-center py-2">${esc(String(e))}</div>`;
     }
 }
 
@@ -230,14 +230,14 @@ async function loadPermissionsList() {
                     <span class="text-2xs text-[var(--text-muted)] ml-2">${esc(p.displayName)}</span>
                 </div>
                 <div class="flex gap-2">
-                    ${p.allowedForConfigPlugin ? '<span class="text-2xs text-blue-400">config</span>' : ''}
-                    ${p.allowedForUiExtension ? '<span class="text-2xs text-green-400">ui</span>' : ''}
+                    ${p.allowedForConfigPlugin ? '<span class="text-2xs text-info">config</span>' : ''}
+                    ${p.allowedForUiExtension ? '<span class="text-2xs text-success">ui</span>' : ''}
                 </div>
             </div>
         `).join('');
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-danger text-xs text-center py-2">${esc(String(e))}</div>`;
     }
 }
 
@@ -266,8 +266,8 @@ async function loadKvStore() {
                     <span class="text-2xs text-[var(--text-tertiary)] ml-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
                 </div>
                 <div class="flex items-center gap-1 ml-2">
-                    <button class="kv-edit-btn text-2xs text-blue-400 hover:text-blue-300" data-key="${esc(e.key)}">edit</button>
-                    <button class="kv-delete-key-btn text-2xs text-red-400 hover:text-red-300" data-key="${esc(e.key)}">✕</button>
+                    <button class="kv-edit-btn text-2xs text-info hover:text-info/70" data-key="${esc(e.key)}">edit</button>
+                    <button class="kv-delete-key-btn text-2xs text-danger hover:text-danger/70" data-key="${esc(e.key)}">✕</button>
                 </div>
             </div>
         `).join('');
@@ -303,7 +303,7 @@ async function loadKvStore() {
         });
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-danger text-xs text-center py-2">${esc(String(e))}</div>`;
     }
 }
 
@@ -399,7 +399,7 @@ async function loadSandboxConfig() {
         const indicator = document.getElementById('sandbox-safe-indicator');
         if (indicator) {
             indicator.textContent = safe ? '● Safe' : '● Unsafe';
-            indicator.className = `text-xs ${safe ? 'text-green-400' : 'text-red-400'}`;
+            indicator.className = `text-xs ${safe ? 'text-success' : 'text-danger'}`;
         }
     } catch {}
 }
@@ -598,7 +598,7 @@ async function loadSmartRankings() {
     container.innerHTML = rankings.map((r, i) => {
             const score = typeof r.score === 'number' ? r.score.toFixed(1) : '?';
             const barWidth = Math.min(100, Math.max(0, Number(r.score) || 0));
-            const barColor = barWidth >= 80 ? 'bg-green-500' : barWidth >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+            const barColor = barWidth >= 80 ? 'bg-success' : barWidth >= 50 ? 'bg-warning' : 'bg-danger';
             return `
                 <div class="flex items-center gap-3 py-1">
                     <span class="text-2xs text-[var(--text-tertiary)] w-6 text-right">#${i + 1}</span>
@@ -611,7 +611,7 @@ async function loadSmartRankings() {
         }).join('');
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-4">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-danger text-xs text-center py-4">${esc(String(e))}</div>`;
     }
 }
 
