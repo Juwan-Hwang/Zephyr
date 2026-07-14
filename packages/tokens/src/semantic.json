@@ -41,6 +41,12 @@
     "download":  { "value": "{color.purple.500}", "lightValue": "{color.purple.600}" },
     "upload":    { "value": "{color.sky.400}",   "lightValue": "{color.blue.600}" }
   },
+  "focus": {
+    "color":           { "value": "{color.accent}" },
+    "ring-alpha":      { "value": "0.50" },
+    "ring-soft-alpha": { "value": "0.15" },
+    "border-alpha":    { "value": "0.50" }
+  },
   "shadow": {
     "dialog": {
       "value": "inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 8px 40px rgba(0, 0, 0, 0.55)",
