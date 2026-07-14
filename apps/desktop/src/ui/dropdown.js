@@ -102,24 +102,36 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         });
     };
 
-    // Hover highlight
+    // Hover highlight — skip disabled items
     menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
         item.addEventListener('mouseenter', () => {
+            if (item.matches(':disabled, [disabled], [aria-disabled="true"]')) return;
             menu.querySelectorAll(`[${optionAttr}]`).forEach(i => i.classList.remove('active'));
             item.classList.add('active');
         }, { signal });
     });
     menu.addEventListener('mouseleave', syncUI, { signal });
 
-    // Toggle
+    // Toggle — guard against disabled trigger (non-native elements don't block clicks)
     trigger.addEventListener('click', (e) => {
+        if (trigger.matches(':disabled, [disabled], [aria-disabled="true"]')) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         e.stopPropagation();
         menu.classList.contains('hidden') ? openMenu() : closeMenu();
     }, { signal });
 
-    // Option click
+    // Option click — guard against disabled items (non-native elements
+    // don't block click events natively even with aria-disabled="true")
     menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
         item.addEventListener('click', (e) => {
+            if (item.matches(':disabled, [disabled], [aria-disabled="true"]')) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             e.stopPropagation();
             const val = item.getAttribute(optionAttr);
             if (val === null || val === select.value) { closeMenu(); return; }
