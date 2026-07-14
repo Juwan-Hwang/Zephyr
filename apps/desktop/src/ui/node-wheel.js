@@ -166,7 +166,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             const isSelected = name === current;
 
             const item = document.createElement('div');
-            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-200 w-full h-full
+            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-micro)] w-full h-full
                 ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-[var(--text-primary)]' : 'bg-[var(--zephyr-bg-input)] border-[var(--zephyr-border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)]'}`;
 
             const dot = document.createElement('div');
