@@ -22,21 +22,21 @@
   --color-accent: var(--accent-primary);
   --color-accent-glow: var(--accent-glow);
   --color-accent-rgb: var(--accent-rgb);
-  --radius-sm: var(--zephyr-radius-sm);
-  --radius-md: var(--zephyr-radius-md);
-  --radius-lg: var(--zephyr-radius-lg);
+  --radius-sm: var(--zephyr-radius-control);
+  --radius-md: var(--zephyr-radius-surface);
+  --radius-lg: var(--zephyr-radius-overlay);
   --radius-full: var(--zephyr-radius-full);
   --radius-dropdown-option: var(--zephyr-radius-dropdown-option);
-  --radius-button: var(--zephyr-radius-lg);
-  --radius-input: var(--zephyr-radius-md);
-  --radius-card: var(--zephyr-radius-lg);
-  --radius-panel: var(--zephyr-radius-lg);
-  --radius-modal: var(--zephyr-radius-lg);
-  --radius-nav: var(--zephyr-radius-md);
-  --radius-badge: var(--zephyr-radius-sm);
-  --radius-dropdown: var(--zephyr-radius-lg);
-  --radius-option: var(--zephyr-radius-dropdown-option);
-  --radius-switch: var(--zephyr-radius-full);
+  --radius-button: var(--zephyr-button-radius);
+  --radius-input: var(--zephyr-input-radius);
+  --radius-card: var(--zephyr-card-radius);
+  --radius-panel: var(--zephyr-panel-radius);
+  --radius-modal: var(--zephyr-modal-radius);
+  --radius-nav: var(--zephyr-radius-surface);
+  --radius-badge: var(--zephyr-badge-radius);
+  --radius-dropdown: var(--zephyr-dropdown-radius);
+  --radius-option: var(--zephyr-dropdown-item-radius);
+  --radius-switch: var(--zephyr-switch-radius);
 }
 
 /* Thin scrollbar - visible on hover */
