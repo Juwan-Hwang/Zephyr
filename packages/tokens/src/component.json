@@ -3,27 +3,27 @@
     "gap":       { "value": "{space.2}" },
     "padding-y": { "value": "{space.3}" },
     "padding-x": { "value": "{space.5}" },
-    "radius":    { "value": "{radius.lg}" },
+    "radius":    { "value": "{radius.control}" },
     "font-size": { "value": "0.625rem" },
     "weight":    { "value": "700" },
     "tracking":  { "value": "0.05em" },
     "transform": { "value": "uppercase" }
   },
   "input": {
-    "radius":   { "value": "{radius.md}" },
+    "radius":   { "value": "{radius.control}" },
     "padding":  { "value": "{space.5} {space.3}" }
   },
   "card": {
-    "radius":   { "value": "{radius.lg}" },
+    "radius":   { "value": "{radius.surface}" },
     "blur":     { "value": "{glass.blur}" }
   },
   "badge": {
-    "radius":    { "value": "{radius.sm}" },
+    "radius":    { "value": "{radius.control}" },
     "padding":   { "value": "0.125rem 0.375rem" },
     "font-size": { "value": "0.625rem" }
   },
   "dropdown": {
-    "radius":      { "value": "{radius.lg}" },
+    "radius":      { "value": "{radius.surface}" },
     "padding":     { "value": "{space.3} {space.4}" },
     "item-radius": { "value": "{radius.dropdown-option}" }
   },
@@ -33,9 +33,9 @@
     "height": { "value": "24px" }
   },
   "modal": {
-    "radius": { "value": "{radius.lg}" }
+    "radius": { "value": "{radius.overlay}" }
   },
   "panel": {
-    "radius": { "value": "{radius.lg}" }
+    "radius": { "value": "{radius.surface}" }
   }
 }

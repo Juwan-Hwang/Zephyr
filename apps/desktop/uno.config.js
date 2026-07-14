@@ -22,6 +22,18 @@ export default defineConfig({
         DEFAULT: 'var(--accent-primary)',
         glow: 'var(--accent-glow)',
       },
+      // ── Semantic color aliases (map to design-token CSS variables) ──
+      success:   'var(--zephyr-color-success)',
+      danger:    'var(--zephyr-color-danger)',
+      warning:   'var(--zephyr-color-warning)',
+      info:      'var(--zephyr-color-info)',
+      'close-btn': 'var(--zephyr-color-close-btn)',
+      download:  'var(--zephyr-color-download)',
+      upload:    'var(--zephyr-color-upload)',
+      orange:    'var(--zephyr-color-orange-500)',
+      pink:      'var(--zephyr-color-pink-500)',
+      cyan:      'var(--zephyr-color-cyan-500)',
+      indigo:    'var(--zephyr-color-indigo-500)',
     },
     fontSize: {
       '2xs': ['0.625rem', { lineHeight: '1.4' }],
