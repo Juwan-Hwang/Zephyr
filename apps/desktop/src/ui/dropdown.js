@@ -117,10 +117,12 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         menu.classList.contains('hidden') ? openMenu() : closeMenu();
     }, { signal });
 
-    // Option click
+    // Option click — guard against disabled items (non-native elements
+    // don't block click events natively even with aria-disabled="true")
     menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
         item.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (item.matches(':disabled, [disabled], [aria-disabled="true"]')) return;
             const val = item.getAttribute(optionAttr);
             if (val === null || val === select.value) { closeMenu(); return; }
             select.value = val;
