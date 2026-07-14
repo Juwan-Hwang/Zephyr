@@ -150,6 +150,32 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   opacity: 0.85;
 }
 
+/* ── Button State Matrix (PR3 §3.3) ── */
+/* Disabled — through native attribute, no extra class needed */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Loading — through aria-busy attribute, synced with DOM semantics */
+.btn[aria-busy="true"] {
+  pointer-events: none;
+  opacity: 0.7;
+}
+.btn[aria-busy="true"]::after {
+  content: '';
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.5rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--zephyr-radius-full);
+  animation: btn-spin 0.6s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
 /* 极简滚动动画 */
 @keyframes text-scroll {
     0% { transform: translateX(0); }
@@ -430,39 +456,63 @@ html:not(.dark) #setting-lang-menu {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
 }
 
-/* --- Input System --- */
-.input-common {
+/* --- Form Control System (PR3 §3.4) --- */
+/* Converges input-common / input-modal / input-mono / textarea-common into one system */
+.form-control {
   width: 100%;
-  border-radius: 1rem;
-  padding: 0.5rem 1rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  background-color: var(--zephyr-bg-input);
+  border-radius: var(--zephyr-radius-control);
+  background-color: var(--zephyr-surface-input);
+  color: var(--text-primary);
   border: 1px solid var(--zephyr-border-subtle);
   transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: var(--zephyr-transition-standard);
 }
-.input-modal {
-  width: 100%;
-  border-radius: 1rem;
-  padding: 1rem 1.5rem;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  background-color: var(--zephyr-bg-input);
-  border: 1px solid var(--zephyr-border-subtle);
+.form-control::placeholder {
+  color: var(--zephyr-text-tertiary);
+}
+/* Size variants */
+.form-control-sm { padding: 0.25rem 0.75rem; font-size: var(--zephyr-font-size-2xs); }
+.form-control-md { padding: 0.5rem 1rem;    font-size: var(--zephyr-font-size-xs); }
+.form-control-lg { padding: 0.75rem 1.5rem;   font-size: var(--zephyr-font-size-sm); }
+/* Font variant */
+.form-control-mono { font-family: var(--font-mono); }
+
+/* --- Status Components (PR3 §3.5) --- */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--zephyr-radius-full);
+  flex-shrink: 0;
+}
+.status-dot--online  { background: var(--zephyr-color-success); }
+.status-dot--offline { background: var(--zephyr-text-muted); }
+.status-dot--error   { background: var(--zephyr-color-danger); }
+.status-dot--warning { background: var(--zephyr-color-warning); }
+
+.latency-badge {
+  font-size: var(--zephyr-font-size-2xs);
+  font-weight: 700;
+  padding: var(--zephyr-badge-padding);
+  border-radius: var(--zephyr-radius-control);
+  font-variant-numeric: tabular-nums;
+}
+.latency-badge--fast   { color: var(--zephyr-color-success); background: color-mix(in srgb, var(--zephyr-color-success) 15%, transparent); }
+.latency-badge--medium { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent); }
+.latency-badge--slow   { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent); }
+
+/* --- Danger Zone (PR3 §3.6) --- */
+.danger-zone {
+  margin-top: var(--zephyr-space-8);
+  padding-top: var(--zephyr-space-6);
+  border-top: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+}
+.danger-zone__title {
+  color: var(--zephyr-color-danger);
+  font-size: var(--zephyr-font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-weight: 300;
-  transition-property: color, background-color, border-color, box-shadow;
-}
-.input-mono {
-  width: 100%;
-  border-radius: 1rem;
-  padding: 0.75rem 1rem;
-  font-size: 0.75rem;
-  color: var(--text-primary);
-  background-color: var(--zephyr-bg-input);
-  border: 1px solid var(--zephyr-border-subtle);
-  font-family: var(--font-mono);
-  transition-property: color, background-color, border-color, box-shadow;
+  margin-bottom: var(--zephyr-space-3);
 }
 
 /* --- Badge System --- */
@@ -653,33 +703,19 @@ html:not(.dark) .script-output {
   background: var(--zephyr-bg-muted);
 }
 
-/* Common textarea styles - rounded corners */
-.textarea-common {
-  width: 100%;
-  border-radius: 1rem;
-  padding: 0.75rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  background-color: var(--zephyr-bg-input);
-  border: 1px solid var(--zephyr-border-subtle);
-  resize: none;
-  transition-property: color, background-color, border-color, box-shadow;
-}
+/* Textarea — use form-control + form-control-mono + resize-none utility */
 
-/* Light mode overrides for common inputs */
-html:not(.dark) .input-common:focus,
-html:not(.dark) .input-mono:focus,
-html:not(.dark) .input-modal:focus,
-html:not(.dark) .textarea-common:focus {
+/* Form control focus + placeholder (replaces old per-class overrides) */
+.form-control:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.15);
+  outline: none;
+}
+html:not(.dark) .form-control:focus-visible {
   border-color: var(--color-accent);
 }
-
-html:not(.dark) .select-common::placeholder,
-html:not(.dark) .input-common::placeholder,
-html:not(.dark) .input-mono::placeholder,
-html:not(.dark) .input-modal::placeholder,
-html:not(.dark) .textarea-common::placeholder {
+html:not(.dark) .form-control::placeholder,
+html:not(.dark) .select-common::placeholder {
   color: var(--zephyr-text-tertiary);
 }
 
@@ -919,15 +955,7 @@ button:focus-visible,
   box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
 }
 
-/* Input focus ring */
-.input-common:focus,
-.textarea-common:focus,
-.input-modal:focus,
-.input-mono:focus {
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6);
-  outline: none;
-  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
-}
+/* Select focus (pill-shaped, keeps its own focus style) */
 .select-common:focus {
   box-shadow: none;
   outline: none;

@@ -146,7 +146,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
             input.type = 'text';
             input.id = 'modal-input';
             input.placeholder = placeholder;
-            input.className = 'input-modal';
+            input.className = 'form-control form-control-lg';
             input.value = defaultValue;
             contentArea.appendChild(input);
         }
