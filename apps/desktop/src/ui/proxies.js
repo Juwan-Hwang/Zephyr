@@ -1001,7 +1001,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Info icon
     const icon = document.createElement('span');
-    icon.className = 'text-amber-400 text-sm flex-shrink-0';
+    icon.className = 'text-warning text-sm flex-shrink-0';
      
     icon.innerHTML = '&#9888;';
 
@@ -1456,8 +1456,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         left.className = 'flex items-center gap-2';
         const dot = document.createElement('div');
         // All indicators use green color as requested
-        const dotColor = 'bg-green-500';
-        dot.className = `w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)] ${dotColor}`;
+        const dotColor = 'bg-success';
+        dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
+dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40%, transparent)";
         const transportText = document.createElement('span');
         transportText.className = 'text-2xs text-[var(--text-muted)] font-medium';
         transportText.textContent = transport;
@@ -1634,7 +1635,7 @@ export async function renderProxies() {
     if (!data || !data.proxies) {
         container.innerHTML = '';
         const errWrap = document.createElement('div');
-        errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
+        errWrap.className = 'col-span-full text-center py-10 text-danger bg-danger/5 rounded-lg border border-danger/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);

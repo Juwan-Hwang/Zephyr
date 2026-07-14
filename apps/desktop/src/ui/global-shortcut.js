@@ -454,7 +454,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
 
     // --- Clear/delete button ---
     const clearBtn = document.createElement('button');
-    clearBtn.className = 'text-[var(--text-muted)] hover:text-rose-400 transition-colors p-1';
+    clearBtn.className = 'text-[var(--text-muted)] hover:text-danger transition-colors p-1';
     clearBtn.title = t.delete || 'Delete';
     clearBtn.innerHTML = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
     clearBtn.addEventListener('click', async () => {
