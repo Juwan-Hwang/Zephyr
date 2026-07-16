@@ -346,7 +346,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     `;
 
     const dropdownMenu = document.createElement('div');
-    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
+    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
 
     const menuScroll = document.createElement('div');
     menuScroll.className = 'menu-scroll max-h-[200px]';
