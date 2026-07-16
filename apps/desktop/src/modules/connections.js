@@ -105,15 +105,15 @@ const PAGE_HTML = `
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="totalConn">Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
-        <span id="stat-dl-total" class="text-lg font-semibold text-download tabular-nums">0 B</span>
+        <span id="stat-dl-total" class="text-lg font-semibold text-purple-400 tabular-nums">0 B</span>
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
-        <span id="stat-ul-total" class="text-lg font-semibold text-upload tabular-nums">0 B</span>
+        <span id="stat-ul-total" class="text-lg font-semibold text-blue-400 tabular-nums">0 B</span>
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
-        <span id="stat-active" class="text-lg font-semibold text-success tabular-nums">0</span>
+        <span id="stat-active" class="text-lg font-semibold text-emerald-400 tabular-nums">0</span>
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="activeConn">Active</span>
     </div>
 </div>
@@ -124,8 +124,8 @@ const PAGE_HTML = `
     <div class="shrink-0">
         <!-- Tabs -->
         <div class="flex items-center px-4 pt-3 pb-0 gap-1">
-            <button id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
-            <button id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-[var(--zephyr-radius-surface)] transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
+            <button type="button" id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
+            <button type="button" id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
             <div class="flex-1"></div>
             <span id="closed-count-badge" class="hidden text-2xs text-[var(--text-tertiary)] tabular-nums"></span>
         </div>
@@ -134,10 +134,10 @@ const PAGE_HTML = `
             <div class="sortable pl-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
             <div class="sortable text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="rule" data-i18n="ruleCol">Rule</div>
             <div class="sortable text-right pr-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-download/70 uppercase tracking-widest cursor-pointer hover:text-download transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-download/50 uppercase tracking-widest cursor-pointer hover:text-download/70 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-upload/70 uppercase tracking-widest cursor-pointer hover:text-upload transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
-            <div class="sortable text-right pr-2 text-[9px] font-bold text-upload/50 uppercase tracking-widest cursor-pointer hover:text-upload/70 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
+            <div class="sortable text-right pr-1 text-[9px] font-bold text-purple-500/70 uppercase tracking-widest cursor-pointer hover:text-purple-400 transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
+            <div class="sortable text-right pr-1 text-[9px] font-bold text-purple-500/50 uppercase tracking-widest cursor-pointer hover:text-purple-300 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
+            <div class="sortable text-right pr-1 text-[9px] font-bold text-blue-500/70 uppercase tracking-widest cursor-pointer hover:text-blue-400 transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
+            <div class="sortable text-right pr-2 text-[9px] font-bold text-blue-500/50 uppercase tracking-widest cursor-pointer hover:text-blue-300 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
         </div>
     </div>
     <!-- List Body -->
@@ -598,10 +598,10 @@ function updateSortIndicators() {
         // Each column's original color (matches the utility classes in PAGE_HTML)
         const originalColors = {
             host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
-            dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
-            dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
-            ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
-            ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
+            dlSpeed: 'color-mix(in srgb, var(--colors-purple-500) 70%, transparent)',
+            dlTotal: 'color-mix(in srgb, var(--colors-purple-500) 50%, transparent)',
+            ulSpeed: 'color-mix(in srgb, var(--colors-blue-500) 70%, transparent)',
+            ulTotal: 'color-mix(in srgb, var(--colors-blue-500) 50%, transparent)',
         };
         const origColor = (/** @type {Record<string, string>} */ (originalColors))[/** @type {string} */ (sortKey)] || '';
 
@@ -734,7 +734,7 @@ function buildConnectionRow(conn, mode) {
         </div>
         <!-- Rule -->
         <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-[var(--zephyr-radius-control)] text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
         </div>
         <!-- Chains -->
         <div style="text-align:right; min-width:0;">
@@ -762,8 +762,8 @@ function buildConnectionRow(conn, mode) {
 /** @param {string} rule */
 function getRuleColorClass(rule) {
     const r = (rule ?? '').toLowerCase();
-    if (r.includes('direct') || r === 'direct') return 'bg-success/15 text-success';
-    if (r.includes('reject') || r === 'reject') return 'bg-danger/15 text-danger';
+    if (r.includes('direct') || r === 'direct') return 'bg-emerald-500/15 text-emerald-400';
+    if (r.includes('reject') || r === 'reject') return 'bg-rose-500/15 text-rose-400';
     if (r.includes('match')) return 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
     return 'bg-accent/15 text-accent';
 }
@@ -814,7 +814,7 @@ function showConnDetail(conn, mode) {
 
     // Build close button HTML (only for active connections)
     const closeBtnHtml = mode === 'active'
-        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[var(--zephyr-radius-control)] bg-danger/10 border border-danger/20 text-2xs font-bold text-danger hover:bg-danger/20 transition-colors uppercase tracking-wider">
+        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-sm bg-rose-500/10 border border-rose-500/20 text-2xs font-bold text-rose-400 hover:bg-rose-500/20 transition-colors uppercase tracking-wider">
              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
              <span>${t.closeConn || 'Close Connection'}</span>
            </button>`
@@ -828,36 +828,36 @@ function showConnDetail(conn, mode) {
                 <h3 class="text-lg font-light text-[var(--text-primary)] truncate">${host}</h3>
                 <p class="text-xs text-[var(--text-secondary)] mt-1 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-[var(--zephyr-radius-control)] bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-sm bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
 
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
-            <span class="inline-flex px-2.5 py-1 rounded-[var(--zephyr-radius-control)] text-xs font-semibold ${ruleColorClass}">${rule}</span>
+            <span class="inline-flex px-2.5 py-1 rounded-sm text-xs font-semibold ${ruleColorClass}">${rule}</span>
             <span class="text-xs text-[var(--text-secondary)] truncate">${chains}</span>
         </div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-3 border border-[var(--zephyr-border-subtle)]">
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-download/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
+                    <span class="text-2xs text-purple-500/70 dark:text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-download tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
+                <span class="text-sm font-semibold text-purple-500 dark:text-purple-400 tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                     <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-3 border border-[var(--zephyr-border-subtle)]">
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-upload/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
+                    <span class="text-2xs text-blue-500/70 dark:text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-upload tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
+                <span class="text-sm font-semibold text-blue-500 dark:text-blue-400 tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                     <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-ul-total">${ulTotal}</span>
