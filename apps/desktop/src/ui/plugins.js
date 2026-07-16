@@ -203,20 +203,20 @@ export function initPlugins() {
             const result = await overrideSetContent(activeOverrideId, source, true);
             if (result.success) {
                 scriptStatus.textContent = t('overrideScriptSafe') ?? '✓ Script safe';
-                scriptStatus.className = 'text-xs text-success';
+                scriptStatus.className = 'text-xs text-emerald-400';
             } else {
                 scriptStatus.textContent = '✗ ' + (formatScriptError(result.error) ?? (t('overrideScriptUnsafe') ?? 'Script may be unsafe'));
-                scriptStatus.className = 'text-xs text-danger';
+                scriptStatus.className = 'text-xs text-rose-400';
             }
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             // If core is not running, show a friendlier message instead of a hard error
             if (msg.includes('Failed to read running config') || msg.includes('No such file')) {
                 scriptStatus.textContent = t('overrideCoreNotRunning') ?? '⚠ Core not running, cannot validate';
-                scriptStatus.className = 'text-xs text-warning';
+                scriptStatus.className = 'text-xs text-emerald-400';
             } else {
                 scriptStatus.textContent = '✗ ' + msg;
-                scriptStatus.className = 'text-xs text-danger';
+                scriptStatus.className = 'text-xs text-emerald-400';
             }
         }
     });
@@ -266,8 +266,8 @@ export function initPlugins() {
             const outputText = lines.join('\n');
             scriptOutput.textContent = outputText;
             scriptOutput.className = result.success
-                ? 'script-output px-4 pb-3 text-success whitespace-pre-wrap break-all custom-scrollbar'
-                : 'script-output px-4 pb-3 text-danger whitespace-pre-wrap break-all custom-scrollbar';
+                ? 'script-output px-4 pb-3 text-emerald-400 whitespace-pre-wrap break-all custom-scrollbar'
+                : 'script-output px-4 pb-3 text-rose-400 whitespace-pre-wrap break-all custom-scrollbar';
             // Auto-expand collapsible output
             scriptOutput.style.display = '';
             scriptOutput.style.maxHeight = '120px';
@@ -283,7 +283,7 @@ export function initPlugins() {
             }
         } catch (err) {
             scriptOutput.textContent = err instanceof Error ? err.message : String(err);
-            scriptOutput.className = 'script-output px-4 pb-3 text-danger whitespace-pre-wrap break-all custom-scrollbar';
+            scriptOutput.className = 'script-output px-4 pb-3 text-rose-400 whitespace-pre-wrap break-all custom-scrollbar';
             scriptOutput.style.display = '';
             scriptOutput.style.maxHeight = '120px';
             scriptOutput.style.overflowY = 'auto';
@@ -472,7 +472,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     overlay.style.background = '';
 
     const card = document.createElement('div');
-    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[360px] max-w-[480px] max-h-[70vh] shadow-2xl';
+    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-0 max-w-[480px] max-h-[70vh] shadow-2xl';
 
     // Title
     const title = document.createElement('div');
@@ -499,7 +499,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     // Fetch and render profiles
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
-    saveBtn.className = 'bg-info hover:bg-info/80 text-white text-xs px-4 py-1.5 rounded-[var(--zephyr-radius-control)] font-medium';
+    saveBtn.className = 'bg-accent hover:bg-accent/80 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
     saveBtn.textContent = t('confirm') ?? 'OK';
     saveBtn.disabled = true; // Disabled until profiles are loaded
 
@@ -522,7 +522,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
         for (const cfg of configs) {
             const row = document.createElement('label');
-            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-[var(--zephyr-radius-control)] hover:bg-[var(--zephyr-bg-muted)]';
+            row.className = 'flex items-center gap-3 cursor-pointer px-2 py-1.5 rounded-md hover:bg-[var(--zephyr-bg-muted)]';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.value = cfg.name || cfg;
@@ -569,7 +569,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-[var(--zephyr-radius-control)]';
+    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
     cancelBtn.textContent = t('cancel') ?? 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
 
@@ -949,8 +949,8 @@ function updateOverrideCardContent(card, item) {
         const statusColor = !item.enabled
             ? 'bg-[var(--text-tertiary)]'
             : item.lastSuccess === false
-                ? 'bg-danger'
-                : 'bg-success';
+                ? 'bg-red-400'
+                : 'bg-emerald-400';
         let summaryText;
         if (!item.enabled) {
             summaryText = t('overrideDisabled');
@@ -966,13 +966,13 @@ function updateOverrideCardContent(card, item) {
     // Update scope badge
     const scopeBadge = card.querySelector('[data-action="edit-scope"]');
     if (scopeBadge) {
-        const scopeClass = item.global ? 'bg-success/20 text-success' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
+        const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
         const scopeLabel = item.global
             ? t('overrideScopeGlobal')
             : (item.profileIds?.length
                 ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
                 : t('overrideScopeNone'));
-        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
+        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
         scopeBadge.textContent = scopeLabel;
     }
 
@@ -984,7 +984,7 @@ function updateOverrideCardContent(card, item) {
             statusText.className = 'text-xs text-[var(--text-muted)]';
         } else if (item.lastSuccess === false) {
             statusText.textContent = t('overrideFailed');
-            statusText.className = 'text-xs text-danger';
+            statusText.className = 'text-xs text-red-400';
         } else {
             statusText.textContent = t('overrideEnabled');
             statusText.className = 'text-xs text-[var(--text-muted)]';
@@ -1000,7 +1000,7 @@ function updateOverrideCardContent(card, item) {
             : t('overrideEnable');
         // eslint-disable-next-line no-unsanitized/property -- static SVG icon
         toggleBtn.innerHTML = item.enabled
-            ? `<svg class="w-3.5 h-3.5 text-success" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
+            ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
             : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
     }
 
@@ -1030,11 +1030,11 @@ function buildOverrideCard(item) {
 
     // ── Type badge color ───────────────────────────────────────
     const isJs = item.ext === 'js';
-    const typeColor = isJs ? 'bg-info/20 text-info' : 'bg-download/20 text-download';
+    const typeColor = isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
     const typeLabel = isJs ? 'JS' : 'Prism';
 
     // ── Scope badge ───────────────────────────────────────────
-    const scopeClass = item.global ? 'bg-success/20 text-success' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
+    const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
     const scopeLabel = item.global
         ? t('overrideScopeGlobal')
         : (item.profileIds?.length
@@ -1045,8 +1045,8 @@ function buildOverrideCard(item) {
     const statusColor = !item.enabled
         ? 'bg-[var(--text-tertiary)]'
         : item.lastSuccess === false
-            ? 'bg-danger'
-            : 'bg-success';
+            ? 'bg-red-400'
+            : 'bg-emerald-400';
 
     // ── Status summary line ────────────────────────────────────
     let summaryText;
@@ -1056,7 +1056,7 @@ function buildOverrideCard(item) {
         summaryClass = 'text-[var(--text-muted)]';
     } else if (item.lastSuccess === false) {
         summaryText = t('overrideFailed');
-        summaryClass = 'text-danger';
+        summaryClass = 'text-red-400';
     } else {
         summaryText = t('overrideEnabled');
         summaryClass = 'text-[var(--text-muted)]';
@@ -1069,29 +1069,29 @@ function buildOverrideCard(item) {
             <div class="flex flex-col gap-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(item.name ?? '')}</span>
-                    <span class="text-2xs px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] ${typeColor} shrink-0">${typeLabel}</span>
-                    ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] bg-info/20 text-info shrink-0">🌐</span>' : ''}
+                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${typeColor} shrink-0">${typeLabel}</span>
+                    ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded-sm bg-info/20 text-info shrink-0">🌐</span>' : ''}
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-2xs px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
+                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
                     <span class="text-xs ${summaryClass}" data-override-status>${summaryText}</span>
                 </div>
             </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-            <button type="button" class="override-toggle-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-[var(--zephyr-radius-control)] hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" aria-label="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
+            <button type="button" class="override-toggle-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" aria-label="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
                 ${item.enabled
-                    ? `<svg class="w-3.5 h-3.5 text-success" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
+                    ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
                     : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
                 }
             </button>
-            <button type="button" class="override-up-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-[var(--zephyr-radius-control)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" aria-label="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
+            <button type="button" class="override-up-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" aria-label="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowUp}
             </button>
-            <button type="button" class="override-down-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-[var(--zephyr-radius-control)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" aria-label="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
+            <button type="button" class="override-down-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" aria-label="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
                 ${SVG_ICONS.arrowDown}
             </button>
-            <button type="button" class="btn-delete-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-[var(--zephyr-radius-control)]" title="${escapeAttr(t('pluginUnload') || '删除')}" aria-label="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
+            <button type="button" class="btn-delete-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-sm" title="${escapeAttr(t('pluginUnload') || '删除')}" aria-label="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
                 ${SVG_ICONS.trash}
             </button>
         </div>
@@ -1299,7 +1299,7 @@ function showDeleteConfirm(overrideId, overrideName) {
     overlay.style.background = '';
 
     const card = document.createElement('div');
-    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-[320px] max-w-[420px] shadow-2xl';
+    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-0 max-w-[420px] shadow-2xl';
 
     const title = document.createElement('div');
     title.className = 'text-sm font-semibold text-[var(--text-primary)]';
@@ -1314,13 +1314,13 @@ function showDeleteConfirm(overrideId, overrideName) {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-[var(--zephyr-radius-control)]';
+    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
     cancelBtn.textContent = t('cancel') ?? '取消';
     cancelBtn.addEventListener('click', () => overlay.remove());
 
     const confirmBtn = document.createElement('button');
     confirmBtn.type = 'button';
-    confirmBtn.className = 'bg-danger hover:bg-danger/80 text-white text-xs px-4 py-1.5 rounded-[var(--zephyr-radius-control)] font-medium';
+    confirmBtn.className = 'bg-rose-600 hover:bg-rose-500 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
     confirmBtn.textContent = t('confirm') ?? '确认';
     confirmBtn.addEventListener('click', async () => {
         confirmBtn.disabled = true;
@@ -1422,7 +1422,7 @@ function openFullscreenEditor() {
     const isJs = activeOverrideExt === 'js';
     if (typeBadge) {
         typeBadge.textContent = isJs ? 'JS' : 'Prism';
-        typeBadge.className = `text-2xs px-2 py-0.5 rounded-[var(--zephyr-radius-control)] ${isJs ? 'bg-info/20 text-info' : 'bg-download/20 text-download'}`;
+        typeBadge.className = `text-2xs px-2 py-0.5 rounded-sm ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`;
     }
 
     // Create fullscreen editor
@@ -1514,18 +1514,18 @@ async function validateFullscreenEditor() {
         if (result.success) {
             if (status) {
                 status.textContent = t('overrideScriptSafe') ?? '✓ Script safe';
-                status.className = 'text-success';
+                status.className = 'text-emerald-400';
             }
         } else {
             if (status) {
                 status.textContent = '✗ ' + (formatScriptError(result.error) ?? (t('overrideScriptUnsafe') ?? 'Script may be unsafe'));
-                status.className = 'text-danger';
+                status.className = 'text-emerald-400';
             }
         }
     } catch (err) {
         if (status) {
             status.textContent = '✗ ' + (err instanceof Error ? err.message : String(err));
-            status.className = 'text-danger';
+            status.className = 'text-rose-400';
         }
     }
 }
@@ -1584,14 +1584,14 @@ async function runFullscreenEditor() {
 
         if (output) {
             output.textContent = outputText;
-            output.className = `flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar ${result.success ? 'text-success' : 'text-danger'}`;
+            output.className = `flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar ${result.success ? 'text-emerald-400' : 'text-rose-400'}`;
         }
 
         if (status) {
             status.textContent = result.success
                 ? (t('overrideExecSuccess') ?? '✓ Execution successful')
                 : (t('overrideExecFailed') ?? '✗ Execution failed');
-            status.className = result.success ? 'text-success' : 'text-danger';
+            status.className = result.success ? 'text-emerald-400' : 'text-rose-400';
         }
 
         if (result.success && result.configModified) {
@@ -1601,11 +1601,11 @@ async function runFullscreenEditor() {
         const errorText = err instanceof Error ? err.message : String(err);
         if (output) {
             output.textContent = errorText;
-            output.className = 'flex-1 p-4 text-sm font-mono text-danger whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
+            output.className = 'flex-1 p-4 text-sm font-mono text-rose-400 whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
         }
         if (status) {
             status.textContent = `✗ ${errorText}`;
-            status.className = 'text-danger';
+            status.className = 'text-rose-400';
         }
         setTimeout(() => {
             startSmartAutoTest();
