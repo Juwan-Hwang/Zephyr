@@ -262,9 +262,9 @@ function buildPageHTML() {
             <div class="flex items-center gap-4">
                 <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="logsTitle">${t('logsTitle')}</h2>
                 <!-- Tab buttons -->
-                <div class="flex items-center gap-1 bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] p-0.5">
-                    <button id="log-tab-core" class="log-tab-btn active text-xs px-3 py-1 rounded-[var(--zephyr-radius-control)] transition-colors" data-i18n="logTabCore">${t('logTabCore')}</button>
-                    <button id="log-tab-ext" class="log-tab-btn text-xs px-3 py-1 rounded-[var(--zephyr-radius-control)] transition-colors" data-i18n="ruleLibraryLogTab">${t('ruleLibraryLogTab')}</button>
+                <div class="flex items-center gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-0.5">
+                    <button id="log-tab-core" class="log-tab-btn active text-xs px-3 py-1 rounded-md transition-colors" data-i18n="logTabCore">${t('logTabCore')}</button>
+                    <button id="log-tab-ext" class="log-tab-btn text-xs px-3 py-1 rounded-md transition-colors" data-i18n="ruleLibraryLogTab">${t('ruleLibraryLogTab')}</button>
                 </div>
             </div>
             <div class="flex items-center gap-3">
@@ -298,7 +298,7 @@ function buildPageHTML() {
             </div>
 
             <!-- Virtual scroll container -->
-            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
+            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
                 <div id="log-spacer-top" style="height:0"></div>
                 <div id="log-lines-container"></div>
                 <div id="log-spacer-bottom" style="height:0"></div>
@@ -325,7 +325,7 @@ function buildPageHTML() {
                     <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 pl-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
                 </div>
             </div>
-            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-[var(--zephyr-radius-surface)] bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
+            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
                 <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-[var(--text-tertiary)]">
                     <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span data-i18n="ruleLibraryLogEmpty">${t('ruleLibraryLogEmpty')}</span>
@@ -852,7 +852,7 @@ function createExtLogRow(entry) {
     ts.textContent = entry.timestamp;
 
     const badge = document.createElement('span');
-    badge.className = 'shrink-0 px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] text-2xs font-bold';
+    badge.className = 'shrink-0 px-1.5 py-0.5 rounded-sm text-2xs font-bold';
     badge.style.color = color;
     badge.style.backgroundColor = `${color}15`;
     badge.textContent = entry.source === 'backend'

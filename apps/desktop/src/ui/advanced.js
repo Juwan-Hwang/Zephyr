@@ -257,7 +257,7 @@ export async function renderAdvancedSettings() {
         advancedLogger.error('Advanced settings render error', err);
         container.innerHTML = '';
         const errDiv = document.createElement('div');
-        errDiv.className = 'p-8 text-center text-danger text-xs font-bold';
+        errDiv.className = 'p-8 text-center text-rose-400 text-xs font-bold';
         errDiv.textContent = toError(err).message;
         container.appendChild(errDiv);
     }
@@ -343,7 +343,7 @@ function renderArrayContent(container, arr, parentKey, _depth) {
         const items = arr;
         items.forEach((item, index) => {
             const itemCard = document.createElement('div');
-            itemCard.className = "bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] p-3 space-y-2";
+            itemCard.className = "bg-[var(--zephyr-bg-input)] rounded-lg p-3 space-y-2";
 
             const idxHeader = document.createElement('div');
             idxHeader.className = "text-2xs text-[var(--text-muted)] font-mono mb-2";
@@ -381,7 +381,7 @@ function renderArraySection(title, arr, fullKey, depth) {
         title,
         defaultOpen: false,
         badgeText: `${arr.length}`,
-        cardClass: 'bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] overflow-hidden',
+        cardClass: 'bg-[var(--zephyr-bg-input)] rounded-lg overflow-hidden',
         headerClass: 'p-3',
         contentClass: 'border-t border-[var(--zephyr-border-subtle)] space-y-2 p-3',
     });
@@ -511,7 +511,7 @@ function renderConfigItem(key, value, fullKey) {
 
         const setBtn = document.createElement('button');
         setBtn.type = "button";
-        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-[var(--zephyr-radius-control)] transition-colors";
+        setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
         setBtn.title = "Set value";
         setBtn.setAttribute('aria-label', 'Set value for ' + fullKey);
         // eslint-disable-next-line no-unsanitized/property -- static SVG constant

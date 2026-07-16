@@ -189,10 +189,10 @@ async function renderRulesList(searchQuery = '') {
             <div class="flex items-center gap-2">
                 <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
 
-                <button type="button" class="btn-move-top-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-[var(--zephyr-radius-control)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}">
+                <button type="button" class="btn-move-top-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}">
                     ${SVG_ICONS.arrowUp}
                 </button>
-                <button type="button" class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-[var(--zephyr-radius-control)] text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToBottom || 'Move to Bottom')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToBottom || 'Move to Bottom')}">
+                <button type="button" class="btn-move-bottom-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToBottom || 'Move to Bottom')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToBottom || 'Move to Bottom')}">
                     ${SVG_ICONS.arrowDown}
                 </button>
                 <button type="button" class="btn-delete-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 btn-delete-icon" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.delete || 'Delete')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.delete || 'Delete')}">
