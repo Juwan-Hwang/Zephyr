@@ -29,9 +29,10 @@
   "radius": {
     "control":         { "value": "8px" },
     "surface":         { "value": "12px" },
-    "overlay":         { "value": "16px" },
+    "md":              { "value": "16px" },
+    "overlay":         { "value": "24px" },
     "full":            { "value": "9999px" },
-    "dropdown-option": { "value": "10px" }
+    "dropdown-option": { "value": "18px" }
   },
   "shadow": {
     "sm":       { "value": "0 4px 20px rgba(0, 0, 0, 0.2)" },

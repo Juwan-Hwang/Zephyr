@@ -43,13 +43,13 @@ export function showNotification(message, type = 'info', title = null) {
     }
 
     const notif = document.createElement('div');
-    notif.className = 'glass-card py-3 px-5 border-l-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-[200px] max-w-[480px]';
+    notif.className = 'glass-card py-3 px-5 border-l-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-0 max-w-[480px]';
 
     const colors = {
         info: 'border-accent text-accent',
-        success: 'border-success text-success',
-        error: 'border-danger text-danger',
-        warning: 'border-warning text-warning',
+        success: 'border-emerald-500 text-emerald-400',
+        error: 'border-rose-500 text-rose-400',
+        warning: 'border-amber-500 text-amber-400',
     };
     notif.className += ` ${colors[type] || colors.info}`;
     notif.dataset.priority = String(NOTIFICATION_PRIORITY[type] ?? 2);
@@ -249,7 +249,7 @@ export function showConfirmModal(title, message = '') {
          
         contentArea.innerHTML = '';
         const msgDiv = document.createElement('div');
-        msgDiv.className = 'rounded-[var(--zephyr-radius-surface)] border border-warning/20 bg-warning/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+        msgDiv.className = 'rounded-lg border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
         msgDiv.textContent = message;
         contentArea.appendChild(msgDiv);
 
