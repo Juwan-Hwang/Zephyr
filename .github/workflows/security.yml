@@ -56,7 +56,6 @@ jobs:
         with:
           manifest-path: apps/desktop/src-tauri/Cargo.toml
           command: check
-          command-arguments: --config deny.toml
           log-level: warn
 
   # ============================================================
@@ -132,8 +131,11 @@ jobs:
           cache: pnpm
       - name: pnpm install
         run: pnpm install
-      - name: pnpm audit (production only, fail on moderate+)
-        run: pnpm audit --prod --audit-level=moderate
+      - name: Frontend dependency audit (GitHub advisory database)
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-3.0, AGPL-3.0
 
   # ============================================================
   # Job 6: PR 依赖审查（仅 PR 触发）
