@@ -1,17 +1,17 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { getDelayColorClass, formatFileSize, formatBytes, formatSpeed, formatDuration } from './format.js';
 
 describe('getDelayColorClass', () => {
     it('returns tertiary for null', () => expect(getDelayColorClass(null)).toBe('text-[var(--zephyr-text-tertiary)]'));
     it('returns tertiary for 0', () => expect(getDelayColorClass(0)).toBe('text-[var(--zephyr-text-tertiary)]'));
     it('returns tertiary for 999999+', () => expect(getDelayColorClass(999999)).toBe('text-[var(--zephyr-text-tertiary)]'));
-    it('returns success for < 200', () => expect(getDelayColorClass(120)).toBe('text-success'));
-    it('returns success for 199', () => expect(getDelayColorClass(199)).toBe('text-success'));
-    it('returns warning for 200', () => expect(getDelayColorClass(200)).toBe('text-warning'));
-    it('returns warning for 499', () => expect(getDelayColorClass(499)).toBe('text-warning'));
-    it('returns danger for 500', () => expect(getDelayColorClass(500)).toBe('text-danger'));
-    it('returns danger for 800', () => expect(getDelayColorClass(800)).toBe('text-danger'));
-    it('boundary: 1', () => expect(getDelayColorClass(1)).toBe('text-success'));
+    it('returns success for < 200', () => expect(getDelayColorClass(120)).toBe('text-emerald-400'));
+    it('returns success for 199', () => expect(getDelayColorClass(199)).toBe('text-emerald-400'));
+    it('returns warning for 200', () => expect(getDelayColorClass(200)).toBe('text-amber-400'));
+    it('returns warning for 499', () => expect(getDelayColorClass(499)).toBe('text-amber-400'));
+    it('returns danger for 500', () => expect(getDelayColorClass(500)).toBe('text-rose-400'));
+    it('returns danger for 800', () => expect(getDelayColorClass(800)).toBe('text-rose-400'));
+    it('boundary: 1', () => expect(getDelayColorClass(1)).toBe('text-emerald-400'));
 });
 
 describe('formatFileSize', () => {

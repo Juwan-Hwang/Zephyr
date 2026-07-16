@@ -108,7 +108,7 @@ async function showApplyModal() {
             wrapper.appendChild(desc);
 
             const changesBox = document.createElement('div');
-            changesBox.className = 'bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] p-4 space-y-2 text-xs';
+            changesBox.className = 'bg-[var(--zephyr-bg-input)] rounded-lg p-4 space-y-2 text-xs';
             const changesTitle = document.createElement('h4');
             changesTitle.className = 'font-bold text-[var(--text-primary)] uppercase tracking-wider';
             changesTitle.textContent = t('networkOptimModalChanges');
@@ -124,7 +124,7 @@ async function showApplyModal() {
             wrapper.appendChild(changesBox);
 
             const infoBox = document.createElement('div');
-            infoBox.className = 'bg-info/10 border border-info/20 rounded-[var(--zephyr-radius-surface)] p-3 text-xs text-info';
+            infoBox.className = 'bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400';
             infoBox.textContent = t('networkOptimModalInfo');
             wrapper.appendChild(infoBox);
 

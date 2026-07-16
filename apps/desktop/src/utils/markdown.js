@@ -40,7 +40,7 @@ export function markdownToHtml(md) {
     // 1. Code blocks (```...```) — must be first to prevent inner content from being parsed
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
         const idx = placeholders.length;
-        placeholders.push(`<pre class="bg-[var(--zephyr-bg-input)] rounded-[var(--zephyr-radius-surface)] p-3 my-3 text-xs overflow-x-auto leading-relaxed"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+        placeholders.push(`<pre class="bg-[var(--zephyr-bg-input)] rounded-lg p-3 my-3 text-xs overflow-x-auto leading-relaxed"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
         return `\x00CODEBLOCK_${idx}\x00`;
     });
 
