@@ -29,7 +29,7 @@
   "radius": {
     "control":         { "value": "8px" },
     "surface":         { "value": "12px" },
-    "overlay":         { "value": "16px" },
+    "overlay":         { "value": "24px" },
     "full":            { "value": "9999px" },
     "dropdown-option": { "value": "10px" }
   },

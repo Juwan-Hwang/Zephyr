@@ -207,10 +207,10 @@ function render() {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
-                <button data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+                <button type="button" data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryManageFiles || 'Manage Rule Files')}
                 </button>
-                <button data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+                <button type="button" data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
                     ${escapeHtml(t.ruleLibraryActiveRules || 'Active Rules')}
                 </button>
             </div>
@@ -573,7 +573,7 @@ function renderActiveRules(container) {
             <span class="text-xs text-[var(--text-tertiary)]">|</span>
             <span id="arl-rules-count" class="text-xs text-[var(--text-muted)]">${escapeHtml(String(totalRules))} ${t.ruleLibraryRules || 'rules'}</span>
         </div>
-        <button id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
+        <button type="button" id="rl-btn-insert-rule" class="px-3 py-1.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
             ${escapeHtml(t.ruleLibraryInsertRule || '+ Insert Rule')}
         </button>
     `;
@@ -1108,7 +1108,7 @@ function buildEditorHtml(t) {
                 <div id="rl-editor-cm6" class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl overflow-hidden"></div>
             </div>
             <div class="flex items-center justify-end gap-2 pt-3 border-t border-[var(--zephyr-border-subtle)] shrink-0">
-                <button id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
+                <button type="button" id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
                     ${escapeHtml(t.ruleLibrarySave || 'Save')}
                 </button>
             </div>
@@ -1506,13 +1506,13 @@ async function handleImportRules() {
         <div class="space-y-4">
             <p class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryImportHint || '')}</p>
             <div class="flex items-center gap-1 mb-2">
-                <button data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] bg-accent/20 text-accent">
+                <button type="button" data-rl-import-tab="paste" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] bg-accent/20 text-accent">
                     ${escapeHtml(t.ruleLibraryImportPaste || 'Paste rules text')}
                 </button>
-                <button data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                <button type="button" data-rl-import-tab="file" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportFile || 'Select file')}
                 </button>
-                <button data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                <button type="button" data-rl-import-tab="url" class="rl-import-tab px-3 py-1 text-xs rounded-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     ${escapeHtml(t.ruleLibraryImportUrl || 'Import from URL')}
                 </button>
             </div>
@@ -1530,7 +1530,7 @@ async function handleImportRules() {
                 <input id="rl-import-name" type="text" class="form-control form-control-lg" placeholder="my-rules" />
             </div>
             <div class="flex items-center justify-end gap-2 pt-2">
-                <button id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
+                <button type="button" id="rl-import-confirm" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
                     ${escapeHtml(t.ruleLibraryImportConfirm || 'Import')}
                 </button>
             </div>
