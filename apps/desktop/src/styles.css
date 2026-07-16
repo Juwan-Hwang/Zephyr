@@ -246,13 +246,8 @@ input[type="range"],
   --transition-standard: var(--zephyr-transition-standard);
   --transition-fast: var(--zephyr-transition-fast);
 
-  /* Glass card — consolidated variables (dark default) */
-  /* Match hover state's filter list (blur + saturate + brightness) for smooth transition */
-  --glass-card: blur(16px) saturate(1) brightness(1);
-  --glass-card-bg: rgba(255, 255, 255, 0.05);
-  --glass-card-hover-bg: rgba(255, 255, 255, 0.09);
-  --glass-card-hover-blur: blur(16px) saturate(1.2) brightness(calc(var(--brightness, 1) * 0.9));
-  --glass-card-hover-border: rgba(255, 255, 255, 0.12);
+  /* Glass blur levels */
+  --glass-card: var(--zephyr-glass-blur);
 
   /* Shadow system */
   --dialog-shadow-color: rgba(0, 0, 0, 0.55);
@@ -272,12 +267,6 @@ input[type="range"],
 html:not(.dark) {
   --brightness: 0.95;
   --dialog-shadow-color: rgba(0, 0, 0, 0.25);
-  /* Glass card light mode overrides */
-  --glass-card-bg: rgba(255, 255, 255, 0.4);
-  --glass-card: blur(20px) saturate(1.5) brightness(1);
-  --glass-card-hover-bg: rgba(255, 255, 255, 0.6);
-  --glass-card-hover-blur: blur(20px) saturate(1.5) brightness(1);
-  --glass-card-hover-border: rgba(255, 255, 255, 0.8);
 }
 
 html.dark {
@@ -296,22 +285,26 @@ input[type=number] {
   -moz-appearance: textfield;
 }
 
-/* ── Glass card (consolidated: dark default + light override via variables) ── */
+/* ── Glass card ── */
 .glass-card {
-  background: var(--glass-card-bg);
+  background: rgba(255, 255, 255, 0.02);
   backdrop-filter: var(--glass-card);
   -webkit-backdrop-filter: var(--glass-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--zephyr-radius-surface);
+  border-radius: var(--radius-card);
   box-shadow: var(--zephyr-shadow-sm);
+  transition-property: background-color, border-color, box-shadow, backdrop-filter, -webkit-backdrop-filter;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
 }
 
 .glass-card:hover {
-  background: var(--glass-card-hover-bg);
-  border-color: var(--glass-card-hover-border);
+  background: var(--zephyr-bg-muted);
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow: var(--zephyr-shadow-md);
-  backdrop-filter: var(--glass-card-hover-blur);
-  -webkit-backdrop-filter: var(--glass-card-hover-blur);
+  --glass-card-hover: blur(16px) saturate(1.2) brightness(calc(var(--brightness, 1) * 0.9));
+  backdrop-filter: var(--glass-card-hover);
+  -webkit-backdrop-filter: var(--glass-card-hover);
 }
 
 .movie-card-base {
@@ -416,7 +409,13 @@ html.dark #sidebar-nav {
   background: rgba(255, 255, 255, 0.01);
   border: 1px solid rgba(255, 255, 255, 0.01);
 }
-/* glass-card dark/light variants now consolidated via CSS variables — see :root and html:not(.dark) */
+html.dark .glass-card {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+html.dark .glass-card:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
 
 /* Left-top title icon: keep original colors (we swap src in JS) */
 #app-title-icon {
@@ -433,7 +432,19 @@ html:not(.dark) #app-main-container {
   background-color: rgb(248 250 252 / var(--app-opacity, 0.4));
 }
 
-/* glass-card light mode variants now driven by --glass-card-* variables in html:not(.dark) */
+html:not(.dark) .glass-card {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 16px -4px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+html:not(.dark) .glass-card:hover {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
 
 html:not(.dark) #setting-lang-menu {
   background-color: rgba(255, 255, 255, 0.92);

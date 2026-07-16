@@ -195,7 +195,7 @@ async function showEditPanel(configInfo) {
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
                                 ${uaMenuItems}
                             </div>
@@ -215,7 +215,7 @@ async function showEditPanel(configInfo) {
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
+                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
                             <div class="menu-scroll">
                                 ${dropdownMenuItems}
                             </div>
@@ -1264,7 +1264,7 @@ export function initSubscriptionSettings({
             if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
                 updateBtn.type = 'button';
-                updateBtn.className = 'p-1.5 rounded-[var(--zephyr-radius-control)] hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
+                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh;
                 updateBtn.title = t.update;

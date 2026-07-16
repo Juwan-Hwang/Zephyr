@@ -4,6 +4,7 @@
     "padding-y": { "value": "{space.3}" },
     "padding-x": { "value": "{space.5}" },
     "radius":    { "value": "{radius.control}" },
+    "card-radius": { "value": "{radius.overlay}" },
     "font-size": { "value": "0.625rem" },
     "weight":    { "value": "700" },
     "tracking":  { "value": "0.05em" },
@@ -14,7 +15,7 @@
     "padding":  { "value": "{space.5} {space.3}" }
   },
   "card": {
-    "radius":   { "value": "{radius.surface}" },
+    "radius":   { "value": "{radius.overlay}" },
     "blur":     { "value": "{glass.blur}" }
   },
   "badge": {

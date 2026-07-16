@@ -1104,7 +1104,7 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-[var(--zephyr-radius-surface)] shadow-2xl';
+        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
         const scrollDiv = document.createElement('div');
         scrollDiv.className = 'menu-scroll max-h-[300px]';
@@ -1276,7 +1276,7 @@ function renderProxiesLoading(container, loadingText) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.id = 'restart-core-btn';
-        btn.className = 'mt-2 px-4 py-1.5 rounded-[var(--zephyr-radius-surface)] text-sm font-medium transition-all';
+        btn.className = 'mt-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
         btn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
         btn.textContent = tObj.restartCore || 'Restart Core';
         btn.addEventListener('click', () => handleCoreRestart(btn, tObj, 'loading state'));
@@ -1643,14 +1643,14 @@ export async function renderProxies() {
     if (!data || !data.proxies) {
         container.innerHTML = '';
         const errWrap = document.createElement('div');
-        errWrap.className = 'col-span-full text-center py-10 text-danger bg-danger/5 rounded-[var(--zephyr-radius-surface)] border border-danger/20 flex flex-col items-center gap-4';
+        errWrap.className = 'col-span-full text-center py-10 text-danger bg-danger/5 rounded-lg border border-danger/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);
         // Add restart core button on connection failure
         const restartBtn = document.createElement('button');
         restartBtn.type = 'button';
-        restartBtn.className = 'px-4 py-1.5 rounded-[var(--zephyr-radius-surface)] text-sm font-medium transition-all';
+        restartBtn.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
         restartBtn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
         restartBtn.textContent = t.restartCore || 'Restart Core';
         restartBtn.addEventListener('click', () => handleCoreRestart(restartBtn, t, 'error state'));
@@ -1662,7 +1662,7 @@ export async function renderProxies() {
     if (config?.mode?.toLowerCase() === 'direct') {
         container.innerHTML = '';
         const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-[var(--zephyr-radius-surface)] border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
+        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
         prompt.innerHTML = `
             ${SVG_ICONS.externalLink}
