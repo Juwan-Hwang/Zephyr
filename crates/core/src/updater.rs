@@ -89,14 +89,14 @@ pub fn current_platform_tags() -> Result<PlatformTags, AppError> {
     let arch = std::env::consts::ARCH;
     let os_tag = match os {
         "windows" => "windows",
-        "macos" => "darwin",
+        // macOS and iOS both use darwin-arm64 / darwin-amd64 tags in mihomo releases
+        "macos" | "ios" => "darwin",
         "linux" => "linux",
         "freebsd" => "freebsd",
         "openbsd" => "openbsd",
         "netbsd" => "netbsd",
         "dragonfly" => "dragonfly",
         "android" => "android",
-        "ios" => "darwin", // iOS uses darwin-arm64 tag in mihomo releases
         _ => return Err(AppError::ConfigError(format!("Unsupported OS: {os}"))),
     };
     let arch_tag = match arch {
@@ -121,12 +121,14 @@ pub fn current_platform_tags() -> Result<PlatformTags, AppError> {
 
 /// Build the download URL for a GitHub release asset.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn build_asset_download_url(version: &str, asset_name: &str) -> String {
     format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}")
 }
 
 /// Check if a URL points to a trusted update host.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn is_trusted_update_url(url: &str) -> bool {
     if let Ok(parsed) = url::Url::parse(url) {
         if let Some(host) = parsed.host_str() {
@@ -160,6 +162,7 @@ pub fn select_release_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, AppE
 
 /// Validates that a version string follows the semantic versioning pattern.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn validate_version_format(version: &str) -> bool {
     if !version.starts_with('v') {
         return false;
@@ -211,6 +214,7 @@ pub fn validate_version_format(version: &str) -> bool {
 /// Parse a GitHub release download URL to extract version and asset name.
 /// Only allows official MetaCubeX/mihomo GitHub releases.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn parse_github_release_info(url: &str) -> Option<Vec<String>> {
     let parsed = url::Url::parse(url).ok()?;
     if parsed.host_str() != Some("github.com") {
@@ -256,6 +260,7 @@ pub fn parse_github_release_info(url: &str) -> Option<Vec<String>> {
 
 /// Determine the expected asset extension for the current platform.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn platform_asset_extensions() -> Vec<String> {
     if cfg!(target_os = "windows") {
         vec![".exe".to_owned(), ".msi".to_owned()]
@@ -380,5 +385,31 @@ mod tests {
             url,
             "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz"
         );
+    }
+
+    // -- Snapshot tests ----------------------------------------------------
+
+    #[test]
+    fn snapshot_build_asset_url_linux() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.18.0",
+            "mihomo-linux-amd64-v1.18.0.gz"
+        ));
+    }
+
+    #[test]
+    fn snapshot_build_asset_url_windows() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.19.28",
+            "mihomo-windows-amd64-v3-v1.19.28.zip"
+        ));
+    }
+
+    #[test]
+    fn snapshot_build_asset_url_arm64() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.20.1",
+            "mihomo-darwin-arm64-v1.20.1.gz"
+        ));
     }
 }
