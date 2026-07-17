@@ -393,3 +393,26 @@ jobs:
       - name: Check aarch64-apple-darwin
         working-directory: apps/desktop/src-tauri
         run: cargo check --target aarch64-apple-darwin
+
+  # ============================================================
+  # Job 12: Windows 编译检查（原生 Windows runner，编译 Windows 专属代码）
+  # ============================================================
+  # webview2-com、webview_recovery.rs 等 #[cfg(target_os = "windows")] 代码
+  # 在 Ubuntu CI 上完全不参与编译，导致 Windows 专属的编译错误无法被发现。
+  # 此 job 确保所有 Windows 平台条件编译的代码也能通过编译。
+  windows-build-check:
+    name: "Windows Build Check"
+    runs-on: windows-latest
+    needs: [rust-clippy, rust-fmt]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Check x86_64-pc-windows-msvc
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --target x86_64-pc-windows-msvc
