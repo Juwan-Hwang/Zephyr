@@ -1,0 +1,5 @@
+---
+source: crates/core/src/process.rs
+expression: "parse_version_output(\"Mihomo v1.18.0 abc123 linux/amd64\".to_owned())"
+---
+v1.18.0

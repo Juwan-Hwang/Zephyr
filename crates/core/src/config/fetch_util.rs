@@ -11,7 +11,7 @@ use crate::error::AppError;
 ///
 /// Migrated from `src-tauri/src/core/fetch_util.rs`.
 /// The `resolve_pin` field uses a `UrlResolvePin` Record instead of
-/// `(String, SocketAddr)` tuple for UniFFI compatibility.
+/// `(String, SocketAddr)` tuple for `UniFFI` compatibility.
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Debug, Clone, Default)]
 pub struct HttpClientConfig {
@@ -20,7 +20,7 @@ pub struct HttpClientConfig {
     pub connect_timeout_secs: u64,
     pub proxy_url: Option<String>,
     /// DNS pinning: host → IP:port string (e.g., "example.com" → "1.2.3.4:443").
-    /// The platform side parses this into a SocketAddr for the actual HTTP client.
+    /// The platform side parses this into a `SocketAddr` for the actual HTTP client.
     pub resolve_pin: Option<UrlResolvePin>,
 }
 
@@ -45,6 +45,7 @@ pub struct UrlValidationResult {
 ///
 /// Migrated from `src-tauri/src/core/fetch_util.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn format_host_port(host: String, port: u16) -> String {
     if host.contains(':') {
         format!("[{host}]:{port}")
@@ -94,7 +95,7 @@ pub fn validate_url_basic(url: String) -> Result<UrlValidationResult, AppError> 
 
 /// Validate that resolved addresses for a public host are all public IPs.
 ///
-/// Returns the first valid address as a string "ip:port" for UniFFI compatibility.
+/// Returns the first valid address as a string "ip:port" for `UniFFI` compatibility.
 /// Migrated from `src-tauri/src/core/fetch_util.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn validate_public_host_addrs_str(
@@ -192,7 +193,14 @@ mod tests {
         let err = r.unwrap_err();
         let msg = match &err {
             AppError::NetworkError(m) => m.clone(),
-            _ => format!("{err}"),
+            AppError::IoError(_)
+            | AppError::ConfigError(_)
+            | AppError::CryptoError(_)
+            | AppError::Cancelled
+            | AppError::ParseError(_)
+            | AppError::UnknownError(_) => {
+                format!("{err}")
+            }
         };
         assert!(msg.contains("SSRF protection"));
     }

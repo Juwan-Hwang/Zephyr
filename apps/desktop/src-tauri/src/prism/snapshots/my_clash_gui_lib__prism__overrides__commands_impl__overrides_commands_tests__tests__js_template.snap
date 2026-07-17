@@ -1,0 +1,11 @@
+---
+source: apps/desktop/src-tauri/src/prism/overrides_commands_tests.rs
+expression: default_template_content(OverrideExt::Js)
+---
+// Zephyr Override Script
+// API: config.get(path), config.set(path, value), log.*, utils.*
+
+function main(config) {
+    log.info('Override executed');
+    return config;
+}

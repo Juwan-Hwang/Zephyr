@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/core/core_process.rs
+expression: parse_version_output("mihomo v1.18.0 linux amd64")
+---
+v1.18.0

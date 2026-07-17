@@ -1,7 +1,7 @@
 //! Prism rule types and utility functions — migrated from `src-tauri/src/prism/types.rs`.
 //!
 //! Only pure functions and data types are migrated.
-//! File I/O functions (read_json, write_json, etc.) remain in src-tauri.
+//! File I/O functions (`read_json`, `write_json`, etc.) remain in src-tauri.
 
 use serde::{Deserialize, Serialize};
 
@@ -196,6 +196,7 @@ pub fn detect_source(content: &str) -> String {
 
 /// Convert raw rule text (Surge/S-R or Clash format) into .prism.yaml content.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn normalize_to_prism_yaml(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

@@ -78,6 +78,7 @@ impl Default for SmartDecayConfig {
 /// This is the pure computation part of `smart_score` from src-tauri.
 /// The platform layer is responsible for persisting the result.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn compute_smart_score(
     weights: SmartScoreWeights,
     decay: SmartDecayConfig,
@@ -105,6 +106,7 @@ pub fn compute_smart_score(
 ///
 /// Migrated from `src-tauri/src/prism/smart_commands.rs::smart_rank()`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn compute_smart_rank(
     weights: SmartScoreWeights,
     decay: SmartDecayConfig,
@@ -151,6 +153,7 @@ pub fn compute_smart_rank(
 ///
 /// Migrated from `src-tauri/src/prism/smart_commands.rs::smart_next_interval()`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn compute_next_interval(
     network_quality: f64,
     min_interval_secs: u64,
@@ -172,6 +175,7 @@ pub fn compute_next_interval(
 ///
 /// Migrated from `src-tauri/src/prism/smart_commands.rs::smart_validate_config()`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn validate_smart_config(weights: SmartScoreWeights, decay: SmartDecayConfig) -> Vec<String> {
     let mut errors = Vec::new();
     if weights.latency_p90 < 0.0 || weights.success_rate < 0.0 || weights.stability < 0.0 {

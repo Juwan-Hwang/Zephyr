@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/merge.rs
+expression: "mask_url(\"https://例子.测试.com/path\".to_owned())"
+---
+https://xn-***com/***
