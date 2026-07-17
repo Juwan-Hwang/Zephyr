@@ -336,4 +336,26 @@ mod tests {
         let result = mask_url("https://example.com/path".to_owned());
         assert!(result.starts_with("https://"));
     }
+
+    // -- Snapshot tests for URL masking -----------------------------------
+
+    #[test]
+    fn snapshot_mask_url_https() {
+        insta::assert_snapshot!(mask_url("https://example.com/path?token=abc".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_http_long_host() {
+        insta::assert_snapshot!(mask_url("http://subdomain.example.com/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_short_host() {
+        insta::assert_snapshot!(mask_url("https://ab.co/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_invalid() {
+        insta::assert_snapshot!(mask_url("not-a-url".to_owned()));
+    }
 }

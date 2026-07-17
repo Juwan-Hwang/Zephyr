@@ -356,9 +356,25 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo build --release
 
-      - name: Run Rust tests
-        working-directory: apps/desktop/src-tauri
-        run: cargo test --release
+      - name: Run Rust tests and verify Golden snapshots
+        run: |
+          set -o pipefail
+          # Generate/update snapshots and run all workspace tests.
+          # INSTA_UPDATE=always updates .snap files to match current output;
+          # any resulting diff means snapshots need to be committed.
+          # NOTE: Snapshot test inputs MUST be deterministic (no timestamps,
+          # random values, or environment-dependent strings). Non-deterministic
+          # outputs will cause this check to fail on every run.
+          INSTA_UPDATE=always cargo test --workspace --release --locked 2>&1 | tee /tmp/cargo-test.log
+          # Fail if any .snap files are modified (tracked) or untracked.
+          if ! git diff --exit-code -- '*.snap' || git ls-files --others --exclude-standard -- '*.snap' | grep -q .; then
+            echo "::error::Golden test snapshots are missing or outdated."
+            echo "::error::The following .snap files need to be committed:"
+            git diff --name-only -- '*.snap'
+            git ls-files --others --exclude-standard -- '*.snap'
+            exit 1
+          fi
+          echo "All snapshot files are committed and up to date."
 
       - name: Run frontend tests
         run: pnpm --filter @zephyr/desktop test
