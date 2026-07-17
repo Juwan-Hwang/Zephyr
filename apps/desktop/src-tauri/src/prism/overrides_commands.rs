@@ -1107,3 +1107,7 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
     // Batch import: single metadata lock, then best-effort content writes
     overrides_store::import_items_batch(&state, items_to_import)
 }
+
+#[cfg(test)]
+#[path = "overrides_commands_tests.rs"]
+mod overrides_commands_tests;

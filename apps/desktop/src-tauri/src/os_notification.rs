@@ -24,11 +24,21 @@ pub fn send_notification(app: AppHandle, title: String, body: String) -> Result<
 }
 
 /// Truncate a string to `max_len` characters. If truncation occurs, appends "...".
+///
+/// The returned string is guaranteed to be at most `max_len` characters long.
+/// When `max_len <= 3`, only a prefix of "..." is returned to honor the limit.
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         s.to_owned()
+    } else if max_len <= 3 {
+        // For very small limits, return only the ellipsis prefix to honor max_len.
+        "...".chars().take(max_len).collect()
     } else {
-        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        let truncated: String = s.chars().take(max_len - 3).collect();
         format!("{truncated}...")
     }
 }
+
+#[cfg(test)]
+#[path = "os_notification_tests.rs"]
+mod os_notification_tests;
