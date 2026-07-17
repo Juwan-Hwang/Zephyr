@@ -336,7 +336,26 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
 
 ---
 
+## Sponsors
+
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://signpath.org/">
+        <img src="https://avatars.githubusercontent.com/u/34448643?s=200&v=4" width="50" alt="SignPath">
+      </a>
+    </td>
+    <td valign="middle">
+      Free code signing provided by <a href="https://about.signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>.<br>
+      <sub>Windows 发布版本经 SignPath Foundation 证书数字签名。详见 <a href="CODE_SIGNING_POLICY.md">Code Signing Policy</a>。</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## 致谢
+
 
 
 - [Mihomo](https://github.com/MetaCubeX/mihomo) — 核心
@@ -347,7 +366,6 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
 - [clash-prism-*](https://github.com/Juwan-Hwang/Clash-Prism-Engine) — 规则
 
 ---
-
 
 **Conjured by Juwan**
 
