@@ -328,4 +328,48 @@ mod tests {
         assert!(redacted.contains("[CORE_DIR]"));
         assert!(!redacted.contains("/home/user/.config/zephyr/core"));
     }
+
+    // -- Snapshot tests for error redaction --------------------------------
+
+    #[test]
+    fn snapshot_redact_core_dir() {
+        let _ = REDACT_PATHS.set((
+            "/home/user/.config/zephyr/core".to_owned(),
+            "/home/user/.config/zephyr/profiles".to_owned(),
+        ));
+        insta::assert_snapshot!(redact_error_message(
+            "Failed to read /home/user/.config/zephyr/core/run_config.yaml"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_profiles_dir() {
+        let _ = REDACT_PATHS.set((
+            "/home/user/.config/zephyr/core".to_owned(),
+            "/home/user/.config/zephyr/profiles".to_owned(),
+        ));
+        insta::assert_snapshot!(redact_error_message(
+            "Error loading /home/user/.config/zephyr/profiles/default.yaml: permission denied"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_both_dirs() {
+        let _ = REDACT_PATHS.set((
+            "/home/user/.config/zephyr/core".to_owned(),
+            "/home/user/.config/zephyr/profiles".to_owned(),
+        ));
+        insta::assert_snapshot!(redact_error_message(
+            "Core at /home/user/.config/zephyr/core failed; profiles at /home/user/.config/zephyr/profiles also failed"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_no_match() {
+        let _ = REDACT_PATHS.set((
+            "/home/user/.config/zephyr/core".to_owned(),
+            "/home/user/.config/zephyr/profiles".to_owned(),
+        ));
+        insta::assert_snapshot!(redact_error_message("An unrelated error occurred"));
+    }
 }

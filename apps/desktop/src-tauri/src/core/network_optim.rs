@@ -38,7 +38,7 @@ fn get_optim_level() -> OptimLevel {
 
 // -- Linux config --
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone)]
 struct LinuxTcpOptimConfig {
     tcp_fastopen: u32,
@@ -50,7 +50,7 @@ struct LinuxTcpOptimConfig {
     tcp_notsent_lowat: u64,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 impl LinuxTcpOptimConfig {
     const fn conservative() -> Self {
         Self {
@@ -97,6 +97,7 @@ impl LinuxTcpOptimConfig {
     }
 
     /// sysctl key names used for backup / restore validation.
+    #[allow(dead_code)]
     const BACKUP_KEYS: &[&str] = &[
         "net.ipv4.tcp_fastopen",
         "net.ipv4.tcp_ecn",
@@ -312,7 +313,7 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn generate_linux_optim_script(cfg: &LinuxTcpOptimConfig) -> String {
     format!(
         r#"set -e
@@ -1080,3 +1081,7 @@ pub fn check_network_optimizations_status(_app: AppHandle) -> Result<NetworkOpti
 
     Ok(NetworkOptimStatus { applied, details })
 }
+
+#[cfg(test)]
+#[path = "network_optim_tests.rs"]
+mod network_optim_tests;
