@@ -219,10 +219,16 @@ pub fn update_config_core<I: ConfigIo>(
 pub fn mask_url(url: String) -> String {
     if let Ok(parsed) = url::Url::parse(&url) {
         let host = parsed.host_str().unwrap_or("???");
-        let masked_host = if host.len() > 6 {
-            format!("{}***{}", &host[..3], &host[host.len() - 3..])
-        } else {
-            "***".to_owned()
+        // Use char-based slicing to avoid panics on multi-byte UTF-8 hosts (IDN domains)
+        let masked_host = {
+            let chars: Vec<char> = host.chars().collect();
+            if chars.len() > 6 {
+                let prefix: String = chars[..3].iter().collect();
+                let suffix: String = chars[chars.len() - 3..].iter().collect();
+                format!("{prefix}***{suffix}")
+            } else {
+                "***".to_owned()
+            }
         };
         // Only show scheme + masked host; hide path and query entirely
         format!("{}://{masked_host}/***", parsed.scheme())
@@ -335,5 +341,32 @@ mod tests {
     fn test_mask_url_preserves_scheme() {
         let result = mask_url("https://example.com/path".to_owned());
         assert!(result.starts_with("https://"));
+    }
+
+    // -- Snapshot tests for URL masking -----------------------------------
+
+    #[test]
+    fn snapshot_mask_url_https() {
+        insta::assert_snapshot!(mask_url("https://example.com/path?token=abc".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_http_long_host() {
+        insta::assert_snapshot!(mask_url("http://subdomain.example.com/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_short_host() {
+        insta::assert_snapshot!(mask_url("https://ab.co/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_invalid() {
+        insta::assert_snapshot!(mask_url("not-a-url".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_unicode_host() {
+        insta::assert_snapshot!(mask_url("https://例子.测试.com/path".to_owned()));
     }
 }

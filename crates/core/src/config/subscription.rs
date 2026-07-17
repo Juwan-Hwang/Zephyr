@@ -538,4 +538,57 @@ mod tests {
         );
         assert_eq!(parse_content_disposition_filename("no filename here"), None);
     }
+
+    // -- Snapshot tests for subscription content processing ----------------
+
+    #[test]
+    fn snapshot_quote_short_id_simple() {
+        insta::assert_snapshot!(quote_short_id_values("short-id: abc123"));
+    }
+
+    #[test]
+    fn snapshot_quote_short_id_hex_like() {
+        insta::assert_snapshot!(quote_short_id_values("short-id: 34010e92"));
+    }
+
+    #[test]
+    fn snapshot_quote_short_id_multiple() {
+        insta::assert_snapshot!(quote_short_id_values(
+            "proxies:\n  - name: test-1\n    short-id: abc123\n  - name: test-2\n    short-id: def456"
+        ));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_ascii() {
+        insta::assert_snapshot!(percent_decode("hello%20world"));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_utf8() {
+        insta::assert_snapshot!(percent_decode("%E4%B8%AD%E6%96%87"));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_no_encoding() {
+        insta::assert_snapshot!(percent_decode("plain text"));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_single() {
+        insta::assert_snapshot!(redact_url_in_string(
+            "Fetching config from https://example.com/sub?token=secret123".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_multiple() {
+        insta::assert_snapshot!(redact_url_in_string(
+            "First http://a.com/config then https://b.com/sub2 done".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_no_url() {
+        insta::assert_snapshot!(redact_url_in_string("Just a plain message".to_owned()));
+    }
 }

@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/tray_tests.rs
+expression: format_proxy_env("fish", 7890)
+---
+set -x http_proxy http://127.0.0.1:7890; set -x https_proxy http://127.0.0.1:7890; set -x all_proxy http://127.0.0.1:7890; set -x HTTP_PROXY http://127.0.0.1:7890; set -x HTTPS_PROXY http://127.0.0.1:7890; set -x ALL_PROXY http://127.0.0.1:7890
