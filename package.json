@@ -26,16 +26,7 @@
     "style-dictionary": "^5.5.0",
     "typescript": "^6.0.2",
     "unocss": "^66.7.5",
+    "vite": "8.1.4",
     "vitest": "4.1.10"
-  },
-  "pnpm": {
-    "overrides": {
-      "brace-expansion": ">=5.0.6",
-      "ws": ">=8.20.1"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "esbuild"
-    ]
   }
 }
