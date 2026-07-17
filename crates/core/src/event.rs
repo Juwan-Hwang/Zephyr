@@ -307,6 +307,18 @@ pub fn redact_error_message(msg: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Initialize `REDACT_PATHS` for tests. Uses `get_or_init` so repeated
+    /// calls are idempotent — `OnceLock::set` only succeeds once, which would
+    /// make subsequent test setups silently no-op.
+    fn init_redact_paths_for_test() {
+        REDACT_PATHS.get_or_init(|| {
+            (
+                "/home/user/.config/zephyr/core".to_owned(),
+                "/home/user/.config/zephyr/profiles".to_owned(),
+            )
+        });
+    }
+
     #[test]
     fn test_core_event_creation() {
         let event = CoreEvent::info(EventModule::Core, codes::CORE_START_FAILED, "test message");
@@ -319,13 +331,42 @@ mod tests {
 
     #[test]
     fn test_redact_error_message() {
-        let _ = REDACT_PATHS.set((
-            "/home/user/.config/zephyr/core".to_owned(),
-            "/home/user/.config/zephyr/profiles".to_owned(),
-        ));
+        init_redact_paths_for_test();
         let msg = "Failed to read /home/user/.config/zephyr/core/run_config.yaml";
         let redacted = redact_error_message(msg);
         assert!(redacted.contains("[CORE_DIR]"));
         assert!(!redacted.contains("/home/user/.config/zephyr/core"));
+    }
+
+    // -- Snapshot tests for error redaction --------------------------------
+
+    #[test]
+    fn snapshot_redact_core_dir() {
+        init_redact_paths_for_test();
+        insta::assert_snapshot!(redact_error_message(
+            "Failed to read /home/user/.config/zephyr/core/run_config.yaml"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_profiles_dir() {
+        init_redact_paths_for_test();
+        insta::assert_snapshot!(redact_error_message(
+            "Error loading /home/user/.config/zephyr/profiles/default.yaml: permission denied"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_both_dirs() {
+        init_redact_paths_for_test();
+        insta::assert_snapshot!(redact_error_message(
+            "Core at /home/user/.config/zephyr/core failed; profiles at /home/user/.config/zephyr/profiles also failed"
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_no_match() {
+        init_redact_paths_for_test();
+        insta::assert_snapshot!(redact_error_message("An unrelated error occurred"));
     }
 }
