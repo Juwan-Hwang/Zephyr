@@ -42,12 +42,22 @@ use sys_proxy::{
 use tauri::Manager as _;
 #[cfg(desktop)]
 use tauri_plugin_autostart::Builder as AutostartBuilder;
+use tauri_plugin_window_state::WindowExt as _;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
 use updater::{
     get_latest_client_version, get_latest_client_versions, get_latest_version, update_client,
     update_core, update_geo_data,
 };
 use uwp_loopback::exempt_uwp_apps;
+
+/// Window state aspects to persist across sessions.
+///
+/// Excludes `FULLSCREEN` and `DECORATIONS` — the app uses custom frameless
+/// decorations (`decorations: false`) and does not support fullscreen mode.
+const WINDOW_STATE_FLAGS: tauri_plugin_window_state::StateFlags =
+    tauri_plugin_window_state::StateFlags::SIZE
+        .union(tauri_plugin_window_state::StateFlags::POSITION)
+        .union(tauri_plugin_window_state::StateFlags::MAXIMIZED);
 
 /// Rate limiter for Tauri commands
 pub struct RateLimiter {
@@ -990,7 +1000,7 @@ pub(crate) fn recreate_main_window(
             .min_inner_size(720.0, 540.0)
             .center()
             .decorations(false)
-            .visible(true)
+            .visible(false)
             .on_page_load(move |webview_window, payload| {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished {
                     #[cfg(target_os = "windows")]
@@ -1015,7 +1025,12 @@ pub(crate) fn recreate_main_window(
     #[allow(clippy::shadow_reuse)]
     let window_builder = window_builder.transparent(true);
 
-    window_builder.build()
+    let window = window_builder.build()?;
+    // Restore saved window state (position, size, maximized) if available.
+    // Called while the window is still invisible to prevent a visual flash
+    // from the default position/size before the saved state is applied.
+    let _ = window.restore_state(WINDOW_STATE_FLAGS);
+    Ok(window)
 }
 
 /// Get current system proxy and core status for tray state determination
@@ -1204,7 +1219,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(WINDOW_STATE_FLAGS)
+                .build(),
+        );
 
     // Single instance detection: only enabled in release builds.
     // In debug builds (pnpm run dev), multiple instances are allowed for testing.

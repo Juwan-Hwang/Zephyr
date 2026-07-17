@@ -171,6 +171,10 @@ html:not(.dark) {
   --zephyr-bg-input: rgba(255, 255, 255, 0.8);
   --zephyr-bg-elevated: #ffffff;
   --zephyr-bg-overlay: rgba(0, 0, 0, 0.25);
+  --zephyr-surface-raised: rgba(0, 0, 0, 0.04);
+  --zephyr-surface-elevated: #ffffff;
+  --zephyr-surface-input: rgba(255, 255, 255, 0.8);
+  --zephyr-surface-overlay: rgba(0, 0, 0, 0.25);
   --zephyr-border-primary: rgba(0, 0, 0, 0.15);
   --zephyr-border-subtle: rgba(30, 41, 59, 0.1);
   --zephyr-border-default: rgba(30, 41, 59, 0.14);
