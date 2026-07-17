@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/deep_link.rs
+expression: sanitize_name("nul")
+---
+_nul

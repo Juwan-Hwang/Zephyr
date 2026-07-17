@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: "redact_url_in_string(\"First http://a.com/config then https://b.com/sub2 done\".to_owned())"
+---
+First http://***/*** then https://***/*** done

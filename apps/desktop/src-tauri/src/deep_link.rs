@@ -11,20 +11,34 @@ pub struct DeepLinkPayload {
 /// Maximum length for the `name` parameter in deep links.
 const MAX_NAME_LEN: usize = 128;
 
-/// Characters that could enable path traversal or injection attacks.
-const DANGEROUS_CHARS: &[char] = &['.', '/', '\\', '\0', '\n', '\r'];
+/// Characters that could enable path traversal, injection, or invalid filenames.
+const DANGEROUS_CHARS: &[char] = &[
+    '.', '/', '\\', '\0', '\n', '\r',
+    // Windows reserved filename characters (cross-platform safety)
+    '<', '>', ':', '"', '|', '?', '*',
+];
 
-/// Sanitize the `name` parameter: replace dangerous characters and truncate.
+/// Sanitize the `name` parameter: replace dangerous characters, strip trailing
+/// whitespace, prefix Windows reserved device names, and truncate.
 fn sanitize_name(raw: &str) -> String {
     let sanitized: String = raw
         .chars()
         .map(|c| if DANGEROUS_CHARS.contains(&c) { '_' } else { c })
         .collect();
+    // Remove trailing whitespace (invalid in Windows filenames)
+    let trimmed = sanitized.trim_end();
+    // Prefix underscore if result is a Windows reserved device name
+    let result = match trimmed.to_ascii_uppercase().as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6"
+        | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6"
+        | "LPT7" | "LPT8" | "LPT9" => format!("_{trimmed}"),
+        _ => trimmed.to_owned(),
+    };
     // Truncate to MAX_NAME_LEN characters
-    if sanitized.chars().count() > MAX_NAME_LEN {
-        sanitized.chars().take(MAX_NAME_LEN).collect()
+    if result.chars().count() > MAX_NAME_LEN {
+        result.chars().take(MAX_NAME_LEN).collect()
     } else {
-        sanitized
+        result
     }
 }
 
@@ -252,5 +266,20 @@ mod tests {
     #[test]
     fn snapshot_sanitize_name_long_name() {
         insta::assert_snapshot!(sanitize_name(&"A".repeat(200)));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_reserved_con() {
+        insta::assert_snapshot!(sanitize_name("CON"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_reserved_nul_lower() {
+        insta::assert_snapshot!(sanitize_name("nul"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_trailing_spaces() {
+        insta::assert_snapshot!(sanitize_name("test  "));
     }
 }

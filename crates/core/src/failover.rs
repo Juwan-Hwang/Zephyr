@@ -1,9 +1,9 @@
 //! Failover engine — data types and policy validation.
 //!
 //! Data types migrated from `src-tauri/src/prism/failover_commands.rs`.
-//! The actual failover tracking logic (check_failover) is inherently stateful
+//! The actual failover tracking logic (`check_failover`) is inherently stateful
 //! and remains in the platform layer — it cannot be a pure function because
-//! FailoverTracker must persist across calls for cooldown to work correctly.
+//! `FailoverTracker` must persist across calls for cooldown to work correctly.
 
 use clash_prism_core::failover::NodeFailPolicy;
 
@@ -42,6 +42,7 @@ pub struct FailoverAction {
 
 /// Validate failover policy configuration.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn validate_failover_policy(config: FailoverPolicyConfig) -> Vec<String> {
     let mut errors = Vec::new();
     if config.threshold == 0 {
