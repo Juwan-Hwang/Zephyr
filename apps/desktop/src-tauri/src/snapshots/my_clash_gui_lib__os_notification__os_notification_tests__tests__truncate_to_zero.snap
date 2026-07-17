@@ -1,0 +1,4 @@
+---
+source: apps/desktop/src-tauri/src/os_notification_tests.rs
+expression: truncate_str("Hello", 0)
+---
