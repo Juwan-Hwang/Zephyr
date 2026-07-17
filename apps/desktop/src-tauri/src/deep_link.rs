@@ -231,4 +231,26 @@ mod tests {
         assert_eq!(result.url, "https://example.com/config.yaml");
         assert_eq!(result.name, "test");
     }
+
+    // -- Snapshot tests for name sanitization ------------------------------
+
+    #[test]
+    fn snapshot_sanitize_name_normal() {
+        insta::assert_snapshot!(sanitize_name("My Subscription"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_path_traversal() {
+        insta::assert_snapshot!(sanitize_name("../../../etc/passwd"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_dangerous_chars() {
+        insta::assert_snapshot!(sanitize_name("test<>:\"|?*\0"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_name_long_name() {
+        insta::assert_snapshot!(sanitize_name(&"A".repeat(200)));
+    }
 }
