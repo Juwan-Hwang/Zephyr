@@ -15,3 +15,229 @@ split-debuginfo = "packed"
 [profile.release-small]
 inherits = "release"
 opt-level = "z"
+
+# =====================================================================
+# Workspace 统一 Lint 配置
+# ---------------------------------------------------------------------
+# 所有成员 crate 通过 `[lints] workspace = true` 继承此处配置，
+# 确保本地 `cargo clippy` 与 CI 使用完全相同的规则集，
+# 消除「本地通过、CI 失败」的不一致问题。
+# =====================================================================
+[workspace.lints.rust]
+unused_crate_dependencies = "allow"
+
+[workspace.lints.clippy]
+
+# =====================================================================
+#  第一层：正确性 & 安全性（最高优先级，绝不允许通过）
+# =====================================================================
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+missing_safety_doc = "deny"
+map_err_ignore = "deny"
+
+# =====================================================================
+#  第二层：并发 & 内存安全
+# =====================================================================
+rc_mutex = "deny"
+clone_on_ref_ptr = "deny"
+rc_clone_in_vec_init = "deny"
+mutex_atomic = "deny"
+mutex_integer = "deny"
+await_holding_lock = "deny"
+async_yields_async = "deny"
+unused_async = "deny"
+future_not_send = "deny"
+large_futures = "deny"
+large_stack_arrays = "deny"
+large_const_arrays = "deny"
+
+# =====================================================================
+#  第三层：性能优化（内存分配）
+# =====================================================================
+string_add_assign = "deny"
+format_in_format_args = "deny"
+format_collect = "deny"
+literal_string_with_formatting_args = "deny"
+format_push_string = "deny"
+vec_init_then_push = "deny"
+useless_vec = "deny"
+try_err = "deny"
+repeat_once = "deny"
+useless_asref = "deny"
+needless_borrow = "deny"
+needless_borrows_for_generic_args = "deny"
+assigning_clones = "deny"
+clone_on_copy = "deny"
+redundant_clone = "deny"
+option_as_ref_cloned = "deny"
+unnecessary_box_returns = "deny"
+vec_box = "deny"
+large_enum_variant = "deny"
+rc_buffer = "deny"
+linkedlist = "deny"
+unnecessary_to_owned = "deny"
+str_to_string = "deny"
+
+# =====================================================================
+#  第四层：性能优化（CPU & 算法）
+# =====================================================================
+inefficient_to_string = "deny"
+uninlined_format_args = "deny"
+ptr_arg = "deny"
+trivially_copy_pass_by_ref = "deny"
+# needless_pass_by_value: core/core-ffi 是 FFI 库，公共函数通过 UniFFI 导出，
+# 参数必须是 owned 类型（String/Vec<T>）。desktop crate 在自身 Cargo.toml 中覆盖为 deny。
+needless_pass_by_value = "allow"
+large_types_passed_by_value = "deny"
+manual_range_contains = "deny"
+suspicious_xor_used_as_pow = "deny"
+suboptimal_flops = "deny"
+float_cmp = "deny"
+float_equality_without_abs = "deny"
+naive_bytecount = "deny"
+chars_last_cmp = "deny"
+# chars_cmp_with_unwrap removed: not available in Rust 1.94
+single_char_pattern = "deny"
+manual_str_repeat = "deny"
+trivial_regex = "deny"
+unnecessary_sort_by = "deny"
+same_item_push = "deny"
+single_element_loop = "deny"
+manual_memcpy = "deny"
+manual_is_ascii_check = "deny"
+collapsible_str_replace = "deny"
+
+# =====================================================================
+#  第五层：性能优化（迭代器 & 闭包 & 循环）
+# =====================================================================
+redundant_closure = "deny"
+redundant_closure_for_method_calls = "deny"
+iter_with_drain = "deny"
+iter_on_single_items = "deny"
+iter_on_empty_collections = "deny"
+collection_is_never_read = "deny"
+iter_cloned_collect = "deny"
+option_filter_map = "deny"
+filter_map_identity = "deny"
+unnecessary_filter_map = "deny"
+manual_filter_map = "deny"
+search_is_some = "deny"
+manual_find_map = "deny"
+unnecessary_fold = "deny"
+manual_flatten = "deny"
+bind_instead_of_map = "deny"
+filter_map_bool_then = "deny"
+get_first = "deny"
+iter_next_slice = "deny"
+iter_nth_zero = "deny"
+while_let_on_iterator = "deny"
+needless_range_loop = "deny"
+explicit_iter_loop = "deny"
+explicit_into_iter_loop = "deny"
+manual_while_let_some = "deny"
+needless_collect = "deny"
+iter_over_hash_type = "deny"
+
+# =====================================================================
+#  第六层：性能优化（内存操作 & 数据结构）
+# =====================================================================
+mem_replace_with_default = "deny"
+mem_replace_option_with_none = "deny"
+clear_with_drain = "deny"
+extend_with_drain = "deny"
+drain_collect = "deny"
+significant_drop_tightening = "deny"
+significant_drop_in_scrutinee = "deny"
+pathbuf_init_then_push = "deny"
+let_underscore_lock = "deny"
+
+# =====================================================================
+#  第七层：性能优化（类型系统 & 编译）
+# =====================================================================
+expl_impl_clone_on_copy = "deny"
+copy_iterator = "deny"
+cloned_instead_of_copied = "deny"
+borrow_deref_ref = "deny"
+deref_addrof = "deny"
+redundant_type_annotations = "deny"
+from_over_into = "deny"
+into_iter_on_ref = "deny"
+derive_partial_eq_without_eq = "deny"
+extra_unused_lifetimes = "deny"
+extra_unused_type_parameters = "deny"
+missing_const_for_fn = "deny"
+inline_always = "deny"
+# unused_crate_dependencies is a rustc lint, not clippy
+multiple_crate_versions = "allow"
+
+# =====================================================================
+#  第八层：代码质量（冗余 & 可读性 & 风格）
+# =====================================================================
+redundant_else = "deny"
+needless_continue = "deny"
+needless_raw_string_hashes = "deny"
+needless_pass_by_ref_mut = "deny"
+or_fun_call = "deny"
+useless_let_if_seq = "deny"
+use_self = "deny"
+tuple_array_conversions = "deny"
+trait_duplication_in_bounds = "deny"
+string_lit_as_bytes = "deny"
+unnecessary_self_imports = "deny"
+unused_trait_names = "deny"
+wildcard_imports = "deny"
+unnecessary_wraps = "deny"
+cognitive_complexity = "deny"
+suspicious_operation_groupings = "deny"
+branches_sharing_code = "deny"
+equatable_if_let = "deny"
+nonminimal_bool = "deny"
+overly_complex_bool_expr = "deny"
+collapsible_if = "deny"
+collapsible_match = "deny"
+match_same_arms = "deny"
+needless_match = "deny"
+let_and_return = "deny"
+needless_return = "deny"
+semicolon_if_nothing_returned = "deny"
+single_match_else = "deny"
+if_then_some_else_none = "deny"
+needless_bool_assign = "deny"
+manual_assert = "deny"
+ref_patterns = "deny"
+default_trait_access = "deny"
+filetype_is_file = "deny"
+large_include_file = "deny"
+shadow_reuse = "deny"
+unnecessary_safety_comment = "deny"
+doc_markdown = "deny"
+explicit_deref_methods = "deny"
+mod_module_files = "deny"
+multiple_bound_locations = "deny"
+stable_sort_primitive = "deny"
+self_only_used_in_recursion = "deny"
+
+# =====================================================================
+#  第九层：正确性辅助（防止静默丢弃 & 潜在 bug）
+# =====================================================================
+must_use_candidate = "deny"
+manual_ok_or = "deny"
+option_map_or_none = "deny"
+result_map_or_into_option = "deny"
+wildcard_enum_match_arm = "deny"
+used_underscore_binding = "deny"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

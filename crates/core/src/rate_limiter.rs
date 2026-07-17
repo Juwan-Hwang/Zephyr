@@ -64,7 +64,7 @@ impl Bucket {
 /// Multi-key rate limiter backed by a sharded concurrent map.
 ///
 /// Each key's `Bucket` is wrapped in `Arc<Mutex<>>` so that `check()` can
-/// clone the Arc, release the DashMap shard read lock immediately, then lock
+/// clone the Arc, release the `DashMap` shard read lock immediately, then lock
 /// only the individual bucket. Concurrent calls to different keys never
 /// contend, even when they hash to the same shard.
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
@@ -82,6 +82,7 @@ impl Default for RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter with no rules configured.
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buckets: DashMap::new(),
@@ -101,13 +102,14 @@ impl RateLimiter {
 
     /// Check if a call to `key` is allowed. Returns true if allowed, false if rate-limited.
     /// If no rule is registered for `key`, always allows.
+    #[must_use]
     pub fn check(&self, key: &str) -> bool {
         // Clone the Arc to release the DashMap shard read lock immediately,
         // then lock only the per-bucket mutex.
         if let Some(bucket) = self.buckets.get(key).map(|r| Arc::clone(r.value())) {
             bucket
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .check()
                 .is_ok()
         } else {

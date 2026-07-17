@@ -1,0 +1,12 @@
+---
+source: apps/desktop/src-tauri/src/prism/overrides_commands_tests.rs
+expression: default_template_content(OverrideExt::PrismYaml)
+---
+# Zephyr Prism Override
+# Supports: $override, $prepend, $append, $filter, $transform, $remove, $default
+# Conditions: __when__, Variables: __vars__, Dependencies: __after__
+
+# Example: prepend rules
+# rules:
+#   $prepend:
+#     - "DOMAIN-SUFFIX,google.com,DIRECT"
