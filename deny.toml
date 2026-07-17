@@ -52,6 +52,8 @@ allow = [
   "CC0-1.0",
   # libbz2-rs-sys (via zip v8 → bzip2 v0.6) — BSD-like, FSF-approved
   "bzip2-1.0.6",
+  # clipboard-win (via arboard) — Boost Software License, BSD-like, FSF-approved
+  "BSL-1.0",
 ]
 
 [bans]

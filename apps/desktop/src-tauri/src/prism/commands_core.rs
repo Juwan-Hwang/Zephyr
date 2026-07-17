@@ -9,6 +9,7 @@ use clash_prism_extension::{ApplyOptions, PrismExtension, RuleInsertPosition};
 use super::types::MAX_INPUT_SIZE;
 use crate::backend_event::{codes, lock_best_effort, lock_critical, BackendModule};
 use crate::core_manager::core::core_process;
+use crate::core_manager::read_profile_file;
 use crate::prism::PrismState;
 
 /// Helper: parse `RuleInsertPosition` from a frontend string.
@@ -256,7 +257,8 @@ pub async fn prism_rebuild(
 
         let paths = crate::core_manager::ensure_app_storage(&app)?;
         let profile_file = paths.profiles_dir.join(&config_path);
-        let content = std::fs::read_to_string(&profile_file)
+        // Use read_profile_file to auto-decrypt encrypted profiles (encrypt_configs)
+        let content = read_profile_file(&profile_file)
             .map_err(|e| format!("Failed to read profile '{config_path}': {e}"))?;
 
         // Read global preferences for injection
