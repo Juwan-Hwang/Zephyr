@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/core/fetch_util.rs
+expression: format_host_port("192.0.2.1", 443)
+---
+192.0.2.1:443

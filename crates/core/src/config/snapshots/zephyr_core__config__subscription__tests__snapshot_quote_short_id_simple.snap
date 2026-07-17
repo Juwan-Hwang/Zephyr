@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: "quote_short_id_values(\"short-id: abc123\")"
+---
+short-id: "abc123"

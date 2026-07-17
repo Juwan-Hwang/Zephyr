@@ -428,7 +428,7 @@ export function generateProxyEnvVars(format, port = 7890) {
         case 'fish':
             return `set -x http_proxy ${proxy}; set -x https_proxy ${proxy}; set -x all_proxy ${proxy}`;
         case 'cmd':
-            return `set http_proxy=${proxy}\r\nset https_proxy=${proxy}\r\nset all_proxy=${proxy}`;
+            return `set http_proxy=${proxy}&set https_proxy=${proxy}&set all_proxy=${proxy}`;
         case 'powershell':
             return `$env:HTTP_PROXY="${proxy}"; $env:HTTPS_PROXY="${proxy}"; $env:ALL_PROXY="${proxy}"`;
         case 'nushell':
