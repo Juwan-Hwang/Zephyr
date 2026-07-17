@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: "redact_url_in_string(\"Just a plain message\".to_owned())"
+---
+Just a plain message
