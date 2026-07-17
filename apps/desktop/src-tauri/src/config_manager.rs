@@ -4,7 +4,7 @@
 //! This module only contains Tauri-specific glue ([`AppHandle`], [`State`], reqwest hot-reload).
 
 use crate::core_manager::ensure_app_storage;
-use crate::core_manager::MihomoState;
+use crate::core_manager::{read_profile_file, MihomoState};
 #[allow(unused_imports)]
 use crate::emit_warn;
 use serde_json::Value as JsonValue;
@@ -91,7 +91,7 @@ pub async fn update_config(
         if profile_name != "run_config.yaml" {
             let profile_path = paths.profiles_dir.join(profile_name);
             if profile_path.exists() {
-                if let Ok(profile_content) = fs::read_to_string(&profile_path) {
+                if let Ok(profile_content) = read_profile_file(&profile_path) {
                     let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
                         .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
                     if let Ok(mut profile_yaml) =

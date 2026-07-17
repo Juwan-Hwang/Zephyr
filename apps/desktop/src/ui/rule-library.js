@@ -367,7 +367,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Group header
     const header = document.createElement('div');
-    header.className = 'flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--zephyr-bg-muted)] cursor-pointer group hover:bg-[var(--zephyr-bg-input)] transition-colors duration-[var(--zephyr-time-micro)]';
+    header.className = 'flex items-center justify-between py-2 px-3 rounded-lg border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-bg-input)] cursor-pointer group hover:border-[var(--zephyr-border-strong)] transition-all duration-[var(--zephyr-time-micro)]';
     header.setAttribute('role', 'button');
     header.setAttribute('tabindex', '0');
     header.setAttribute('aria-expanded', 'true');
@@ -401,8 +401,9 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
         const isCollapsed = body.style.display === 'none';
         body.style.display = isCollapsed ? '' : 'none';
         header.setAttribute('aria-expanded', isCollapsed ? 'true' : 'false');
-        const arrow = header.querySelector('.collapse-arrow');
-        if (arrow instanceof HTMLElement) arrow.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
+        header.style.opacity = isCollapsed ? '' : '0.55';
+        const arrow = /** @type {HTMLElement|null} */ (header.querySelector('.collapse-arrow'));
+        if (arrow) arrow.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
     });
 
     // File cards
@@ -630,7 +631,7 @@ function renderActiveRules(container) {
 
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
-                header.className = 'flex items-center justify-between p-2 rounded-lg bg-[var(--zephyr-bg-muted)] cursor-pointer select-none';
+                header.className = `flex items-center justify-between p-2 rounded-lg border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-bg-input)] cursor-pointer select-none hover:border-[var(--zephyr-border-strong)] transition-all duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'opacity-60' : ''}`;
                 header.setAttribute('role', 'button');
                 header.setAttribute('tabindex', '0');
                 header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');

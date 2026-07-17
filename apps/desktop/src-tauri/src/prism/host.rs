@@ -1,4 +1,4 @@
-//! `ZephyrPrismHost` — bridges Prism Engine to Zephyr's internal state.
+//! `ZephyrPrismHost` --- bridges Prism Engine to Zephyr's internal state.
 
 use tauri::Manager as _;
 
@@ -6,7 +6,7 @@ use clash_prism_extension::{ApplyStatus, CoreInfo, PrismEvent, PrismHost, Profil
 
 use crate::backend_event::{codes, lock_best_effort, lock_critical, BackendModule};
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
-use crate::core_manager::{ensure_app_storage, write_file_secure, MihomoState};
+use crate::core_manager::{ensure_app_storage, read_profile_file, write_file_secure, MihomoState};
 use zephyr_core::config::sanitizer::validate_path_within_dir;
 
 use super::prism_data_dir;
@@ -21,7 +21,7 @@ impl ZephyrPrismHost {
         Self { app }
     }
 
-    /// Synchronous HTTP PUT to localhost — no tokio dependency.
+    /// Synchronous HTTP PUT to localhost --- no tokio dependency.
     /// Used by `apply_config` which is a sync trait method callable from any thread.
     fn http_put(url: &str, body: &str, bearer: &str) -> bool {
         use std::io::{Read as _, Write as _};
@@ -121,7 +121,7 @@ impl PrismHost for ZephyrPrismHost {
         };
 
         let url = format!("http://127.0.0.1:{port}/configs?force=true");
-        // Synchronous HTTP PUT — apply_config is a sync trait method that may be
+        // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let hot_reload_success = Self::http_put(&url, config, &secret);
@@ -161,7 +161,10 @@ impl PrismHost for ZephyrPrismHost {
                 "Profile '{safe_id}' exceeds maximum size of {MAX_RESPONSE_SIZE} bytes"
             ));
         }
-        std::fs::read_to_string(&profile_path)
+        // Use read_profile_file to auto-decrypt encrypted profiles (encrypt_configs)
+        // Without this, encrypted YAML is parsed as a plain string,
+        // causing "No 'rules' section found in profile" when extracting rules.
+        read_profile_file(&profile_path)
             .map_err(|e| format!("Failed to read profile '{safe_id}': {e}"))
     }
 
