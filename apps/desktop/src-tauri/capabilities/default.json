@@ -24,6 +24,7 @@
     "core:resources:default",
     "core:app:default",
     "dialog:allow-message",
-    "notification:default"
+    "notification:default",
+    "window-state:default"
   ]
 }

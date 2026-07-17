@@ -31,6 +31,9 @@ export function switchPage(pageId) {
     });
 }
 
+/** Store leave-timeout IDs without polluting DOM element types. */
+const leaveTimeouts = new WeakMap();
+
 /**
  * Initialize sidebar navigation.
  * Sets up click handlers on [data-nav] items and applies 3D hover effects.
@@ -70,14 +73,31 @@ export function initNavigation(callbacks = {}) {
                 callbacks.onLeaveProxies();
             }
 
-            // Update nav item active styling
+            // Update nav item active styling — visual (UnoCSS) + animation (is-active/is-leaving)
+            const oldActive = document.querySelector('.nav-btn.is-active');
+            if (oldActive && oldActive !== item) {
+                oldActive.classList.add('is-leaving');
+                oldActive.classList.remove('is-active');
+                const prevTimer = leaveTimeouts.get(oldActive);
+                if (prevTimer) clearTimeout(prevTimer);
+                const timer = setTimeout(() => {
+                    oldActive.classList.remove('is-leaving');
+                    leaveTimeouts.delete(oldActive);
+                }, 500);
+                leaveTimeouts.set(oldActive, timer);
+            }
+            const itemTimer = leaveTimeouts.get(item);
+            if (itemTimer) {
+                clearTimeout(itemTimer);
+                leaveTimeouts.delete(item);
+            }
             navItems.forEach(i => {
-                i.classList.remove('bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+                i.classList.remove('is-active', 'bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
                 i.classList.add('text-[var(--text-muted)]');
                 i.removeAttribute('aria-current');
             });
-            item.classList.add('bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
-            item.classList.remove('text-[var(--text-muted)]');
+            item.classList.add('is-active', 'bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+            item.classList.remove('text-[var(--text-muted)]', 'is-leaving');
             item.setAttribute('aria-current', 'page');
 
             // Switch page
