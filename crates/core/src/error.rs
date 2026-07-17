@@ -27,12 +27,12 @@ pub enum AppError {
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
-        AppError::IoError(e.to_string())
+        Self::IoError(e.to_string())
     }
 }
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
-        AppError::ParseError(e.to_string())
+        Self::ParseError(e.to_string())
     }
 }

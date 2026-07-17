@@ -2,8 +2,8 @@ use std::sync::{Arc, RwLock};
 
 /// Core application state shared across all platforms.
 /// Tauri desktop: injected via `tauri::State<Arc<AppStore>>`
-/// Android: held by ViewModel
-/// iOS: held by @MainActor ObservableObject
+/// Android: held by `ViewModel`
+/// iOS: held by @`MainActor` `ObservableObject`
 #[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct AppStore {
     inner: Arc<RwLock<StoreInner>>,
@@ -24,16 +24,18 @@ impl Default for AppStore {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 impl AppStore {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(StoreInner::default())),
         }
     }
 
+    #[must_use]
     pub fn get_active_profile(&self) -> Option<String> {
         self.inner
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .active_profile
             .clone()
     }
@@ -41,21 +43,22 @@ impl AppStore {
     pub fn set_active_profile(&self, profile: String) {
         self.inner
             .write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .active_profile = Some(profile);
     }
 
+    #[must_use]
     pub fn is_core_running(&self) -> bool {
         self.inner
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .core_running
     }
 
     pub fn set_core_running(&self, running: bool) {
         self.inner
             .write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .core_running = running;
     }
 }
