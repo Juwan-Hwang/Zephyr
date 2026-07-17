@@ -248,6 +248,59 @@ fn show_or_recreate_window(app: &AppHandle) {
     crate::show_or_recreate_main_window(app);
 }
 
+/// Copy proxy environment variables to clipboard.
+/// Used by the tray "Copy Proxy Env" menu item.
+/// Handles clipboard write directly in Rust — on Linux, `WebKit2GTK`
+/// requires window focus for navigator.clipboard, which isn't guaranteed
+/// when clicking from the tray menu.
+fn copy_proxy_env_to_clipboard(app: &AppHandle) -> Result<(), String> {
+    // Get copy_env_format from settings
+    let settings_state = app.state::<crate::SettingsState>();
+    let format = settings_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .copy_env_format
+        .clone();
+
+    // Get proxy port from core state
+    let mihomo_state = app.state::<MihomoState>();
+    let port = mihomo_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .last_proxy_port()
+        .unwrap_or(DEFAULT_MIXED_PORT);
+
+    let proxy = format!("http://127.0.0.1:{port}");
+    let text = match format.as_str() {
+        "fish" => format!(
+            "set -x http_proxy {proxy}; set -x https_proxy {proxy}; set -x all_proxy {proxy}; set -x HTTP_PROXY {proxy}; set -x HTTPS_PROXY {proxy}; set -x ALL_PROXY {proxy}"
+        ),
+        "cmd" => format!(
+            "set http_proxy={proxy}\r\nset https_proxy={proxy}\r\nset all_proxy={proxy}"
+        ),
+        "powershell" => format!(
+            "$env:HTTP_PROXY=\"{proxy}\"; $env:HTTPS_PROXY=\"{proxy}\"; $env:ALL_PROXY=\"{proxy}\""
+        ),
+        "nushell" => format!(
+            "$env.HTTP_PROXY = \"{proxy}\"; $env.HTTPS_PROXY = \"{proxy}\"; $env.ALL_PROXY = \"{proxy}\""
+        ),
+        _ => format!(
+            "export http_proxy={proxy} https_proxy={proxy} all_proxy={proxy} HTTP_PROXY={proxy} HTTPS_PROXY={proxy} ALL_PROXY={proxy}"
+        ),
+    };
+
+    // Write to clipboard using arboard (cross-platform)
+    let mut cb = arboard::Clipboard::new().map_err(|e| format!("Clipboard access failed: {e}"))?;
+    cb.set_text(text)
+        .map_err(|e| format!("Clipboard write failed: {e}"))?;
+
+    // Emit to frontend for notification (optional — ignored if no WebView)
+    crate::backend_event::emit_to_main(app, "tray-copy-env-done", ());
+    Ok(())
+}
+
 /// Handle tray menu events
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
@@ -282,7 +335,13 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             crate::backend_event::emit_to_main(app, "tray-mode-changed", mode);
         }
         "copy_env" => {
-            crate::backend_event::emit_to_main(app, "tray-copy-env", ());
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = copy_proxy_env_to_clipboard(&app_handle) {
+                    eprintln!("[tray] Failed to copy proxy env: {e}");
+                    crate::backend_event::emit_to_main(&app_handle, "tray-copy-env-failed", e);
+                }
+            });
         }
         _ => {
             // Handle subscription switching (prefix: sub_)

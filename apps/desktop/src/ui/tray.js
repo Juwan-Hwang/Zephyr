@@ -288,23 +288,26 @@ export async function initTrayEventListeners() {
     });
     _trayEventUnlisteners.push(unlisten5);
 
-    // Listen for copy proxy env from tray
-    const unlisten6 = await listen('tray-copy-env', async () => {
-        try {
-            const settings = await invoke(COMMANDS.GET_SETTINGS);
-            const format = resolveEnvFormat(settings?.copy_env_format);
-            const currentConfig = /** @type {any} */ (await getConfig());
-            const port = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-            const text = generateProxyEnvVars(format, port);
-            await copyToClipboard(text);
-            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const t = /** @type {Record<string, string>} */(translations[langKey]);
-            showNotification(t.trayCopyEnvSuccess || 'Proxy env vars copied', 'info');
-        } catch (err) {
-            trayLogger.error('Failed to copy proxy env vars', err);
-        }
+    // Listen for copy proxy env from tray (Rust-side clipboard write)
+    // On Linux, WebKit2GTK requires window focus for navigator.clipboard,
+    // which isn't guaranteed when clicking from the tray menu.
+    // Rust now handles the clipboard write via arboard, so we just show the notification.
+    const unlisten6 = await listen('tray-copy-env-done', async () => {
+        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
+        showNotification(t.trayCopyEnvSuccess || 'Proxy env vars copied', 'info');
     });
     _trayEventUnlisteners.push(unlisten6);
+
+    // Listen for clipboard write failure from tray (Rust-side arboard error)
+    const unlisten7 = await listen('tray-copy-env-failed', async (event) => {
+        /** @type {any} */
+        const ev = event;
+        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
+        showNotification(`${t.trayCopyEnvFailed || 'Failed to copy proxy env'}: ${ev.payload}`, 'error');
+    });
+    _trayEventUnlisteners.push(unlisten7);
 }
 
 // --- Unified periodic sync ---
