@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/prism/overrides/overrides_model_tests.rs
+expression: item.patch_filename()
+---
+override_xyz789.prism.yaml

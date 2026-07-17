@@ -2321,4 +2321,38 @@ mod tests {
             get_core_version_with_io(&mock, std::path::Path::new("/usr/bin/mihomo")).unwrap();
         assert_eq!(result, "v1.18.0-alpha.1");
     }
+
+    // -- Snapshot tests for version parsing --------------------------------
+
+    #[test]
+    fn snapshot_parse_version_standard() {
+        insta::assert_snapshot!(parse_version_output("mihomo v1.18.0 linux amd64"));
+    }
+
+    #[test]
+    fn snapshot_parse_version_alpha() {
+        insta::assert_snapshot!(parse_version_output("mihomo v1.18.0-alpha.1 (linux amd64)"));
+    }
+
+    #[test]
+    fn snapshot_parse_version_no_prefix() {
+        insta::assert_snapshot!(parse_version_output("1.18.0"));
+    }
+
+    #[test]
+    fn snapshot_parse_version_empty() {
+        insta::assert_snapshot!(parse_version_output(""));
+    }
+
+    // -- Property test for secret generation -------------------------------
+
+    #[test]
+    fn generate_secret_is_32_alphanumeric() {
+        let secret = generate_secret();
+        assert_eq!(secret.len(), 32, "secret must be exactly 32 characters");
+        assert!(
+            secret.chars().all(|c| c.is_ascii_alphanumeric()),
+            "secret must be alphanumeric: {secret}"
+        );
+    }
 }

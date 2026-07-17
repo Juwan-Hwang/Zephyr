@@ -14,6 +14,7 @@ uniffi::setup_scaffolding!("zephyr_core");
 
 // ---- 示例导出函数（验证 UniFFI pipeline）----
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn greet(name: String) -> String {
     format!("Hello, {name}! Welcome to Zephyr.")
 }

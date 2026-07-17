@@ -1,7 +1,7 @@
 //! Subscription content processing — platform-agnostic pure functions.
 //!
 //! Migrated from `src-tauri/src/core/subscription.rs` for cross-platform reuse.
-//! Network I/O (reqwest, Tauri AppHandle) stays in src-tauri.
+//! Network I/O (reqwest, Tauri `AppHandle`) stays in src-tauri.
 
 use base64::Engine as _;
 use std::net::IpAddr;
@@ -10,7 +10,7 @@ use std::net::IpAddr;
 pub const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
 
 #[inline]
-fn decode_hex_digit(byte: u8) -> Option<u8> {
+const fn decode_hex_digit(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -42,6 +42,7 @@ pub fn quote_short_id_values(content: &str) -> String {
 
 /// Extract a name from the rules' policy-group field.
 /// Scans up to 10 rules, returns the first non-generic policy-group name.
+#[must_use]
 pub fn extract_name_from_rules(content: &str) -> Option<String> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
 
@@ -93,6 +94,7 @@ pub fn extract_name_from_rules(content: &str) -> Option<String> {
 
 /// Parse filename from a Content-Disposition header value.
 /// Supports both `filename="name"` and `filename*=UTF-8''encoded_name` (RFC 5987).
+#[must_use]
 pub fn parse_content_disposition_filename(header_value: &str) -> Option<String> {
     // Try filename*= first (RFC 5987, takes precedence)
     for raw_part in header_value.split(';') {
@@ -122,6 +124,7 @@ pub fn parse_content_disposition_filename(header_value: &str) -> Option<String> 
 }
 
 /// Decode percent-encoded string (e.g. "%E4%B8%AD%E6%96%87" → "中文").
+#[must_use]
 pub fn percent_decode(input: &str) -> String {
     if !input.contains('%') {
         return input.to_owned();
@@ -169,6 +172,7 @@ pub fn try_decode_base64_content(content: &str) -> Option<String> {
 }
 
 /// Check if an IP address is private or local
+#[must_use]
 pub fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
@@ -205,6 +209,7 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
 }
 
 /// Check if a host is a private or local address (SSRF protection)
+#[must_use]
 pub fn is_private_host(host: &str) -> bool {
     let host_lower = host.to_lowercase();
 
@@ -293,6 +298,7 @@ pub fn validate_subscription_url_with_ip(
 ///
 /// Migrated from `src-tauri/src/core/subscription.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn classify_sub_error(e: String) -> u16 {
     if e.contains("SSRF protection") {
         crate::event::codes::SUB_SSRF_BLOCKED
@@ -340,6 +346,7 @@ pub fn classify_sub_error(e: String) -> u16 {
 /// This prevents leaking subscription tokens to logs and frontend.
 /// Migrated from `src-tauri/src/core/subscription.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn redact_url_in_string(s: String) -> String {
     if !s.contains("http") {
         return s;
@@ -537,5 +544,58 @@ mod tests {
             Some("配置".to_owned())
         );
         assert_eq!(parse_content_disposition_filename("no filename here"), None);
+    }
+
+    // -- Snapshot tests for subscription content processing ----------------
+
+    #[test]
+    fn snapshot_quote_short_id_simple() {
+        insta::assert_snapshot!(quote_short_id_values("short-id: abc123"));
+    }
+
+    #[test]
+    fn snapshot_quote_short_id_hex_like() {
+        insta::assert_snapshot!(quote_short_id_values("short-id: 34010e92"));
+    }
+
+    #[test]
+    fn snapshot_quote_short_id_multiple() {
+        insta::assert_snapshot!(quote_short_id_values(
+            "proxies:\n  - name: test-1\n    short-id: abc123\n  - name: test-2\n    short-id: def456"
+        ));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_ascii() {
+        insta::assert_snapshot!(percent_decode("hello%20world"));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_utf8() {
+        insta::assert_snapshot!(percent_decode("%E4%B8%AD%E6%96%87"));
+    }
+
+    #[test]
+    fn snapshot_percent_decode_no_encoding() {
+        insta::assert_snapshot!(percent_decode("plain text"));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_single() {
+        insta::assert_snapshot!(redact_url_in_string(
+            "Fetching config from https://example.com/sub?token=secret123".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_multiple() {
+        insta::assert_snapshot!(redact_url_in_string(
+            "First http://a.com/config then https://b.com/sub2 done".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_redact_url_in_string_no_url() {
+        insta::assert_snapshot!(redact_url_in_string("Just a plain message".to_owned()));
     }
 }

@@ -1,3 +1,17 @@
+// desktop crate 非 FFI 库，覆盖 workspace 的 needless_pass_by_value = "allow"。
+// core/core-ffi 是 FFI 库需要 allow，desktop 用源码级属性重新启用 deny。
+#![deny(clippy::needless_pass_by_value)]
+// 测试模块中允许 unwrap/expect/indexing/panic，避免在每个测试文件重复 #[allow]。
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic
+    )
+)]
+
 #[macro_use]
 pub mod backend_event;
 pub mod backup;

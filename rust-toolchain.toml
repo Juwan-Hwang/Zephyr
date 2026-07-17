@@ -1,0 +1,5 @@
+# Pin Rust toolchain version to ensure local/CI consistency.
+# To upgrade: change `channel` below, then run `rustup toolchain install <version>`.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

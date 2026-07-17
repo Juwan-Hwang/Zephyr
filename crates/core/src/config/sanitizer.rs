@@ -8,7 +8,7 @@ use std::path::Path;
 const MAX_YAML_DEPTH: usize = 100;
 
 #[inline]
-fn decode_hex_digit(byte: u8) -> Option<u8> {
+const fn decode_hex_digit(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -92,7 +92,7 @@ pub fn remove_dangerous_keys(value_json: String) -> Result<String, crate::error:
         .map_err(|e| crate::error::AppError::ParseError(format!("YAML serialization failed: {e}")))
 }
 
-/// Non-FFI version that works directly with serde_yaml::Value (for internal use).
+/// Non-FFI version that works directly with `serde_yaml::Value` (for internal use).
 pub fn remove_dangerous_keys_internal_pub(
     value: &mut serde_yaml::Value,
     in_provider_context: bool,
@@ -102,6 +102,7 @@ pub fn remove_dangerous_keys_internal_pub(
 
 /// Complete URL decoding for path traversal detection
 /// Handles standard percent-encoding, double encoding, and mixed case
+#[must_use]
 pub fn url_decode_complete(input: &str) -> String {
     if !input.contains('%') {
         return input.to_owned();
