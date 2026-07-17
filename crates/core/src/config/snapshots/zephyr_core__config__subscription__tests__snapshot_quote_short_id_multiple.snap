@@ -1,0 +1,8 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: "quote_short_id_values(\"proxies:\n  short-id: abc123\n  name: test\n  short-id: def456\")"
+---
+proxies:
+  short-id: "abc123"
+  name: test
+  short-id: "def456"

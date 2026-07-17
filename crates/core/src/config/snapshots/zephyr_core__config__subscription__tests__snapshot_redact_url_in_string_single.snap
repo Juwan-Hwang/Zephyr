@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: "redact_url_in_string(\"Fetching config from https://example.com/sub?token=secret123\".to_owned())"
+---
+Fetching config from https://exa***com/***
