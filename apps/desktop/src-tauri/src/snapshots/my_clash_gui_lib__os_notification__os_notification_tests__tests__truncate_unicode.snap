@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/os_notification_tests.rs
+expression: truncate_str("你好世界Hello", 6)
+---
+你好世...

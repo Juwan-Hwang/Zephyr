@@ -132,3 +132,7 @@ pub struct LogEntry {
     pub level: String,
     pub message: String,
 }
+
+#[cfg(test)]
+#[path = "overrides_model_tests.rs"]
+mod overrides_model_tests;

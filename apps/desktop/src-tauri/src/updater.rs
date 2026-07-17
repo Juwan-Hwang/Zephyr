@@ -2062,4 +2062,22 @@ mod tests {
         let first = digests.first().unwrap();
         assert_eq!(first.0, "mihomo-windows-amd64-v3-v1.19.28.zip");
     }
+
+    // -- Snapshot tests for URL formatting ---------------------------------
+
+    #[test]
+    fn snapshot_build_asset_download_url() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.18.0",
+            "mihomo-linux-amd64-v1.18.0.gz"
+        ));
+    }
+
+    #[test]
+    fn snapshot_build_asset_download_url_windows() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.19.28",
+            "mihomo-windows-amd64-v3-v1.19.28.zip"
+        ));
+    }
 }
