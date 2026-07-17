@@ -645,4 +645,30 @@ mod tests {
         assert!(port >= 59090);
         assert!(port < 59190);
     }
+
+    // -- Snapshot tests for version parsing --------------------------------
+
+    #[test]
+    fn snapshot_parse_version_standard() {
+        insta::assert_snapshot!(parse_version_output(
+            "Mihomo v1.18.0 abc123 linux/amd64".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_parse_version_alpha() {
+        insta::assert_snapshot!(parse_version_output(
+            "mihomo v1.18.0-alpha.1 (linux amd64)".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_parse_version_no_v_prefix() {
+        insta::assert_snapshot!(parse_version_output("1.18.0".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_parse_version_empty() {
+        insta::assert_snapshot!(parse_version_output("".to_owned()));
+    }
 }

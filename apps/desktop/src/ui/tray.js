@@ -422,19 +422,19 @@ export function resolveEnvFormat(format) {
  */
 export function generateProxyEnvVars(format, port = 7890) {
     const proxy = `http://127.0.0.1:${port}`;
-    switch (format) {
+    switch (format?.toLowerCase()) {
         case 'bash':
-            return `export https_proxy=${proxy} http_proxy=${proxy} all_proxy=${proxy}`;
+            return `export http_proxy=${proxy} https_proxy=${proxy} all_proxy=${proxy} HTTP_PROXY=${proxy} HTTPS_PROXY=${proxy} ALL_PROXY=${proxy}`;
         case 'fish':
-            return `set -x http_proxy ${proxy}; set -x https_proxy ${proxy}; set -x all_proxy ${proxy}`;
+            return `set -x http_proxy ${proxy}; set -x https_proxy ${proxy}; set -x all_proxy ${proxy}; set -x HTTP_PROXY ${proxy}; set -x HTTPS_PROXY ${proxy}; set -x ALL_PROXY ${proxy}`;
         case 'cmd':
-            return `set http_proxy=${proxy}\r\nset https_proxy=${proxy}\r\nset all_proxy=${proxy}`;
+            return `set http_proxy=${proxy}&set https_proxy=${proxy}&set all_proxy=${proxy}`;
         case 'powershell':
             return `$env:HTTP_PROXY="${proxy}"; $env:HTTPS_PROXY="${proxy}"; $env:ALL_PROXY="${proxy}"`;
         case 'nushell':
             return `$env.HTTP_PROXY = "${proxy}"; $env.HTTPS_PROXY = "${proxy}"; $env.ALL_PROXY = "${proxy}"`;
         default:
-            return `export https_proxy=${proxy} http_proxy=${proxy} all_proxy=${proxy}`;
+            return `export http_proxy=${proxy} https_proxy=${proxy} all_proxy=${proxy} HTTP_PROXY=${proxy} HTTPS_PROXY=${proxy} ALL_PROXY=${proxy}`;
     }
 }
 
