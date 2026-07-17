@@ -84,6 +84,7 @@ pub trait ProcessManager: Send + Sync {
 
 /// Detect whether a core log indicates a cache/lock issue that warrants retry.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn detect_cache_lock_issue(log: String) -> bool {
     log.contains("database is locked")
         || log.contains("cache.db")
@@ -93,6 +94,7 @@ pub fn detect_cache_lock_issue(log: String) -> bool {
 
 /// Parse the version string from `mihomo -v` stdout.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn parse_version_output(stdout: String) -> String {
     let trimmed = stdout.trim();
     if let Some(v_idx) = trimmed.find('v') {
@@ -111,15 +113,19 @@ pub fn parse_version_output(stdout: String) -> String {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn generate_secret() -> Result<String, AppError> {
     use rand::Rng as _;
+    use std::fmt::Write as _;
     let mut rng = rand::rng();
-    let secret: String = (0..32)
-        .map(|_| format!("{:02x}", rng.random::<u8>()))
-        .collect();
+    let bytes: [u8; 32] = rng.random();
+    let mut secret = String::with_capacity(64);
+    for byte in bytes {
+        let _ = write!(secret, "{byte:02x}");
+    }
     Ok(secret)
 }
 
 /// Return the platform-specific core binary name.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn core_binary_name() -> String {
     #[cfg(target_os = "windows")]
     {
@@ -179,6 +185,7 @@ pub fn validate_custom_args(custom_args: Vec<String>) -> Result<Vec<String>, App
 ///
 /// Migrated from `src-tauri/src/core/core_process.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn parse_external_controller_port(yaml_str: String) -> u16 {
     let yaml_val: serde_yaml::Value = match serde_yaml::from_str(&yaml_str) {
         Ok(v) => v,
@@ -196,6 +203,7 @@ pub fn parse_external_controller_port(yaml_str: String) -> u16 {
 ///
 /// Returns the default mixed port (7890) if not found or invalid.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn extract_mixed_port_from_yaml(yaml_str: String) -> u16 {
     let yaml_val: serde_yaml::Value = match serde_yaml::from_str(&yaml_str) {
         Ok(v) => v,
@@ -203,20 +211,22 @@ pub fn extract_mixed_port_from_yaml(yaml_str: String) -> u16 {
     };
     yaml_val
         .get("mixed-port")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|p| u16::try_from(p).ok())
         .unwrap_or(DEFAULT_MIXED_PORT)
 }
 
 /// Get the default API port (9090).
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn default_api_port() -> u16 {
+#[must_use]
+pub const fn default_api_port() -> u16 {
     DEFAULT_API_PORT
 }
 
 /// Get the default mixed proxy port (7890).
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn default_mixed_port() -> u16 {
+#[must_use]
+pub const fn default_mixed_port() -> u16 {
     DEFAULT_MIXED_PORT
 }
 
@@ -232,11 +242,12 @@ pub fn default_mixed_port() -> u16 {
 /// - Default `keep-alive-idle: 600` if missing
 /// - Default `find-process-mode: always` if missing
 /// - Default `profile.store-fake-ip: true` if missing
-/// - GlobalPreferences overrides (mode, tun, ports, ipv6, allow_lan, unified_delay)
+/// - `GlobalPreferences` overrides (mode, tun, ports, ipv6, `allow_lan`, `unified_delay`)
 /// - Removes dangerous keys
 ///
 /// Returns `None` if the YAML is invalid or not a mapping.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn prepare_runtime_config(
     content: String,
     secret: String,
@@ -403,6 +414,7 @@ pub fn prepare_runtime_config(
 ///
 /// Migrated from `src-tauri/src/core/core_process.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn build_minimal_runtime_config(secret: String) -> RuntimeConfigResult {
     let config = format!(
         "mixed-port: {DEFAULT_MIXED_PORT}\n\
@@ -644,5 +656,31 @@ mod tests {
         let port = find_available_port(59090).unwrap();
         assert!(port >= 59090);
         assert!(port < 59190);
+    }
+
+    // -- Snapshot tests for version parsing --------------------------------
+
+    #[test]
+    fn snapshot_parse_version_standard() {
+        insta::assert_snapshot!(parse_version_output(
+            "Mihomo v1.18.0 abc123 linux/amd64".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_parse_version_alpha() {
+        insta::assert_snapshot!(parse_version_output(
+            "mihomo v1.18.0-alpha.1 (linux amd64)".to_owned()
+        ));
+    }
+
+    #[test]
+    fn snapshot_parse_version_no_v_prefix() {
+        insta::assert_snapshot!(parse_version_output("1.18.0".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_parse_version_empty() {
+        insta::assert_snapshot!(parse_version_output("".to_owned()));
     }
 }

@@ -1,0 +1,5 @@
+# Pin Rust toolchain version to ensure local/CI consistency.
+# Update this file when upgrading Rust; run `cargo update -p rustc` as needed.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

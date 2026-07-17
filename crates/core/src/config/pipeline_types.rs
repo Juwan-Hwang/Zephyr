@@ -40,7 +40,7 @@ pub struct PatchInfo {
     pub path: String,
 }
 
-/// Convert a PipelineResult to a JSON string.
+/// Convert a `PipelineResult` to a JSON string.
 ///
 /// Migrated from `src-tauri/src/prism/pipeline.rs`.
 #[cfg_attr(feature = "uniffi", uniffi::export)]

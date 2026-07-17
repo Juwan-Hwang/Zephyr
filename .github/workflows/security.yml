@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
       - name: Run cargo audit
         working-directory: apps/desktop/src-tauri
         run: |
@@ -69,12 +69,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           components: clippy
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          workspaces: apps/desktop/src-tauri -> target
 
       - name: Install system dependencies
         run: |
@@ -82,21 +80,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Run clippy with security lints
-        working-directory: apps/desktop/src-tauri
-        run: |
-          cargo clippy --all-targets -- -D warnings \
-            -W clippy::indexing_slicing \
-            -W clippy::cast_possible_truncation \
-            -W clippy::cast_possible_wrap \
-            -W clippy::cast_sign_loss \
-            -W clippy::default_trait_access \
-            -W clippy::filetype_is_file \
-            -W clippy::large_include_file \
-            -W clippy::shadow_reuse \
-            -W clippy::implicit_clone \
-            -W clippy::unnecessary_safety_comment \
-            -W clippy::unused_async \
-            -W clippy::todo
+        # Lint 规则统一由 workspace 根 Cargo.toml 的 [workspace.lints] 定义，
+        # 本地与 CI 使用完全相同的规则集，命令行只需 -D warnings。
+        run: cargo clippy --all-targets -- -D warnings
 
   # ============================================================
   # Job 4: Rust 格式化检查
@@ -109,7 +95,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           components: rustfmt
       - name: Check formatting
         working-directory: apps/desktop/src-tauri
@@ -322,10 +308,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          # Cache the workspace-root target directory, since `cargo test --workspace`
+          # runs from the repo root and compiles all workspace members.
+          workspaces: . -> target
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -353,12 +341,36 @@ jobs:
         run: pnpm --filter @zephyr/desktop build:css
 
       - name: Build Rust (release)
-        working-directory: apps/desktop/src-tauri
-        run: cargo build --release
+        # Build workspace members except core-ffi (no tests, needs uniffi-bindgen).
+        run: cargo build --workspace --exclude zephyr-core-ffi --release --locked
 
-      - name: Run Rust tests
-        working-directory: apps/desktop/src-tauri
-        run: cargo test --release
+      - name: Run Rust tests and verify Golden snapshots
+        run: |
+          set -euo pipefail
+          # Generate/update snapshots and run all workspace tests.
+          # INSTA_UPDATE=always updates .snap files to match current output;
+          # any resulting diff means snapshots need to be committed.
+          # NOTE: Snapshot test inputs MUST be deterministic (no timestamps,
+          # random values, or environment-dependent strings). Non-deterministic
+          # outputs will cause this check to fail on every run.
+          # Exclude zephyr-core-ffi: it has no tests and requires uniffi-bindgen
+          # to generate FFI bindings, which adds unnecessary CI time.
+          INSTA_UPDATE=always cargo test --workspace --exclude zephyr-core-ffi --release --locked 2>&1 | tee /tmp/cargo-test.log
+          # Fail if any .snap files are modified (tracked) or untracked.
+          if ! git diff --exit-code -- '*.snap' || git ls-files --others --exclude-standard -- '*.snap' | grep -q .; then
+            echo "::error::Golden test snapshots are missing or outdated."
+            echo "::error::The following .snap files need to be committed:"
+            git diff --name-only -- '*.snap'
+            git ls-files --others --exclude-standard -- '*.snap'
+            exit 1
+          fi
+          echo "All snapshot files are committed and up to date."
+          # Fail if Cargo.lock was modified by the build/test steps.
+          if ! git diff --exit-code -- Cargo.lock; then
+            echo "::error::Cargo.lock was modified. Please commit the updated lockfile."
+            exit 1
+          fi
+          echo "Cargo.lock is up to date."
 
       - name: Run frontend tests
         run: pnpm --filter @zephyr/desktop test
@@ -375,7 +387,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -409,7 +421,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: apps/desktop/src-tauri -> target
