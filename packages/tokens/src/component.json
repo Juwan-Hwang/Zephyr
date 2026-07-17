@@ -3,18 +3,18 @@
     "gap":       { "value": "{space.2}" },
     "padding-y": { "value": "{space.3}" },
     "padding-x": { "value": "{space.5}" },
-    "radius":    { "value": "{radius.control}" },
+    "radius":    { "value": "{radius.overlay}" },
     "font-size": { "value": "0.625rem" },
     "weight":    { "value": "700" },
     "tracking":  { "value": "0.05em" },
     "transform": { "value": "uppercase" }
   },
   "input": {
-    "radius":   { "value": "{radius.control}" },
+    "radius":   { "value": "{radius.md}" },
     "padding":  { "value": "{space.5} {space.3}" }
   },
   "card": {
-    "radius":   { "value": "{radius.surface}" },
+    "radius":   { "value": "{radius.overlay}" },
     "blur":     { "value": "{glass.blur}" }
   },
   "badge": {
@@ -23,7 +23,7 @@
     "font-size": { "value": "0.625rem" }
   },
   "dropdown": {
-    "radius":      { "value": "{radius.surface}" },
+    "radius":      { "value": "{radius.overlay}" },
     "padding":     { "value": "{space.3} {space.4}" },
     "item-radius": { "value": "{radius.dropdown-option}" }
   },
@@ -36,6 +36,6 @@
     "radius": { "value": "{radius.overlay}" }
   },
   "panel": {
-    "radius": { "value": "{radius.surface}" }
+    "radius": { "value": "{radius.overlay}" }
   }
 }
