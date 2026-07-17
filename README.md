@@ -11,7 +11,7 @@
 [![Stars](https://badgen.net/github/stars/Juwan-Hwang/Zephyr?icon=github&color=blue)](https://github.com/Juwan-Hwang/Zephyr/stargazers)
 [![Release](https://badgen.net/github/release/Juwan-Hwang/Zephyr?icon=git&color=cyan)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![License](https://badgen.net/badge/license/MIT/blue)](https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE)
-[![Platform](https://badgen.net/badge/Platform/Windows%20%7C%20macOS%20%7C%20Linux/08C)](https://github.com/Juwan-Hwang/Zephyr/releases)
+[![Platform](https://badgen.net/badge/Platform//Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20ARM64/08C)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Downloads](https://img.shields.io/github/downloads/Juwan-Hwang/Zephyr/total.svg?style=flat&label=Downloads&color=08C&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/releases)
 [![Security](https://badgen.net/badge/Security/CodeQL%20%7C%20Semgrep%20%7C%20cargo--deny%20%7C%20Clippy/green)](https://github.com/Juwan-Hwang/Zephyr/wiki/Security)
 [![Rust Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/rust-tests.json&query=$.message&label=Rust%20Tests&color=3C1&style=flat&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/actions)
@@ -168,7 +168,7 @@ Zephyr 采用纵深防御策略：
 | 桌面框架 | Tauri v2 | 轻量桌面应用框架 |
 | 后端 | Rust 1.92+ | IPC、系统集成、核心管理、安全边界 |
 | 前端 | 原生 JavaScript | 无前端框架依赖 |
-| 样式 | Tailwind CSS v4 | 现代原子化样式系统 |
+| 样式 | UnoCSS presetWind4 | 即时原子化 CSS 引擎 |
 | 编辑器 | CodeMirror 6 | Prism DSL 编辑体验 |
 | 规则引擎 | clash-prism-* | 规则补丁、插件、脚本沙箱、智能选择 |
 | 包管理 | pnpm workspace | `apps/*` + `packages/*` monorepo |
@@ -180,11 +180,11 @@ Zephyr 采用纵深防御策略：
 
 ### 系统要求
 
-| 平台 | 最低版本 |
-|:--------:|----------------|
-| Windows | Windows 10 1809+ |
-| macOS | macOS 10.15 (Catalina)+ |
-| Linux | glibc 2.31+（Ubuntu 20.04+、Debian 11+、Fedora 34+） |
+| 平台 | 架构 | 最低版本 |
+|:--------:|:--------:|----------------|
+| Windows | x64 / ARM64 | Windows 10 1809+ |
+| macOS | x64 / ARM64 (Apple Silicon) | macOS 10.15 (Catalina)+ |
+| Linux | x64 / ARM64 | glibc 2.31+（Ubuntu 20.04+、Debian 11+、Fedora 34+） |
 
 **硬件**：约 300MB 内存，约 50MB 磁盘空间（完整版）
 
@@ -341,8 +341,9 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
 
 - [Mihomo](https://github.com/MetaCubeX/mihomo) — 核心
 - [Tauri](https://tauri.app) — 框架
-- [Tailwind CSS](https://tailwindcss.com) — 样式
+- [UnoCSS](https://unocss.dev) — 即时原子化 CSS 引擎
 - [CodeMirror](https://codemirror.net) — 编辑器
+- [Style Dictionary](https://styledictionary.com/) — Design Token 系统
 - [clash-prism-*](https://github.com/Juwan-Hwang/Clash-Prism-Engine) — 规则
 
 ---
