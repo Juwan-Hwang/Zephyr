@@ -360,6 +360,21 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test --release
 
+      - name: Verify Golden test snapshots are committed
+        working-directory: apps/desktop/src-tauri
+        run: |
+          # Generate any missing snapshots, then check if any .snap files are new/untracked.
+          # If so, they need to be committed to the repo.
+          INSTA_UPDATE=always cargo test --release 2>&1 | tail -5
+          if git diff --exit-code -- '*.snap' || git ls-files --others --exclude-standard -- '*.snap' | grep -q .; then
+            echo "::error::Golden test snapshots are missing or outdated."
+            echo "::error::The following .snap files need to be committed:"
+            git diff --name-only -- '*.snap'
+            git ls-files --others --exclude-standard -- '*.snap'
+            exit 1
+          fi
+          echo "All snapshot files are committed and up to date."
+
       - name: Run frontend tests
         run: pnpm --filter @zephyr/desktop test
 

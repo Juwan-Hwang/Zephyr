@@ -1,0 +1,5 @@
+---
+source: crates/core/src/updater.rs
+expression: build_asset_download_url("v1.19.28", "mihomo-windows-amd64-v3-v1.19.28.zip")
+---
+https://github.com/MetaCubeX/mihomo/releases/download/v1.19.28/mihomo-windows-amd64-v3-v1.19.28.zip

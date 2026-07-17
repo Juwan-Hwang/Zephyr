@@ -399,4 +399,21 @@ mod tests {
             Err(_) => unreachable!("http://example.com:8080 should be valid"),
         }
     }
+
+    // -- Snapshot tests for host:port formatting ---------------------------
+
+    #[test]
+    fn snapshot_format_host_port_ipv4() {
+        insta::assert_snapshot!(format_host_port("example.com", 443));
+    }
+
+    #[test]
+    fn snapshot_format_host_port_ipv6_loopback() {
+        insta::assert_snapshot!(format_host_port("::1", 80));
+    }
+
+    #[test]
+    fn snapshot_format_host_port_ipv6_full() {
+        insta::assert_snapshot!(format_host_port("2001:db8::1", 443));
+    }
 }

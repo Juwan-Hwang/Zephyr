@@ -1,0 +1,5 @@
+---
+source: crates/core/src/config/subscription.rs
+expression: percent_decode("plain text")
+---
+plain text

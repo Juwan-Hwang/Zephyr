@@ -1,0 +1,5 @@
+---
+source: crates/core/src/updater.rs
+expression: build_asset_download_url("v1.18.0", "mihomo-linux-amd64-v1.18.0.gz")
+---
+https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64-v1.18.0.gz

@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/core/fetch_util.rs
+expression: format_host_port("example.com", 443)
+---
+example.com:443

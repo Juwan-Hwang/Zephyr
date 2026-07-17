@@ -1,0 +1,5 @@
+---
+source: crates/core/src/event.rs
+expression: redact_error_message("Core at /home/user/.config/zephyr/core failed; profiles at /home/user/.config/zephyr/profiles also failed")
+---
+Core at [CORE_DIR] failed; profiles at [PROFILES_DIR] also failed

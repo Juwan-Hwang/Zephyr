@@ -32,3 +32,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{truncated}...")
     }
 }
+
+#[cfg(test)]
+#[path = "os_notification_tests.rs"]
+mod os_notification_tests;

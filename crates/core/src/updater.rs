@@ -381,4 +381,30 @@ mod tests {
             "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz"
         );
     }
+
+    // -- Snapshot tests ----------------------------------------------------
+
+    #[test]
+    fn snapshot_build_asset_url_linux() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.18.0",
+            "mihomo-linux-amd64-v1.18.0.gz"
+        ));
+    }
+
+    #[test]
+    fn snapshot_build_asset_url_windows() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.19.28",
+            "mihomo-windows-amd64-v3-v1.19.28.zip"
+        ));
+    }
+
+    #[test]
+    fn snapshot_build_asset_url_arm64() {
+        insta::assert_snapshot!(build_asset_download_url(
+            "v1.20.1",
+            "mihomo-darwin-arm64-v1.20.1.gz"
+        ));
+    }
 }
