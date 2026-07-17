@@ -199,17 +199,11 @@ jobs:
         with:
           targets: ${{ (matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin') || (matrix.target == 'aarch64-pc-windows-msvc' && 'aarch64-pc-windows-msvc') || '' }}
 
-      - name: Install dependencies (Ubuntu x64 only)
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install dependencies (Ubuntu ARM64 only)
-        if: matrix.platform == 'ubuntu-22.04-arm'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
 
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-latest'
@@ -432,10 +426,16 @@ jobs:
       - name: Install minisign
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz -o minisign.tar.gz
-            tar xzf minisign.tar.gz
-            sudo mv minisign-linux/x86_64/minisign /usr/local/bin/
-            rm -rf minisign.tar.gz minisign-linux
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "aarch64" ]; then
+              # No prebuilt ARM binary — build from source (Rust is already installed)
+              cargo install minisign --root /usr/local --locked
+            else
+              curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz -o minisign.tar.gz
+              tar xzf minisign.tar.gz
+              sudo mv minisign-linux/x86_64/minisign /usr/local/bin/
+              rm -rf minisign.tar.gz minisign-linux
+            fi
           elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install minisign
           elif [ "$RUNNER_OS" = "Windows" ]; then
