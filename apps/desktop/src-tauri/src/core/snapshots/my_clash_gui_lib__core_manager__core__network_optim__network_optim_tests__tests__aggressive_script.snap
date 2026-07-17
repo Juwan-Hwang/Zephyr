@@ -1,0 +1,50 @@
+---
+source: apps/desktop/src-tauri/src/core/network_optim_tests.rs
+expression: generate_linux_optim_script(&cfg)
+---
+set -e
+export PATH="/usr/sbin:/sbin:$PATH"
+
+# TCP Fast Open + ECN
+sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
+sysctl -w net.ipv4.tcp_ecn=1 2>/dev/null || true
+
+# HyStart: disable ACK train detection, keep RTT delay only
+modprobe tcp_cubic 2>/dev/null || true
+echo 2 > /sys/module/tcp_cubic/parameters/hystart_detect 2>/dev/null || true
+
+# TCP buffer limits (raise-only)
+curr_rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
+curr_rmem_max=${curr_rmem_max:-0}
+if [ "$curr_rmem_max" -lt 33554432 ] 2>/dev/null; then
+    sysctl -w net.core.rmem_max=33554432 2>/dev/null || true
+fi
+curr_wmem_max=$(sysctl -n net.core.wmem_max 2>/dev/null | tr -cd '0-9' || echo 0)
+curr_wmem_max=${curr_wmem_max:-0}
+if [ "$curr_wmem_max" -lt 67108864 ] 2>/dev/null; then
+    sysctl -w net.core.wmem_max=67108864 2>/dev/null || true
+fi
+read -r r_min r_def r_max <<< "$(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo "4096 524288 33554432")"
+r_min=${r_min:-4096}; r_def=${r_def:-524288}; r_max=${r_max:-33554432}
+if [ "$r_def" -lt 524288 ] 2>/dev/null; then r_def=524288; fi
+if [ "$r_max" -lt 33554432 ] 2>/dev/null; then r_max=33554432; fi
+sysctl -w "net.ipv4.tcp_rmem=$r_min $r_def $r_max" 2>/dev/null || true
+read -r w_min w_def w_max <<< "$(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo "4096 524288 67108864")"
+w_min=${w_min:-4096}; w_def=${w_def:-524288}; w_max=${w_max:-67108864}
+if [ "$w_def" -lt 524288 ] 2>/dev/null; then w_def=524288; fi
+if [ "$w_max" -lt 67108864 ] 2>/dev/null; then w_max=67108864; fi
+sysctl -w "net.ipv4.tcp_wmem=$w_min $w_def $w_max" 2>/dev/null || true
+sysctl -w net.ipv4.tcp_notsent_lowat=262144 2>/dev/null || true
+
+# Persist to /etc/sysctl.d so it survives reboot
+cat > /etc/sysctl.d/99-zephyr-tcp-tuning.conf << 'SYSEOF'
+# Zephyr TCP performance tuning
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_ecn = 1
+net.core.rmem_max = 33554432
+net.core.wmem_max = 67108864
+net.ipv4.tcp_rmem = 4096 524288 33554432
+net.ipv4.tcp_wmem = 4096 524288 67108864
+net.ipv4.tcp_notsent_lowat = 262144
+SYSEOF
+chmod 644 /etc/sysctl.d/99-zephyr-tcp-tuning.conf 2>/dev/null || true
