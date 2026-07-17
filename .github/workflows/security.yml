@@ -122,6 +122,7 @@ jobs:
     name: "\U0001F4E6 Frontend Dependency Audit"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: pnpm/action-setup@v4
