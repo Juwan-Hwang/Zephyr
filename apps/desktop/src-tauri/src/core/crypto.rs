@@ -289,10 +289,10 @@ pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
 
     let nonce_bytes: [u8; 12] = rand::rng().random();
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce: Nonce<_> = nonce_bytes.into();
 
     let ciphertext = cipher
-        .encrypt(nonce, s.as_bytes())
+        .encrypt(&nonce, s.as_bytes())
         .map_err(|e| format!("AES encryption failed: {e}"))?;
 
     let mut result = b"v2:".to_vec();
@@ -340,10 +340,12 @@ pub(super) fn deobfuscate_string(s: &str) -> Result<String, String> {
     let cipher = Aes256Gcm::new_from_slice(&key_bytes)
         .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
 
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce: Nonce<_> = nonce_bytes
+        .try_into()
+        .map_err(|e| format!("Invalid nonce length: {e}"))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| format!("AES decryption failed - data may be tampered: {e}"))?;
 
     String::from_utf8(plaintext).map_err(|e| format!("Decrypted data is not valid UTF-8: {e}"))
@@ -648,9 +650,9 @@ pub mod test_helpers {
         };
 
         let nonce_bytes: [u8; 12] = rand::rng().random();
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce: Nonce<_> = nonce_bytes.into();
 
-        match cipher.encrypt(nonce, plaintext.as_bytes()) {
+        match cipher.encrypt(&nonce, plaintext.as_bytes()) {
             Ok(ciphertext) => {
                 let mut result = b"v2:".to_vec();
                 result.extend(&nonce_bytes);
@@ -666,7 +668,7 @@ pub mod test_helpers {
     pub fn deobfuscate_with_key(ciphertext: &str, key: &[u8]) -> String {
         use aes_gcm::{
             aead::{Aead as _, KeyInit as _},
-            Aes256Gcm, Nonce,
+            Aes256Gcm,
         };
 
         let Ok(decoded) = base64_standard.decode(ciphertext) else {
@@ -688,9 +690,11 @@ pub mod test_helpers {
             return String::new();
         };
 
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let Ok(nonce) = nonce_bytes.try_into() else {
+            return String::new();
+        };
 
-        match cipher.decrypt(nonce, ct) {
+        match cipher.decrypt(&nonce, ct) {
             Ok(pt) => String::from_utf8_lossy(&pt).into_owned(),
             Err(_) => String::new(),
         }
