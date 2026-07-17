@@ -434,16 +434,18 @@ html:not(.dark) #app-main-container {
 
 html:not(.dark) .glass-card {
   background: rgba(255, 255, 255, 0.4);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
   border-color: rgba(255, 255, 255, 0.6);
   box-shadow: 0 4px 16px -4px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 html:not(.dark) .glass-card:hover {
   background: rgba(255, 255, 255, 0.6);
   border-color: rgba(255, 255, 255, 0.8);
   box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 html:not(.dark) #setting-lang-menu {
