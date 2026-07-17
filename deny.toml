@@ -50,6 +50,8 @@ allow = [
   "0BSD",
   # notify (via clash-prism-core) — FSF-approved public-domain dedication
   "CC0-1.0",
+  # libbz2-rs-sys (via zip v8 → bzip2 v0.6) — BSD-like, FSF-approved
+  "bzip2-1.0.6",
 ]
 
 [bans]
