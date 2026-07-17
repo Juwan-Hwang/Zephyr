@@ -428,8 +428,11 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then
             ARCH=$(uname -m)
             if [ "$ARCH" = "aarch64" ]; then
-              # No prebuilt ARM binary — build from source (Rust is already installed)
-              cargo install minisign --root /usr/local --locked
+              # No prebuilt ARM binary — compile C version from source
+              sudo apt-get install -y cmake libsodium-dev
+              git clone --depth 1 https://github.com/jedisct1/minisign.git /tmp/minisign-src
+              (cd /tmp/minisign-src && mkdir build && cd build && cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local && make -j$(nproc) && sudo make install)
+              rm -rf /tmp/minisign-src
             else
               curl -sL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz -o minisign.tar.gz
               tar xzf minisign.tar.gz

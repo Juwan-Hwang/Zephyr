@@ -62,6 +62,7 @@ chrono = { version = "0.4", features = ["serde"] }
 toml = "1.1"
 dashmap = "6.0"
 minisign = "0.9"
+arboard = "3.3"
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
@@ -102,6 +103,8 @@ webview2-com = "=0.38.2"
 # Currently using only std::process::Command for networksetup
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Enable Wayland clipboard support via wlr-data-control protocol
+arboard = { version = "3.3", features = ["wayland-data-control"] }
 # Linux specific dependencies will be added as needed
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
