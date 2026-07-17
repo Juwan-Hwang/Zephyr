@@ -248,6 +248,52 @@ fn show_or_recreate_window(app: &AppHandle) {
     crate::show_or_recreate_main_window(app);
 }
 
+/// Resolve the shell format, falling back to a platform-appropriate default when empty.
+///
+/// - Empty string → `"powershell"` on Windows, `"bash"` elsewhere.
+/// - Non-empty string → returned as-is (caller normalizes case via `format_proxy_env`).
+#[must_use]
+pub(crate) const fn resolve_proxy_format(format: &str) -> &str {
+    if format.is_empty() {
+        if cfg!(target_os = "windows") {
+            "powershell"
+        } else {
+            "bash"
+        }
+    } else {
+        format
+    }
+}
+
+/// Format proxy environment variables for the given shell format and port.
+///
+/// Linux/macOS shells export both lowercase and uppercase proxy variables
+/// for maximum CLI tool compatibility (curl/wget read lowercase, Go reads uppercase).
+/// cmd is Windows-only (case-insensitive, single set).
+/// PowerShell/NuShell are cross-platform; on macOS/Linux env vars are case-sensitive,
+/// so both lowercase and uppercase are set for compatibility.
+#[must_use]
+pub(crate) fn format_proxy_env(format: &str, port: u16) -> String {
+    let proxy = format!("http://127.0.0.1:{port}");
+    match format.to_ascii_lowercase().as_str() {
+        "fish" => format!(
+            "set -x http_proxy {proxy}; set -x https_proxy {proxy}; set -x all_proxy {proxy}; set -x HTTP_PROXY {proxy}; set -x HTTPS_PROXY {proxy}; set -x ALL_PROXY {proxy}"
+        ),
+        "cmd" => format!(
+            "set http_proxy={proxy}&set https_proxy={proxy}&set all_proxy={proxy}"
+        ),
+        "powershell" => format!(
+            "$env:http_proxy=\"{proxy}\"; $env:https_proxy=\"{proxy}\"; $env:all_proxy=\"{proxy}\"; $env:HTTP_PROXY=\"{proxy}\"; $env:HTTPS_PROXY=\"{proxy}\"; $env:ALL_PROXY=\"{proxy}\""
+        ),
+        "nushell" => format!(
+            "$env.http_proxy = \"{proxy}\"; $env.https_proxy = \"{proxy}\"; $env.all_proxy = \"{proxy}\"; $env.HTTP_PROXY = \"{proxy}\"; $env.HTTPS_PROXY = \"{proxy}\"; $env.ALL_PROXY = \"{proxy}\""
+        ),
+        _ => format!(
+            "export http_proxy={proxy} https_proxy={proxy} all_proxy={proxy} HTTP_PROXY={proxy} HTTPS_PROXY={proxy} ALL_PROXY={proxy}"
+        ),
+    }
+}
+
 /// Copy proxy environment variables to clipboard.
 /// Used by the tray "Copy Proxy Env" menu item.
 /// Handles clipboard write directly in Rust — on Linux, `WebKit2GTK`
@@ -272,24 +318,9 @@ fn copy_proxy_env_to_clipboard(app: &AppHandle) -> Result<(), String> {
         .last_proxy_port()
         .unwrap_or(DEFAULT_MIXED_PORT);
 
-    let proxy = format!("http://127.0.0.1:{port}");
-    let text = match format.as_str() {
-        "fish" => format!(
-            "set -x http_proxy {proxy}; set -x https_proxy {proxy}; set -x all_proxy {proxy}; set -x HTTP_PROXY {proxy}; set -x HTTPS_PROXY {proxy}; set -x ALL_PROXY {proxy}"
-        ),
-        "cmd" => format!(
-            "set http_proxy={proxy}\r\nset https_proxy={proxy}\r\nset all_proxy={proxy}"
-        ),
-        "powershell" => format!(
-            "$env:HTTP_PROXY=\"{proxy}\"; $env:HTTPS_PROXY=\"{proxy}\"; $env:ALL_PROXY=\"{proxy}\""
-        ),
-        "nushell" => format!(
-            "$env.HTTP_PROXY = \"{proxy}\"; $env.HTTPS_PROXY = \"{proxy}\"; $env.ALL_PROXY = \"{proxy}\""
-        ),
-        _ => format!(
-            "export http_proxy={proxy} https_proxy={proxy} all_proxy={proxy} HTTP_PROXY={proxy} HTTPS_PROXY={proxy} ALL_PROXY={proxy}"
-        ),
-    };
+    // Resolve format: fall back to platform-appropriate default if empty
+    let resolved_format = resolve_proxy_format(&format);
+    let text = format_proxy_env(resolved_format, port);
 
     // Write to clipboard using arboard (cross-platform)
     let mut cb = arboard::Clipboard::new().map_err(|e| format!("Clipboard access failed: {e}"))?;
@@ -789,3 +820,7 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
         let _ = tray.set_menu(Some(m));
     }
 }
+
+#[cfg(test)]
+#[path = "tray_tests.rs"]
+mod tray_tests;

@@ -51,7 +51,7 @@ pub struct NetworkOptimStatus {
 }
 
 /// Application paths — migrated from `src-tauri/src/core/mod.rs`.
-/// PathBuf is represented as String for UniFFI compatibility.
+/// `PathBuf` is represented as String for `UniFFI` compatibility.
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AppPaths {
