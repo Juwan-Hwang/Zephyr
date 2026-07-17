@@ -1,0 +1,5 @@
+---
+source: apps/desktop/src-tauri/src/core/core_process.rs
+expression: parse_version_output("")
+---
+

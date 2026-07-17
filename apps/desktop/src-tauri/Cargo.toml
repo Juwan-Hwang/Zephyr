@@ -111,6 +111,7 @@ arboard = { version = "3.3", features = ["wayland-data-control"] }
 [dev-dependencies]
 mockall = "0.15"
 tempfile = "3.14"
+insta = { version = "1", features = ["filters"] }
 
 [lints]
 # rustc native lints
