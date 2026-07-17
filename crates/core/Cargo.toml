@@ -28,3 +28,6 @@ clash-prism-smart = "0.1.1"
 default = []
 uniffi = ["dep:uniffi"]
 tokio-async = ["tokio"]
+
+[dev-dependencies]
+insta = { version = "1", features = ["filters"] }
