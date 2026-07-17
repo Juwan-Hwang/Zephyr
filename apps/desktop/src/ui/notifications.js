@@ -248,10 +248,12 @@ export function showConfirmModal(title, message = '') {
 
          
         contentArea.innerHTML = '';
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'rounded-lg border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
-        msgDiv.textContent = message;
-        contentArea.appendChild(msgDiv);
+        if (typeof message === 'string' && message.trim()) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'rounded-lg border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.textContent = message;
+            contentArea.appendChild(msgDiv);
+        }
 
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(false) });
