@@ -22,10 +22,10 @@
   },
   "surface": {
     "page":     { "value": "transparent" },
-    "raised":   { "value": "{bg.secondary}" },
-    "elevated": { "value": "{bg.elevated}" },
-    "input":    { "value": "{bg.input}" },
-    "overlay":  { "value": "{bg.overlay}" }
+    "raised":   { "value": "{bg.secondary}", "lightValue": "rgba(0, 0, 0, 0.04)" },
+    "elevated": { "value": "{bg.elevated}", "lightValue": "#ffffff" },
+    "input":    { "value": "{bg.input}", "lightValue": "rgba(255, 255, 255, 0.8)" },
+    "overlay":  { "value": "{bg.overlay}", "lightValue": "rgba(0, 0, 0, 0.25)" }
   },
   "border": {
     "primary": { "value": "hsla(0, 0%, 100%, 0.1)",       "lightValue": "rgba(0, 0, 0, 0.15)" },
