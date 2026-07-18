@@ -9,3 +9,8 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 zephyr-core = { path = "../core", features = ["uniffi"] }
 uniffi = "0.28"
+
+# 继承 workspace 根 Cargo.toml 的 [workspace.lints] 统一配置，
+# 确保 core-ffi crate 与 desktop 使用同一套 lint 规则。
+[lints]
+workspace = true

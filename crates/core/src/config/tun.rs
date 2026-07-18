@@ -12,12 +12,13 @@ use crate::error::AppError;
 /// Extract secret from YAML config content using the YAML parser.
 /// This avoids issues with line-by-line parsing (multi-line strings, comments, etc.).
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn extract_secret_from_yaml(content: &str) -> Option<String> {
     let yaml_val: yaml::Value = yaml::from_str(content).ok()?;
     yaml_val
         .get("secret")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
+        .map(str::to_owned)
 }
 
 /// Ensure dns-hijack list contains both UDP (`any:53`) and TCP (`tcp://any:53`) entries.
@@ -103,9 +104,9 @@ pub fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, AppErro
 /// Inject TUN file descriptor into YAML config content for Android VPN Service.
 ///
 /// On Android, mihomo cannot create its own TUN device (netlink is banned).
-/// Instead, Android VpnService creates the TUN interface and passes the fd
+/// Instead, Android `VpnService` creates the TUN interface and passes the fd
 /// to mihomo via the `tun.fd` config field. This function reliably injects
-/// the fd using serde_yaml (not regex), and enables `auto-route` and
+/// the fd using `serde_yaml` (not regex), and enables `auto-route` and
 /// `auto-detect-interface` since VPN Service requires mihomo to handle routing
 /// through the TUN interface.
 #[cfg_attr(feature = "uniffi", uniffi::export)]

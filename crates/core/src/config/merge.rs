@@ -216,13 +216,21 @@ pub fn update_config_core<I: ConfigIo>(
 
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
 #[cfg_attr(feature = "uniffi", uniffi::export)]
+#[must_use]
 pub fn mask_url(url: String) -> String {
     if let Ok(parsed) = url::Url::parse(&url) {
         let host = parsed.host_str().unwrap_or("???");
-        let masked_host = if host.len() > 6 {
-            format!("{}***{}", &host[..3], &host[host.len() - 3..])
-        } else {
-            "***".to_owned()
+        // Use char-based iteration to avoid panics on multi-byte UTF-8 hosts (IDN domains).
+        // `take`/`skip` are panic-free (no indexing) and avoid Vec<char> allocation.
+        let masked_host = {
+            let char_count = host.chars().count();
+            if char_count > 6 {
+                let prefix: String = host.chars().take(3).collect();
+                let suffix: String = host.chars().skip(char_count - 3).collect();
+                format!("{prefix}***{suffix}")
+            } else {
+                "***".to_owned()
+            }
         };
         // Only show scheme + masked host; hide path and query entirely
         format!("{}://{masked_host}/***", parsed.scheme())
@@ -335,5 +343,32 @@ mod tests {
     fn test_mask_url_preserves_scheme() {
         let result = mask_url("https://example.com/path".to_owned());
         assert!(result.starts_with("https://"));
+    }
+
+    // -- Snapshot tests for URL masking -----------------------------------
+
+    #[test]
+    fn snapshot_mask_url_https() {
+        insta::assert_snapshot!(mask_url("https://example.com/path?token=abc".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_http_long_host() {
+        insta::assert_snapshot!(mask_url("http://subdomain.example.com/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_short_host() {
+        insta::assert_snapshot!(mask_url("https://ab.co/path".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_invalid() {
+        insta::assert_snapshot!(mask_url("not-a-url".to_owned()));
+    }
+
+    #[test]
+    fn snapshot_mask_url_unicode_host() {
+        insta::assert_snapshot!(mask_url("https://例子.测试.com/path".to_owned()));
     }
 }
