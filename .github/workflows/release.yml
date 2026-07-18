@@ -9,6 +9,7 @@ jobs:
   release:
     permissions:
       contents: write
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -420,6 +421,83 @@ jobs:
           touch portable/.portable
           ARCH_SUFFIX="${{ matrix.arch }}"
           cd portable && tar czf ../dist-artifacts/Zephyr-linux-${ARCH_SUFFIX}-portable.tar.gz . && cd ..
+        shell: bash
+
+      # ── Code signing (SignPath) for Windows artifacts ──
+      # Signs NSIS installers (.exe) and MSI packages (.msi) with the
+      # release-signing policy.  Runs for both x64 and arm64 Windows builds.
+      # Reference: the verified test-signing workflow (.github/workflows/test-signing.yml).
+      - name: Stage unsigned Windows artifacts for signing
+        if: matrix.platform == 'windows-latest'
+        run: |
+          mkdir -p unsigned-staging
+          # All four Windows artifacts are expected from the build steps above.
+          # Fail immediately if any is missing or if multiple matches are found.
+          shopt -s nullglob
+          EXPECTED=(
+            "dist-artifacts/*-setup-full.exe"
+            "dist-artifacts/*-setup-lite.exe"
+            "dist-artifacts/*-full.msi"
+            "dist-artifacts/*-lite.msi"
+          )
+          for pattern in "${EXPECTED[@]}"; do
+            files=( $pattern )
+            if [ ${#files[@]} -eq 0 ]; then
+              echo "ERROR: Expected artifact not found: $pattern"
+              exit 1
+            fi
+            if [ ${#files[@]} -gt 1 ]; then
+              echo "ERROR: Multiple files matched pattern: $pattern"
+              printf 'Matches:\n%s\n' "${files[@]}"
+              exit 1
+            fi
+            cp "${files[0]}" unsigned-staging/
+          done
+          echo "Staged $(ls -1 unsigned-staging/ | wc -l) files for code signing:"
+          ls -la unsigned-staging/
+        shell: bash
+
+      - name: Upload unsigned Windows artifacts for signing
+        if: matrix.platform == 'windows-latest'
+        id: upload-unsigned-windows
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zephyr-unsigned-windows-${{ matrix.arch }}
+          path: unsigned-staging/*
+          if-no-files-found: error
+
+      - name: Sign Windows artifacts with SignPath
+        if: matrix.platform == 'windows-latest'
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: '480cc228-d09e-4d18-b654-4917b96a0611'
+          project-slug: 'Zephyr'
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: './signed-windows'
+
+      - name: Replace unsigned artifacts with signed ones
+        if: matrix.platform == 'windows-latest'
+        run: |
+          echo "Signed artifacts from SignPath:"
+          ls -la ./signed-windows/
+          # Verify every staged file has a signed counterpart, then replace.
+          # This prevents partial signing from leaving unsigned binaries in dist-artifacts.
+          for unsigned in unsigned-staging/*; do
+            name="$(basename "$unsigned")"
+            signed="./signed-windows/$name"
+            if [ ! -f "$signed" ]; then
+              echo "ERROR: Missing signed artifact: $name"
+              exit 1
+            fi
+            cp -f "$signed" "dist-artifacts/$name"
+          done
+          # Clean up staging directories
+          rm -rf unsigned-staging signed-windows
+          echo "Final Windows artifacts in dist-artifacts:"
+          ls -la dist-artifacts/*.exe dist-artifacts/*.msi 2>/dev/null || true
         shell: bash
 
       # ── Minisign: sign all release artifacts ──
