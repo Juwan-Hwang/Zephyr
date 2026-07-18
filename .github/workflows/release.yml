@@ -196,9 +196,16 @@ jobs:
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          targets: ${{ (matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin') || (matrix.target == 'aarch64-pc-windows-msvc' && 'aarch64-pc-windows-msvc') || '' }}
+          toolchain: stable
+
+      - name: Add Rust cross-compilation target
+        if: matrix.target != ''
+        shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.target }}
+        run: rustup target add "$RUST_TARGET"
 
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
