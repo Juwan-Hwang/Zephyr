@@ -12,8 +12,8 @@ Zephyr is maintained by [Juwan Hwang](https://github.com/Juwan-Hwang), who acts 
 
 Only the official Windows release artifacts are signed:
 
-- NSIS installer (`Zephyr_*_x64-setup.exe`, `Zephyr_*_arm64-setup.exe`)
-- MSI package (`Zephyr_*_x64_*.msi`, `Zephyr_*_arm64_*.msi`)
+- NSIS installer (`Zephyr_*_x64-setup-full.exe`, `Zephyr_*_arm64-setup-full.exe`, `Zephyr_*_x64-setup-lite.exe`, `Zephyr_*_arm64-setup-lite.exe`)
+- MSI package (`Zephyr_*_x64-full.msi`, `Zephyr_*_arm64-full.msi`, `Zephyr_*_x64-lite.msi`, `Zephyr_*_arm64-lite.msi`)
 
 Artifacts are built by GitHub Actions directly from the source in this repository and submitted to SignPath from that workflow only.
 
@@ -26,7 +26,7 @@ This program will not transfer any information to other networked systems unless
 On Windows, check the signature with PowerShell:
 
 ```powershell
-Get-AuthenticodeSignature .\Zephyr_*_setup.exe
+Get-AuthenticodeSignature .\Zephyr_*.exe, .\Zephyr_*.msi -ErrorAction SilentlyContinue
 ```
 
 The status must be **Valid** and the signer **SignPath Foundation**. You can also right-click the file → Properties → Digital Signatures.
