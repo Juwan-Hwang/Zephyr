@@ -42,7 +42,7 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
 
       - name: Sign with SignPath
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: '480cc228-d09e-4d18-b654-4917b96a0611'
