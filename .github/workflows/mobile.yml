@@ -11,8 +11,9 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Add Rust cross-compilation targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Install cargo-ndk & uniffi-bindgen
         run: |
@@ -80,8 +81,9 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Add Rust cross-compilation targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
       - name: Install uniffi-bindgen
         run: |
