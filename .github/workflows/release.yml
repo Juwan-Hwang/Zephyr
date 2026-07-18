@@ -197,8 +197,10 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ (matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin') || (matrix.target == 'aarch64-pc-windows-msvc' && 'aarch64-pc-windows-msvc') || '' }}
+
+      - name: Add Rust cross-compilation target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
 
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
