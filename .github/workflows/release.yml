@@ -290,8 +290,10 @@ jobs:
           shopt -s nullglob
           if [ -n "${{ matrix.target }}" ]; then
             BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+            EXE_PATH="target/${{ matrix.target }}/release/Zephyr.exe"
           else
             BUNDLE_DIR="target/release/bundle"
+            EXE_PATH="target/release/Zephyr.exe"
           fi
           for f in $BUNDLE_DIR/nsis/*-setup.exe; do
             cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
@@ -299,6 +301,8 @@ jobs:
           for f in $BUNDLE_DIR/msi/*.msi; do
             cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
           done
+          # Copy raw exe for portable (same binary, avoids a 3rd full compile)
+          cp "$EXE_PATH" "dist-artifacts/Zephyr_${{ steps.get_version.outputs.VERSION }}_${{ matrix.arch }}-portable.exe"
         shell: bash
 
       - name: Collect macOS Full artifacts
@@ -380,50 +384,20 @@ jobs:
           done
         shell: bash
 
-      # ── Portable builds (Windows ZIP + Linux AppImage) ──
-      # Portable uses the same bundled resources as Full, with SHA256 verification
+      # ── Portable builds (Windows ZIP + Linux tar.gz) ──
+      # Portable reuses the Full build binary — no 3rd compile needed.
+      # Windows: uses the Authenticode-signed exe after SignPath verification.
+      # Linux: uses the AppImage already collected from the Full build.
 
-      # ── Restore bundled for portable (reuses unified script) ──
-      - name: Restore bundled for portable
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
+      - name: Package Portable (Linux)
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
-        shell: bash
-
-      - name: Clean bundle directory before portable build
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
-        run: |
-          # Clean previous builds to ensure we get the correct portable artifact
-          rm -rf target/release/bundle
-        shell: bash
-
-      - name: Build Tauri app (Portable)
-        if: matrix.platform == 'windows-latest' || matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
-        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
-
-      - name: Package Portable ZIP (Windows)
-        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
         run: |
           mkdir -p portable/core portable/profiles portable/prism/plugins
-          cp target/release/Zephyr.exe portable/
-          cp apps/desktop/src-tauri/bundled/* portable/core/
-          touch portable/.portable
-          cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr-windows-portable.zip . && cd ..
-        shell: bash
-
-      - name: Package Portable AppImage (Linux)
-        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
-        run: |
-          # Get the freshly built AppImage (should be the only one after clean)
-          APPIMAGE=$(ls -t target/release/bundle/appimage/Zephyr*.AppImage | head -1)
-          if [ -z "$APPIMAGE" ]; then
-            echo "ERROR: No AppImage found!"
-            exit 1
-          fi
-          echo "Using AppImage: $APPIMAGE"
-          mkdir -p portable/core portable/profiles portable/prism/plugins
-          cp "$APPIMAGE" portable/
+          cp dist-artifacts/Zephyr_*_${{ matrix.arch }}-full.AppImage portable/Zephyr.AppImage
+          # Restore bundled resources (were removed before Lite build)
+          /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
           cp apps/desktop/src-tauri/bundled/* portable/core/
           touch portable/.portable
           ARCH_SUFFIX="${{ matrix.arch }}"
@@ -446,6 +420,7 @@ jobs:
             "dist-artifacts/Zephyr_*_${{ matrix.arch }}-setup-lite.exe"
             "dist-artifacts/Zephyr_*_${{ matrix.arch }}*-full.msi"
             "dist-artifacts/Zephyr_*_${{ matrix.arch }}*-lite.msi"
+            "dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe"
           )
           for pattern in "${EXPECTED[@]}"; do
             mapfile -t files < <(compgen -G "$pattern")
@@ -519,6 +494,23 @@ jobs:
           Remove-Item -Recurse -Force unsigned-staging, signed-windows
           Write-Host "Final Windows artifacts in dist-artifacts:"
           Get-ChildItem dist-artifacts/*.exe, dist-artifacts/*.msi -ErrorAction SilentlyContinue | Format-Table Name, Length
+
+      - name: Package Portable ZIP (Windows) from signed exe
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p portable/core portable/profiles portable/prism/plugins
+          # Use the Authenticode-signed exe from dist-artifacts
+          cp dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe portable/Zephyr.exe
+          # Restore bundled resources (were removed before Lite build)
+          /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
+          cp apps/desktop/src-tauri/bundled/* portable/core/
+          touch portable/.portable
+          cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr_${{ matrix.arch }}-portable.zip . && cd ..
+          # Remove the standalone portable exe (now inside the ZIP)
+          rm -f dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe
+        shell: bash
 
       # ── Minisign: sign all release artifacts ──
       - name: Install minisign

@@ -7,14 +7,14 @@
 ## 下载
 
 从 [Releases](https://github.com/Juwan-Hwang/Zephyr/releases) 下载：
-- **Windows**: `Zephyr-windows-portable.zip`
-- **Linux**: `Zephyr-linux-portable.tar.gz` (包含 AppImage + 数据目录)
+- **Windows**: `Zephyr_x64-portable.zip` / `Zephyr_arm64-portable.zip`
+- **Linux**: `Zephyr-linux-x64-portable.tar.gz` / `Zephyr-linux-arm64-portable.tar.gz` (包含 AppImage + 数据目录)
 
 ## 使用方法
 
 ### Windows
 
-1. 解压 `Zephyr-windows-portable.zip` 到任意目录（如 U 盘、桌面）
+1. 解压 `Zephyr_x64-portable.zip` 或 `Zephyr_arm64-portable.zip` 到任意目录（如 U 盘、桌面）
 2. 确保目录中有 `.portable` 标记文件
 3. 运行 `Zephyr.exe`
 
@@ -32,12 +32,12 @@ Zephyr/
 
 ### Linux (AppImage)
 
-1. 解压 `Zephyr-linux-portable.tar.gz`
+1. 解压 `Zephyr-linux-x64-portable.tar.gz` 或 `Zephyr-linux-arm64-portable.tar.gz`
 2. 确保 `.portable` 文件与 `.AppImage` 在同一目录
 3. 运行 `./Zephyr-*.AppImage`
 
 ```bash
-tar xzf Zephyr-linux-portable.tar.gz
+tar xzf Zephyr-linux-*-portable.tar.gz
 cd Zephyr
 chmod +x Zephyr-*.AppImage
 ./Zephyr-*.AppImage

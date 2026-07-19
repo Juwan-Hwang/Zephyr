@@ -200,7 +200,7 @@ Get the appropriate package from [GitHub Releases](https://github.com/Juwan-Hwan
 
 ### Portable Version Usage
 
-1. Download `Zephyr-windows-portable.zip` or `Zephyr-linux-portable.tar.gz`
+1. Download `Zephyr_x64-portable.zip` / `Zephyr_arm64-portable.zip` or `Zephyr-linux-x64-portable.tar.gz` / `Zephyr-linux-arm64-portable.tar.gz`
 2. Extract to any directory
 3. Create an empty file named `.portable` in the directory (or it will be auto-created on first run)
 4. Run the executable
