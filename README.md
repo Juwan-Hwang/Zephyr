@@ -200,7 +200,7 @@ Zephyr 采用纵深防御策略：
 
 ### 便携版使用
 
-1. 下载 `Zephyr-windows-portable.zip` 或 `Zephyr-linux-portable.tar.gz`
+1. 下载 `Zephyr_x64-portable.zip` / `Zephyr_arm64-portable.zip` 或 `Zephyr-linux-x64-portable.tar.gz` / `Zephyr-linux-arm64-portable.tar.gz`
 2. 解压至任意目录
 3. 在目录中创建名为 `.portable` 的空文件（首次运行时会自动创建）
 4. 运行可执行文件
