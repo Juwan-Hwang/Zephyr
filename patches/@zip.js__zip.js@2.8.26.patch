@@ -1,0 +1,42 @@
+diff --git a/index-native.cjs b/index-native.cjs
+index bbabd2b5f980f1a4a29e0482ffa205e3c9a04469..bfa964f728b5ee68197ea2c2f1bbe08a0f5a3437 100644
+--- a/index-native.cjs
++++ b/index-native.cjs
+@@ -361,7 +361,8 @@ function encodeText(value) {
+ 
+ /*
+  * SJCL is open. You can use, modify and redistribute it under a BSD
+- * license or under the GNU GPL, version 2.0.
++ * license. (Dual-licensed under BSD or GNU GPL v2.0; this distribution
++ * elects the BSD license per the original SJCL license terms.)
+  */
+ 
+ /** @fileOverview Javascript cryptography implementation.
+diff --git a/index.cjs b/index.cjs
+index 5cb56e1cd343ac17e5d393182dd2e8ccf70fe706..cf756401b5f31af54e60efbaf3f87b77d5e418ec 100644
+--- a/index.cjs
++++ b/index.cjs
+@@ -361,7 +361,8 @@ function encodeText(value) {
+ 
+ /*
+  * SJCL is open. You can use, modify and redistribute it under a BSD
+- * license or under the GNU GPL, version 2.0.
++ * license. (Dual-licensed under BSD or GNU GPL v2.0; this distribution
++ * elects the BSD license per the original SJCL license terms.)
+  */
+ 
+ /** @fileOverview Javascript cryptography implementation.
+diff --git a/lib/core/streams/codecs/sjcl.js b/lib/core/streams/codecs/sjcl.js
+index abd44b705d7bb61c9e2c090c6057e0a2a7c02e99..3afc93a8942da2ba8e676ed2bee5a7f2db26e5f7 100644
+--- a/lib/core/streams/codecs/sjcl.js
++++ b/lib/core/streams/codecs/sjcl.js
+@@ -4,7 +4,8 @@
+ 
+ /*
+  * SJCL is open. You can use, modify and redistribute it under a BSD
+- * license or under the GNU GPL, version 2.0.
++ * license. (Dual-licensed under BSD or GNU GPL v2.0; this distribution
++ * elects the BSD license per the original SJCL license terms.)
+  */
+ 
+ /** @fileOverview Javascript cryptography implementation.
