@@ -487,7 +487,7 @@ export async function testProxy(name, customTimeout = 5000) {
   latencyTestController.signal.addEventListener('abort', onGlobalAbort, { once: true });
 
   try {
-    const testUrl = 'http://www.gstatic.com/generate_204';
+    const testUrl = 'https://www.gstatic.com/generate_204';
     const apiUrl = `/proxies/${encodeURIComponent(name)}/delay?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`;
 
     const res = await apiFetch(apiUrl, {
