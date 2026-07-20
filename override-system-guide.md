@@ -195,7 +195,7 @@ dns:
   $override:
     enable: true
     enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
+    fake-ip-range: 198.18.0.0/16
     nameserver:
       - https://doh.pub/dns-query
       - https://dns.alidns.com/dns-query
@@ -708,7 +708,7 @@ dns:
   $default:
     enable: true
     enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
+    fake-ip-range: 198.18.0.0/16
     fake-ip-filter:
       - "*.lan"
       - "localhost.ptlogin2.qq.com"
@@ -804,7 +804,7 @@ function main(config) {
         newGroups.push({
             name: groupName,
             type: region.type,
-            url: 'http://www.gstatic.com/generate_204',
+            url: 'https://www.gstatic.com/generate_204',
             interval: 300,
             tolerance: 50,
             proxies: nodes,

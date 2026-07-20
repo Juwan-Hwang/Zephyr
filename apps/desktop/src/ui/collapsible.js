@@ -5,6 +5,8 @@
  * Eliminates code duplication between renderConfigSection and renderArraySection.
  */
 
+import { generateDomId } from '../utils/dom-id.js';
+
 /**
  * Create a collapsible panel.
  * @param {HTMLElement} container - Parent element to append the collapsible to
@@ -39,7 +41,6 @@ export function createCollapsible(container, {
     header.setAttribute('tabindex', '0');
     header.setAttribute('aria-expanded', defaultOpen ? 'true' : 'false');
     header.addEventListener('keydown', (e) => { if (e.target === header && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); header.click(); } });
-
     const leftPart = document.createElement('div');
     leftPart.className = 'flex items-center gap-2.5';
 
@@ -90,6 +91,7 @@ export function createCollapsible(container, {
     // Content wrapper for smooth animation
     const contentWrapper = document.createElement('div');
     contentWrapper.className = 'collapse-content-wrapper';
+    contentWrapper.id = generateDomId('collapsible-content');
     contentWrapper.style.cssText = `
         display: grid;
         grid-template-rows: 0fr;
@@ -111,14 +113,14 @@ export function createCollapsible(container, {
     contentInner.appendChild(content);
     contentWrapper.appendChild(contentInner);
 
+    // Wire aria-controls immediately so the relationship is available
+    // before the first toggle (accessibility).
+    header.setAttribute('aria-controls', contentWrapper.id);
+
     // Collapse state
     let isCollapsed = !defaultOpen;
 
     const updateCollapse = () => {
-        if (!contentWrapper.id) {
-            contentWrapper.id = 'collapsible-content-' + Math.random().toString(36).substring(2, 9);
-        }
-        header.setAttribute('aria-controls', contentWrapper.id);
         header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         if (isCollapsed) {
             contentWrapper.style.gridTemplateRows = '0fr';
