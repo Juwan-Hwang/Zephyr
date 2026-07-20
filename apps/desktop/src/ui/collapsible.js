@@ -5,6 +5,8 @@
  * Eliminates code duplication between renderConfigSection and renderArraySection.
  */
 
+import { generateDomId } from '../utils/dom-id.js';
+
 /**
  * Create a collapsible panel.
  * @param {HTMLElement} container - Parent element to append the collapsible to
@@ -116,7 +118,7 @@ export function createCollapsible(container, {
 
     const updateCollapse = () => {
         if (!contentWrapper.id) {
-            contentWrapper.id = 'collapsible-content-' + Math.random().toString(36).substring(2, 9);
+            contentWrapper.id = generateDomId('collapsible-content');
         }
         header.setAttribute('aria-controls', contentWrapper.id);
         header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');

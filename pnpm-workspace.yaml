@@ -1,12 +1,24 @@
 packages:
-  - "apps/*"
-  - "packages/*"
-
-overrides:
-  vite: "8.1.4"
-  brace-expansion: ">=5.0.6"
-  ws: ">=8.20.1"
+  - apps/*
+  - packages/*
 
 onlyBuiltDependencies:
-  - "@parcel/watcher"
-  - "esbuild"
+  - '@parcel/watcher'
+  - esbuild
+
+overrides:
+  vite: 8.1.4
+  brace-expansion: '>=5.0.6'
+  ws: '>=8.20.1'
+  '@jsonjoy.com/json-pack@^1.11.0': ^17.67.0
+  '@jsonjoy.com/base64@^1.1.2': ^18.28.0
+  '@jsonjoy.com/buffers@^1.2.1': ^18.28.0
+  '@jsonjoy.com/codegen@^1.0.0': ^18.28.0
+  '@jsonjoy.com/json-pointer@^1.0.2': ^18.28.0
+  '@jsonjoy.com/util@^1.9.0': ^18.28.0
+  nanoid@^3.3.15: ^5.1.16
+  tinybench@^2.9.0: ^6.0.2
+  which@^2.0.2: ^5.0.0
+
+patchedDependencies:
+  '@zip.js/zip.js@2.8.26': patches/@zip.js__zip.js@2.8.26.patch
