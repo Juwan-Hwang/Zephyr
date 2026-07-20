@@ -187,10 +187,10 @@ jobs:
         shell: bash
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
           cache: pnpm
@@ -548,10 +548,12 @@ jobs:
         shell: bash
 
       - name: Sign release artifacts
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
         run: |
           # Write private key to temp file (minisign requires a file path)
           KEY_FILE=$(mktemp)
-          printf '%s' "${{ secrets.MINISIGN_PRIVATE_KEY }}" > "$KEY_FILE"
+          printf '%s' "$MINISIGN_PRIVATE_KEY" > "$KEY_FILE"
           trap 'rm -f "$KEY_FILE"' EXIT
 
           shopt -s nullglob
@@ -565,8 +567,36 @@ jobs:
           ls -la dist-artifacts/*.minisig 2>/dev/null || echo "No signatures generated"
         shell: bash
 
+      # ── SBOM: 生成并附加到 Release Assets（永久保存）──
+      - name: Generate SBOM for Release
+        shell: bash
+        run: |
+          # Install cargo-cyclonedx and generate Rust SBOM
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --all --format json
+          mkdir -p sbom
+          find . -name '*.cdx.json' -not -path './sbom/*' -exec cp {} sbom/ \;
+          if [ -z "$(ls sbom/*.cdx.json 2>/dev/null)" ]; then
+            echo "::error::No Rust SBOM files generated"
+            exit 1
+          fi
+          echo "Rust SBOM files:"
+          ls -la sbom/
+
+          # Generate NPM SBOM (--ignore-scripts: SonarCloud S6724; --ignore-errors: pnpm layout)
+          npx --yes --ignore-scripts @cyclonedx/cyclonedx-npm \
+            --output-file sbom/bom.npm.cdx.json --ignore-errors
+
+          # Merge all SBOMs into one
+          npx --yes --ignore-scripts @cyclonedx/cyclonedx-cli merge \
+            --input-files sbom/*.cdx.json \
+            --output-file "dist-artifacts/SBOM-${{ github.ref_name }}.cdx.json"
+
+          echo "SBOM generated:"
+          ls -la dist-artifacts/SBOM-*.cdx.json
+
       - name: Upload All Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
