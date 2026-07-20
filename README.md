@@ -44,6 +44,7 @@
 ## 截图
 
 ![Zephyr 主页 - macOS 浅色模式 Mihomo 代理客户端界面](apps/desktop/assets/screenshot-home.png)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJuwan-Hwang%2FZephyr.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FJuwan-Hwang%2FZephyr?ref=badge_shield)
 
 <details>
 <summary>更多截图</summary>
@@ -335,6 +336,9 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
 本项目使用 [MIT License](LICENSE)。
 
 ---
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJuwan-Hwang%2FZephyr.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FJuwan-Hwang%2FZephyr?ref=badge_large)
 
 ## Sponsors
 
