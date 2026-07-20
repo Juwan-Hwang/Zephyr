@@ -1,12 +1,21 @@
 packages:
-  - "apps/*"
-  - "packages/*"
-
-overrides:
-  vite: "8.1.4"
-  brace-expansion: ">=5.0.6"
-  ws: ">=8.20.1"
+  - apps/*
+  - packages/*
 
 onlyBuiltDependencies:
-  - "@parcel/watcher"
-  - "esbuild"
+  - '@parcel/watcher'
+  - esbuild
+
+overrides:
+  vite: 8.1.4
+  brace-expansion: 5.0.6
+  ws: 8.20.1
+  # nanoid 5.x is ESM-only; postcss (and other CommonJS consumers) require
+  # the 3.x line.  Pin to latest 3.x to get security patches without
+  # breaking CJS compatibility.
+  nanoid@^3.3.15: 3.3.8
+  tinybench@^2.9.0: 6.0.2
+  which@^2.0.2: 5.0.0
+
+patchedDependencies:
+  '@zip.js/zip.js@2.8.26': patches/@zip.js__zip.js@2.8.26.patch

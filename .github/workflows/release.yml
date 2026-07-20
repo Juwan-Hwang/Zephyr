@@ -187,10 +187,10 @@ jobs:
         shell: bash
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: lts/*
           cache: pnpm
@@ -548,10 +548,12 @@ jobs:
         shell: bash
 
       - name: Sign release artifacts
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
         run: |
           # Write private key to temp file (minisign requires a file path)
           KEY_FILE=$(mktemp)
-          printf '%s' "${{ secrets.MINISIGN_PRIVATE_KEY }}" > "$KEY_FILE"
+          printf '%s' "$MINISIGN_PRIVATE_KEY" > "$KEY_FILE"
           trap 'rm -f "$KEY_FILE"' EXIT
 
           shopt -s nullglob
@@ -565,14 +567,119 @@ jobs:
           ls -la dist-artifacts/*.minisig 2>/dev/null || echo "No signatures generated"
         shell: bash
 
+      # ── SBOM 现在单独生成（避免每个 matrix leg 重复）见下方 generate-sbom-for-release 任务──
+
       - name: Upload All Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Zephyr ${{ github.ref_name }}"
+          name: "Zephyr ${{ env.RUN_VERSION }}"
           body: "See the assets to download and install this version."
           draft: true
           prerelease: false
           files: dist-artifacts/*
+
+  # ── Separate SBOM Job: 只跑一次避免冗余 ──
+  generate-sbom-for-release:
+    name: SBOM for Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Set safe version variable
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          printf 'RUN_VERSION=%s\n' "$REF_NAME" >> "$GITHUB_ENV"
+
+      - name: Generate SBOM for Release
+        shell: bash
+        run: |
+          # Install cargo-cyclonedx and generate Rust SBOM
+          cargo install cargo-cyclonedx --version 0.5.9 --locked
+          cargo cyclonedx --all --format json
+          mkdir -p sbom/rust sbom/npm
+          while IFS= read -r -d '' f; do
+            name=$(basename "$f" .cdx.json)
+            parent=$(basename "$(dirname "$f")")
+            if [ "$name" != "$parent" ]; then
+              cp "$f" "sbom/rust/${parent}-${name}.cdx.json"
+            else
+              cp "$f" "sbom/rust/${name}.cdx.json"
+            fi
+          done < <(find . -name '*.cdx.json' -not -path './sbom/*' -not -path './node_modules/*' -print0)
+          if [ -z "$(ls sbom/rust/*.cdx.json 2>/dev/null)" ]; then
+            echo "::error::No Rust SBOM files generated"
+            exit 1
+          fi
+          echo "Rust SBOM files:"
+          ls -la sbom/rust/
+
+          # Generate NPM SBOM via cdxgen — use locked version from devDependencies.
+          pnpm install --frozen-lockfile --ignore-scripts
+          npx --yes --ignore-scripts --package=@cyclonedx/cdxgen@12.8.0 cdxgen -t pnpm -o sbom/npm/bom.npm.cdx.json
+
+          # Merge all SBOMs into one using Python (no external npm dependency needed).
+          python3 - <<'PY'
+          import os, json, glob
+
+          merged = {"bomFormat": "CycloneDX", "specVersion": "1.5", "components": [], "dependencies": []}
+          seen_components = set()
+          seen_dependencies = set()
+
+          for pattern in ["sbom/rust/*.cdx.json", "sbom/npm/*.cdx.json"]:
+              for f in sorted(glob.glob(pattern)):
+                  with open(f) as fh:
+                      bom = json.load(fh)
+                  for comp in bom.get("components", []):
+                      ref = comp.get("bom-ref")
+                      if ref and ref not in seen_components:
+                          seen_components.add(ref)
+                          merged["components"].append(comp)
+                      elif not ref:
+                          merged["components"].append(comp)
+                  for dep in bom.get("dependencies", []):
+                      ref = dep.get("ref")
+                      if ref and ref not in seen_dependencies:
+                          seen_dependencies.add(ref)
+                          merged["dependencies"].append(dep)
+                  if "metadata" not in merged and "metadata" in bom:
+                      merged["metadata"] = bom["metadata"]
+
+          run_version = os.environ.get("RUN_VERSION", "unknown")
+          with open(f"{run_version}.cdx.json", "w") as out:
+              json.dump(merged, out, indent=2)
+
+          print(f"SBOM generated: {run_version}.cdx.json")
+          print(f"Total components: {len(merged.get('components', []))}")
+          PY
+          ls -la *.cdx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: "sbom-${{ env.RUN_VERSION }}"
+          path: "*.cdx.json"
+          retention-days: 90
