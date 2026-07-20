@@ -11,6 +11,7 @@
 
 import { invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
+import { generateDomId } from '../utils/dom-id.js';
 import { translations, currentLang } from '../i18n.js';
 import { showNotification, showModal, showConfirmModal } from './notifications.js';
 import { Bus, Events } from './events.js';
@@ -393,7 +394,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     // Toggle collapse
     const body = document.createElement('div');
     body.className = 'space-y-2 pl-2 transition-all duration-[var(--zephyr-time-standard)]';
-    const bodyId = 'rl-group-body-' + Math.random().toString(36).substring(2, 9);
+    const bodyId = generateDomId('rl-group-body');
     body.id = bodyId;
     header.setAttribute('aria-controls', bodyId);
 

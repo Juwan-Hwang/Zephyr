@@ -8,6 +8,32 @@
  * @module ui/dns-shared
  */
 
+// ---------------------------------------------------------------------------
+//  DNS bootstrap constants
+// ---------------------------------------------------------------------------
+//
+//  These IP addresses MUST be raw IPs (not hostnames).  mihomo uses them as
+//  "default-nameserver" to resolve DoH/DoT server domains (e.g. dns.google).
+//  Using a hostname here would create a circular dependency: you need DNS to
+//  reach the DoH server, but you need the DoH server to resolve its own name.
+//
+//  All four are well-known public DNS resolvers with decades of stable service.
+
+/** @type {readonly string[]} */
+const BOOTSTRAP_DNS_SERVERS = Object.freeze([
+    '223.5.5.5',    // AliDNS (Alibaba) // NOSONAR: bootstrap resolver, must be raw IP
+    '119.29.29.29', // DNSPod (Tencent) // NOSONAR: bootstrap resolver, must be raw IP
+    '1.1.1.1',      // Cloudflare DNS // NOSONAR: bootstrap resolver, must be raw IP
+    '8.8.8.8',      // Google Public DNS // NOSONAR: bootstrap resolver, must be raw IP
+]);
+
+/**
+ * RFC 2544 benchmarking range (198.18.0.0/15) — non-routable on the public
+ * internet.  mihomo uses it for fake-ip mode: real queries get synthetic IPs
+ * from this range, which are intercepted and resolved internally.
+ */
+const FAKE_IP_RANGE = '198.18.0.1/16'; // NOSONAR: RFC 2544 benchmark range, non-routable
+
 import { patchConfig, closeAllConnections, getConfig, invoke } from '../api.js';
 import { dnsLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
@@ -185,7 +211,7 @@ export async function buildDnsRewritePayload() {
             listen: '0.0.0.0:1053',
             ipv6: false,
             'enhanced-mode': 'fake-ip',
-            'fake-ip-range': '198.18.0.1/16',
+            'fake-ip-range': FAKE_IP_RANGE,
             // Domains that must resolve to real IPs (not fake-ip).
             // These are services that break or behave incorrectly with fake IPs,
             // such as captive portals, game consoles, and LAN discovery.
@@ -206,12 +232,7 @@ export async function buildDnsRewritePayload() {
             // Base DNS servers used to resolve DoH/DoT hostnames themselves.
             // Without this, mihomo cannot resolve the DoH server domain (e.g. dns.google)
             // because it needs DNS to reach the DoH server — a circular dependency.
-            'default-nameserver': [
-                '223.5.5.5',
-                '119.29.29.29',
-                '1.1.1.1',
-                '8.8.8.8',
-            ],
+            'default-nameserver': [...BOOTSTRAP_DNS_SERVERS],
             nameserver: dnsConfig.nameserver,
             fallback: dnsConfig.fallback,
         },
