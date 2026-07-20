@@ -195,7 +195,7 @@ dns:
   $override:
     enable: true
     enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
+    fake-ip-range: 198.18.0.0/16
     nameserver:
       - https://doh.pub/dns-query
       - https://dns.alidns.com/dns-query
@@ -708,7 +708,7 @@ dns:
   $default:
     enable: true
     enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
+    fake-ip-range: 198.18.0.0/16
     fake-ip-filter:
       - "*.lan"
       - "localhost.ptlogin2.qq.com"
