@@ -23,6 +23,7 @@ import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidat
 import { formatFileSize } from '../../utils/format.js';
 import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
+import { generateDomId } from '../../utils/dom-id.js';
 import { SVG_ICONS } from '../icons.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
@@ -1353,7 +1354,7 @@ export function initSubscriptionSettings({
                     usageContainer.className = 'mt-3 mb-1 w-full';
 
                     const textRow = document.createElement('div');
-                    const labelId = 'sub-usage-label-' + Math.random().toString(36).substring(2, 9);
+                    const labelId = generateDomId('sub-usage-label');
                     textRow.id = labelId;
                     textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
