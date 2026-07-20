@@ -27,15 +27,15 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
       # === JS Tests ===
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: lts/*
           cache: pnpm
       - name: Count JS tests
         id: js
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts && pnpm rebuild esbuild @parcel/watcher
           cd apps/desktop
           COUNT=$(pnpm vitest run --reporter=verbose 2>&1 | grep -oP '\d+(?=\s+passed)' | tail -1)
           if [ -z "$COUNT" ]; then
@@ -45,7 +45,7 @@ jobs:
 
       # === Update Gist Badges ===
       - name: Update Rust badge
-        uses: schneegans/dynamic-badges-action@v1.9.0
+        uses: schneegans/dynamic-badges-action@28b0fa8bdeb46170ac397105ece0c1fe58f68910 # v1.9.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ secrets.GIST_ID }}
@@ -55,7 +55,7 @@ jobs:
           color: green
 
       - name: Update JS badge
-        uses: schneegans/dynamic-badges-action@v1.9.0
+        uses: schneegans/dynamic-badges-action@28b0fa8bdeb46170ac397105ece0c1fe58f68910 # v1.9.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ secrets.GIST_ID }}
