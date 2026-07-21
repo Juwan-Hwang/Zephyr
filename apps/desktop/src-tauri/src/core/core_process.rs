@@ -634,7 +634,7 @@ dns:
   enable: true
   ipv6: false
   enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
+  fake-ip-range: 198.18.0.0/16
   fake-ip-filter:
     - '*.lan'
     - localhost.ptlogin2.qq.com
