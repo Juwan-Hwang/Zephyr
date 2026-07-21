@@ -30,7 +30,7 @@ jobs:
           cargo install --path /tmp/uniffi-src/examples/app/uniffi-bindgen-cli
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@7c5672355aaa8fde5f97a91aa9a99616d1ace6bc # v2
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Install pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
