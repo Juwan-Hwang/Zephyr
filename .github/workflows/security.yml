@@ -277,7 +277,7 @@ jobs:
           sarif_file: scorecard.sarif
 
       - name: Upload Scorecard artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-results
           path: scorecard.sarif
@@ -562,7 +562,7 @@ jobs:
       # GitHub Free tier: artifact 最多保留 90 天。
       # Release tag 时额外将 SBOM 附带到 Release Assets（永久保存）。
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-cyclonedx
           path: |
