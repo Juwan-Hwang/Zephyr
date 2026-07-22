@@ -567,6 +567,8 @@ pub fn apply_network_optimizations(app: AppHandle) -> Result<(), String> {
     }
 
     // Apply optimizations via osascript using config values
+    // nosemgrep: rust-osascript-privilege-escalation — config values are u32 typed, no injection possible
+    // nosemgrep: rust-osascript-command-pattern — u32 format args are inherently safe
     let script = format!(
         r#"do shell script "sysctl -w net.inet.tcp.msl={}; sysctl -w net.inet.tcp.fastopen={}; sysctl -w net.inet.tcp.ecn={}" with administrator privileges"#,
         config.msl, config.fastopen, config.ecn
@@ -633,6 +635,8 @@ pub fn revert_network_optimizations(app: AppHandle) -> Result<(), String> {
     };
 
     // Use validated integer values to prevent command injection
+    // nosemgrep: rust-osascript-privilege-escalation — validated u32 values, no injection possible
+    // nosemgrep: rust-osascript-command-pattern — u32 format args are inherently safe
     let script = format!(
         r#"do shell script "sysctl -w net.inet.tcp.msl={msl}; sysctl -w net.inet.tcp.fastopen={fopen}; sysctl -w net.inet.tcp.ecn={ecn}" with administrator privileges"#
     );
