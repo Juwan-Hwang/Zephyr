@@ -445,7 +445,7 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
 
         const savedScrollTop = container.scrollTop;
 
-        linesContainer.innerHTML = '';
+        linesContainer.replaceChildren();
         spacerTop.style.height = '0';
         spacerBottom.style.height = '0';
 

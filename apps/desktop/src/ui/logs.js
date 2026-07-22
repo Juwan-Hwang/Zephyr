@@ -162,7 +162,7 @@ export async function initLogsPage() {
     if (_initialized) {
         resetState();
         // eslint-disable-next-line no-unsanitized/property -- static HTML template from buildPageHTML()
-        _container.innerHTML = buildPageHTML();
+        _container.innerHTML = buildPageHTML(); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         cacheDOMRefs();
         bindEvents();
         createVirtualScrollInstance();
@@ -174,7 +174,7 @@ export async function initLogsPage() {
     _initialized = true;
     resetState();
     // eslint-disable-next-line no-unsanitized/property -- static HTML template from buildPageHTML()
-    _container.innerHTML = buildPageHTML();
+    _container.innerHTML = buildPageHTML(); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     cacheDOMRefs();
     bindEvents();
     createVirtualScrollInstance();
@@ -602,7 +602,7 @@ function createVirtualScrollInstance() {
             );
 
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
-            pre.innerHTML = html;
+            pre.innerHTML = html; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             fragment.appendChild(pre);
         },
         dataAttr: 'data-line-idx',
@@ -862,7 +862,7 @@ function createExtLogRow(entry) {
     const msg = document.createElement('span');
     msg.className = 'text-[var(--text-secondary)] break-all';
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
-    msg.innerHTML = formatExtLogMessage(entry);
+    msg.innerHTML = formatExtLogMessage(entry); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
     row.appendChild(ts);
     row.appendChild(badge);
@@ -903,7 +903,7 @@ function rebuildExtLogDOM() {
 
     // Clear existing content
      
-    listEl.innerHTML = '';
+    listEl.replaceChildren();
 
     if (events.length === 0) {
         const emptyEl = _container?.querySelector('#log-ext-empty');
