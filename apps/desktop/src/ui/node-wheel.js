@@ -146,6 +146,23 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
         /** @type {string[]} */
         const proxies = [...proxyGroupsResult.proxies];
 
+        // Guard: if the group has no nodes (provider still loading), show
+        // a brief loading hint instead of an empty dropdown.
+        if (proxies.length === 0) {
+            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
+            const tObj = /** @type {Record<string, string>} */(translations[langKey]);
+            const hint = document.createElement('div');
+            hint.className = 'px-3 py-2 text-xs text-[var(--text-muted)] text-center';
+            hint.textContent = tObj?.loadingNodes || 'Loading nodes...';
+            list.replaceChildren();
+            list.appendChild(hint);
+            dropdown.classList.remove('opacity-0', 'pointer-events-none');
+            /** @type {HTMLElement} */ (dropdown).style.transform = 'translateY(0) scale(1)';
+            /** @type {HTMLElement} */ (trigger).style.opacity = '0';
+            /** @type {HTMLElement} */ (trigger).style.pointerEvents = 'none';
+            return;
+        }
+
         sortProxiesByLatency(proxies, data);
 
         const fragment = document.createDocumentFragment();

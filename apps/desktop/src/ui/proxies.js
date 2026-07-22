@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -1223,6 +1223,13 @@ function renderGroupSelector(groups, currentGroup) {
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _loadingTimeout = null;
 
+/** Provider-loading poller handle (retry when include-all group has empty all[]). */
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _providerPollTimer = null;
+
+/** Maximum provider-loading retries (≈30 s at 1.5 s interval). */
+const PROVIDER_POLL_MAX = 20;
+
 /**
  * Handle core restart from a button element.
  * @param {HTMLButtonElement} btn - The button that triggered the restart
@@ -1291,6 +1298,65 @@ function clearLoadingTimeout() {
         _loadingTimeout = null;
     }
 }
+
+// ─── Provider-loading poller ───────────────────────────────────────────
+// When a group uses `include-all: true`, its `all[]` array is empty until
+// the proxy-provider finishes its HTTP download.  The poller re-fetches
+// /proxies at a short interval and re-renders once nodes appear.
+
+/**
+ * Start polling for provider-loaded nodes.
+ * @param {string|null} preferredGroupName - The group name to check.
+ * @param {number} [attempt] - Current attempt count (internal).
+ */
+function startProviderPoll(preferredGroupName, attempt = 0) {
+    stopProviderPoll();
+    if (attempt >= PROVIDER_POLL_MAX) return;  // Give up silently
+
+    _providerPollTimer = setTimeout(async () => {
+        _providerPollTimer = null;
+        try {
+            // Use non-cached fetch to avoid invalidating the global cache
+            // (which would force other UI components to re-fetch too).
+            const data = /** @type {any} */ (await getProxies());
+            if (!data || !data.proxies) {
+                // Malformed response — treat as retryable
+                startProviderPoll(preferredGroupName, attempt + 1);
+                return;
+            }
+
+            // Pass cached config to avoid an extra /configs HTTP request
+            const cachedConfig = await getConfigCached();
+            const result = await fetchProxyGroupsShared({
+                existingData: data,
+                existingConfig: cachedConfig,
+                preferredGroupName: preferredGroupName || undefined,
+            });
+            if (result && result.proxies.length > 0) {
+                // Nodes have arrived — invalidate cache + re-render
+                invalidateProxiesCache();
+                renderProxies();
+            } else {
+                // Still empty — keep polling
+                startProviderPoll(preferredGroupName, attempt + 1);
+            }
+        } catch {
+            // Network error — keep polling
+            startProviderPoll(preferredGroupName, attempt + 1);
+        }
+    }, 1500);
+}
+
+/** Stop the provider-loading poller if active. */
+function stopProviderPoll() {
+    if (_providerPollTimer) {
+        clearTimeout(_providerPollTimer);
+        _providerPollTimer = null;
+    }
+}
+
+// Export for lifecycle cleanup (called when leaving the proxies page)
+export { stopProviderPoll };
 
 /**
  * Update existing proxy wrappers in-place when the proxy list hasn't changed.
@@ -1717,6 +1783,17 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
+    // --- Provider-loading guard ---
+    // If the uiGroup uses include-all and its all[] is empty, the proxy-provider
+    // hasn't finished downloading nodes yet.  Clear any stale cards from a
+    // previous group, then start a silent poller to re-render once nodes arrive.
+    if (proxyGroupsResult.providerLoading) {
+        container.innerHTML = '';
+        startProviderPoll(preferredGroupName);
+        return;
+    }
+    stopProviderPoll();
+
     // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
     const observedGroupName = appStore.get('observedGroupName');
     const observedNodeName = appStore.get('observedNodeName');
@@ -1725,6 +1802,7 @@ export async function renderProxies() {
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
     if (settings?.hide_timeout_nodes) {
+        const preFilterCount = proxies.length;
         proxies = proxies.filter((/** @type {string} */ name) => {
             // Always keep the currently active node, even if it's timed out
             if (name === current) return true;
@@ -1737,6 +1815,12 @@ export async function renderProxies() {
             // Use helper to catch all timeout/invalid states (0, 999999, etc.)
             return !isInvalidDelay(lastDelay);
         });
+        // Safety valve: if hide_timeout_nodes filtered out EVERY node, keep the
+        // original unfiltered list so the user can still see and interact with
+        // nodes (rather than facing a confusing blank page).
+        if (proxies.length === 0 && preFilterCount > 0) {
+            proxies = [...proxyGroupsResult.proxies];
+        }
     }
 
     if (appStore.get('currentSortMode') === 'name') {
@@ -1839,6 +1923,7 @@ Bus.on(Events.CORE_RESTARTED, () => {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         stopObservedGroupWatcher();
+        stopProviderPoll();
     } else {
         // Only start if proxies page is visible
         const proxiesPage = document.querySelector('[data-page="proxies"]');
