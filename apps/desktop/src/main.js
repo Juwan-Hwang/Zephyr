@@ -255,7 +255,10 @@ async function initApp() {
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
     onLeaveLogs: () => { import('./ui/logs.js').then(m => m.destroyLogsPage()).catch(() => {}); },
-    onLeaveProxies: () => { import('./ui/observed-group.js').then(m => m.stopObservedGroupWatcher()).catch(() => {}); },
+    onLeaveProxies: () => {
+        import('./ui/observed-group.js').then(m => m.stopObservedGroupWatcher()).catch(() => {});
+        import('./ui/proxies.js').then(m => { if (m.stopProviderPoll) m.stopProviderPoll(); }).catch(() => {});
+    },
   });
   initChart();
   initTrayEventListeners();
