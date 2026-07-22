@@ -324,6 +324,7 @@ function determineUiPrimaryGroup(ctx) {
  * @property {string|null}  uiGroupName           - Actually used UI group (GLOBAL in global mode, or primary)
  * @property {{source:string, detail:string}} reason - Why this primary group was chosen
  * @property {Record<string, string[]>} graph - Group → children adjacency list
+ * @property {boolean} providerLoading - True when uiGroup uses include-all and all[] is empty
  */
 
 /**
@@ -408,6 +409,19 @@ export async function fetchProxyGroups(options = {}) {
     const proxies = targetGroup?.all || [];
     const current = targetGroup?.now || null;
 
+    // --- Detect provider-loading state ---
+    // Groups with `include-all: true` or `include-all-providers: true` depend
+    // on proxy-providers finishing their HTTP download before their `all`
+    // array is populated.  If such a group has an empty `all` array while
+    // the config defines proxy-providers, the nodes are still loading.
+    const hasProxyProviders = !!(runConfig && runConfig['proxy-providers']
+        && Object.keys(runConfig['proxy-providers']).length > 0);
+    const includeAllGroups = buildIncludeAllSet(runConfig);
+    const isIncludeAllGroup = uiGroupName
+        ? (uiGroupName === 'GLOBAL' || includeAllGroups.has(uiGroupName))
+        : false;
+    const providerLoading = hasProxyProviders && isIncludeAllGroup && proxies.length === 0;
+
     return {
         // Legacy compat fields
         data,
@@ -425,5 +439,27 @@ export async function fetchProxyGroups(options = {}) {
         uiGroupName,
         reason,
         graph,
+
+        // Provider loading state — true when the uiGroup uses include-all
+        // and its all[] is empty (nodes still being downloaded by mihomo)
+        providerLoading,
     };
+}
+
+/**
+ * Build a Set of group names that use `include-all` or `include-all-providers`.
+ * Precomputed once per fetchProxyGroups call to avoid repeated linear scans.
+ *
+ * @param {any} runConfig - The run_config.yaml JSON
+ * @returns {Set<string>}
+ */
+function buildIncludeAllSet(runConfig) {
+    const result = new Set();
+    if (!runConfig || !Array.isArray(runConfig['proxy-groups'])) return result;
+    for (const pg of runConfig['proxy-groups']) {
+        if (pg?.name && (pg['include-all'] || pg['include-all-providers'])) {
+            result.add(pg.name);
+        }
+    }
+    return result;
 }
