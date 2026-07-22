@@ -605,7 +605,14 @@ export function initProxyControls() {
                 showLatencyLoadingForAllCards();
                 await renderProxies();
 
-                const proxyGroupsResult = await fetchProxyGroupsShared();
+                // CRITICAL: Pass the user's currently-viewed group so the resolver
+                // returns that group's proxies (individual node names), not the
+                // effective group's proxies (which may be group-name references).
+                // Without this, testProxyAndUpdate can't find DOM elements and
+                // cards stay spinning forever.
+                const proxyGroupsResult = await fetchProxyGroupsShared({
+                    preferredGroupName: appStore.get('uiGroupName') || undefined,
+                });
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
@@ -713,20 +720,39 @@ export function initProxyControls() {
                 appStore.set('isTestingLatency', false);
                 appStore.set('latencyTestStartTime', null);
                 if (latencySortTimer) clearTimeout(latencySortTimer);
-                if (appStore.get('currentSortMode') === 'smart') {
-                    // Wait for all pending smart score updates before sorting
-                    await _smartBatcher.wait();
-                    await applySmartSortToDom();
-                } else {
-                    applyLatencySortToDom(true);
-                }
-                // Re-render to restore nodes that may need to be visible again after testing
-                invalidateProxiesCache();
-                if (hideTimeoutEnabled) {
-                    await renderProxies();
-                }
+                // Restore UI controls first — must never be skipped by render failures
                 icon?.classList.remove('animate-spin', 'text-accent');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                // Safety net: clear stuck pending state and re-render BEFORE
+                // sorting — the sort must not gate or block this cleanup.
+                let hadStuckPending = false;
+                try {
+                    const container = document.getElementById('proxies-list');
+                    if (container) {
+                        const stuck = container.querySelectorAll('[data-pending="1"]');
+                        hadStuckPending = stuck.length > 0;
+                        stuck.forEach(el => {
+                            (/** @type {HTMLElement} */ (el)).dataset.pending = '0';
+                        });
+                    }
+                    invalidateProxiesCache();
+                    if (hideTimeoutEnabled || hadStuckPending) {
+                        await renderProxies();
+                    }
+                } catch (e) {
+                    proxyLogger.warn('post-latency render failed', e);
+                }
+                // Sort is best-effort — failures here must not affect cleanup
+                try {
+                    if (appStore.get('currentSortMode') === 'smart') {
+                        await _smartBatcher.wait();
+                        await applySmartSortToDom();
+                    } else {
+                        applyLatencySortToDom(true);
+                    }
+                } catch (e) {
+                    proxyLogger.warn('post-latency sort failed', e);
+                }
             }
         };
     }
@@ -778,7 +804,9 @@ export function initProxyControls() {
                     if (match) displayScore = Math.round(match.score);
                 } catch { /* fallback to selectBest score */ }
 
-                const proxyGroupsResult = await fetchProxyGroupsShared();
+                const proxyGroupsResult = await fetchProxyGroupsShared({
+                    preferredGroupName: appStore.get('uiGroupName') || undefined,
+                });
                 if (!proxyGroupsResult) return;
                 const { mainGroup } = proxyGroupsResult;
                 const targetGroup = appStore.get('uiGroupName') || mainGroup;
@@ -2182,7 +2210,10 @@ const _autoTest = {
         resetLatencyTestController();  // Reset controller before starting
         this._running = true;
         try {
-            const proxyGroupsResult = await fetchProxyGroupsShared();
+            // Pass the user's currently-viewed group (same fix as test button handler)
+            const proxyGroupsResult = await fetchProxyGroupsShared({
+                preferredGroupName: appStore.get('uiGroupName') || undefined,
+            });
             if (!proxyGroupsResult) return;
             const { data, proxies } = proxyGroupsResult;
 
