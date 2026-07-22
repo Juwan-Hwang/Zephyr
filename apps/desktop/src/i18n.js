@@ -198,6 +198,8 @@ export const translations = {
         proxyInactive: "System proxy disabled",
         disconnected: "Disconnected",
         loadingNodes: "Loading nodes...",
+        providerPollExhausted: "No nodes available from provider yet. The provider may still be downloading or failed to load.",
+        retry: "Retry",
         failedToConnect: "Failed to connect to core. Ensure Mihomo is running.",
         restartCore: "Restart Core",
         restartingCore: "Restarting...",
@@ -901,6 +903,8 @@ export const translations = {
         proxyInactive: "系统代理已关闭",
         disconnected: "未连接",
         loadingNodes: "正在加载节点...",
+        providerPollExhausted: "提供者尚无可用节点。提供者可能仍在下载或加载失败。",
+        retry: "重试",
         failedToConnect: "连接核心失败，请确保 Mihomo 已启动。",
         restartCore: "重启内核",
         restartingCore: "正在重启...",
@@ -1450,6 +1454,8 @@ export const translations = {
         loading: "読み込み中...",
         errorPrefix: "エラー",
         unknown: "不明",
+        providerPollExhausted: "プロバイダーからノードを取得できませんでした。ダウンロード中または読み込み失敗の可能性があります。",
+        retry: "再試行",
 
         // New keys (empty — fallback to English)
         save: "",
@@ -1643,6 +1649,8 @@ export const translations = {
         loading: "로딩 중...",
         errorPrefix: "오류",
         unknown: "알 수 없음",
+        providerPollExhausted: "제공자에서 노드를 사용할 수 없습니다. 다운로드 중이거나 로드에 실패했을 수 있습니다.",
+        retry: "재시도",
 
         // New keys (empty — fallback to English)
         save: "",

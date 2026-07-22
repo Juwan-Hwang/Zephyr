@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -1223,6 +1223,53 @@ function renderGroupSelector(groups, currentGroup) {
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _loadingTimeout = null;
 
+/** Provider-loading poller handle (retry when include-all group has empty all[]). */
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _providerPollTimer = null;
+
+/** True while the poll's async fetch/resolve cycle is in-flight. */
+let _providerPollInFlight = false;
+
+/** Maximum provider-loading retries (≈30 s at 1.5 s interval). */
+const PROVIDER_POLL_MAX = 20;
+
+/** Generation token: incremented on stop to cancel in-flight poll callbacks. */
+let _providerPollGeneration = 0;
+
+/**
+ * Group name for which provider polling was exhausted (undefined = not exhausted).
+ * Prevents re-entering the poll loop for the same group after max retries.
+ * Uses `undefined` (not `null`) as the sentinel because `null` is a valid
+ * value for `preferredGroupName` on first load, which would cause a false
+ * exhaustion match.
+ * @type {string|undefined}
+ */
+let _providerPollExhaustedGroup = undefined;
+
+/** Shared CSS for accent-style buttons (Restart Core, Retry, etc.). */
+const ACCENT_BTN_CSS = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
+
+/** Shared class for accent-style buttons. */
+const ACCENT_BTN_CLASS = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
+
+/**
+ * Create an accent-styled button with consistent appearance.
+ * @param {string} text - Button label text
+ * @param {(btn: HTMLButtonElement) => void} onClick - Click handler
+ * @param {string} [id] - Optional element ID
+ * @returns {HTMLButtonElement}
+ */
+function createAccentButton(text, onClick, id) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = ACCENT_BTN_CLASS;
+    btn.style.cssText = ACCENT_BTN_CSS;
+    btn.textContent = text;
+    if (id) btn.id = id;
+    btn.addEventListener('click', () => onClick(btn));
+    return btn;
+}
+
 /**
  * Handle core restart from a button element.
  * @param {HTMLButtonElement} btn - The button that triggered the restart
@@ -1273,15 +1320,39 @@ function renderProxiesLoading(container, loadingText) {
         // Don't add button if it already exists
         if (document.getElementById('restart-core-btn')) return;
         const tObj = /** @type {any} */ (translations)[currentLang] || {};
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.id = 'restart-core-btn';
-        btn.className = 'mt-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
-        btn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
-        btn.textContent = tObj.restartCore || 'Restart Core';
-        btn.addEventListener('click', () => handleCoreRestart(btn, tObj, 'loading state'));
+        const btn = createAccentButton(
+            tObj.restartCore || 'Restart Core',
+            (b) => handleCoreRestart(b, tObj, 'loading state'),
+            'restart-core-btn'
+        );
+        btn.className = 'mt-2 ' + ACCENT_BTN_CLASS;
         existing.appendChild(btn);
     }, 2500);
+}
+
+/**
+ * Render the provider-poll-exhausted state with a retry button.
+ * Shown when startProviderPoll() exhausts all retries without receiving nodes.
+ * @param {HTMLElement} container
+ * @param {any} tObj - i18n translations object
+ */
+function renderProviderPollExhausted(container, tObj) {
+    clearLoadingTimeout();
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
+    const msg = document.createElement('span');
+    msg.textContent = tObj.providerPollExhausted || 'No nodes available from provider yet. The provider may still be downloading or failed to load.';
+    wrap.appendChild(msg);
+    const retryBtn = createAccentButton(
+        tObj.retry || 'Retry',
+        () => {
+            _providerPollExhaustedGroup = undefined;
+            renderProxies().catch(() => {});
+        }
+    );
+    wrap.appendChild(retryBtn);
+    container.appendChild(wrap);
 }
 
 /** Clear the loading timeout timer if active. */
@@ -1291,6 +1362,88 @@ function clearLoadingTimeout() {
         _loadingTimeout = null;
     }
 }
+
+// ─── Provider-loading poller ───────────────────────────────────────────
+// When a group uses `include-all: true`, its `all[]` array is empty until
+// the proxy-provider finishes its HTTP download.  The poller re-fetches
+// /proxies at a short interval and re-renders once nodes appear.
+
+/**
+ * Start polling for provider-loaded nodes.
+ * @param {string|null} preferredGroupName - The group name to pass to the resolver.
+ * @param {string|null|undefined} [exhaustionKey] - The resolved uiGroupName used as the exhaustion key.
+ *   Falls back to preferredGroupName if not provided.
+ * @param {number} [attempt] - Current attempt count (internal).
+ */
+function startProviderPoll(preferredGroupName, exhaustionKey, attempt = 0) {
+    stopProviderPoll();
+    if (attempt >= PROVIDER_POLL_MAX) {
+        // Polling exhausted — mark this group and re-render to show a terminal state
+        // with a retry button instead of leaving the user stuck on a loading spinner.
+        _providerPollExhaustedGroup = exhaustionKey ?? preferredGroupName ?? undefined;
+        renderProxies().catch(() => {});
+        return;
+    }
+
+    const gen = _providerPollGeneration;
+    _providerPollTimer = setTimeout(async () => {
+        _providerPollTimer = null;
+        _providerPollInFlight = true;
+        try {
+            // Cancelled while waiting
+            if (gen !== _providerPollGeneration) return;
+            // Use non-cached fetch to avoid invalidating the global cache
+            // (which would force other UI components to re-fetch too).
+            const data = /** @type {any} */ (await getProxies());
+            if (gen !== _providerPollGeneration) return;  // Cancelled during await
+            if (!data || !data.proxies) {
+                // Malformed response — treat as retryable
+                startProviderPoll(preferredGroupName, exhaustionKey, attempt + 1);
+                return;
+            }
+
+            // Pass cached config to avoid an extra /configs HTTP request
+            const cachedConfig = await getConfigCached();
+            if (gen !== _providerPollGeneration) return;  // Cancelled during await
+            const result = await fetchProxyGroupsShared({
+                existingData: data,
+                existingConfig: cachedConfig,
+                preferredGroupName: preferredGroupName || undefined,
+            });
+            if (gen !== _providerPollGeneration) return;  // Cancelled during await
+            if (result && result.proxies.length > 0) {
+                // Nodes have arrived — invalidate cache + re-render
+                invalidateProxiesCache();
+                renderProxies().catch(() => {});
+            } else {
+                // Still empty — keep polling
+                startProviderPoll(preferredGroupName, exhaustionKey, attempt + 1);
+            }
+        } catch {
+            if (gen !== _providerPollGeneration) return;  // Cancelled during await
+            // Network error — keep polling
+            startProviderPoll(preferredGroupName, exhaustionKey, attempt + 1);
+        } finally {
+            _providerPollInFlight = false;
+        }
+    }, 1500);
+}
+
+/** Stop the provider-loading poller if active. */
+function stopProviderPoll() {
+    _providerPollGeneration++;  // Cancel any in-flight callbacks
+    if (_providerPollTimer) {
+        clearTimeout(_providerPollTimer);
+        _providerPollTimer = null;
+    }
+    // Clear exhaustion state so that re-entering the page (navigation, tab
+    // visibility) attempts a fresh poll instead of immediately showing the
+    // exhausted UI from a previous session.
+    _providerPollExhaustedGroup = undefined;
+}
+
+// Export for lifecycle cleanup (called when leaving the proxies page)
+export { stopProviderPoll };
 
 /**
  * Update existing proxy wrappers in-place when the proxy list hasn't changed.
@@ -1648,12 +1801,10 @@ export async function renderProxies() {
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);
         // Add restart core button on connection failure
-        const restartBtn = document.createElement('button');
-        restartBtn.type = 'button';
-        restartBtn.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-all';
-        restartBtn.style.cssText = 'background: color-mix(in srgb, var(--accent-primary) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent); color: var(--accent-primary);';
-        restartBtn.textContent = t.restartCore || 'Restart Core';
-        restartBtn.addEventListener('click', () => handleCoreRestart(restartBtn, t, 'error state'));
+        const restartBtn = createAccentButton(
+            t.restartCore || 'Restart Core',
+            (b) => handleCoreRestart(b, t, 'error state')
+        );
         errWrap.appendChild(restartBtn);
         container.appendChild(errWrap);
         return;
@@ -1717,6 +1868,43 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
+    // --- Provider-loading guard ---
+    // If the uiGroup uses include-all and its all[] is empty, the proxy-provider
+    // hasn't finished downloading nodes yet.  Clear any stale cards from a
+    // previous group, then start a silent poller to re-render once nodes arrive.
+    if (proxyGroupsResult.providerLoading) {
+        // If polling was already exhausted for this group, show a terminal state
+        // with a retry button instead of restarting the poll loop.
+        // Use the resolved uiGroupName (not preferredGroupName) as the key —
+        // preferredGroupName can be null on first load, which would collide
+        // with the undefined sentinel and cause a false exhaustion match.
+        if (_providerPollExhaustedGroup !== undefined && _providerPollExhaustedGroup === uiGroupName) {
+            renderProviderPollExhausted(container, t);
+            return;
+        }
+        renderProxiesLoading(container, t.loadingNodes);
+        // Gate poll startup on the Proxies page being active and the document
+        // being visible — a stale renderProxies() callback may resume after the
+        // user navigated away or the tab was hidden, which would restart polling
+        // that was explicitly stopped via stopProviderPoll().
+        if (!document.hidden) {
+            const proxiesPage = document.querySelector('[data-page="proxies"]');
+            // Don't restart a poll that's already in-flight — external events
+            // (CONFIG_UPDATED, CORE_RESTARTED, tray/mode/plugin changes) can
+            // trigger renderProxies() repeatedly, and each call to
+            // startProviderPoll() resets the attempt counter to 0 via
+            // stopProviderPoll(), causing an infinite loading loop that never
+            // reaches PROVIDER_POLL_MAX.
+            if (proxiesPage && !proxiesPage.classList.contains('hidden') && !_providerPollTimer && !_providerPollInFlight) {
+                startProviderPoll(preferredGroupName, uiGroupName);
+            }
+        }
+        return;
+    }
+    // Provider loaded successfully — clear exhausted state and stop any lingering poller
+    _providerPollExhaustedGroup = undefined;
+    stopProviderPoll();
+
     // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
     const observedGroupName = appStore.get('observedGroupName');
     const observedNodeName = appStore.get('observedNodeName');
@@ -1725,6 +1913,7 @@ export async function renderProxies() {
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
     if (settings?.hide_timeout_nodes) {
+        const preFilterCount = proxies.length;
         proxies = proxies.filter((/** @type {string} */ name) => {
             // Always keep the currently active node, even if it's timed out
             if (name === current) return true;
@@ -1737,6 +1926,12 @@ export async function renderProxies() {
             // Use helper to catch all timeout/invalid states (0, 999999, etc.)
             return !isInvalidDelay(lastDelay);
         });
+        // Safety valve: if hide_timeout_nodes filtered out EVERY node, keep the
+        // original unfiltered list so the user can still see and interact with
+        // nodes (rather than facing a confusing blank page).
+        if (proxies.length === 0 && preFilterCount > 0) {
+            proxies = [...proxyGroupsResult.proxies];
+        }
     }
 
     if (appStore.get('currentSortMode') === 'name') {
@@ -1839,11 +2034,16 @@ Bus.on(Events.CORE_RESTARTED, () => {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         stopObservedGroupWatcher();
+        stopProviderPoll();
     } else {
         // Only start if proxies page is visible
         const proxiesPage = document.querySelector('[data-page="proxies"]');
         if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
             startObservedGroupWatcher();
+            // Re-render to restart provider polling if the group is still
+            // loading — stopProviderPoll() cleared the timer and exhaustion
+            // state on hide, so renderProxies() will start a fresh poll.
+            renderProxies().catch(() => {});
         }
     }
 });
