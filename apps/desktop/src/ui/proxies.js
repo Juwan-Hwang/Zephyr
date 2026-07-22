@@ -605,7 +605,14 @@ export function initProxyControls() {
                 showLatencyLoadingForAllCards();
                 await renderProxies();
 
-                const proxyGroupsResult = await fetchProxyGroupsShared();
+                // CRITICAL: Pass the user's currently-viewed group so the resolver
+                // returns that group's proxies (individual node names), not the
+                // effective group's proxies (which may be group-name references).
+                // Without this, testProxyAndUpdate can't find DOM elements and
+                // cards stay spinning forever.
+                const proxyGroupsResult = await fetchProxyGroupsShared({
+                    preferredGroupName: appStore.get('uiGroupName') || undefined,
+                });
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
@@ -720,11 +727,17 @@ export function initProxyControls() {
                 } else {
                     applyLatencySortToDom(true);
                 }
-                // Re-render to restore nodes that may need to be visible again after testing
-                invalidateProxiesCache();
-                if (hideTimeoutEnabled) {
-                    await renderProxies();
+                // Safety net: always re-render to sync UI with test results.
+                // Clear stuck pending state first so updateProxiesInPlace can
+                // refresh latency display from mihomo's updated history data.
+                const container = document.getElementById('proxies-list');
+                if (container) {
+                    container.querySelectorAll('[data-pending="1"]').forEach(el => {
+                        (/** @type {HTMLElement} */ (el)).dataset.pending = '0';
+                    });
                 }
+                invalidateProxiesCache();
+                await renderProxies();
                 icon?.classList.remove('animate-spin', 'text-accent');
                 testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
@@ -778,7 +791,9 @@ export function initProxyControls() {
                     if (match) displayScore = Math.round(match.score);
                 } catch { /* fallback to selectBest score */ }
 
-                const proxyGroupsResult = await fetchProxyGroupsShared();
+                const proxyGroupsResult = await fetchProxyGroupsShared({
+                    preferredGroupName: appStore.get('uiGroupName') || undefined,
+                });
                 if (!proxyGroupsResult) return;
                 const { mainGroup } = proxyGroupsResult;
                 const targetGroup = appStore.get('uiGroupName') || mainGroup;
@@ -2182,7 +2197,10 @@ const _autoTest = {
         resetLatencyTestController();  // Reset controller before starting
         this._running = true;
         try {
-            const proxyGroupsResult = await fetchProxyGroupsShared();
+            // Pass the user's currently-viewed group (same fix as test button handler)
+            const proxyGroupsResult = await fetchProxyGroupsShared({
+                preferredGroupName: appStore.get('uiGroupName') || undefined,
+            });
             if (!proxyGroupsResult) return;
             const { data, proxies } = proxyGroupsResult;
 
