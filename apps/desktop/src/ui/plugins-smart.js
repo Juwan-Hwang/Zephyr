@@ -102,7 +102,7 @@ async function renderPluginsList(plugins) {
     if (!container) return;
     if (!plugins || plugins.length === 0) {
          
-    container.innerHTML = '<div class="glass-card p-6 text-center text-[var(--text-tertiary)] text-xs">No plugins found.</div>';
+    container.innerHTML = '<div class="glass-card p-6 text-center text-[var(--text-tertiary)] text-xs">No plugins found.</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
         return;
     }
 
@@ -111,7 +111,7 @@ async function renderPluginsList(plugins) {
     try { const loaded = await prism.pluginListLoaded(); loadedIds = loaded.map((/** @type {{id: string}} */ p) => p.id); } catch {}
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = plugins.map(p => {
+    container.innerHTML = plugins.map(p => { // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         const id = p.id || '';
         const isLoaded = loadedIds.includes(id);
         return `
@@ -178,11 +178,11 @@ async function loadHooksList() {
         const hooks = /** @type {Array<{name: string, isHighFrequency?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListHooks('*')));
         if (!hooks || hooks.length === 0) {
              
-    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No hooks available</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No hooks available</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = hooks.map(h => `
+    container.innerHTML = hooks.map(h => ` // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <span class="text-xs text-[var(--text-secondary)]">${esc(h.name)}</span>
                 <div class="flex items-center gap-2">
@@ -206,7 +206,7 @@ async function loadHooksList() {
         });
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     }
 }
 
@@ -219,11 +219,11 @@ async function loadPermissionsList() {
         const perms = /** @type {Array<{name: string, displayName: string, allowedForConfigPlugin?: boolean, allowedForUiExtension?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListPermissions('*')));
         if (!perms || perms.length === 0) {
              
-    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No permissions</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No permissions</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = perms.map(p => `
+    container.innerHTML = perms.map(p => ` // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div>
                     <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(p.name)}</span>
@@ -237,7 +237,7 @@ async function loadPermissionsList() {
         `).join('');
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     }
 }
 
@@ -250,7 +250,7 @@ async function loadKvStore() {
         const keys = await prism.kvKeys();
         if (!keys || keys.length === 0) {
              
-    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">KV Store is empty</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">KV Store is empty</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
         const entries = [];
@@ -259,7 +259,7 @@ async function loadKvStore() {
             entries.push({ key, value });
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = entries.map(e => `
+    container.innerHTML = entries.map(e => ` // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div class="flex-1 min-w-0">
                     <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(e.key)}</span>
@@ -303,7 +303,7 @@ async function loadKvStore() {
         });
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-red-400 text-xs text-center py-2">${esc(String(e))}</div>`; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     }
 }
 
@@ -591,11 +591,11 @@ async function loadSmartRankings() {
         const rankings = await prism.smartRank();
         if (!rankings || rankings.length === 0) {
              
-    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-4">No ranking data. Run speed tests first.</div>';
+    container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-4">No ranking data. Run speed tests first.</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = rankings.map((r, i) => {
+    container.innerHTML = rankings.map((r, i) => { // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             const score = typeof r.score === 'number' ? r.score.toFixed(1) : '?';
             const barWidth = Math.min(100, Math.max(0, Number(r.score) || 0));
             const barColor = barWidth >= 80 ? 'bg-success' : barWidth >= 50 ? 'bg-warning' : 'bg-danger';
@@ -611,7 +611,7 @@ async function loadSmartRankings() {
         }).join('');
     } catch (e) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via esc()
-    container.innerHTML = `<div class="text-red-400 text-xs text-center py-4">${esc(String(e))}</div>`;
+    container.innerHTML = `<div class="text-red-400 text-xs text-center py-4">${esc(String(e))}</div>`; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     }
 }
 

@@ -363,7 +363,7 @@ function showLatencyLoadingForAllCards() {
         if (latVal) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-            latVal.innerHTML = latencyLoadingIcon;
+            latVal.innerHTML = latencyLoadingIcon; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         }
     });
 }
@@ -1031,7 +1031,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     const icon = document.createElement('span');
     icon.className = 'text-amber-400 text-sm flex-shrink-0';
      
-    icon.innerHTML = '&#9888;';
+    icon.textContent = '\u26A0';
 
     // Explanation text — use t() for fallback chain support
     const text = document.createElement('span');
@@ -1082,7 +1082,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     const dismiss = document.createElement('button');
     dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ml-2 flex-shrink-0';
      
-    dismiss.innerHTML = '&times;';
+    dismiss.textContent = '\u00D7';
     dismiss.title = t('dismiss');
     dismiss.onclick = () => {
         _dismissedMismatchKey = mismatchKey;
@@ -1144,7 +1144,7 @@ function renderGroupSelector(groups, currentGroup) {
 
     // Build menu items
 
-    menuScroll.innerHTML = '';
+    menuScroll.replaceChildren();
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -1339,7 +1339,7 @@ async function handleCoreRestart(btn, tObj, context) {
  */
 function renderProxiesLoading(container, loadingText) {
     clearLoadingTimeout();
-    container.innerHTML = '';
+    container.replaceChildren();
     const loading = document.createElement('div');
     loading.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     loading.id = 'proxies-loading-state';
@@ -1375,7 +1375,7 @@ function renderProxiesLoading(container, loadingText) {
  */
 function renderProviderPollExhausted(container, tObj) {
     clearLoadingTimeout();
-    container.innerHTML = '';
+    container.replaceChildren();
     const wrap = document.createElement('div');
     wrap.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     const msg = document.createElement('span');
@@ -1687,7 +1687,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
         if (isPending) {
             latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-            latVal.innerHTML = latencyLoadingIcon;
+            latVal.innerHTML = latencyLoadingIcon; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
         } else {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
@@ -1725,7 +1725,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
             const originalLatContent = latVal ? latVal.innerHTML : '';
             if (latVal) {
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-                latVal.innerHTML = SVG_ICONS.loadingSmall;
+                latVal.innerHTML = SVG_ICONS.loadingSmall; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             }
 
             try {
@@ -1735,7 +1735,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
                 card.classList.remove('opacity-50', 'pointer-events-none');
                 if (latVal) {
                     // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
-                    latVal.innerHTML = originalLatContent;
+                    latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 }
 
                 if (success) {
@@ -1765,7 +1765,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
                 card.classList.remove('opacity-50', 'pointer-events-none');
                 if (latVal) {
                     // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
-                    latVal.innerHTML = originalLatContent;
+                    latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 }
                 showNotification(String(err), 'error');
             }
@@ -1843,7 +1843,7 @@ export async function renderProxies() {
     clearLoadingTimeout();
 
     if (!data || !data.proxies) {
-        container.innerHTML = '';
+        container.replaceChildren();
         const errWrap = document.createElement('div');
         errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
@@ -1860,11 +1860,11 @@ export async function renderProxies() {
     }
 
     if (config?.mode?.toLowerCase() === 'direct') {
-        container.innerHTML = '';
+        container.replaceChildren();
         const prompt = document.createElement('div');
         prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
-        prompt.innerHTML = `
+        prompt.innerHTML = ` // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             ${SVG_ICONS.externalLink}
             <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>
         `;
@@ -1882,7 +1882,7 @@ export async function renderProxies() {
     });
     if (!proxyGroupsResult) {
  
-    container.innerHTML = '';
+    container.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
     empty.textContent = t.noGroupsFound;
@@ -1907,7 +1907,7 @@ export async function renderProxies() {
     // rendering actionable buttons that would fail on PUT /proxies/{group}
     if (!proxyGroupsResult.uiGroupName) {
  
-    container.innerHTML = '';
+    container.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
     empty.textContent = t.noGroupsFound || 'No switchable proxy groups found';
@@ -2020,7 +2020,7 @@ export async function renderProxies() {
 
     const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName || '');
      
-    container.innerHTML = '';
+    container.replaceChildren();
     container.appendChild(fragment);
 
     // Sync _activeCard with the actual current node

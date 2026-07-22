@@ -185,6 +185,12 @@ async function handleConfigUpdate(path, value) {
 }
 
 /**
+ * Property names that can pollute Object.prototype — must never be used as keys
+ * in dynamically-built object trees.
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
  * @param {string} path
  * @param {*} value
  * @returns {Object}
@@ -211,6 +217,7 @@ function buildNestedPayload(path, value) {
         const nextSeg = segments[i + 1];
 
         if (seg.type === 'key') {
+            if (UNSAFE_KEYS.has(seg.value)) continue; // nosemgrep: prototype-pollution — guarded
             current[seg.value] = nextSeg.type === 'index' ? [] : {};
             current = current[seg.value];
         } else {
@@ -223,6 +230,7 @@ function buildNestedPayload(path, value) {
 
     const lastSeg = segments[segments.length - 1];
     if (lastSeg.type === 'key') {
+        if (UNSAFE_KEYS.has(lastSeg.value)) return result; // nosemgrep: prototype-pollution — guarded
         current[lastSeg.value] = value;
     } else {
         while (current.length <= lastSeg.value) {
@@ -251,11 +259,11 @@ export async function renderAdvancedSettings() {
             if (card) fragment.appendChild(card);
         }
 
-        container.innerHTML = '';
+        container.replaceChildren();
         container.appendChild(fragment);
     } catch (err) {
         advancedLogger.error('Advanced settings render error', err);
-        container.innerHTML = '';
+        container.replaceChildren();
         const errDiv = document.createElement('div');
         errDiv.className = 'p-8 text-center text-rose-400 text-xs font-bold';
         errDiv.textContent = toError(err).message;
@@ -515,7 +523,7 @@ function renderConfigItem(key, value, fullKey) {
         setBtn.title = "Set value";
         setBtn.setAttribute('aria-label', 'Set value for ' + fullKey);
         // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-        setBtn.innerHTML = SVG_ICONS.plus;
+        setBtn.innerHTML = SVG_ICONS.plus; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         setBtn.onclick = (e) => {
             e.stopPropagation();
             const input = document.createElement('input');
@@ -536,12 +544,12 @@ function renderConfigItem(key, value, fullKey) {
                     }
                     handleConfigUpdate(fullKey, parsed);
                 } else if (ev.key === 'Escape') {
-                    wrapper.innerHTML = '';
+                    wrapper.replaceChildren();
                     wrapper.appendChild(badge);
                     wrapper.appendChild(setBtn);
                 }
             };
-            wrapper.innerHTML = '';
+            wrapper.replaceChildren();
             wrapper.appendChild(input);
             input.focus();
         };

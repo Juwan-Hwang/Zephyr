@@ -862,7 +862,7 @@ async function loadOverrides() {
         });
     }
 
-    pluginList.innerHTML = '';
+    pluginList.replaceChildren();
 
     try {
         overrideItems = (await overrideList()) ?? [];
@@ -889,7 +889,7 @@ function renderOverrideCards(container, items, filter) {
 
     // Empty state
     if (filtered.length === 0) {
-        container.innerHTML = '';
+        container.replaceChildren();
         const empty = document.createElement('div');
         empty.className = 'text-center text-[var(--text-muted)] text-sm py-12';
         empty.textContent = filter
@@ -929,7 +929,7 @@ function renderOverrideCards(container, items, filter) {
         });
     } else {
         // Full rebuild (first render or items added/removed)
-        container.innerHTML = '';
+        container.replaceChildren();
         for (const item of filtered) {
             const card = buildOverrideCard(item);
             container.appendChild(card);
@@ -1063,7 +1063,7 @@ function buildOverrideCard(item) {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
-    card.innerHTML = `
+    card.innerHTML = ` // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${summaryText}"></div>
             <div class="flex flex-col gap-1 min-w-0">
@@ -1192,7 +1192,7 @@ async function openEditor(id, name, ext) {
     // Build CM6 editor
     if (scriptEditorView) { scriptEditorView.destroy(); scriptEditorView = null; }
     if (scriptCm6) {
-        scriptCm6.innerHTML = '';
+        scriptCm6.replaceChildren();
         scriptEditorView = createEditor({
             parent: scriptCm6,
             content: content || '',
@@ -1431,7 +1431,7 @@ function openFullscreenEditor() {
         fullscreenEditorView = null;
     }
 
-    cm6Container.innerHTML = '';
+    cm6Container.replaceChildren();
     fullscreenEditorView = createEditor({
         parent: cm6Container,
         content: content,
@@ -1470,7 +1470,7 @@ function closeFullscreenEditor() {
             // Update small editor content
             const scriptCm6 = document.getElementById('plugin-script-cm6');
             if (scriptCm6) {
-                scriptCm6.innerHTML = '';
+                scriptCm6.replaceChildren();
                 scriptEditorView.destroy();
                 scriptEditorView = createEditor({
                     parent: scriptCm6,
@@ -1543,8 +1543,11 @@ async function runFullscreenEditor() {
     if (!source) return;
 
     if (output) {
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
-        output.innerHTML = '<div class="text-[var(--text-muted)]">' + (t('overrideExecuting') ?? 'Executing...') + '</div>';
+        output.replaceChildren();
+        const div = document.createElement('div');
+        div.className = 'text-[var(--text-muted)]';
+        div.textContent = t('overrideExecuting') ?? 'Executing...';
+        output.appendChild(div);
     }
 
     stopSmartAutoTest();
@@ -1619,8 +1622,11 @@ async function runFullscreenEditor() {
 function clearFullscreenOutput() {
     const output = document.getElementById('fullscreen-editor-output');
     if (output) {
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
-        output.innerHTML = '<div class="text-[var(--text-tertiary)] italic">' + (t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...') + '</div>';
+        output.replaceChildren();
+        const div = document.createElement('div');
+        div.className = 'text-[var(--text-tertiary)] italic';
+        div.textContent = t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...';
+        output.appendChild(div);
         output.className = 'flex-1 p-4 text-sm font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
     }
 }

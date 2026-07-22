@@ -173,7 +173,7 @@ export function initConnectionsPage() {
     // Inject template if not already present
     if (!document.getElementById('conn-stats-bar')) {
         // eslint-disable-next-line no-unsanitized/property -- static HTML template (PAGE_HTML is a hardcoded string)
-        container.innerHTML = PAGE_HTML;
+        container.innerHTML = PAGE_HTML; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         // Apply i18n translations to newly injected DOM elements
         applyTranslations();
     }
@@ -510,7 +510,7 @@ function renderConnectionList(connections, mode) {
     }
 
     if (filtered.length === 0) {
-        container.innerHTML = '';
+        container.replaceChildren();
         const tpl = mode === 'active' ? emptyState : closedEmptyState;
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
@@ -542,7 +542,7 @@ function renderConnectionList(connections, mode) {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in buildConnectionRow
-    container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join('');
+    container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join(''); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
     // Bind row click → open detail panel
     for (const row of container.querySelectorAll('.conn-row')) {
@@ -889,7 +889,7 @@ function showConnDetail(conn, mode) {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in showConnDetail
-    bg.innerHTML = panelHtml;
+    bg.innerHTML = panelHtml; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     bg.classList.remove('hidden');
     bg.classList.add('flex');
 
@@ -1115,7 +1115,7 @@ function setButtonLoading(btn, t, loadingText) {
     const text = btn.querySelector('#action-btn-text');
     if (icon) {
         icon.classList.add('animate-spin');
-        icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>';
+        icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>'; // nosemgrep: js-innerhtml-assignment — static HTML
     }
     if (text) text.textContent = t[loadingText] || loadingText;
 }
@@ -1135,7 +1135,7 @@ function resetButton(btn, iconSvg, text) {
     if (!btn) return;
     /** @type {HTMLButtonElement} */ (btn).disabled = false;
     // eslint-disable-next-line no-unsanitized/property -- caller-validated: iconSvg/text are hardcoded SVG + i18n
-    btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`;
+    btn.innerHTML = `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${iconSvg}</svg><span>${text}</span>`; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 }
 
 /**
