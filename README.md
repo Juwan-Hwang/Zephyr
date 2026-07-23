@@ -18,6 +18,7 @@
 [![JS Tests](https://img.shields.io/badge/dynamic/json?url=https://gist.githubusercontent.com/Juwan-Hwang/6f7cfd1b6927a9a224ffe8cb21f5e9d4/raw/js-tests.json&query=$.message&label=JS%20Tests&color=3C1&style=flat&labelColor=555)](https://github.com/Juwan-Hwang/Zephyr/actions)
 [![Tauri](https://badgen.net/badge/Tauri/v2/24c8db)](https://tauri.app)
 [![Rust](https://badgen.net/badge/Rust/1.92+/dea584)](https://www.rust-lang.org/)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13752/badge)](https://www.bestpractices.dev/projects/13752)
 
 [简体中文](README.md) | [English](README_en.md)
 

@@ -170,7 +170,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
                     found = false;
                     break;
                 }
-                obj = obj[part];
+                obj = obj[part]; // nosemgrep: prototype-pollution-loop — read-only traversal of static COMMANDS constant, no write to prototype
             }
             if (!found || obj === undefined) {
                 missing.push(access);
