@@ -807,6 +807,11 @@ function showConnDetail(conn, mode) {
     }
 
     // Network info
+    // NOTE: These values use String() coercion (NOT _esc()) because they are
+    // only ever rendered through renderDetailRow(), which already calls _esc()
+    // on both label and value.  Pre-escaping here would cause double-escaping
+    // (e.g., "&" → "&amp;" → "&amp;amp;").  String() only ensures type safety
+    // so that undefined/null become '-' instead of "undefined".
     const networkVal = String(meta.network || meta.interface || '-');
     const typeVal = String(meta.type || conn.type || '-');
     const srcIp = String(meta.sourceIP || '-');
