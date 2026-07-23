@@ -561,6 +561,7 @@ pub fn ensure_app_storage(app: &AppHandle) -> Result<AppPaths, String> {
                     .arg(&paths.app_data_dir)
                     .arg("/inheritance:r")
                     .arg("/grant:r")
+                    // nosemgrep: rust-command-format-arg — passed as .arg(), not through shell
                     .arg(format!("{username}:(OI)(CI)(F)"))
                     .arg("/grant:r")
                     .arg("SYSTEM:(OI)(CI)(F)")

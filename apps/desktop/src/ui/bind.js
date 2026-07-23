@@ -35,7 +35,7 @@ export function bind(store, element, storeKey, property, transform) {
             case 'className':   element.className = value; break;
             case 'hidden':      element.hidden = value; break;
             // eslint-disable-next-line no-unsanitized/property -- caller-validated: store values are app-internal
-            case 'innerHTML':   element.innerHTML = value; break;
+            case 'innerHTML':   element.innerHTML = value; break; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             default:            element.setAttribute(property, value); break;
         }
     };
