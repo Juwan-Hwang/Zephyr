@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   update-aur:
     runs-on: ubuntu-latest
@@ -13,7 +16,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           DEB_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_${VERSION}_amd64-full.deb"
-          curl -sfL -o package.deb "$DEB_URL"
+          curl --proto =https --proto-redir =https -sfL -o package.deb "$DEB_URL"
           SHA256=$(sha256sum package.deb | cut -d' ' -f1)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "SHA256=$SHA256" >> "$GITHUB_ENV"

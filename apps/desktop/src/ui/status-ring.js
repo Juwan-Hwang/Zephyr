@@ -162,7 +162,7 @@ export function createStatusRing(buttonEl, opts = {}) {
      * @param {string} color
      */
     function showIcon(kind, color) {
-        center.innerHTML = '';
+        center.replaceChildren();
         center.style.color = color;
 
         const iconSvg = document.createElementNS(SVG_NS, 'svg');
@@ -219,7 +219,7 @@ export function createStatusRing(buttonEl, opts = {}) {
      * @param {string} text
      */
     function showText(text) {
-        center.innerHTML = '';
+        center.replaceChildren();
         center.style.color = '';
         const span = document.createElement('span');
         span.className = 'sr-pct';
@@ -263,7 +263,7 @@ export function createStatusRing(buttonEl, opts = {}) {
         resetStroke();
         fill.classList.add('sr-dashing');
         turn.classList.add('sr-spinning');
-        center.innerHTML = '';
+        center.replaceChildren();
         center.style.color = '';
     }
 
