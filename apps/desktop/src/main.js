@@ -53,6 +53,7 @@ import { initChart, updateTrafficData, cleanupChart } from './modules/traffic-ch
 import { initConnectionsPage } from './modules/connections.js';
 import { initBackendEventListeners, cleanupBackendEventListeners } from './modules/backend-events.js';
 import { apiLogger } from './utils/logger.js';
+import { forwardToBackend } from './utils/frontend-log.js';
 import { registerCleanup, runCleanup } from './utils/cleanup-registry.js';
 import { COMMANDS } from '@zephyr/shared';
 import * as prism from './ui/prism.js';
@@ -460,6 +461,26 @@ async function initApp() {
 // ═══════════════════════════════════════════════════════════════════
 //  Bootstrap
 // ═══════════════════════════════════════════════════════════════════
+
+// Global error handlers — catch uncaught exceptions and unhandled
+// Promise rejections that would otherwise silently vanish from the
+// app log.  These run BEFORE DOMContentLoaded so they're armed as early
+// as possible.
+window.addEventListener('error', (event) => {
+    const { error: err, message, filename, lineno, colno } = event;
+    const detail = err instanceof Error
+        ? `${err.name}: ${err.message}\n${err.stack || ''}`
+        : `${message} at ${filename}:${lineno}:${colno}`;
+    forwardToBackend('error', 'uncaught', `[Uncaught] ${detail}`);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const detail = reason instanceof Error
+        ? `${reason.name}: ${reason.message}\n${reason.stack || ''}`
+        : String(reason);
+    forwardToBackend('error', 'rejection', `[Unhandled Rejection] ${detail}`);
+});
 
 window.addEventListener('DOMContentLoaded', () => {
   initApp().catch((err) => {
