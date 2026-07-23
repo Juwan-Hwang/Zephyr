@@ -57,7 +57,7 @@ if [ ! -f "$UPSTREAM_PLUGIN" ]; then
     echo "Downloading linuxdeploy-plugin-gtk-upstream.sh..."
     mkdir -p "$CACHE_DIR"
     TMPFILE="$(mktemp "$CACHE_DIR/.upstream.XXXXXX")"
-    if ! curl -sfL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/3b67a1d1c1b0c8268f57f2bce40fe2d33d409cea/linuxdeploy-plugin-gtk.sh" \
+    if ! curl --proto =https --proto-redir =https -sfL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/3b67a1d1c1b0c8268f57f2bce40fe2d33d409cea/linuxdeploy-plugin-gtk.sh" \
         -o "$TMPFILE"; then
         echo "Error: Failed to download upstream linuxdeploy-plugin-gtk.sh" >&2
         exit 1

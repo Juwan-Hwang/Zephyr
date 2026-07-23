@@ -6,6 +6,16 @@
 //  All imports are from dedicated sub-modules — no legacy ui.js dependency.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Polyfill: Element.replaceChildren() for older WebViews (pre-Safari 14 / macOS 10.15)
+if (typeof Element.prototype.replaceChildren !== 'function') {
+    Element.prototype.replaceChildren = function (/* ...nodes */) {
+        while (this.firstChild) this.firstChild.remove();
+        for (const node of arguments) {
+            this.appendChild(typeof node === 'string' ? document.createTextNode(node) : node);
+        }
+    };
+}
+
 import {
   invoke,
   setBaseUrl,

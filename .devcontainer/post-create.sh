@@ -17,4 +17,6 @@ sudo apt-get install -y \
 
 sudo corepack enable
 
-pnpm install
+pnpm install --ignore-scripts
+pnpm rebuild esbuild @parcel/watcher
+pnpm run prepare
