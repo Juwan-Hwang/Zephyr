@@ -102,7 +102,7 @@ export function forwardToBackend(level, source, message) {
               // a trailing high surrogate (0xD800-0xDBFF) means the
               // corresponding low surrogate was cut off — remove it.
               if (s.length > 0) {
-                  const code = s.charCodeAt(s.length - 1);
+                  const code = s.codePointAt(s.length - 1) ?? 0;
                   if (code >= 0xD800 && code <= 0xDBFF) {
                       s = s.slice(0, -1);
                   }
@@ -123,17 +123,15 @@ export function forwardToBackend(level, source, message) {
     }
 
     // — Fire-and-forget: swallow both sync throws and async rejections —
+    // Use optional chaining on .catch() so SonarCloud recognizes the
+    // pattern (S4822/S6544). The outer try/catch handles sync throws
+    // when __TAURI_INTERNALS__ is not yet available.
     try {
-        const promise = _tauri?.invoke?.(COMMANDS.WRITE_FRONTEND_LOG, {
+        _tauri?.invoke?.(COMMANDS.WRITE_FRONTEND_LOG, {
             level,
             source,
             message: payload,
-        });
-        // Catch the Promise rejection to prevent unhandledrejection
-        // (which would itself trigger forwardToBackend → loop).
-        if (promise && typeof promise.catch === 'function') {
-            promise.catch(() => {});
-        }
+        })?.catch?.(() => {});
     } catch {
         // Silently ignore — logging must never throw
     }
