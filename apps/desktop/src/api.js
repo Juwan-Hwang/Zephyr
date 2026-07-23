@@ -298,7 +298,7 @@ export function setCoreReachable(reachable) {
  */
 function getHeaders() {
   /** @type {Record<string, string>} */
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
   if (_state.secret) {
     headers['Authorization'] = `Bearer ${_state.secret}`;
   }
