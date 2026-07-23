@@ -97,7 +97,7 @@ async function showApplyModal() {
             if (cancelBtn) cancelBtn.classList.remove('hidden');
 
             // Replace the default input with our custom content
-            contentArea.innerHTML = '';
+            contentArea.replaceChildren();
 
             const wrapper = document.createElement('div');
             wrapper.className = 'space-y-4 text-sm text-[var(--text-secondary)]';

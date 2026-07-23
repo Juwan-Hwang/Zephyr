@@ -237,7 +237,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
 
         /** @type {any} */ (list)._virtObserver?.disconnect();
 
-        list.innerHTML = '';
+        list.replaceChildren();
         list.appendChild(fragment);
 
         dropdown.classList.remove('opacity-0', 'pointer-events-none');

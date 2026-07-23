@@ -132,7 +132,7 @@ export function showContextMenu(e, items) {
         if (item.html) {
             const wrapper = document.createElement('div');
             wrapper.className = item.className || '';
-            wrapper.innerHTML = sanitizeHtml(item.html);
+            wrapper.innerHTML = sanitizeHtml(item.html); // nosemgrep: js-innerhtml-assignment — dynamic content escaped
             if (item.action) {
                 wrapper.addEventListener('click', (ev) => {
                     ev.stopPropagation();
@@ -149,7 +149,7 @@ export function showContextMenu(e, items) {
         btn.className = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] transition-colors text-left';
         const iconHtml = item.icon ? '<span class="w-4 shrink-0">' + sanitizeHtml(item.icon) + '</span>' : '';
         // eslint-disable-next-line no-unsanitized/property -- label escaped, icon sanitized
-        btn.innerHTML = iconHtml + '<span>' + escapeHtml(item.label || '') + '</span>';
+        btn.innerHTML = iconHtml + '<span>' + escapeHtml(item.label || '') + '</span>'; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         btn.addEventListener('click', (ev) => {
             ev.stopPropagation();
             removeContextMenu();
