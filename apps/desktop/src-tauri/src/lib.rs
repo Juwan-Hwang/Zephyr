@@ -1124,7 +1124,48 @@ async fn rate_limited_unregister_shortcut(
     global_shortcut::unregister_shortcut(app, shortcut_state, action)
 }
 
+/// Frontend log forwarding command.
+///
+/// Receives log entries from the frontend (console errors, toast
+/// notifications, uncaught exceptions, unhandled Promise rejections) and
+/// writes them to the app log via `emit_backend_event`.
+///
+/// The `source` parameter determines the error code:
+/// - `"console"`       → `FRONTEND_CONSOLE`      (default)
+/// - `"notification"` → `FRONTEND_NOTIFICATION`
+/// - `"uncaught"`      → `FRONTEND_UNCAUGHT`
+/// - `"rejection"`     → `FRONTEND_REJECTION`
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn write_frontend_log(level: String, source: String, message: String) {
+    use crate::backend_event::codes;
+    let code = match source.as_str() {
+        "notification" => codes::FRONTEND_NOTIFICATION,
+        "uncaught" => codes::FRONTEND_UNCAUGHT,
+        "rejection" => codes::FRONTEND_REJECTION,
+        _ => codes::FRONTEND_CONSOLE,
+    };
+    // Cap message length to prevent unbounded disk writes from oversized
+    // stack traces or stringified circular objects. 16 KiB is generous
+    // for any realistic log entry while protecting the log file.
+    // Use is_char_boundary to avoid panicking when the cutoff lands
+    // inside a multibyte UTF-8 character (e.g., CJK, emoji).
+    const MAX_MESSAGE_LEN: usize = 16 * 1024;
+    const TRUNCATION_SUFFIX: &str = "… [truncated]";
+    let capped_message = if message.len() > MAX_MESSAGE_LEN {
+        let mut end = MAX_MESSAGE_LEN - TRUNCATION_SUFFIX.len();
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}{}", &message[..end], TRUNCATION_SUFFIX)
+    } else {
+        message
+    };
+    crate::backend_event::write_frontend_log(&level, code, &capped_message);
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
@@ -1597,6 +1638,7 @@ invalidate_heartbeat(window.app_handle());
             rate_limited_send_notification,
             get_app_version,
             heartbeat,
+write_frontend_log,
             // Prism Engine commands
             prism::prism_apply,
             prism::prism_status,
