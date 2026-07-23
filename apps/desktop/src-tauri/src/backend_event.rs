@@ -154,6 +154,7 @@ pub enum BackendModule {
     Override,
     Rule,
     Smart,
+    Frontend,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -338,6 +339,16 @@ pub mod codes {
     pub const SMART_WAL_APPEND_FAILED: u16 = 10003;
     /// Smart WAL remove operation failed.
     pub const SMART_WAL_REMOVE_FAILED: u16 = 10004;
+
+    // Frontend: 11000-11999
+    /// Console `console.error()` / `console.warn()` forwarded from frontend.
+    pub const FRONTEND_CONSOLE: u16 = 11001;
+    /// Toast notification shown via `showNotification()`.
+    pub const FRONTEND_NOTIFICATION: u16 = 11002;
+    /// Uncaught exception caught by `window.onerror`.
+    pub const FRONTEND_UNCAUGHT: u16 = 11003;
+    /// Unhandled Promise rejection caught by `unhandledrejection`.
+    pub const FRONTEND_REJECTION: u16 = 11004;
 }
 
 // ── Global Emitter ──────────────────────────────────────────────────────────
@@ -439,6 +450,7 @@ pub fn emit_backend_event(event: &BackendEvent) {
                 BackendModule::Override => "override",
                 BackendModule::Rule => "rule",
                 BackendModule::Smart => "smart",
+                BackendModule::Frontend => "frontend",
             };
             let line = format!(
                 "[{}] [{}] [{}] (#{}) {}",
@@ -453,6 +465,37 @@ pub fn emit_backend_event(event: &BackendEvent) {
             }
         }
     }
+}
+
+// ── Frontend Log Forwarding ────────────────────────────────────────────────
+
+/// Write a log entry originating from the frontend (console errors, toast
+/// notifications, uncaught exceptions, unhandled Promise rejections).
+///
+/// This goes through the standard `emit_backend_event` pipeline so the event
+/// reaches stderr, the frontend event listener (for the logs page), and the
+/// app log file (if `log_app_enabled` is active).
+///
+/// To prevent feedback loops (frontend error → backend → frontend toast →
+/// backend log → …), `backend-events.js` skips toast notifications for
+/// events from the `Frontend` module.
+///
+/// # Arguments
+/// * `level` - One of `"error"`, `"warn"`, `"info"` (case-insensitive).
+/// * `code`  - Error code from the `codes::FRONTEND_*` constants.
+/// * `message` - The log message text.
+pub fn write_frontend_log(level: &str, code: u16, message: &str) {
+    let backend_level = match level.to_ascii_lowercase().as_str() {
+        "error" | "fatal" => BackendLevel::Error,
+        "warn" => BackendLevel::Warn,
+        _ => BackendLevel::Info,
+    };
+    emit_backend_event(&BackendEvent::new(
+        backend_level,
+        BackendModule::Frontend,
+        code,
+        message,
+    ));
 }
 
 // ── Convenience Macros ──────────────────────────────────────────────────────
