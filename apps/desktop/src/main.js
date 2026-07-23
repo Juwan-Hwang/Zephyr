@@ -7,6 +7,18 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Polyfill: Element.replaceChildren() for older WebViews (pre-Safari 14 / macOS 10.15)
+//
+// Design note (ES5 compatibility):
+//
+// This polyfill deliberately uses `var`, index-based `for` loops, and
+// `this.removeChild(this.firstChild)` instead of `let`/`const`, `for...of`, and
+// `Node.remove()`.  The polyfill exists precisely because the target WebView
+// lacks `replaceChildren()` — such old engines may also lack ES6 features
+// (`Symbol.iterator` for `for...of`) and DOM4 (`Node.remove()`).
+//
+// SonarCloud may flag `var` and the `for` loop as style violations.  Do NOT
+// "fix" them to `let`/`for...of` — that would break the polyfill on the very
+// old WebViews it was created for.
 if (typeof Element.prototype.replaceChildren !== 'function') {
     Element.prototype.replaceChildren = function (/* ...nodes */) {
         while (this.firstChild) this.removeChild(this.firstChild);

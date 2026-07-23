@@ -190,6 +190,26 @@ async function handleConfigUpdate(path, value) {
  */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+/*
+ * Design note (prototype-pollution guard):
+ *
+ * When an unsafe key is encountered, buildNestedPayload() returns the (possibly
+ * partially-built) result object instead of throwing.  This is intentional:
+ *
+ *   1. `__proto__`, `constructor`, and `prototype` are NOT valid mihomo config
+ *      keys — no legitimate user path will ever contain them.
+ *   2. Throwing would abort the entire multi-key batch update, silently dropping
+ *      other valid keys the user intended to set.
+ *   3. Returning an empty/partial payload turns the operation into a no-op:
+ *      patchConfig receives an object with no harmful keys, so the config is not
+ *      polluted and no data is lost.
+ *
+ * Reviewers have repeatedly suggested throwing instead of returning.  That
+ * approach was rejected for the reasons above.  Do NOT change `return result`
+ * to `throw` without understanding the multi-key update flow in
+ * handleConfigUpdate().
+ */
+
 /**
  * @param {string} path
  * @param {*} value
@@ -217,7 +237,7 @@ function buildNestedPayload(path, value) {
         const nextSeg = segments[i + 1];
 
         if (seg.type === 'key') {
-            if (UNSAFE_KEYS.has(seg.value)) return result; // nosemgrep: prototype-pollution — guarded
+            if (UNSAFE_KEYS.has(String(seg.value))) return result; // nosemgrep: prototype-pollution — guarded
             current[seg.value] = nextSeg.type === 'index' ? [] : Object.create(null);
             current = current[seg.value];
         } else {
@@ -230,7 +250,7 @@ function buildNestedPayload(path, value) {
 
     const lastSeg = segments[segments.length - 1];
     if (lastSeg.type === 'key') {
-        if (UNSAFE_KEYS.has(lastSeg.value)) return result; // nosemgrep: prototype-pollution — guarded
+        if (UNSAFE_KEYS.has(String(lastSeg.value))) return result; // nosemgrep: prototype-pollution — guarded
         current[lastSeg.value] = value;
     } else {
         while (current.length <= lastSeg.value) {

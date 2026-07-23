@@ -2148,6 +2148,11 @@ appStore.set('isNetworkUpdating', false);
             const modal = document.createElement('div');
             modal.id = 'smart-config-modal';
             modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
+            // NOTE: config.* values (latency_weight, success_weight, etc.) come from
+            // prism.smartConfig() which calls a Tauri command backed by Rust f64 types.
+            // They are NOT user-controlled strings and cannot contain HTML — they are
+            // guaranteed to be numbers by the Rust type system.  Do not add HTML escaping
+            // here; it would produce visible "&amp;" artifacts in the number inputs.
             // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
