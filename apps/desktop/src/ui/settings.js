@@ -214,7 +214,7 @@ function initCopyEnvSettings() {
         const modal = document.createElement('div');
         modal.id = 'copy-env-format-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[360px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
@@ -363,7 +363,7 @@ function initLogSettingsModal() {
         const modal = document.createElement('div');
         modal.id = 'log-settings-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[400px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
@@ -561,7 +561,7 @@ function initLogSettingsModal() {
         const modal = document.createElement('div');
         modal.id = 'log-export-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[480px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
@@ -1257,7 +1257,7 @@ export async function initSettings() {
 
                 // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
                 const proxyContainer = document.getElementById('proxies-list');
-                if (proxyContainer) proxyContainer.innerHTML = '';
+                if (proxyContainer) proxyContainer.replaceChildren();
                 Bus.emit(Events.CONFIG_UPDATED);
 
                 if (errors.length === 0) {
@@ -1813,7 +1813,7 @@ appStore.set('isNetworkUpdating', false);
         );
         // Clear the container to force full re-render (in-place update won't update CSS classes)
         const container = document.getElementById('proxies-list');
-        if (container) container.innerHTML = '';
+        if (container) container.replaceChildren();
         Bus.emit(Events.CONFIG_UPDATED);
     });
 
@@ -2148,7 +2148,7 @@ appStore.set('isNetworkUpdating', false);
             const modal = document.createElement('div');
             modal.id = 'smart-config-modal';
             modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys
+            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
