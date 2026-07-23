@@ -171,7 +171,7 @@ async function showEditPanel(configInfo) {
     modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md opacity-0 transition-opacity';
     modal.style.transitionDuration = `${ANIMATION_DURATION}ms`;
     // Escape all translation strings for XSS safety
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:opacity ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1),transform ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
@@ -576,7 +576,7 @@ export function initSubscriptionSettings({
         for (let i = profileLineIdx + 1; i < lines.length; i++) {
             const line = lines[i];
             // Check if this line is a sequence item under profile
-            const itemMatch = line.match(new RegExp(`^${seqIndent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s+(.+)`));
+            const itemMatch = line.match(new RegExp(`^${seqIndent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s+(.+)`)); // nosemgrep: detect-non-literal-regexp — seqIndent is regex-escaped
             if (itemMatch) {
                 items.push(itemMatch[1].trim());
                 endLine = i;
@@ -668,7 +668,7 @@ export function initSubscriptionSettings({
             if (!parsed) continue;
 
             // Already present?
-            if (parsed.items.some(/** @type {string} */ item => new RegExp(`^${escapedName}$`, 'i').test(item))) {
+            if (parsed.items.some(/** @type {string} */ item => new RegExp(`^${escapedName}$`, 'i').test(item))) { // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
                 return content;
             }
 
@@ -696,7 +696,7 @@ export function initSubscriptionSettings({
             const parsed = parseProfileBlock(lines, i);
             if (!parsed) continue;
 
-            const filtered = parsed.items.filter(/** @type {string} */ item => !new RegExp(`^${escapedName}$`, 'i').test(item));
+            const filtered = parsed.items.filter(/** @type {string} */ item => !new RegExp(`^${escapedName}$`, 'i').test(item)); // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
 
             let newLines;
             if (filtered.length === 0) {
@@ -734,7 +734,7 @@ export function initSubscriptionSettings({
         // --- "Edit" item ---
         const editItem = document.createElement('div');
         editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
-        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
+        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
@@ -751,7 +751,7 @@ export function initSubscriptionSettings({
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
         extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
-        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml()
+        // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
@@ -855,7 +855,7 @@ export function initSubscriptionSettings({
                         // Show spinner while processing
                         const spinner = document.createElement('span');
                         spinner.className = 'animate-spin ml-1 text-[var(--text-muted)]';
-                        spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>';
+                        spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
 
@@ -960,7 +960,7 @@ export function initSubscriptionSettings({
                 for (const [groupName, groupFiles] of grouped) {
                     const groupHeader = document.createElement('div');
                     groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-[var(--text-muted)] uppercase tracking-wider font-bold';
-                    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+                    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                     groupHeader.innerHTML = `<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${escapeHtml(groupName)}`;
                     menuScroll.appendChild(groupHeader);
 
@@ -1014,7 +1014,7 @@ export function initSubscriptionSettings({
             return idxA - idxB;
         });
 
-        configsList.innerHTML = '';
+        configsList.replaceChildren();
 
         // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
         // Bind document-level listeners only once
@@ -1233,7 +1233,7 @@ export function initSubscriptionSettings({
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-            delBtn.innerHTML = SVG_ICONS.trash;
+            delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.title = t.delete;
             delBtn.onclick = async (e) => {
                 e.stopPropagation();
@@ -1267,7 +1267,7 @@ export function initSubscriptionSettings({
                 updateBtn.type = 'button';
                 updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-                updateBtn.innerHTML = SVG_ICONS.refresh;
+                updateBtn.innerHTML = SVG_ICONS.refresh; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 updateBtn.title = t.update;
                 updateBtn.setAttribute('aria-label', t?.update || 'Update');
                 updateBtn.onclick = async (e) => {
@@ -1358,7 +1358,7 @@ export function initSubscriptionSettings({
                     textRow.id = labelId;
                     textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
-                    textRow.innerHTML = '<span>' + formatFileSize(used) + ' ' + (t?.usedSpace || 'used') + '</span><span>' + formatFileSize(total) + ' ' + (t?.totalSpace || 'total') + '</span>';
+                    textRow.innerHTML = '<span>' + formatFileSize(used) + ' ' + (t?.usedSpace || 'used') + '</span><span>' + formatFileSize(total) + ' ' + (t?.totalSpace || 'total') + '</span>'; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
                     const barBg = document.createElement('div');
                     barBg.className = 'h-1.5 w-full bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden border border-[var(--zephyr-border-subtle)]';

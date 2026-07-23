@@ -159,7 +159,7 @@ async function updateStatusBar() {
             if (isError) stateLabel = t.ruleLibraryStatusError || 'Error';
             else if (isCompiling) stateLabel = t.ruleLibraryStatusCompiling || 'Compiling';
             else stateLabel = t.ruleLibraryStatusReady || 'Ready';
-            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} mr-1.5"></span>${escapeHtml(stateLabel)}`;
         }
 
@@ -173,7 +173,7 @@ async function updateStatusBar() {
         if (statusEl) {
             const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>';
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
-            statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready');
+            statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready'); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         }
         if (statsEl) {
             const totalRules = ruleFiles.reduce((sum, f) => sum + (f.rule_count || 0), 0);
@@ -205,7 +205,7 @@ function render() {
     // (e.g. after import, language change, etc.).
     let tabContent = document.getElementById('rl-tab-content');
     if (!tabContent) {
-        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         content.innerHTML = `
             <div class="flex items-center gap-1 mb-4 shrink-0">
                 <button type="button" data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
@@ -285,7 +285,7 @@ function renderRuleSets(container) {
 
     // Empty state
     if (ruleFiles.length === 0) {
-        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
@@ -328,7 +328,7 @@ function renderRuleSets(container) {
     // Build a set of files that belong to a group
     const groupedFiles = new Set(groups.flatMap((g) => g.files));
 
-    container.innerHTML = '';
+    container.replaceChildren();
 
     // Render each group as a collapsible section
     groups.forEach((group) => {
@@ -373,7 +373,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     header.setAttribute('tabindex', '0');
     header.setAttribute('aria-expanded', 'true');
     header.addEventListener('keydown', (e) => { if (e.target === header && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); header.click(); } });
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     header.innerHTML = `
         <div class="flex items-center gap-2">
             ${SVG_ICONS.collapseArrow}
@@ -430,7 +430,7 @@ function buildFileCard(file, _fileMap) {
 
     const sourceBadge = getSourceBadge(file.source);
 
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
             <div class="flex flex-col gap-0.5 min-w-0">
@@ -510,7 +510,7 @@ function renderActiveRules(container) {
             activeRulesResizeObs.disconnect();
             activeRulesResizeObs = null;
         }
-        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         ct.innerHTML = `
             <div class="flex flex-col items-center justify-center py-20 gap-4">
                 <svg class="w-16 h-16 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
@@ -563,12 +563,12 @@ function renderActiveRules(container) {
     }
 
     // ── Build DOM structure (first time only) ──
-    ct.innerHTML = '';
+    ct.replaceChildren();
 
     // Toolbar
     const toolbar = document.createElement('div');
     toolbar.className = 'flex items-center justify-between mb-4 shrink-0';
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     toolbar.innerHTML = `
         <div class="flex items-center gap-2">
             <span id="arl-groups-count" class="text-xs text-[var(--text-muted)]">${escapeHtml(String(activeRules.length))} ${t.ruleLibraryActiveGroups || 'groups'}</span>
@@ -589,7 +589,7 @@ function renderActiveRules(container) {
     // Virtual scroll container
     const scrollBox = document.createElement('div');
     scrollBox.className = 'overflow-y-auto custom-scrollbar pr-1';
-    scrollBox.innerHTML = '<div id="arl-vs-spacer-top" style="height:0"></div><div id="arl-vs-lines" class="space-y-1"></div><div id="arl-vs-spacer-bottom" style="height:0"></div>';
+    scrollBox.innerHTML = '<div id="arl-vs-spacer-top" style="height:0"></div><div id="arl-vs-lines" class="space-y-1"></div><div id="arl-vs-spacer-bottom" style="height:0"></div>'; // nosemgrep: js-innerhtml-assignment — static HTML
     ct.appendChild(scrollBox);
 
     // Compute available height using the page container (which has constrained height)
@@ -637,7 +637,7 @@ function renderActiveRules(container) {
                 header.setAttribute('tabindex', '0');
                 header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
                 header.addEventListener('keydown', (e) => { if (e.target === header && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); header.click(); } });
-                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 header.innerHTML = `
                     <div class="flex items-center gap-3">
                         <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
@@ -677,7 +677,7 @@ function renderActiveRules(container) {
                 const el = document.createElement('div');
                 el.setAttribute('data-line-idx', String(idx));
                 el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-[var(--zephyr-time-micro)]';
-                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
+                // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 el.innerHTML = `
                     <div class="flex items-center gap-4 flex-1 min-w-0">
                         <span class="text-xs text-[var(--text-tertiary)] w-6 shrink-0">${localIndex}</span>
@@ -1203,7 +1203,7 @@ async function handleEditRule(filename) {
             item.style.setProperty('-webkit-user-drag', 'element');
             item.dataset.ruleIndex = String(index);
 
-            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr
+            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml/escapeAttr // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             item.innerHTML = `
                 <div class="flex items-center gap-4 flex-1">
                     <span class="text-xs text-[var(--text-tertiary)] w-6 shrink-0 cursor-grab active:cursor-grabbing select-none" title="${escapeAttr(t.ruleLibraryDragToReorder || 'Drag to reorder')}">${index + 1}</span>
@@ -1330,7 +1330,7 @@ async function handleEditRule(filename) {
                 toggleBtn.textContent = t.ruleLibrarySwitchToVisual || 'Visual Editor';
                 // Create CM6 editor
                 if (ruleEditorView) { ruleEditorView.destroy(); ruleEditorView = null; }
-                cm6Container.innerHTML = '';
+                cm6Container.replaceChildren();
                 ruleEditorView = createEditor({
                     parent: cm6Container,
                     content: textContent,
