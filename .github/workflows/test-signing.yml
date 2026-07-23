@@ -3,6 +3,10 @@ name: Test Code Signing
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read  # SignPath needs to read job details and download uploaded artifacts
+
 jobs:
   sign:
     runs-on: windows-latest

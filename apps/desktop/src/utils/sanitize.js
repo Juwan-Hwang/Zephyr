@@ -199,7 +199,7 @@ export function sanitizeHtml(input, options = {}) {
     //  DocumentFragment that accepts any HTML without structural correction.)
     const template = document.createElement('template');
     // eslint-disable-next-line no-unsanitized/property -- sanitizer core: <template> is inert, no script execution
-    template.innerHTML = normalized;
+    template.innerHTML = normalized; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     const fragment = template.content;
 
     // Recursive sanitizer — walks the tree depth-first
@@ -255,6 +255,11 @@ export function sanitizeHtml(input, options = {}) {
             // Strip ALL event handlers (onclick, onerror, onload, etc.)
             if (EVENT_HANDLER_RE.test(name)) {
                 attrsToRemove.push(attr.name);
+                continue;
+            }
+
+            // Allow data-* attributes on all elements (safe: no code execution)
+            if (name.startsWith('data-')) {
                 continue;
             }
 
