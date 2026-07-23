@@ -85,10 +85,10 @@ const DEFAULT_ALLOWED_ATTRS = {
     tr:     new Set(['class']),
     td:     new Set(['colspan', 'rowspan', 'class']),
     th:     new Set(['colspan', 'rowspan', 'class']),
-    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step']),
+    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step', 'spellcheck']),
     label:  new Set(['for', 'class']),
     button: new Set(['type', 'id', 'class', 'disabled']),
-    textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols']),
+    textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols', 'spellcheck']),
     select: new Set(['id', 'name', 'class', 'disabled', 'multiple']),
     option: new Set(['value', 'selected', 'disabled']),
     // SVG attributes
@@ -199,7 +199,7 @@ export function sanitizeHtml(input, options = {}) {
     //  DocumentFragment that accepts any HTML without structural correction.)
     const template = document.createElement('template');
     // eslint-disable-next-line no-unsanitized/property -- sanitizer core: <template> is inert, no script execution
-    template.innerHTML = normalized;
+    template.innerHTML = normalized; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     const fragment = template.content;
 
     // Recursive sanitizer — walks the tree depth-first
@@ -255,6 +255,11 @@ export function sanitizeHtml(input, options = {}) {
             // Strip ALL event handlers (onclick, onerror, onload, etc.)
             if (EVENT_HANDLER_RE.test(name)) {
                 attrsToRemove.push(attr.name);
+                continue;
+            }
+
+            // Allow data-* and aria-* attributes on all elements (safe: no code execution)
+            if (name.startsWith('data-') || name.startsWith('aria-')) {
                 continue;
             }
 

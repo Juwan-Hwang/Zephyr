@@ -215,20 +215,32 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
             temp.join("mihomo-tun.log").to_string_lossy().into_owned()
         });
 
-    // CRITICAL: Escape paths for shell single-quote context to prevent command injection
-    // Replace all ' with '\'' (end quote, escaped quote, start quote)
-    let escaped_config_dir = config_dir_str.replace("'", "'\\''");
-    let escaped_log_path = log_path.replace("'", "'\\''");
+    // CRITICAL: Escape paths in two phases — shell first, then AppleScript
+    // 1. Shell-escape: replace ' with '\'' for single-quote context (end quote, escaped quote, start quote)
+    // 2. AppleScript-escape: replace \ with \\ and " with \" to prevent breaking the outer "do shell script" literal
+    let escaped_config_dir = config_dir_str
+        .replace("'", "'\\''")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let escaped_log_path = log_path
+        .replace("'", "'\\''")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
 
     // Get binary name from resolved core_path to ensure backward compatibility
     let binary_name = core_path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| "Invalid core binary name".to_owned())?;
-    let escaped_binary_name = binary_name.replace("'", "'\\''");
+    let escaped_binary_name = binary_name
+        .replace("'", "'\\''")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
     let script = format!(
+        // nosemgrep: rust-osascript-privilege-escalation — paths are shell-escaped via replace("'", "'\\''")
+        // nosemgrep: rust-osascript-command-pattern — escaped values prevent injection
         r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
@@ -497,6 +509,8 @@ const fn has_root_mihomo() -> bool {
 #[cfg(target_os = "macos")]
 pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     // Kill both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
+    // nosemgrep: rust-osascript-privilege-escalation — static string, no interpolation
+    // nosemgrep: rust-osascript-command-pattern — static string, no injection vector
     let script = r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
     let status = std::process::Command::new("osascript")
         .args(["-e", script])

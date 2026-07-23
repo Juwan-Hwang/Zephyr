@@ -44,6 +44,9 @@ const strict = args.includes('--strict');
  * Handles nested braces inside string literals correctly.
  */
 function extractBlock(content, lang) {
+    // Validate lang to prevent ReDoS — only allow word chars and hyphens
+    if (!/^[\w-]+$/.test(lang)) return null;
+    // nosemgrep: detect-non-literal-regexp — lang is validated above
     const regex = new RegExp(`(?:^|\\n)\\s*${lang}\\s*:\\s*\\{`, 'm');
     const match = regex.exec(content);
     if (!match) return null;

@@ -136,12 +136,11 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
         titleEl.textContent = title;
 
         if (isCustomContent) {
-            contentArea.innerHTML = '';
-            // eslint-disable-next-line no-unsanitized/method -- caller-validated: customHtml already sanitized by caller
-            contentArea.insertAdjacentHTML('beforeend', customHtml);
+            contentArea.replaceChildren();
+            contentArea.insertAdjacentHTML('beforeend', sanitizeHtml(customHtml));
         } else {
              
-            contentArea.innerHTML = '';
+            contentArea.replaceChildren();
             const input = document.createElement('input');
             input.type = 'text';
             input.id = 'modal-input';
@@ -247,7 +246,7 @@ export function showConfirmModal(title, message = '') {
         titleEl.textContent = title;
 
          
-        contentArea.innerHTML = '';
+        contentArea.replaceChildren();
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
