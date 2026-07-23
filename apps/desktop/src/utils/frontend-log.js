@@ -122,17 +122,13 @@ export function forwardToBackend(level, source, message) {
         _windowCount++;
     }
 
-    // — Fire-and-forget: swallow both sync throws and async rejections —
-    // Use optional chaining on .catch() so SonarCloud recognizes the
-    // pattern (S4822/S6544). The outer try/catch handles sync throws
-    // when __TAURI_INTERNALS__ is not yet available.
-    try {
-        _tauri?.invoke?.(COMMANDS.WRITE_FRONTEND_LOG, {
-            level,
-            source,
-            message: payload,
-        })?.catch?.(() => {});
-    } catch {
-        // Silently ignore — logging must never throw
-    }
+    // — Fire-and-forget: optional chaining prevents sync throws when
+    // __TAURI_INTERNALS__ is unavailable; .catch() swallows async
+    // rejections to prevent unhandledrejection (which would trigger
+    // forwardToBackend → loop). No try/catch needed — SonarCloud S4822.
+    _tauri?.invoke?.(COMMANDS.WRITE_FRONTEND_LOG, {
+        level,
+        source,
+        message: payload,
+    })?.catch?.(() => {});
 }
