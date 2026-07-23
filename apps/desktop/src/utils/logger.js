@@ -1,10 +1,14 @@
 // @ts-check
+import { forwardToBackend } from './frontend-log.js';
 /**
  * Logging system with colored console output.
  *
  * Architecture:
  *   Logger (abstract base)  <-  ConsoleLogger
  *   Registry (Map)          <-  factory + global level control
+ *
+ * ConsoleLogger forwards all log levels (debug/info/warn/error) to the
+ * backend app log via `frontend-log.js` (fire-and-forget, rate-limited).
  *
  * @module logger
  */
@@ -99,6 +103,24 @@ class Logger {
 // Console logger — colored prefix output
 // ---------------------------------------------------------------------------
 
+/**
+ * Format a single argument for log forwarding.
+ * Handles Error objects (with stack), strings, and objects.
+ * @param {*} arg
+ * @returns {string}
+ */
+function _formatArg(arg) {
+    if (arg instanceof Error) {
+        return arg.stack || `${arg.name}: ${arg.message}`;
+    }
+    if (typeof arg === 'string') return arg;
+    try {
+        return JSON.stringify(arg) ?? String(arg);
+    } catch {
+        return String(arg);
+    }
+}
+
 /** @type {Record<string, string>} */
 const CONSOLE_STYLES = {
     debug: 'color:#6b7280;font-weight:bold',
@@ -120,6 +142,13 @@ class ConsoleLogger extends Logger {
         if (typeof console[method] === 'function') {
             console[method](`%c${prefix}`, style, ...args);
         }
+
+        // Forward all levels to the backend app log (fire-and-forget, rate-limited).
+        // Use logger name (not the timestamped prefix) so the dedup hash is stable
+        // across repeated identical messages — the prefix contains a per-call
+        // timestamp that would otherwise break deduplication entirely.
+        const msg = args.map(_formatArg).join(' ');
+        forwardToBackend(level, 'console', `[${this.name}] ${msg}`);
     }
 }
 
