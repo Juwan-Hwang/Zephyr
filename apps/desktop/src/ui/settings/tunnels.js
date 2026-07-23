@@ -71,14 +71,14 @@ export function initTunnelSettings({
         if (!tunnelsList) return;
 
         if (!currentTunnels || currentTunnels.length === 0) {
-            tunnelsList.innerHTML = '';
+            tunnelsList.replaceChildren();
             if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
             if (tunnelsEmpty) tunnelsEmpty.style.display = 'block';
             return;
         }
 
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
-        tunnelsList.innerHTML = '';
+        tunnelsList.replaceChildren();
 
         currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
@@ -113,7 +113,7 @@ export function initTunnelSettings({
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
-            delBtn.innerHTML = SVG_ICONS.trash;
+            delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
                 const deleted = currentTunnels[index];
                 currentTunnels.splice(index, 1);
