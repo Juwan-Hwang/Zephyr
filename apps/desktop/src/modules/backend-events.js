@@ -169,7 +169,9 @@ export async function initBackendEventListeners() {
                 _onNewEvent?.(entry);
 
                 // Fatal/Error → Toast notification (dedup by module:code, 10s window)
-                if (level === 'fatal' || level === 'error') {
+                // Skip frontend-originated events to prevent feedback loops:
+                // frontend error → backend → frontend toast → backend log → …
+                if ((level === 'fatal' || level === 'error') && module !== 'frontend') {
                     const key = `${module}:${code}`;
                     if (_recentErrors.has(key)) return;
                     _recentErrors.add(key);
@@ -177,6 +179,8 @@ export async function initBackendEventListeners() {
                     showNotification(
                         `[${module}] ${message}`,
                         level === 'fatal' ? 'error' : 'warning',
+                        null,
+                        { log: false }, // Already logged via emit_backend_event
                     );
                 }
             });
