@@ -106,7 +106,9 @@ fn collect_backup_files(paths: &AppPaths) -> Vec<(String, PathBuf)> {
     }
 
     // 4. Metadata file (subscription info, intervals, etc.)
-    let metadata = paths.app_data_dir.join("metadata.json");
+    //    Lives in profiles_dir — same directory as the profile YAMLs,
+    //    not in app_data_dir (see crypto.rs load_metadata/save_metadata).
+    let metadata = paths.profiles_dir.join("metadata.json");
     if metadata.exists() {
         files.push(("metadata.json".to_owned(), metadata));
     }
@@ -706,7 +708,7 @@ fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, P
             } else if entry.path == "run_config.yaml" {
                 paths.core_dir.join("run_config.yaml")
             } else if entry.path == "metadata.json" {
-                paths.app_data_dir.join("metadata.json")
+                paths.profiles_dir.join("metadata.json")
             } else {
                 // Reject unknown paths to prevent crafted archives from
                 // overwriting arbitrary application directories.
@@ -796,7 +798,7 @@ fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
     } else if rel == Path::new("run_config.yaml") {
         Some(paths.core_dir.join("run_config.yaml"))
     } else if rel == Path::new("metadata.json") {
-        Some(paths.app_data_dir.join("metadata.json"))
+        Some(paths.profiles_dir.join("metadata.json"))
     } else {
         None
     }

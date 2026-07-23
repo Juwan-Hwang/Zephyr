@@ -9,6 +9,7 @@ import { markdownToHtml } from '../utils/markdown.js';
 import { sanitizeHtml } from '../utils/sanitize.js';
 import { translations } from '../i18n.js';
 import { appStore } from './state.js';
+import { forwardToBackend } from '../utils/frontend-log.js';
 
 /**
  * Show a toast notification.
@@ -31,8 +32,10 @@ const MAX_NOTIFICATIONS = 5;
  * @param {string} message
  * @param {'info'|'success'|'warning'|'error'} [type]
  * @param {string|null} [title]
+ * @param {{ log?: boolean }} [opts] - `log: false` skips app-log forwarding
+ *        (use when the toast is triggered by a backend event that's already logged).
  */
-export function showNotification(message, type = 'info', title = null) {
+export function showNotification(message, type = 'info', title = null, { log = true } = {}) {
     const container = document.getElementById('notif-container');
     if (!container) return;
 
@@ -89,6 +92,24 @@ export function showNotification(message, type = 'info', title = null) {
         notif.classList.add('translate-x-full', 'opacity-0');
         setTimeout(() => notif.remove(), 500);
     }, title ? 4000 : 3000);
+
+    if (log) _forwardNotification(type, title, message);
+}
+
+/**
+ * Map notification type to log level and forward to backend app log.
+ * Extracted from showNotification to keep its cognitive complexity
+ * below the SonarCloud threshold (15).
+ * @param {string} type
+ * @param {string|null} title
+ * @param {string} message
+ */
+function _forwardNotification(type, title, message) {
+    const level = /** @type {'error'|'warn'|'info'} */ (
+        { error: 'error', warning: 'warn' }[type] ?? 'info'
+    );
+    const msg = title ? `[${title}] ${message}` : message;
+    forwardToBackend(level, 'notification', msg);
 }
 
 /**
