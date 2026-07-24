@@ -10,7 +10,7 @@ use zephyr_core::config::subscription::{
 };
 
 use super::core_process::ensure_app_storage;
-use super::crypto::{load_metadata, save_metadata, write_profile_file};
+use super::crypto::{load_metadata, lock_metadata, save_metadata, write_profile_file};
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 #[allow(unused_imports)]
 use crate::emit_warn;
@@ -586,33 +586,6 @@ async fn download_sub_inner_raw(
     zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)
         .map_err(|e| e.to_string())?;
 
-    let mut metadata = load_metadata(&paths);
-    // Preserve existing auto_update_interval and per-subscription user_agent
-    // to avoid silently resetting user-configured settings
-    let (preserved_interval, preserved_ua) = metadata
-        .configs
-        .get(&clean_name)
-        .map(|m| (m.auto_update_interval, m.user_agent.clone()))
-        .unwrap_or((None, None));
-    metadata.configs.insert(
-        clean_name.clone(),
-        super::crypto::ConfigMetadata {
-            url: Some(final_url),
-            sub_info: if sub_info_header.is_empty() {
-                None
-            } else {
-                Some(sub_info_header)
-            },
-            last_updated: Some(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-            ),
-            auto_update_interval: preserved_interval,
-            user_agent: preserved_ua,
-        },
-    );
     let final_content = content;
 
     // Best-effort atomic config + metadata update (compensating transactions, not ACID):
@@ -657,8 +630,45 @@ async fn download_sub_inner_raw(
         return Err(format!("Failed to apply config file: {e}"));
     }
 
-    // Save metadata — last step so failure can be cleanly rolled back
-    if let Err(e) = save_metadata(&paths, &metadata) {
+    // Save metadata — last step so failure can be cleanly rolled back.
+    // Load *after* file I/O and under the metadata lock to avoid Lost Update:
+    // a concurrent command's metadata change would otherwise be overwritten
+    // by this save (which was based on a pre-download snapshot).
+    let metadata_result = {
+        let _guard = lock_metadata();
+        let mut metadata = load_metadata(&paths);
+        // Preserve existing auto_update_interval, per-subscription user_agent, and
+        // URL to avoid silently resetting user-configured settings — especially
+        // when the user changed the URL via update_config_url while this download
+        // was in progress (the download URL would otherwise overwrite the new URL).
+        let (preserved_interval, preserved_ua, preserved_url) = metadata
+            .configs
+            .get(&clean_name)
+            .map(|m| (m.auto_update_interval, m.user_agent.clone(), m.url.clone()))
+            .unwrap_or((None, None, None));
+        metadata.configs.insert(
+            clean_name.clone(),
+            super::crypto::ConfigMetadata {
+                url: preserved_url.or(Some(final_url)),
+                sub_info: if sub_info_header.is_empty() {
+                    None
+                } else {
+                    Some(sub_info_header)
+                },
+                last_updated: Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                ),
+                auto_update_interval: preserved_interval,
+                user_agent: preserved_ua,
+            },
+        );
+        save_metadata(&paths, &metadata)
+    };
+
+    if let Err(e) = metadata_result {
         // Rollback config to previous state
         let _ = std::fs::remove_file(&target_path);
         if let Some(bp) = backup_path.as_ref() {
