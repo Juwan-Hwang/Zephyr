@@ -8,8 +8,8 @@ use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
-    cleanup_metadata_cache, load_metadata, read_profile_file, save_metadata, write_profile_file,
-    ConfigMetadata, ProfilesMetadata,
+    cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
+    write_profile_file, ConfigMetadata, ProfilesMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -182,6 +182,7 @@ pub async fn update_config_url(
         return Err("URL must use http:// or https://".to_owned());
     }
 
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
     update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
         entry.url = Some(trimmed_url.to_owned());
@@ -200,6 +201,7 @@ pub async fn update_subscription_interval(
 ) -> Result<(), String> {
     let (paths, safe_name) = validate_config_for_update(&app, &name)?;
 
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
     update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
         entry.auto_update_interval = (interval > 0).then_some(interval);
@@ -235,6 +237,7 @@ pub async fn update_subscription_ua(
         }
     }
 
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
     update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
         entry.user_agent.clone_from(&normalized);
@@ -388,9 +391,12 @@ pub async fn delete_config(
 
         if yml_path.exists() {
             fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
-            let mut metadata = load_metadata(&paths);
-            metadata.configs.remove(&yml_name);
-            save_metadata(&paths, &metadata)?;
+            {
+                let _guard = lock_metadata();
+                let mut metadata = load_metadata(&paths);
+                metadata.configs.remove(&yml_name);
+                save_metadata(&paths, &metadata)?;
+            }
             cleanup_dangling_last_config(&app, &state, &paths, &yml_name);
             return Ok(format!("Config {yml_name} deleted"));
         }
@@ -413,13 +419,16 @@ pub async fn delete_config(
 
     // File deleted successfully — now update metadata
     // Use clean_name for metadata removal (matches the actual file key stored)
-    let mut metadata = load_metadata(&paths);
-    metadata.configs.remove(&clean_name);
-    // Also try the original name in case metadata was stored with a different key
-    if name != clean_name {
-        metadata.configs.remove(&name);
+    {
+        let _guard = lock_metadata();
+        let mut metadata = load_metadata(&paths);
+        metadata.configs.remove(&clean_name);
+        // Also try the original name in case metadata was stored with a different key
+        if name != clean_name {
+            metadata.configs.remove(&name);
+        }
+        save_metadata(&paths, &metadata)?;
     }
-    save_metadata(&paths, &metadata)?;
 
     // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
     // 避免悬空指针导致下次冷启动加载到错误的配置。
@@ -600,17 +609,20 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     std::fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename config: {e}"))?;
 
     // Update metadata
-    let mut metadata = load_metadata(&paths);
-    if let Some(meta) = metadata.configs.remove(&clean_old) {
-        metadata.configs.insert(clean_new.clone(), meta);
-    }
-    // Also try original name in case metadata was stored differently
-    if old_name != clean_old {
-        if let Some(meta) = metadata.configs.remove(&old_name) {
+    {
+        let _guard = lock_metadata();
+        let mut metadata = load_metadata(&paths);
+        if let Some(meta) = metadata.configs.remove(&clean_old) {
             metadata.configs.insert(clean_new.clone(), meta);
         }
+        // Also try original name in case metadata was stored differently
+        if old_name != clean_old {
+            if let Some(meta) = metadata.configs.remove(&old_name) {
+                metadata.configs.insert(clean_new.clone(), meta);
+            }
+        }
+        save_metadata(&paths, &metadata)?;
     }
-    save_metadata(&paths, &metadata)?;
 
     // Update last_config setting if it references the old name
     // Also migrate last_proxy_selection key from old name to new name
