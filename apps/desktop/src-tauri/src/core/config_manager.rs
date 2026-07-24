@@ -8,37 +8,12 @@ use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
-    cleanup_metadata_cache, load_metadata, read_profile_file, save_metadata, write_profile_file,
-    ConfigMetadata, ProfilesMetadata,
+    cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
+    write_profile_file, ConfigMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
 use zephyr_core::config::sanitizer::{sanitize_config_file_name, validate_path_within_dir};
-
-/// Update a field on an existing metadata entry (or create the entry first).
-fn update_metadata_entry<F>(
-    metadata: &mut ProfilesMetadata,
-    safe_name: &str,
-    app: &AppHandle,
-    update: F,
-) where
-    F: FnOnce(&mut ConfigMetadata),
-{
-    let entry = metadata
-        .configs
-        .entry(safe_name.to_owned())
-        .or_insert_with(|| {
-            let url = get_config_url(app, safe_name).ok();
-            ConfigMetadata {
-                url,
-                sub_info: None,
-                last_updated: None,
-                auto_update_interval: None,
-                user_agent: None,
-            }
-        });
-    update(entry);
-}
 
 /// Common validation for config update commands.
 /// Returns sanitized name and app paths if valid.
@@ -182,10 +157,10 @@ pub async fn update_config_url(
         return Err("URL must use http:// or https://".to_owned());
     }
 
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
-    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
-        entry.url = Some(trimmed_url.to_owned());
-    });
+    let entry = metadata.configs.entry(safe_name).or_default();
+    entry.url = Some(trimmed_url.to_owned());
     save_metadata(&paths, &metadata)?;
 
     Ok(())
@@ -199,11 +174,18 @@ pub async fn update_subscription_interval(
     interval: u64,
 ) -> Result<(), String> {
     let (paths, safe_name) = validate_config_for_update(&app, &name)?;
+    let fallback_url = get_config_url(&app, &safe_name).ok();
 
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
-    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
-        entry.auto_update_interval = (interval > 0).then_some(interval);
-    });
+    let entry = metadata
+        .configs
+        .entry(safe_name)
+        .or_insert_with(|| ConfigMetadata {
+            url: fallback_url,
+            ..Default::default()
+        });
+    entry.auto_update_interval = (interval > 0).then_some(interval);
     save_metadata(&paths, &metadata)?;
 
     Ok(())
@@ -235,10 +217,18 @@ pub async fn update_subscription_ua(
         }
     }
 
+    let fallback_url = get_config_url(&app, &safe_name).ok();
+
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
-    update_metadata_entry(&mut metadata, &safe_name, &app, |entry| {
-        entry.user_agent.clone_from(&normalized);
-    });
+    let entry = metadata
+        .configs
+        .entry(safe_name)
+        .or_insert_with(|| ConfigMetadata {
+            url: fallback_url,
+            ..Default::default()
+        });
+    entry.user_agent.clone_from(&normalized);
     save_metadata(&paths, &metadata)?;
 
     Ok(())
@@ -388,9 +378,12 @@ pub async fn delete_config(
 
         if yml_path.exists() {
             fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
-            let mut metadata = load_metadata(&paths);
-            metadata.configs.remove(&yml_name);
-            save_metadata(&paths, &metadata)?;
+            {
+                let _guard = lock_metadata();
+                let mut metadata = load_metadata(&paths);
+                metadata.configs.remove(&yml_name);
+                save_metadata(&paths, &metadata)?;
+            }
             cleanup_dangling_last_config(&app, &state, &paths, &yml_name);
             return Ok(format!("Config {yml_name} deleted"));
         }
@@ -413,13 +406,16 @@ pub async fn delete_config(
 
     // File deleted successfully — now update metadata
     // Use clean_name for metadata removal (matches the actual file key stored)
-    let mut metadata = load_metadata(&paths);
-    metadata.configs.remove(&clean_name);
-    // Also try the original name in case metadata was stored with a different key
-    if name != clean_name {
-        metadata.configs.remove(&name);
+    {
+        let _guard = lock_metadata();
+        let mut metadata = load_metadata(&paths);
+        metadata.configs.remove(&clean_name);
+        // Also try the original name in case metadata was stored with a different key
+        if name != clean_name {
+            metadata.configs.remove(&name);
+        }
+        save_metadata(&paths, &metadata)?;
     }
-    save_metadata(&paths, &metadata)?;
 
     // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
     // 避免悬空指针导致下次冷启动加载到错误的配置。
@@ -596,21 +592,34 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
         return Err(format!("A config named '{clean_new}' already exists"));
     }
 
-    // Rename file
-    std::fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename config: {e}"))?;
-
-    // Update metadata
-    let mut metadata = load_metadata(&paths);
-    if let Some(meta) = metadata.configs.remove(&clean_old) {
-        metadata.configs.insert(clean_new.clone(), meta);
-    }
-    // Also try original name in case metadata was stored differently
-    if old_name != clean_old {
-        if let Some(meta) = metadata.configs.remove(&old_name) {
+    // Rename file + update metadata under lock to prevent cleanup_metadata_cache
+    // from removing the metadata entry while the file is temporarily absent.
+    {
+        let _guard = lock_metadata();
+        std::fs::rename(&old_path, &new_path)
+            .map_err(|e| format!("Failed to rename config: {e}"))?;
+        let mut metadata = load_metadata(&paths);
+        if let Some(meta) = metadata.configs.remove(&clean_old) {
             metadata.configs.insert(clean_new.clone(), meta);
         }
+        // Also try original name in case metadata was stored differently
+        if old_name != clean_old {
+            if let Some(meta) = metadata.configs.remove(&old_name) {
+                metadata.configs.insert(clean_new.clone(), meta);
+            }
+        }
+        if let Err(e) = save_metadata(&paths, &metadata) {
+            // Rollback: rename file back to old path
+            if let Err(rn_err) = std::fs::rename(&new_path, &old_path) {
+                emit_warn!(
+                    Config,
+                    CONFIG_PERSIST_FAILED,
+                    "Rollback: failed to rename {clean_new} back to {clean_old}: {rn_err}"
+                );
+            }
+            return Err(format!("Failed to save metadata: {e}"));
+        }
     }
-    save_metadata(&paths, &metadata)?;
 
     // Update last_config setting if it references the old name
     // Also migrate last_proxy_selection key from old name to new name
