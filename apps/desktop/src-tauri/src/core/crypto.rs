@@ -3,7 +3,7 @@ use rand::RngExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use super::secure_io::write_file_secure;
 use super::AppPaths;
@@ -13,7 +13,7 @@ pub(super) struct ProfilesMetadata {
     pub configs: std::collections::HashMap<String, ConfigMetadata>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub(super) struct ConfigMetadata {
     pub url: Option<String>,
     pub sub_info: Option<String>,
@@ -502,6 +502,42 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
     }
 }
 
+// ── Metadata concurrency ────────────────────────────────────────────────
+
+/// Coarse-grained lock serializing all metadata read-modify-write sequences.
+///
+/// Prevents Lost Update races between user-initiated Tauri commands
+/// (`update_config_url`, `delete_config`, `rename_config`, …) and the
+/// background subscription scheduler (`download_sub_inner`).
+///
+/// The lock serializes metadata load-modify-save sequences and may be held
+/// across synchronous file operations that are part of the transaction
+/// (e.g., `save_metadata`, directory scans in `cleanup_metadata_cache`,
+/// file renames in `rename_config` and `download_sub_inner`). It must
+/// **never** be held across `.await` points.
+///
+/// # Poison safety
+/// Recovers from poison via [`PoisonError::into_inner`], consistent with
+/// the rest of the codebase — a panic in one command does not permanently
+/// disable configuration management.
+static METADATA_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquire the global metadata lock.
+///
+/// The returned guard is dropped automatically at the end of the enclosing
+/// scope. **Never hold it across `.await` points** — `std::sync::MutexGuard`
+/// is `!Send`, so the compiler will reject that.
+pub(super) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
+    METADATA_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// # Concurrency
+///
+/// Safe to call without [`lock_metadata`] for read-only access (atomic
+/// write ensures no torn reads). Must hold [`lock_metadata`] if the loaded
+/// data will be modified and saved back via [`save_metadata`].
 pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
     let meta_path = paths.profiles_dir.join("metadata.json");
     match fs::read_to_string(&meta_path) {
@@ -523,6 +559,31 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
                 meta
             }
             Err(e) => {
+                // Try recovering from backup if the primary file is corrupted
+                let bak_path = paths.profiles_dir.join("metadata.json.bak");
+                if let Ok(bak_data) = fs::read_to_string(&bak_path) {
+                    if let Ok(mut meta) = serde_json::from_str::<ProfilesMetadata>(&bak_data) {
+                        emit_warn!(
+                            Core,
+                            CORE_CRASHED,
+                            "metadata.json was corrupt, restored from backup: {e}"
+                        );
+                        #[allow(clippy::iter_over_hash_type)]
+                        for config in meta.configs.values_mut() {
+                            if let Some(url) = &config.url {
+                                if !url.starts_with("http") {
+                                    config.url = deobfuscate_string(url).ok();
+                                }
+                            }
+                            if let Some(info) = &config.sub_info {
+                                if !info.contains(';') {
+                                    config.sub_info = deobfuscate_string(info).ok();
+                                }
+                            }
+                        }
+                        return meta;
+                    }
+                }
                 emit_warn!(
                     Core,
                     CORE_CRASHED,
@@ -544,6 +605,10 @@ pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
     }
 }
 
+/// # Concurrency
+///
+/// Callers must hold [`lock_metadata`] before calling this function
+/// to prevent Lost Update races.
 pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result<(), String> {
     let mut obf_meta = ProfilesMetadata::default();
     #[allow(clippy::iter_over_hash_type)]
@@ -564,12 +629,82 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     let meta_path = paths.profiles_dir.join("metadata.json");
     let data = serde_json::to_string_pretty(&obf_meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
-    write_file_secure(&meta_path, &data)?;
+
+    // Atomic write: write to a temp file in the same directory, then rename.
+    // `rename` is atomic on the same filesystem — readers see either the old
+    // or the new file, never a partial write. If the process crashes between
+    // the temp write and the rename, the old metadata.json is untouched.
+    let temp_path = paths.profiles_dir.join("metadata.json.tmp");
+    write_file_secure(&temp_path, &data)?;
+
+    // Rename can fail on Windows if an external process (e.g. antivirus)
+    // has the file open. Such handles are transient — retry before falling
+    // back to a non-atomic direct write.
+    let mut rename_err = None;
+    for attempt in 0..3 {
+        match std::fs::rename(&temp_path, &meta_path) {
+            Ok(()) => {
+                rename_err = None;
+                break;
+            }
+            Err(e) => {
+                rename_err = Some(e);
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+
+    if let Some(e) = rename_err {
+        let _ = std::fs::remove_file(&temp_path);
+        // Keep a recoverable copy: an interrupted direct write truncates
+        // metadata.json, and load_metadata would then silently degrade to
+        // an empty default that the next save persists. Refuse the
+        // destructive write when no backup could be made.
+        let bak_path = paths.profiles_dir.join("metadata.json.bak");
+        if meta_path.exists() && std::fs::copy(&meta_path, &bak_path).is_err() {
+            return Err(format!(
+                "Failed to persist metadata: atomic rename failed ({e}) and no backup could be created"
+            ));
+        }
+        if let Err(write_err) = write_file_secure(&meta_path, &data) {
+            // Restore from backup if the direct write failed
+            if let Err(restore_err) = std::fs::rename(&bak_path, &meta_path) {
+                emit_warn!(
+                    Core,
+                    CORE_CRASHED,
+                    "metadata.json may be truncated: restore from {} failed: {restore_err}",
+                    bak_path.display()
+                );
+                return Err(format!(
+                    "Failed to persist metadata: atomic rename failed ({e}), direct write failed ({write_err}), restore failed ({restore_err}) — recover manually from {}",
+                    bak_path.display()
+                ));
+            }
+            return Err(format!("Failed to persist metadata: atomic rename failed ({e}), direct write also failed: {write_err}"));
+        }
+        // Direct write succeeded — clean up backup
+        let _ = std::fs::remove_file(&bak_path);
+        emit_warn!(
+            Core,
+            CORE_CRASHED,
+            "Atomic rename of metadata.json failed, used direct write: {e}"
+        );
+    }
+
     Ok(())
 }
 
-/// Clean up metadata entries for configs that no longer exist on disk
+/// Clean up metadata entries for configs that no longer exist on disk.
+///
+/// Acquires the metadata lock for the entire scan-modify-save sequence.
+/// The directory scan is performed under the lock to prevent TOCTOU races:
+/// if the scan were outside the lock, a concurrent writer could create a file
+/// between the scan and the metadata modification, causing its entry to be
+/// erroneously removed.
 pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(paths);
     let mut changed = false;
 
