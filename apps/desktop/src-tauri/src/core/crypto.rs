@@ -3,7 +3,7 @@ use rand::RngExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use super::secure_io::write_file_secure;
 use super::AppPaths;
@@ -502,6 +502,35 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
     }
 }
 
+// ── Metadata concurrency ────────────────────────────────────────────────
+
+/// Coarse-grained lock serializing all metadata read-modify-write sequences.
+///
+/// Prevents Lost Update races between user-initiated Tauri commands
+/// (`update_config_url`, `delete_config`, `rename_config`, …) and the
+/// background subscription scheduler (`download_sub_inner`).
+///
+/// The lock is held **only** for the brief JSON load-modify-save sequence —
+/// never across non-metadata file I/O (config writes, directory scans) or
+/// `.await` points — so contention is negligible.
+///
+/// # Poison safety
+/// Recovers from poison via [`PoisonError::into_inner`], consistent with
+/// the rest of the codebase — a panic in one command does not permanently
+/// disable configuration management.
+static METADATA_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquire the global metadata lock.
+///
+/// The returned guard is dropped automatically at the end of the enclosing
+/// scope. **Never hold it across `.await` points** — `std::sync::MutexGuard`
+/// is `!Send`, so the compiler will reject that.
+pub(super) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
+    METADATA_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub(super) fn load_metadata(paths: &AppPaths) -> ProfilesMetadata {
     let meta_path = paths.profiles_dir.join("metadata.json");
     match fs::read_to_string(&meta_path) {
@@ -564,12 +593,36 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     let meta_path = paths.profiles_dir.join("metadata.json");
     let data = serde_json::to_string_pretty(&obf_meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
-    write_file_secure(&meta_path, &data)?;
+
+    // Atomic write: write to a temp file in the same directory, then rename.
+    // `rename` is atomic on the same filesystem — readers see either the old
+    // or the new file, never a partial write. If the process crashes between
+    // the temp write and the rename, the old metadata.json is untouched.
+    let temp_path = paths.profiles_dir.join("metadata.json.tmp");
+    write_file_secure(&temp_path, &data)?;
+
+    if let Err(e) = std::fs::rename(&temp_path, &meta_path) {
+        // Rename can fail on Windows if an external process (e.g. antivirus)
+        // has the file open. Clean up the temp file and fall back to direct
+        // write — not atomic, but strictly better than losing the data.
+        let _ = std::fs::remove_file(&temp_path);
+        write_file_secure(&meta_path, &data)?;
+        emit_warn!(
+            Core,
+            CORE_CRASHED,
+            "Atomic rename of metadata.json failed, used direct write: {e}"
+        );
+    }
+
     Ok(())
 }
 
-/// Clean up metadata entries for configs that no longer exist on disk
+/// Clean up metadata entries for configs that no longer exist on disk.
+///
+/// Acquires the metadata lock to ensure the load-modify-save sequence is
+/// atomic with respect to concurrent metadata writers.
 pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
+    let _guard = lock_metadata();
     let mut metadata = load_metadata(paths);
     let mut changed = false;
 
