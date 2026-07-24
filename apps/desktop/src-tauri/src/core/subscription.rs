@@ -10,7 +10,7 @@ use zephyr_core::config::subscription::{
 };
 
 use super::core_process::ensure_app_storage;
-use super::crypto::{load_metadata, save_metadata, write_profile_file};
+use super::crypto::{load_metadata, lock_metadata, save_metadata, write_profile_file};
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 #[allow(unused_imports)]
 use crate::emit_warn;
@@ -586,45 +586,19 @@ async fn download_sub_inner_raw(
     zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &paths.profiles_dir)
         .map_err(|e| e.to_string())?;
 
-    let mut metadata = load_metadata(&paths);
-    // Preserve existing auto_update_interval and per-subscription user_agent
-    // to avoid silently resetting user-configured settings
-    let (preserved_interval, preserved_ua) = metadata
-        .configs
-        .get(&clean_name)
-        .map(|m| (m.auto_update_interval, m.user_agent.clone()))
-        .unwrap_or((None, None));
-    metadata.configs.insert(
-        clean_name.clone(),
-        super::crypto::ConfigMetadata {
-            url: Some(final_url),
-            sub_info: if sub_info_header.is_empty() {
-                None
-            } else {
-                Some(sub_info_header)
-            },
-            last_updated: Some(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-            ),
-            auto_update_interval: preserved_interval,
-            user_agent: preserved_ua,
-        },
-    );
     let final_content = content;
 
     // Best-effort atomic config + metadata update (compensating transactions, not ACID):
     //   Overwrite: target -> backup, temp -> target, save_metadata, cleanup backup
     //   New:      temp -> target, save_metadata, remove target on failure
     // Crash between steps may leave .bak.<uuid> residuals — cleaned up at startup.
-    let is_overwrite = target_path.exists();
+    //
+    // The overwrite decision is made *under* the lock to prevent TOCTOU:
+    // a concurrent delete/create between the pre-lock probe and the swap
+    // would either abort the update or clobber a new file with no backup.
 
     // Use UUID suffix to avoid conflicts from concurrent updates or crash residuals
     let unique_id = uuid::Uuid::new_v4().to_string()[..8].to_owned();
-    let backup_path =
-        is_overwrite.then(|| target_path.with_extension(format!("yaml.bak.{unique_id}")));
     let temp_path = target_path.with_extension(format!("yaml.tmp.{unique_id}"));
 
     // Write new config to temp file (encrypt if setting is enabled)
@@ -638,40 +612,117 @@ async fn download_sub_inner_raw(
     };
     write_profile_file(&temp_path, &final_content, encrypt)?;
 
-    // Overwrite: move old config to backup first
-    if let Some(bp) = backup_path.as_ref() {
-        std::fs::rename(&target_path, bp).map_err(|e| {
+    // File swap + metadata RMW under lock to prevent cleanup_metadata_cache
+    // from removing the metadata entry while the file is temporarily absent
+    // (e.g. during overwrite, the target is briefly moved to a backup).
+    let metadata_result = {
+        let _guard = lock_metadata();
+
+        // Decide overwrite-vs-new *under the lock*: the pre-lock probe can
+        // be invalidated by a concurrent delete or create.
+        let backup_path = if target_path.exists() {
+            let bp = target_path.with_extension(format!("yaml.bak.{unique_id}"));
+            std::fs::rename(&target_path, &bp).map_err(|e| {
+                let _ = std::fs::remove_file(&temp_path);
+                format!("Failed to backup existing config (update aborted): {e}")
+            })?;
+            Some(bp)
+        } else {
+            None
+        };
+
+        // Move temp to final path (same directory — rename is always atomic, no copy fallback)
+        if let Err(e) = std::fs::rename(&temp_path, &target_path) {
             let _ = std::fs::remove_file(&temp_path);
-            format!("Failed to backup existing config (update aborted): {e}")
-        })?;
-    }
+            if let Some(bp) = backup_path.as_ref() {
+                if bp.exists() {
+                    let _ = std::fs::rename(bp, &target_path);
+                }
+            }
+            return Err(format!("Failed to apply config file: {e}"));
+        }
 
-    // Move temp to final path (same directory — rename is always atomic, no copy fallback)
-    if let Err(e) = std::fs::rename(&temp_path, &target_path) {
-        let _ = std::fs::remove_file(&temp_path);
-        if let Some(bp) = backup_path.as_ref() {
-            if bp.exists() {
-                let _ = std::fs::rename(bp, &target_path);
+        let mut metadata = load_metadata(&paths);
+        // Preserve existing auto_update_interval, per-subscription user_agent, and
+        // URL only when updating an existing subscription — avoids silently
+        // resetting user-configured settings if the URL changed mid-download.
+        // For new subscriptions, any pre-existing entry under `clean_name` is
+        // stale (e.g. an orphaned entry left by a failed delete) and must not
+        // leak into the new subscription's metadata.
+        let (preserved_interval, preserved_ua, preserved_url, preserved_sub_info) = if overwrite {
+            metadata
+                .configs
+                .get(&clean_name)
+                .map(|m| {
+                    (
+                        m.auto_update_interval,
+                        m.user_agent.clone(),
+                        m.url.clone(),
+                        m.sub_info.clone(),
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            (None, None, None, None)
+        };
+        metadata.configs.insert(
+            clean_name.clone(),
+            super::crypto::ConfigMetadata {
+                url: preserved_url.or(Some(final_url)),
+                sub_info: if sub_info_header.is_empty() {
+                    preserved_sub_info
+                } else {
+                    Some(sub_info_header)
+                },
+                last_updated: Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                ),
+                auto_update_interval: preserved_interval,
+                user_agent: preserved_ua,
+            },
+        );
+        match save_metadata(&paths, &metadata) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Rollback under lock to prevent cleanup_metadata_cache
+                // from removing the metadata entry while the file is
+                // temporarily absent during rollback.
+                if let Err(rm_err) = std::fs::remove_file(&target_path) {
+                    emit_warn!(
+                        Subscription,
+                        SUB_UPDATE_FAILED,
+                        "Rollback: failed to remove {clean_name}: {rm_err}"
+                    );
+                }
+                if let Some(bp) = backup_path.as_ref() {
+                    if bp.exists() {
+                        if let Err(rn_err) = std::fs::rename(bp, &target_path) {
+                            emit_warn!(
+                                Subscription,
+                                SUB_UPDATE_FAILED,
+                                "Rollback: failed to restore {clean_name} from {:?}: {rn_err}",
+                                bp
+                            );
+                        }
+                    }
+                }
+                Err(e)
             }
         }
-        return Err(format!("Failed to apply config file: {e}"));
-    }
+    };
 
-    // Save metadata — last step so failure can be cleanly rolled back
-    if let Err(e) = save_metadata(&paths, &metadata) {
-        // Rollback config to previous state
-        let _ = std::fs::remove_file(&target_path);
-        if let Some(bp) = backup_path.as_ref() {
-            if bp.exists() {
-                let _ = std::fs::rename(bp, &target_path);
-            }
-        }
+    if let Err(e) = metadata_result {
         return Err(format!("Metadata save failed (config rolled back): {e}"));
     }
 
     // Success — clean up backup
-    if let Some(bp) = backup_path.as_ref() {
-        let _ = std::fs::remove_file(bp);
+    // (backup_path is derived from unique_id, so we can reconstruct it)
+    let backup_path = target_path.with_extension(format!("yaml.bak.{unique_id}"));
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(&backup_path);
     }
 
     Ok(DownloadSubResult {
