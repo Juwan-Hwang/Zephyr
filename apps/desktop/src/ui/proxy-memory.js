@@ -18,6 +18,28 @@ const MAX_READY_RETRIES = 50;
 /** Delay between retries in ms. */
 const READY_RETRY_DELAY = 100;
 
+// ── Provider-loading wait constants ─────────────────────────────────────
+//
+// When a config uses proxy-providers (e.g., substore subscriptions),
+// mihomo's /proxies API is immediately available after start, but the
+// actual proxy nodes are downloaded asynchronously via separate HTTP
+// requests.  Groups with `include-all: true` have empty `all[]` arrays
+// until the downloads complete.
+//
+// restoreProxySelection() must wait for these downloads before attempting
+// node restoration — otherwise the saved node cannot be found in any
+// group's `all[]` and restoration silently fails.
+
+/** Maximum retries for waiting proxy-providers (≈30 s at 1.5 s interval). */
+const PROVIDER_WAIT_MAX = 20;
+/** Delay between provider-loading retries in ms. */
+const PROVIDER_WAIT_DELAY = 1500;
+/**
+ * Extra retries after providerLoading clears, for staggered provider
+ * downloads where some providers finish after others (≈4.5 s at 1.5 s).
+ */
+const PROVIDER_STAGGER_RETRIES = 3;
+
 /**
  * Save current proxy selection for a profile (v2: group + node).
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
@@ -118,6 +140,96 @@ export async function waitForMihomoReady() {
 }
 
 /**
+ * Wait for proxy-providers to finish downloading nodes.
+ *
+ * Polls `fetchProxyGroups()` until `providerLoading` becomes false (first
+ * nodes have arrived), then continues for a few extra retries to handle
+ * staggered provider downloads where some providers finish after others.
+ *
+ * If `savedNode` is provided, returns early as soon as the node appears in
+ * any writable group — this is the common-case optimization that avoids
+ * unnecessary waiting when all providers finish at roughly the same time.
+ *
+ * The loop budget is `PROVIDER_WAIT_MAX + PROVIDER_STAGGER_RETRIES` to
+ * guarantee that stagger retries always run, even if `providerLoading`
+ * flips to false near the end of the wait phase.
+ *
+ * @param {string|null} preferredGroupName - Group to target for resolution
+ * @param {string} [savedNode] - If provided, returns early when this node appears
+ * @returns {Promise<any>} The final `fetchProxyGroups` result, or the
+ *   last non-null result on timeout/failure (may still have `providerLoading: true`)
+ */
+async function waitForProvidersLoaded(preferredGroupName, savedNode) {
+    let lastResult = null;
+    let staggerCount = 0;
+    // fetchProxyGroups expects `preferredGroupName: string | undefined`, not `null`
+    const groupName = preferredGroupName || undefined;
+
+    for (let i = 0; i < PROVIDER_WAIT_MAX + PROVIDER_STAGGER_RETRIES; i++) {
+        let result;
+        try {
+            result = await fetchProxyGroups({ preferredGroupName: groupName });
+        } catch {
+            // Transient API errors (e.g., mihomo briefly unreachable) should
+            // not abort the wait — keep polling until budget is exhausted.
+            result = null;
+        }
+        if (!result) {
+            await new Promise((r) => setTimeout(r, PROVIDER_WAIT_DELAY));
+            continue;
+        }
+        lastResult = result;
+
+        // Check for early return on every iteration.  `providerLoading` only
+        // reflects the resolved UI group's `all[]`; the saved node may already
+        // exist in a different writable group while `providerLoading` is
+        // still true.
+        if (savedNode && nodeInWritableGroup(result, savedNode)) {
+            return result;
+        }
+
+        if (result.providerLoading) {
+            // Phase 1: providers still downloading — reset stagger counter
+            // in case providers reload after briefly becoming ready.
+            staggerCount = 0;
+        } else {
+            // Phase 2: providerLoading is false — first proxies arrived.
+            // Count stagger retries for providers that finish out of order.
+            staggerCount++;
+            if (staggerCount >= PROVIDER_STAGGER_RETRIES) {
+                return result;
+            }
+        }
+
+        await new Promise((r) => setTimeout(r, PROVIDER_WAIT_DELAY));
+    }
+    return lastResult;
+}
+
+/**
+ * Check if a node exists in any writable (selector) group of the result.
+ * @param {any} result - `fetchProxyGroups` result
+ * @param {string} node - Node name to find
+ * @returns {boolean}
+ */
+function nodeInWritableGroup(result, node) {
+    // Check the resolved UI group's candidates first (fast path)
+    if (result.proxies && result.proxies.includes(node)) return true;
+    // Check all writable groups (node may be in a different selector)
+    const proxyMap = /** @type {any} */ (result.data)?.proxies;
+    if (proxyMap) {
+        for (const groupName of Object.keys(proxyMap)) {
+            const group = proxyMap[groupName];
+            if (isWritableGroupType(group?.type) && !group.hidden
+                && Array.isArray(group.all) && group.all.includes(node)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
  * Restore proxy selection for a profile after core restart.
  * Uses polling to wait for mihomo to be ready instead of hardcoded delay.
  * Reads directly from backend (bypasses cache) to ensure fresh data.
@@ -146,10 +258,37 @@ export async function restoreProxySelection(profileName) {
         const primaryGroup = settings.primary_group_preference?.[profileName] || null;
         const preferredGroupName = primaryGroup || saved.group || appStore.get('uiGroupName') || null;
 
-        const proxyGroupsResult = await fetchProxyGroups({
+        let proxyGroupsResult = await fetchProxyGroups({
             preferredGroupName,
         });
         if (!proxyGroupsResult) return false;
+
+        // If proxy-providers are still downloading (e.g., substore configs),
+        // wait for nodes to arrive before attempting restoration.
+        // Without this, include-all groups have empty `all[]` arrays and
+        // the saved node cannot be found — causing silent restoration failure.
+        if (proxyGroupsResult.providerLoading) {
+            proxyMemoryLogger.info(
+                '[restoreProxySelection] proxy-providers still loading, waiting…',
+            );
+            proxyGroupsResult = await waitForProvidersLoaded(
+                preferredGroupName,
+                saved.node,
+            );
+            // If providers never finished loading (timeout), abort — unless
+            // the saved node was already found in another writable group
+            // (providerLoading only reflects the resolved UI group's all[]).
+            // In that case, the fallback search below will still locate and
+            // switch to the correct group.
+            if (!proxyGroupsResult
+                || (proxyGroupsResult.providerLoading
+                    && !nodeInWritableGroup(proxyGroupsResult, saved.node))) {
+                proxyMemoryLogger.warn(
+                    '[restoreProxySelection] providers still loading after timeout, aborting restoration',
+                );
+                return false;
+            }
+        }
 
         // Use the resolved uiGroupName (from resolver) instead of the old
         // keyword-guessed mainGroup.  This fixes the core bug where the
