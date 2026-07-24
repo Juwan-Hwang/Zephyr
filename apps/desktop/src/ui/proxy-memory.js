@@ -18,6 +18,28 @@ const MAX_READY_RETRIES = 50;
 /** Delay between retries in ms. */
 const READY_RETRY_DELAY = 100;
 
+// ── Provider-loading wait constants ─────────────────────────────────────
+//
+// When a config uses proxy-providers (e.g., substore subscriptions),
+// mihomo's /proxies API is immediately available after start, but the
+// actual proxy nodes are downloaded asynchronously via separate HTTP
+// requests.  Groups with `include-all: true` have empty `all[]` arrays
+// until the downloads complete.
+//
+// restoreProxySelection() must wait for these downloads before attempting
+// node restoration — otherwise the saved node cannot be found in any
+// group's `all[]` and restoration silently fails.
+
+/** Maximum retries for waiting proxy-providers (≈30 s at 1.5 s interval). */
+const PROVIDER_WAIT_MAX = 20;
+/** Delay between provider-loading retries in ms. */
+const PROVIDER_WAIT_DELAY = 1500;
+/**
+ * Extra retries after providerLoading clears, for staggered provider
+ * downloads where some providers finish after others (≈4.5 s at 1.5 s).
+ */
+const PROVIDER_STAGGER_RETRIES = 3;
+
 /**
  * Save current proxy selection for a profile (v2: group + node).
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
@@ -118,6 +140,115 @@ export async function waitForMihomoReady() {
 }
 
 /**
+ * Wait for proxy-providers to finish downloading nodes.
+ *
+ * Two-phase poller with **separate budgets** so that the stagger phase
+ * always runs in full, regardless of when `providerLoading` clears:
+ *
+ * - Phase 1 (up to `PROVIDER_WAIT_MAX` polls): wait while
+ *   `providerLoading` is true; break as soon as it becomes false.
+ * - Phase 2 (exactly `PROVIDER_STAGGER_RETRIES` polls): additional
+ *   delayed polls to catch out-of-order provider downloads.
+ *
+ * If `savedNode` is provided, returns early as soon as the node appears
+ * in any writable group (checked on every poll in both phases).
+ *
+ * @param {string|null} preferredGroupName - Group to target for resolution
+ * @param {string} [savedNode] - If provided, returns early when this node appears
+ * @returns {Promise<any>} The final `fetchProxyGroups` result, or the
+ *   last non-null result on timeout/failure (may still have `providerLoading: true`)
+ */
+async function waitForProvidersLoaded(preferredGroupName, savedNode) {
+    let lastResult = null;
+    // fetchProxyGroups expects `preferredGroupName: string | undefined`, not `null`
+    const groupName = preferredGroupName || undefined;
+
+    // ── Phase 1: wait for providerLoading to become false ────────────
+    for (let i = 0; i < PROVIDER_WAIT_MAX; i++) {
+        let result;
+        try {
+            result = await fetchProxyGroups({ preferredGroupName: groupName });
+        } catch {
+            // Transient API errors (e.g., mihomo briefly unreachable) should
+            // not abort the wait — keep polling until budget is exhausted.
+            result = null;
+        }
+        if (!result) {
+            await new Promise((r) => setTimeout(r, PROVIDER_WAIT_DELAY));
+            continue;
+        }
+        lastResult = result;
+
+        // Check for early return on every poll.  `providerLoading` only
+        // reflects the resolved UI group's `all[]`; the saved node may
+        // already exist in a different writable group.
+        if (savedNode && nodeInWritableGroup(result, savedNode)) {
+            return result;
+        }
+
+        if (!result.providerLoading) {
+            break; // Phase 1 done — proceed to stagger phase
+        }
+
+        await new Promise((r) => setTimeout(r, PROVIDER_WAIT_DELAY));
+    }
+
+    // ── Phase 2: guaranteed stagger polls ───────────────────────────
+    // Each iteration sleeps first, then polls — producing exactly
+    // PROVIDER_STAGGER_RETRIES delayed polls (~4.5 s at 1.5 s each).
+    for (let i = 0; i < PROVIDER_STAGGER_RETRIES; i++) {
+        await new Promise((r) => setTimeout(r, PROVIDER_WAIT_DELAY));
+        let result;
+        try {
+            result = await fetchProxyGroups({ preferredGroupName: groupName });
+        } catch {
+            result = null;
+        }
+        if (!result) continue;
+        lastResult = result;
+
+        if (savedNode && nodeInWritableGroup(result, savedNode)) {
+            return result;
+        }
+    }
+
+    return lastResult;
+}
+
+/**
+ * Find the first writable (selector) group that contains `node`.
+ * @param {Record<string, any>|undefined|null} proxyMap - `/proxies` response map
+ * @param {string} node - Node name to find
+ * @returns {string|null} Group name, or null if not found
+ */
+function findWritableGroupWithNode(proxyMap, node) {
+    if (!proxyMap) return null;
+    for (const groupName of Object.keys(proxyMap)) {
+        const group = proxyMap[groupName];
+        if (isWritableGroupType(group?.type) && !group.hidden
+            && Array.isArray(group.all) && group.all.includes(node)) {
+            return groupName;
+        }
+    }
+    return null;
+}
+
+/**
+ * Check if a node exists in any writable (selector) group of the result.
+ * @param {any} result - `fetchProxyGroups` result
+ * @param {string} node - Node name to find
+ * @returns {boolean}
+ */
+function nodeInWritableGroup(result, node) {
+    // Check the resolved UI group's candidates first (fast path)
+    if (result.proxies?.includes(node)) return true;
+    // Check all writable groups (node may be in a different selector)
+    return findWritableGroupWithNode(
+        /** @type {any} */ (result.data)?.proxies, node,
+    ) !== null;
+}
+
+/**
  * Restore proxy selection for a profile after core restart.
  * Uses polling to wait for mihomo to be ready instead of hardcoded delay.
  * Reads directly from backend (bypasses cache) to ensure fresh data.
@@ -146,10 +277,42 @@ export async function restoreProxySelection(profileName) {
         const primaryGroup = settings.primary_group_preference?.[profileName] || null;
         const preferredGroupName = primaryGroup || saved.group || appStore.get('uiGroupName') || null;
 
-        const proxyGroupsResult = await fetchProxyGroups({
+        let proxyGroupsResult = await fetchProxyGroups({
             preferredGroupName,
         });
         if (!proxyGroupsResult) return false;
+
+        // If proxy-providers are still downloading (e.g., substore configs),
+        // wait for nodes to arrive before attempting restoration.
+        // Also wait if the config HAS proxy-providers but the saved node
+        // isn't found yet — `providerLoading` only signals an empty UI
+        // group, but other providers may still be downloading even after
+        // the UI group has some nodes.
+        const needsProviderWait = proxyGroupsResult.providerLoading
+            || (proxyGroupsResult.hasProxyProviders
+                && !nodeInWritableGroup(proxyGroupsResult, saved.node));
+        if (needsProviderWait) {
+            proxyMemoryLogger.info(
+                '[restoreProxySelection] proxy-providers still loading, waiting…',
+            );
+            proxyGroupsResult = await waitForProvidersLoaded(
+                preferredGroupName,
+                saved.node,
+            );
+            // If providers never finished loading (timeout), abort — unless
+            // the saved node was already found in another writable group
+            // (providerLoading only reflects the resolved UI group's all[]).
+            // In that case, the fallback search below will still locate and
+            // switch to the correct group.
+            if (!proxyGroupsResult
+                || (proxyGroupsResult.providerLoading
+                    && !nodeInWritableGroup(proxyGroupsResult, saved.node))) {
+                proxyMemoryLogger.warn(
+                    '[restoreProxySelection] providers still loading after timeout, aborting restoration',
+                );
+                return false;
+            }
+        }
 
         // Use the resolved uiGroupName (from resolver) instead of the old
         // keyword-guessed mainGroup.  This fixes the core bug where the
@@ -169,20 +332,13 @@ export async function restoreProxySelection(profileName) {
         // Fallback: search all writable groups for the saved node.
         // After profile/core switches, the saved node may belong to a different
         // selector group than the resolved primary.
-        /** @type {Record<string, any>|undefined} */
         const proxyMap = /** @type {any} */ (proxyGroupsResult.data)?.proxies;
-        if (proxyMap) {
-            for (const groupName of Object.keys(proxyMap)) {
-                const group = proxyMap[groupName];
-                if (!isWritableGroupType(group?.type)) continue;
-                if (group.hidden) continue;
-                if (group.all && group.all.includes(saved.node)) {
-                    const success = await switchProxy(groupName, saved.node);
-                    if (success) {
-                        appStore.set('uiGroupName', groupName);
-                        return true;
-                    }
-                }
+        const fallbackGroup = findWritableGroupWithNode(proxyMap, saved.node);
+        if (fallbackGroup) {
+            const success = await switchProxy(fallbackGroup, saved.node);
+            if (success) {
+                appStore.set('uiGroupName', fallbackGroup);
+                return true;
             }
         }
 
