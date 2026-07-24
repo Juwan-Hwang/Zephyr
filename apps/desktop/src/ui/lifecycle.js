@@ -147,6 +147,10 @@ export async function postRestartRecovery(configName) {
   }
 
   // 3. Restore last proxy selection for this profile
+  //    Re-invalidate run_config cache — the concurrent CORE_RESTARTED
+  //    → renderProxies() handler may have repopulated it with pre-override
+  //    data (GH#603 race condition).
+  invalidateRunConfigCache();
   try {
     const { restoreProxySelection } = await import('./proxy-memory.js');
     await restoreProxySelection(configName);

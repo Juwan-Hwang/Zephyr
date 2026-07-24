@@ -325,6 +325,7 @@ function determineUiPrimaryGroup(ctx) {
  * @property {{source:string, detail:string}} reason - Why this primary group was chosen
  * @property {Record<string, string[]>} graph - Group → children adjacency list
  * @property {boolean} providerLoading - True when uiGroup uses include-all and all[] is empty
+ * @property {boolean} hasProxyProviders - True when the config defines proxy-providers (regardless of loading state)
  */
 
 /**
@@ -443,6 +444,11 @@ export async function fetchProxyGroups(options = {}) {
         // Provider loading state — true when the uiGroup uses include-all
         // and its all[] is empty (nodes still being downloaded by mihomo)
         providerLoading,
+
+        // Whether the config defines proxy-providers (regardless of loading
+        // state).  Callers can use this to decide if a missing node might
+        // still arrive from a provider that hasn't finished downloading.
+        hasProxyProviders,
     };
 }
 
