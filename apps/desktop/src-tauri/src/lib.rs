@@ -1135,23 +1135,15 @@ async fn rate_limited_unregister_shortcut(
 /// - `"notification"` → `FRONTEND_NOTIFICATION`
 /// - `"uncaught"`      → `FRONTEND_UNCAUGHT`
 /// - `"rejection"`     → `FRONTEND_REJECTION`
+///
+/// **No backend-side rate limiting** -- the frontend (`frontend-log.js`)
+/// already enforces a comprehensive limiter (50 non-error + 100 error
+/// entries per 5 s window with content-hash dedup). A previous 5 ms
+/// minimum-interval limiter here dropped legitimate startup logs that
+/// arrived 1-2 ms apart (e.g. `get_settings` then `calling start_core`).
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
-fn write_frontend_log(
-    level: String,
-    source: String,
-    message: String,
-    rate_limiter: tauri::State<'_, RateLimiter>,
-) -> Result<(), String> {
-    // Backend-side rate limiting: 5ms minimum interval = 200/s max.
-    // The frontend limiter (150/5s = 30/s) is the primary guard, but
-    // this prevents direct invoke() bypass from flooding the log.
-    // Silently drop (Ok) instead of using rate_limit! macro, because
-    // the macro's emit_warn! on rejection would itself flood the log.
-    if !rate_limiter.check_rate_limit("write_frontend_log", 5) {
-        return Ok(());
-    }
-
+fn write_frontend_log(level: String, source: String, message: String) -> Result<(), String> {
     use crate::backend_event::codes;
     let code = match source.as_str() {
         "notification" => codes::FRONTEND_NOTIFICATION,
