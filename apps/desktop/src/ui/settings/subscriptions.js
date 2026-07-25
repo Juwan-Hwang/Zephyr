@@ -576,9 +576,11 @@ export function initSubscriptionSettings({
         for (let i = profileLineIdx + 1; i < lines.length; i++) {
             const line = lines[i];
             // Check if this line is a sequence item under profile
-            const itemMatch = line.match(new RegExp(`^${seqIndent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s+(.+)`)); // nosemgrep: detect-non-literal-regexp — seqIndent is regex-escaped
-            if (itemMatch) {
-                items.push(itemMatch[1].trim());
+            // Static regex captures indent + content; compare indent with startsWith
+            // to preserve original behavior (allowed deeper indentation via \s*)
+            const seqItemMatch = line.match(/^(\s*)-\s+(.+)$/);
+            if (seqItemMatch && seqItemMatch[1].startsWith(seqIndent)) {
+                items.push(seqItemMatch[2].trim());
                 endLine = i;
             } else if (line.match(/^\s*$/)) {
                 // Blank line — skip but don't end
@@ -658,7 +660,8 @@ export function initSubscriptionSettings({
      * Add a profile name to the __when__ block's profile field.
      * Handles flow array, block sequence, and single value formats.
      */
-    function addProfileToWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ escapedName) {
+    function addProfileToWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ _escapedName) {
+        const lowerName = profileName.toLowerCase();
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i].match(/^\s*profile\s*:/);
@@ -668,7 +671,7 @@ export function initSubscriptionSettings({
             if (!parsed) continue;
 
             // Already present?
-            if (parsed.items.some(/** @type {string} */ item => new RegExp(`^${escapedName}$`, 'i').test(item))) { // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
+            if (parsed.items.some(/** @type {string} */ item => item.toLowerCase() === lowerName)) {
                 return content;
             }
 
@@ -687,7 +690,8 @@ export function initSubscriptionSettings({
      * Remove a profile name from the __when__ block's profile field.
      * If no profiles remain, replaces with enabled: false.
      */
-    function removeProfileFromWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ escapedName) {
+    function removeProfileFromWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ _escapedName) {
+        const lowerName = profileName.toLowerCase();
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i].match(/^\s*profile\s*:/);
@@ -696,7 +700,7 @@ export function initSubscriptionSettings({
             const parsed = parseProfileBlock(lines, i);
             if (!parsed) continue;
 
-            const filtered = parsed.items.filter(/** @type {string} */ item => !new RegExp(`^${escapedName}$`, 'i').test(item)); // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
+            const filtered = parsed.items.filter(/** @type {string} */ item => item.toLowerCase() !== lowerName);
 
             let newLines;
             if (filtered.length === 0) {

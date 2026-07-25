@@ -46,10 +46,13 @@ const strict = args.includes('--strict');
 function extractBlock(content, lang) {
     // Validate lang to prevent ReDoS — only allow word chars and hyphens
     if (!/^[\w-]+$/.test(lang)) return null;
-    // nosemgrep: detect-non-literal-regexp — lang is validated above
-    const regex = new RegExp(`(?:^|\\n)\\s*${lang}\\s*:\\s*\\{`, 'm');
-    const match = regex.exec(content);
-    if (!match) return null;
+    // Use static regex with capture group to avoid non-literal RegExp (ReDoS audit)
+    const blockStart = /(?:^|\n)\s*([\w-]+)\s*:\s*\{/g;
+    let match;
+    while ((match = blockStart.exec(content)) !== null) {
+        if (match[1] === lang) break;
+    }
+    if (!match || match[1] !== lang) return null;
 
     let depth = 0;
     let inString = false;
