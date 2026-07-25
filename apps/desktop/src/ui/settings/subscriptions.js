@@ -576,9 +576,13 @@ export function initSubscriptionSettings({
         for (let i = profileLineIdx + 1; i < lines.length; i++) {
             const line = lines[i];
             // Check if this line is a sequence item under profile
-            const itemMatch = line.match(new RegExp(`^${seqIndent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s+(.+)`)); // nosemgrep: detect-non-literal-regexp — seqIndent is regex-escaped
-            if (itemMatch) {
-                items.push(itemMatch[1].trim());
+            // Static regex captures indent + content; compare indent with startsWith
+            // to preserve original behavior (allowed deeper indentation via \s*)
+            // Use [ \t] instead of \s to avoid super-linear backtracking (SonarCloud)
+            // Prefix-only pattern avoids (.+) backtracking (SonarCloud)
+            const seqItemPrefix = line.match(/^([ \t]*)-[ \t]+/);
+            if (seqItemPrefix && seqItemPrefix[1].startsWith(seqIndent)) {
+                items.push(line.slice(seqItemPrefix[0].length).trim());
                 endLine = i;
             } else if (line.match(/^\s*$/)) {
                 // Blank line — skip but don't end
@@ -658,7 +662,8 @@ export function initSubscriptionSettings({
      * Add a profile name to the __when__ block's profile field.
      * Handles flow array, block sequence, and single value formats.
      */
-    function addProfileToWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ escapedName) {
+    function addProfileToWhen(/** @type {string} */ content, /** @type {string} */ profileName) {
+        const lowerName = profileName.toLowerCase();
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i].match(/^\s*profile\s*:/);
@@ -668,7 +673,7 @@ export function initSubscriptionSettings({
             if (!parsed) continue;
 
             // Already present?
-            if (parsed.items.some(/** @type {string} */ item => new RegExp(`^${escapedName}$`, 'i').test(item))) { // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
+            if (parsed.items.some(/** @type {string} */ item => item.toLowerCase() === lowerName)) {
                 return content;
             }
 
@@ -687,7 +692,8 @@ export function initSubscriptionSettings({
      * Remove a profile name from the __when__ block's profile field.
      * If no profiles remain, replaces with enabled: false.
      */
-    function removeProfileFromWhen(/** @type {string} */ content, /** @type {string} */ profileName, /** @type {string} */ escapedName) {
+    function removeProfileFromWhen(/** @type {string} */ content, /** @type {string} */ profileName) {
+        const lowerName = profileName.toLowerCase();
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i].match(/^\s*profile\s*:/);
@@ -696,7 +702,7 @@ export function initSubscriptionSettings({
             const parsed = parseProfileBlock(lines, i);
             if (!parsed) continue;
 
-            const filtered = parsed.items.filter(/** @type {string} */ item => !new RegExp(`^${escapedName}$`, 'i').test(item)); // nosemgrep: detect-non-literal-regexp — escapedName is pre-escaped by caller
+            const filtered = parsed.items.filter(/** @type {string} */ item => item.toLowerCase() !== lowerName);
 
             let newLines;
             if (filtered.length === 0) {
@@ -842,7 +848,13 @@ export function initSubscriptionSettings({
                                 checkbox.checked = false;
                                 return;
                             }
-                            checkbox.checked = whenBlock.profiles.includes(profileStem);
+                            // Use flat loop instead of .some() to reduce nesting (SonarCloud)
+                            const normStem = profileStem.toLowerCase();
+                            let profileFound = false;
+                            for (const p of whenBlock.profiles) {
+                                if (p.toLowerCase() === normStem) { profileFound = true; break; }
+                            }
+                            checkbox.checked = profileFound;
                         })
                         .catch(() => {});
 
@@ -861,7 +873,6 @@ export function initSubscriptionSettings({
 
                         try {
                             const currentContent = /** @type {string} */ (await invoke(COMMANDS.RULE_READ, { filename: file.filename }));
-                            const escapedName = profileStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
                             let newContent = currentContent;
                             const hasWhen = /__when__\s*:/i.test(newContent);
@@ -875,7 +886,7 @@ export function initSubscriptionSettings({
                                     // Remove stale enabled: false
                                     newContent = newContent.replace(/^[ \t]*enabled\s*:\s*false\s*?\n?/gim, '');
                                     if (hasProfile) {
-                                        newContent = addProfileToWhen(newContent, profileStem, escapedName);
+                                        newContent = addProfileToWhen(newContent, profileStem);
                                     } else {
                                         // __when__ exists but no profile line — insert profile after __when__ header line
                                         const lines = newContent.split('\n');
@@ -895,7 +906,7 @@ export function initSubscriptionSettings({
                                     newContent = `__when__:\n  profile: ${profileStem}\n\n${newContent}`;
                                 }
                             } else if (hasProfile) {
-                                newContent = removeProfileFromWhen(newContent, profileStem, escapedName);
+                                newContent = removeProfileFromWhen(newContent, profileStem);
                             } else if (hasWhen) {
                                 // Has __when__ but no profile line — add enabled: false to disable
                                 newContent = newContent.replace(/(__when__\s*:\s*\n)/i, '$1  enabled: false\n');
@@ -903,7 +914,11 @@ export function initSubscriptionSettings({
                                 // No __when__ at all — rule applies to all profiles.
                                 // Add __when__ with all profiles EXCEPT the current one,
                                 // so the rule still works for other profiles.
-                                const otherProfiles = allProfileStems.filter((p) => p !== profileStem);
+                                const normalizedStem = profileStem.toLowerCase();
+                                const otherProfiles = [];
+                                for (const p of allProfileStems) {
+                                    if (p.toLowerCase() !== normalizedStem) otherProfiles.push(p);
+                                }
                                 if (otherProfiles.length > 0) {
                                     newContent = `__when__:\n  profile:\n${otherProfiles.map((p) => `    - ${p}`).join('\n')}\n\n${newContent}`;
                                 } else {
