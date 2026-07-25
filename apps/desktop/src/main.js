@@ -94,6 +94,37 @@ let _trafficWsHandle = null;
 /** @type {Function | null} */
 let _configParseErrorListener = null;
 
+/**
+ * Promise that resolves when backend event listeners are registered.
+ *
+ * Started at **module load time** (before `error`/`unhandledrejection` handlers
+ * are installed) so that early bootstrap failures can still be forwarded to
+ * the backend. `initApp()` awaits this promise to ensure registration is
+ * complete before the first `apiLogger.info()` call.
+ *
+ * A 3-second timeout prevents a stalled IPC call from blocking startup.
+ */
+const _backendListenersReady = _initBackendListenersWithTimeout();
+
+/**
+ * Register backend event listeners with a 3 s timeout.
+ * If the timeout fires, startup proceeds with console-only logging.
+ * @returns {Promise<void>}
+ */
+async function _initBackendListenersWithTimeout() {
+  await Promise.race([
+    initBackendEventListeners(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('backend-event listener registration timed out')), 3000)
+    ),
+  ]).catch((err) => {
+    // Tauri IPC unavailable or slow (e.g. browser dev mode) — degrade to
+    // console-only logging. apiLogger.warn prints to console.warn regardless.
+    // We can't use apiLogger here because it might not be ready yet.
+    console.warn('[Zephyr] Failed to init backend event listeners', err);
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  initReactiveBindings — Centralized Bus -> store -> DOM wiring
 // ═══════════════════════════════════════════════════════════════════
@@ -140,6 +171,16 @@ function initReactiveBindings() {
 
 async function initApp() {
   const t0 = performance.now();
+
+  // 0. Await backend event listeners (started at module load time).
+  //
+  // The listener registration was kicked off at the top of this module —
+  // before `error`/`unhandledrejection` handlers were installed — so that
+  // early bootstrap failures can be forwarded to the backend. Here we just
+  // wait for it to complete (with a 3 s timeout built in).
+  await _backendListenersReady;
+  registerCleanup(cleanupBackendEventListeners);
+
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
   // 1. Disable context menu globally (except on draggable titlebar)
@@ -269,12 +310,6 @@ async function initApp() {
 
   // 6. Initialize all UI modules
   const tUI = performance.now();
-
-  // 6a. Initialize backend event listeners (before other UI, so events aren't missed)
-  initBackendEventListeners().catch((err) => {
-    apiLogger.warn('Failed to init backend event listeners', err);
-  });
-  registerCleanup(cleanupBackendEventListeners);
 
   initNavigation({
     onProxies: () => { renderProxies(); },
@@ -464,8 +499,8 @@ async function initApp() {
 
 // Global error handlers — catch uncaught exceptions and unhandled
 // Promise rejections that would otherwise silently vanish from the
-// app log.  These run BEFORE DOMContentLoaded so they're armed as early
-// as possible.
+// app log. These run AFTER _backendListenersReady is started (above)
+// so that forwarded logs have a listener ready to receive them.
 window.addEventListener('error', (event) => {
     const { error: err, message, filename, lineno, colno } = event;
     const detail = err instanceof Error
