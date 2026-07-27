@@ -163,6 +163,49 @@ describe('fetchProxyGroups providerLoading', () => {
         expect(result.providerLoading).toBe(false);
     });
 
+    it('providerLoading=true when all[] has only COMPATIBLE (the reported bug)', async () => {
+        const result = await setup({
+            proxies: {
+                MyGroup: { type: 'Selector', all: ['COMPATIBLE'], now: 'COMPATIBLE' },
+            },
+            runConfig: {
+                'proxy-providers': { 'prov1': { type: 'http' } },
+                'proxy-groups': [{ name: 'MyGroup', 'include-all': true }],
+            },
+            preferredGroupName: 'MyGroup',
+        });
+        expect(result.providerLoading).toBe(true);
+    });
+
+    it('providerLoading=true when all[] has only lowercase special entries', async () => {
+        const result = await setup({
+            proxies: {
+                MyGroup: { type: 'Selector', all: ['compatible', 'reject'], now: 'compatible' },
+            },
+            runConfig: {
+                'proxy-providers': { 'prov1': { type: 'http' } },
+                'proxy-groups': [{ name: 'MyGroup', 'include-all': true }],
+            },
+            preferredGroupName: 'MyGroup',
+        });
+        expect(result.providerLoading).toBe(true);
+    });
+
+    it('providerLoading=false when all[] has special entries mixed with real nodes', async () => {
+        const result = await setup({
+            proxies: {
+                MyGroup: { type: 'Selector', all: ['COMPATIBLE', 'real-node'], now: 'real-node' },
+            },
+            runConfig: {
+                'proxy-providers': { 'prov1': { type: 'http' } },
+                'proxy-groups': [{ name: 'MyGroup', 'include-all': true }],
+            },
+            preferredGroupName: 'MyGroup',
+        });
+        expect(result.providerLoading).toBe(false);
+        expect(result.proxies).toEqual(['COMPATIBLE', 'real-node']);
+    });
+
     it('GLOBAL group treated as include-all in global mode', async () => {
         const result = await setup({
             proxies: {
