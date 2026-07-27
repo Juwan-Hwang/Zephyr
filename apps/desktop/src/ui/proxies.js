@@ -1917,10 +1917,12 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
-    // --- Provider-loading guard ---
-    // If the uiGroup uses include-all and its all[] is empty, the proxy-provider
-    // hasn't finished downloading nodes yet.  Clear any stale cards from a
-    // previous group, then start a silent poller to re-render once nodes arrive.
+// --- Provider-loading guard ---
+// If the uiGroup uses include-all/include-all-providers and its all[] has
+// no real proxy nodes (empty or only special entries like COMPATIBLE),
+// the proxy-provider hasn't finished downloading nodes yet.  Clear any
+// stale cards from a previous group, then start a silent poller to
+// re-render once nodes arrive.
     if (proxyGroupsResult.providerLoading) {
         // If polling was already exhausted for this group, show a terminal state
         // with a retry button instead of restarting the poll loop.
