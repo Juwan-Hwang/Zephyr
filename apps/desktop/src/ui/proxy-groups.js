@@ -413,15 +413,21 @@ export async function fetchProxyGroups(options = {}) {
     // --- Detect provider-loading state ---
     // Groups with `include-all: true` or `include-all-providers: true` depend
     // on proxy-providers finishing their HTTP download before their `all`
-    // array is populated.  If such a group has an empty `all` array while
-    // the config defines proxy-providers, the nodes are still loading.
+    // array is populated.  If such a group has no real proxy nodes (only
+    // special entries like COMPATIBLE/DIRECT/REJECT/PASS, or is completely
+    // empty), the nodes are still loading.
+    //
+    // mihomo returns `all=[COMPATIBLE]` (length 1) during the download phase,
+    // not `all=[]` (length 0) — so checking `length === 0` misses this state.
     const hasProxyProviders = !!(runConfig && runConfig['proxy-providers']
         && Object.keys(runConfig['proxy-providers']).length > 0);
     const includeAllGroups = buildIncludeAllSet(runConfig);
     const isIncludeAllGroup = uiGroupName
         ? (uiGroupName === 'GLOBAL' || includeAllGroups.has(uiGroupName))
         : false;
-    const providerLoading = hasProxyProviders && isIncludeAllGroup && proxies.length === 0;
+    const hasRealProxies = proxies.length > 0
+        && proxies.some(name => !SPECIAL_GROUPS.has(name));
+    const providerLoading = hasProxyProviders && isIncludeAllGroup && !hasRealProxies;
 
     return {
         // Legacy compat fields
