@@ -271,84 +271,29 @@ pub fn is_machine_key_persisted() -> bool {
 /// Returns base64-encoded ciphertext with version prefix and nonce prepended.
 /// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
 pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
-    use aes_gcm::{
-        aead::{Aead as _, KeyInit as _},
-        Aes256Gcm, Nonce,
-    };
-
     let key_bytes = get_machine_key();
-
     if key_bytes.len() != 32 {
         return Err(format!(
             "Invalid key length {}, expected 32",
             key_bytes.len()
         ));
     }
-
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-        .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
-
-    let nonce_bytes: [u8; 12] = rand::rng().random();
-    let nonce: Nonce<_> = nonce_bytes.into();
-
-    let ciphertext = cipher
-        .encrypt(&nonce, s.as_bytes())
-        .map_err(|e| format!("AES encryption failed: {e}"))?;
-
-    let mut result = b"v2:".to_vec();
-    result.extend(&nonce_bytes);
-    result.extend(ciphertext);
-    Ok(base64_standard.encode(&result))
+    zephyr_core::crypto::obfuscate_string(&key_bytes, s)
+        .map_err(|e| format!("Encryption failed: {e}"))
 }
 
 /// Decrypt a string encrypted with AES-256-GCM.
 /// Expects base64-encoded ciphertext with "v2:" prefix.
 pub(super) fn deobfuscate_string(s: &str) -> Result<String, String> {
-    use aes_gcm::{
-        aead::{Aead as _, KeyInit as _},
-        Aes256Gcm, Nonce,
-    };
-
-    let decoded = base64_standard
-        .decode(s)
-        .map_err(|e| format!("Invalid base64 encoding: {e}"))?;
-
-    if !decoded.starts_with(b"v2:") {
-        return Err("Unknown or missing encryption version prefix".to_owned());
-    }
-
-    if decoded.len() < 31 {
-        return Err("Invalid v2 ciphertext: too short".to_owned());
-    }
-
-    let nonce_bytes = decoded
-        .get(3..15)
-        .ok_or("Invalid ciphertext: missing nonce")?;
-    let ciphertext = decoded
-        .get(15..)
-        .ok_or("Invalid ciphertext: missing data")?;
-
     let key_bytes = get_machine_key();
-
     if key_bytes.len() != 32 {
         return Err(format!(
             "Invalid key length {}, expected 32",
             key_bytes.len()
         ));
     }
-
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-        .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
-
-    let nonce: Nonce<_> = nonce_bytes
-        .try_into()
-        .map_err(|e| format!("Invalid nonce length: {e}"))?;
-
-    let plaintext = cipher
-        .decrypt(&nonce, ciphertext)
-        .map_err(|e| format!("AES decryption failed - data may be tampered: {e}"))?;
-
-    String::from_utf8(plaintext).map_err(|e| format!("Decrypted data is not valid UTF-8: {e}"))
+    zephyr_core::crypto::deobfuscate_string(&key_bytes, s)
+        .map_err(|e| format!("Decryption failed: {e}"))
 }
 
 /// Check whether file content is encrypted (starts with base64-encoded "v2:" prefix).
@@ -770,69 +715,15 @@ pub mod test_helpers {
     /// so that tests are deterministic and do not depend on machine state.
     #[must_use]
     pub fn obfuscate_with_key(plaintext: &str, key: &[u8]) -> String {
-        use aes_gcm::{
-            aead::{Aead as _, KeyInit as _},
-            Aes256Gcm, Nonce,
-        };
-
-        if key.len() != 32 {
-            return String::new();
-        }
-
-        let cipher = match Aes256Gcm::new_from_slice(key) {
-            Ok(c) => c,
-            Err(_) => return String::new(),
-        };
-
-        let nonce_bytes: [u8; 12] = rand::rng().random();
-        let nonce: Nonce<_> = nonce_bytes.into();
-
-        match cipher.encrypt(&nonce, plaintext.as_bytes()) {
-            Ok(ciphertext) => {
-                let mut result = b"v2:".to_vec();
-                result.extend(&nonce_bytes);
-                result.extend(ciphertext);
-                base64_standard.encode(&result)
-            }
-            Err(_) => String::new(),
-        }
+        if key.len() != 32 { return String::new(); }
+        zephyr_core::crypto::obfuscate_string(key, plaintext).unwrap_or_default()
     }
 
     /// Decrypt a string encrypted with AES-256-GCM using an explicit key (test-only).
     #[must_use]
     pub fn deobfuscate_with_key(ciphertext: &str, key: &[u8]) -> String {
-        use aes_gcm::{
-            aead::{Aead as _, KeyInit as _},
-            Aes256Gcm,
-        };
-
-        let Ok(decoded) = base64_standard.decode(ciphertext) else {
-            return String::new();
-        };
-
-        if !decoded.starts_with(b"v2:") || decoded.len() < 31 {
-            return String::new();
-        }
-
-        if key.len() != 32 {
-            return String::new();
-        }
-
-        let nonce_bytes = &decoded[3..15];
-        let ct = &decoded[15..];
-
-        let Ok(cipher) = Aes256Gcm::new_from_slice(key) else {
-            return String::new();
-        };
-
-        let Ok(nonce) = nonce_bytes.try_into() else {
-            return String::new();
-        };
-
-        match cipher.decrypt(&nonce, ct) {
-            Ok(pt) => String::from_utf8_lossy(&pt).into_owned(),
-            Err(_) => String::new(),
-        }
+        if key.len() != 32 { return String::new(); }
+        zephyr_core::crypto::deobfuscate_string(key, ciphertext).unwrap_or_default()
     }
 
     /// Derive a deterministic 32-byte key from a machine-id string using PBKDF2 (test-only).

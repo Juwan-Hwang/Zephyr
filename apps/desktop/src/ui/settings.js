@@ -919,6 +919,7 @@ export async function initSettings() {
     // Initialized early so renderConfigs is available for language dropdown and drag-drop listeners.
     const subApi = initSubscriptionSettings({
         subAddBtn: document.getElementById('add-sub-btn'),
+        warpBtn: document.getElementById('warp-btn'),
         updateAllSubBtn: document.getElementById('update-all-sub-btn'),
         configsList,
     });

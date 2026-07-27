@@ -50,7 +50,6 @@ regex = "1"
 tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
-aes-gcm = "0.11"
 pbkdf2 = "0.12"
 hmac = "0.12"
 clash-prism-core = "0.1.5"
@@ -63,6 +62,9 @@ toml = "1.1"
 dashmap = "6.0"
 minisign = "0.9"
 arboard = "3.3"
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+curve25519-dalek = { version = "4", features = ["rand_core"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
@@ -82,7 +84,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
     "Win32_System_JobObjects",
     "Win32_Foundation",
-    "Win32_UI_Shell"
+    "Win32_UI_Shell",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory"
 ] }
 winreg = "0.52"
 # webview2-com: direct dependency for ProcessFailed crash recovery.

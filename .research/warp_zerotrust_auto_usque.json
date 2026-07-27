@@ -1,0 +1,10 @@
+{
+  "protocol": "wireguard",
+  "private_key": "+MR+Cg+zZjRlXPNeqYP+M8Kx3BYwJrjYat1rBXofVmI=",
+  "endpoint_v4": "162.159.193.10:2408",
+  "endpoint_pub_key": "-----BEGIN PUBLIC KEY-----\nbmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=\n-----END PUBLIC KEY-----",
+  "id": "t.019f9bf7-bb7f-1daa-bb7b-4ec53ccfa78d",
+  "access_token": "8aa794b3-4ffe-46dd-aedb-3a57ca9128b8",
+  "ipv4": "100.96.0.4/32",
+  "ipv6": "2606:4700:cf1:1000::4/128"
+}

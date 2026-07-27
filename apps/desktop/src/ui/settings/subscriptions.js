@@ -12,6 +12,7 @@ import {
     invoke,
     restartCore,
     abortLatencyTests,
+    openUrl,
 } from '../../api.js';
 import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -412,14 +413,82 @@ function getSubscriptionUserAgent() {
  *
  * @param {object} opts
  * @param {HTMLElement|null} opts.subAddBtn - The "Add Subscription" button.
+ * @param {HTMLElement|null} opts.warpBtn - The "Cloudflare WARP" button.
  * @param {HTMLElement|null} opts.updateAllSubBtn - The "Update All Subscriptions" button.
  * @param {HTMLElement|null} opts.configsList - The configs list container.
  */
 export function initSubscriptionSettings({
     subAddBtn,
+    warpBtn,
     updateAllSubBtn,
     configsList,
 }) {
+
+    // ---- Cloudflare WARP registration ----
+    if (warpBtn) {
+        warpBtn.onclick = async () => {
+            /** @type {any} */
+            const t = /** @type {Record<string, any>} */ (translations)[appStore.get('currentLang')] || {};
+
+            // DEBUG: log COMMANDS keys to diagnose undefined
+            console.log('[WARP] COMMANDS keys:', Object.keys(COMMANDS).filter(k => k.includes('WARP')));
+            console.log('[WARP] WARP_REGISTER =', COMMANDS.WARP_REGISTER);
+            console.log('[WARP] WARP_REGISTER_ZERO_TRUST =', COMMANDS.WARP_REGISTER_ZERO_TRUST);
+
+            // Ask for organization name — empty = Consumer WARP
+            const orgName = /** @type {string} */ (await showModal(
+                t.warpOrgPrompt || 'Organization name (leave empty for Consumer WARP)',
+                t.warpOrgPlaceholder || 'e.g. mycompany'
+            ));
+
+            if (orgName === null) return; // User cancelled
+
+            /** @type {any} */
+            const t2 = /** @type {Record<string, any>} */ (translations)[appStore.get('currentLang')] || {};
+            showNotification(t2.warpRegistering || 'Registering WARP device...');
+
+            try {
+                /** @type {{name: string, protocol: string, device_id: string, message: string}} */
+                let result;
+                const cmd = orgName.trim() ? COMMANDS.WARP_REGISTER_ZERO_TRUST : COMMANDS.WARP_REGISTER;
+                console.log('[WARP] Using command:', cmd, 'orgName:', orgName.trim());
+                if (!cmd) {
+                    throw new Error('Command name is undefined — check _shared/index.js');
+                }
+                if (orgName.trim()) {
+                    result = await invoke(cmd, { orgName: orgName.trim() });
+                } else {
+                    result = await invoke(cmd);
+                }
+
+                invalidateConfigsCache();
+
+                // Auto-switch to the new WARP profile
+                /** @type {any} */
+                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
+                const currentConfig = subSettings.last_config || 'config.yaml';
+                const resultName = result.name.replace(/\.(ya?ml)$/i, '');
+                const currentStem = currentConfig.replace(/\.(ya?ml)$/i, '');
+
+                if (resultName === currentStem) {
+                    abortLatencyTests();
+                    const customArgs = subSettings.custom_args || [];
+                    await restartCore(result.name, customArgs);
+                    await postRestartRecovery(result.name);
+                }
+
+                /** @type {any} */
+                const t3 = /** @type {Record<string, any>} */ (translations)[appStore.get('currentLang')] || {};
+                showNotification(result.message || (t3.warpSuccess || 'WARP registered successfully'), 'success');
+                renderConfigs();
+            } catch (err) {
+                const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
+                /** @type {any} */
+                const t4 = /** @type {Record<string, any>} */ (translations)[appStore.get('currentLang')] || {};
+                showNotification(`${t4.warpFailed || 'WARP registration failed'}: ${error}`, 'error');
+            }
+        };
+    }
 
     // ---- Subscription add ----
     if (subAddBtn) {

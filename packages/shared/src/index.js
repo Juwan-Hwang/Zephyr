@@ -1,6 +1,5 @@
 /**
  * @fileoverview Single source of truth for Tauri IPC command names.
- *
  * All invoke() calls in the desktop app MUST reference COMMANDS from this
  * file. When a Rust command is renamed, updating this constant causes
  * TypeScript to flag every call site that needs updating.
@@ -155,6 +154,8 @@ export const SUBSCRIPTION = Object.freeze({
     DOWNLOAD_SUB: "download_sub",
     DOWNLOAD_SUB_BATCH: "download_sub_batch",
     FETCH_TEXT: "fetch_text",
+    WARP_REGISTER: "warp_register",
+    WARP_REGISTER_ZERO_TRUST: "warp_register_zero_trust",
 });
 
 // ---------------------------------------------------------------------------

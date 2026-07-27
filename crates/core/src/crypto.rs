@@ -100,3 +100,42 @@ pub fn deobfuscate_string(key: &[u8], ciphertext: &str) -> Result<String, AppErr
     String::from_utf8(plaintext)
         .map_err(|e| AppError::CryptoError(format!("Decrypted data is not valid UTF-8: {e}")))
 }
+
+/// Decrypt a WebView2 v10 cookie value using AES-256-GCM.
+///
+/// Format: 12-byte IV (nonce) + ciphertext + 16-byte GCM tag (at end).
+/// The key is the AES-256 key from WebView2's Local State (decrypted via DPAPI).
+pub fn decrypt_webview2_v10_cookie(key: &[u8], data: &[u8]) -> Result<String, AppError> {
+    use aes_gcm::{
+        aead::{Aead as _, KeyInit as _},
+        Aes256Gcm, Key, Nonce,
+    };
+
+    if key.len() != 32 {
+        return Err(AppError::CryptoError(format!(
+            "Invalid AES key length: {}",
+            key.len()
+        )));
+    }
+    if data.len() < 28 {
+        return Err(AppError::CryptoError("Encrypted data too short".to_owned()));
+    }
+
+    eprintln!("[WARP] v10 decrypt: key={}B data={}B nonce={}B ct+tag={}B",
+        key.len(), data.len(), 12, data.len() - 12);
+
+    let key = Key::<Aes256Gcm>::from_slice(key);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Nonce::from_slice(&data[..12]);
+    let plaintext = cipher
+        .decrypt(nonce, &data[12..])
+        .map_err(|e| AppError::CryptoError(format!("AES-GCM decrypt failed: {e}")))?;
+
+    // Log first 32 bytes as hex for debugging
+    let preview: String = plaintext.iter().take(32)
+        .map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+    eprintln!("[WARP] v10 decrypted: {}B preview={}", plaintext.len(), preview);
+
+    String::from_utf8(plaintext)
+        .map_err(|e| AppError::CryptoError(format!("Decrypted data is not valid UTF-8: {e}")))
+}

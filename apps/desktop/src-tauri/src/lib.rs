@@ -39,7 +39,7 @@ use core_manager::{
     kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, open_log_folder,
     read_config_file, rename_config, restart_core_as_root_cmd, set_tun_enabled,
     smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
-    update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
+    update_subscription_interval, update_subscription_ua, warp_register, warp_register_zero_trust, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -1310,6 +1310,26 @@ pub fn run() {
         .manage(RateLimiter::new())
         .manage(ShortcutRegistry::default())
         .manage(WebviewHealth::default())
+        .register_uri_scheme_protocol("warp-cb", |_ctx, request| {
+            let url = request.uri().to_string();
+            eprintln!("[WARP] warp-cb protocol handler: url={url}");
+            if let Some(jwt) = core_manager::core::warp::extract_jwt_from_url(&url) {
+                eprintln!("[WARP] warp-cb: JWT found! len={}", jwt.len());
+                if let Some(tx_arc) = core_manager::core::warp::WARP_JWT_TX.get() {
+                    if let Some(sender) = tx_arc.lock().unwrap().take() {
+                        let _ = sender.send(jwt);
+                    }
+                }
+            }
+            tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "text/html")
+                .body(
+                    b"<html><body><script>window.close()</script></body></html>"
+                        .to_vec(),
+                )
+                .unwrap()
+        })
         .setup(|app| {
             backend_event::init_app_handle(app.handle());
             core_event_bridge::install_core_event_bridge();
@@ -1616,6 +1636,8 @@ invalidate_heartbeat(window.app_handle());
             get_latest_client_version,
             update_client,
             fetch_text,
+            warp_register,
+            warp_register_zero_trust,
             restart_core_as_root_cmd,
             set_tun_enabled,
             kill_all_mihomo_as_root_cmd,

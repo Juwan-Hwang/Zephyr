@@ -49,6 +49,9 @@ pub use core::{
     update_config_url,
     update_subscription_interval,
     update_subscription_ua,
+    // warp
+    warp_register,
+    warp_register_zero_trust,
     write_config_file,
     // secure_io
     write_file_secure,

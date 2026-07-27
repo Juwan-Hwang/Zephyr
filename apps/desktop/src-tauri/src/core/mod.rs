@@ -169,6 +169,7 @@ pub mod subscription_scheduler;
 #[cfg(test)]
 pub mod subscription_scheduler_test;
 pub mod tun_manager;
+pub mod warp;
 
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
 pub use config_manager::{
@@ -192,3 +193,4 @@ pub use tun_manager::{
     is_tun_toggling, kill_all_mihomo_as_root_cmd, release_tun_toggle, restart_core_as_root_cmd,
     set_tun_enabled, set_tun_mode, smart_kill_all_mihomo_as_root, try_acquire_tun_toggle,
 };
+pub use warp::{extract_jwt_from_url, warp_register, warp_register_zero_trust};
