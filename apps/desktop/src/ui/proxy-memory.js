@@ -337,6 +337,21 @@ export async function restoreProxySelection(profileName) {
         // After profile/core switches, the saved node may belong to a different
         // selector group than the resolved primary.
         const proxyMap = /** @type {any} */ (proxyGroupsResult.data)?.proxies;
+
+        // Defensive: if saved.node is actually a group name (e.g., "手动切换"
+        // saved as node when it's a Selector group), skip restoration —
+        // switching to a group-as-node in GLOBAL causes the UI to jump to
+        // the effective group instead of the user's preferred group.
+        if (proxyMap && saved.node && proxyMap[saved.node]) {
+            const nodeType = (proxyMap[saved.node]?.type || '').toLowerCase();
+            if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(nodeType)) {
+                proxyMemoryLogger.warn(
+                    `${_dbgTag}: saved.node "${saved.node}" is a group (type=${nodeType}), not a proxy node — skipping restoration`,
+                );
+                return false;
+            }
+        }
+
         const fallbackGroup = findWritableGroupWithNode(proxyMap, saved.node);
         if (fallbackGroup) {
             const success = await switchProxy(fallbackGroup, saved.node);
