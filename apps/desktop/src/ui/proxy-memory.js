@@ -289,9 +289,12 @@ export async function restoreProxySelection(profileName) {
             proxyMemoryLogger.warn(
                 `[restoreProxySelection] saved.node "${saved.node}" equals saved.group — stale data from previous bug, clearing and skipping restoration`,
             );
-            // Clear the stale entry to prevent repeated warnings on every run
+            // Clear the stale entry to prevent repeated warnings on every run.
+            // Use empty strings because the Rust backend's update_proxy_selection
+            // requires node_name as String (not Option<String>).
+            // parseSelection() treats "" as null via the `|| null` check.
             try {
-                await saveProxySelection(profileName, /** @type {any} */ ({ node: null, group: null }));
+                await saveProxySelection(profileName, { node: '', group: '' });
             } catch { /* ignore cleanup errors */ }
             return false;
         }
