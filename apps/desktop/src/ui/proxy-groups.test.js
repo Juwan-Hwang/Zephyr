@@ -206,20 +206,83 @@ describe('fetchProxyGroups providerLoading', () => {
         expect(result.proxies).toEqual(['COMPATIBLE', 'real-node']);
     });
 
-    it('GLOBAL group treated as include-all in global mode', async () => {
+    it('providerLoading=true when all[] has only local proxies (not from providers)', async () => {
+        // This is the exact bug from the 2026-07-28 log:
+        // all=['🟢 直连'] where 🟢 直连 is a local proxy, not from a provider.
+        // The old code treated it as "loaded" because 🟢 直连 was not in
+        // SPECIAL_GROUPS.  The new code checks runConfig.proxies to identify
+        // local proxies and correctly detects the loading state.
         const result = await setup({
             proxies: {
-                GLOBAL: { type: 'Selector', all: [], now: null },
+                MyGroup: { type: 'Selector', all: ['🟢 直连'], now: '🟢 直连' },
             },
-            mode: 'global',
             runConfig: {
                 'proxy-providers': { 'prov1': { type: 'http' } },
-                'proxy-groups': [],
+                'proxies': [
+                    { name: '🟢 直连', type: 'direct' },
+                ],
+                'proxy-groups': [{ name: 'MyGroup', 'include-all': true }],
             },
+            preferredGroupName: 'MyGroup',
         });
-        expect(result.uiGroupName).toBe('GLOBAL');
         expect(result.providerLoading).toBe(true);
     });
+
+    it('providerLoading=true when all[] has local proxies + group refs but no provider proxies', async () => {
+        const result = await setup({
+            proxies: {
+                MyGroup: { type: 'Selector', all: ['🟢 直连', '♻️ 自动选择'], now: '🟢 直连' },
+            },
+            runConfig: {
+                'proxy-providers': { 'prov1': { type: 'http' } },
+                'proxies': [
+                    { name: '🟢 直连', type: 'direct' },
+                ],
+                'proxy-groups': [
+                    { name: 'MyGroup', 'include-all': true },
+                    { name: '♻️ 自动选择', type: 'url-test', 'include-all': true },
+                ],
+            },
+            preferredGroupName: 'MyGroup',
+        });
+        expect(result.providerLoading).toBe(true);
+    });
+
+    it('providerLoading=false when local proxies mixed with provider proxies', async () => {
+        const result = await setup({
+            proxies: {
+                MyGroup: { type: 'Selector', all: ['🟢 直连', 'provider-node-1'], now: 'provider-node-1' },
+            },
+            runConfig: {
+                'proxy-providers': { 'prov1': { type: 'http' } },
+                'proxies': [
+                    { name: '🟢 直连', type: 'direct' },
+                ],
+                'proxy-groups': [{ name: 'MyGroup', 'include-all': true }],
+            },
+            preferredGroupName: 'MyGroup',
+        });
+        expect(result.providerLoading).toBe(false);
+        expect(result.proxies).toEqual(['🟢 直连', 'provider-node-1']);
+    });
+
+it('GLOBAL group treated as include-all in global mode', async () => {
+const result = await setup({
+proxies: {
+GLOBAL: { type: 'Selector', all: [], now: null },
+},
+mode: 'global',
+runConfig: {
+'proxy-providers': { 'prov1': { type: 'http' } },
+'proxy-groups': [],
+},
+});
+expect(result.uiGroupName).toBe('GLOBAL');
+// GLOBAL's all[] contains group references, not direct provider proxies,
+// so providerLoading is never true for GLOBAL — it's handled by the
+// include-all groups it references.
+expect(result.providerLoading).toBe(false);
+});
 
     it('providerLoading=false when proxy-providers object is empty', async () => {
         const result = await setup({
