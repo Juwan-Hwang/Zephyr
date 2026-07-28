@@ -277,6 +277,25 @@ export async function restoreProxySelection(profileName) {
 
         if (!saved.node) return false;
 
+        // Defensive: if saved.node === saved.group, the node was saved
+        // incorrectly by a previous version of switchToConfig (which fetched
+        // from the effective group instead of the preferred group, causing the
+        // group name to be saved as the node).  Clear the stale entry and
+        // skip restoration.  This check is precise: a valid group-as-node
+        // selection always has different group and node names (e.g.,
+        // group="兜底分流", node="手动切换"), so legitimate restorations
+        // are never blocked.
+        if (saved.node === saved.group) {
+            proxyMemoryLogger.warn(
+                `[restoreProxySelection] saved.node "${saved.node}" equals saved.group — stale data from previous bug, clearing and skipping restoration`,
+            );
+            // Clear the stale entry to prevent repeated warnings on every run
+            try {
+                await saveProxySelection(profileName, /** @type {any} */ ({ node: null, group: null }));
+            } catch { /* ignore cleanup errors */ }
+            return false;
+        }
+
         // Resolve preferred group: primary preference > saved group > current UI group
         const primaryGroup = settings.primary_group_preference?.[profileName] || null;
         const preferredGroupName = primaryGroup || saved.group || appStore.get('uiGroupName') || null;
