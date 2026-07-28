@@ -413,21 +413,47 @@ export async function fetchProxyGroups(options = {}) {
     // --- Detect provider-loading state ---
     // Groups with `include-all: true` or `include-all-providers: true` depend
     // on proxy-providers finishing their HTTP download before their `all`
-    // array is populated.  If such a group has no real proxy nodes (only
-    // special entries like COMPATIBLE/DIRECT/REJECT/PASS, or is completely
-    // empty), the nodes are still loading.
+    // array is fully populated.
     //
-    // mihomo returns `all=[COMPATIBLE]` (length 1) during the download phase,
-    // not `all=[]` (length 0) — so checking `length === 0` misses this state.
+    // To detect the loading state, we check whether `all[]` contains any
+    // proxy that came from a provider.  Every entry in `all[]` falls into
+    // exactly one of four categories:
+    //   1. mihomo built-in: COMPATIBLE, DIRECT, REJECT, PASS
+    //   2. Local proxy: defined in config's `proxies:` section
+    //   3. Group reference: defined in config's `proxy-groups:` section
+    //   4. Provider proxy: injected by proxy-providers after download
+    //
+    // If no category-4 entry exists, providers haven't finished downloading.
+    // This approach correctly handles any local proxy name (🟢 直连, 🔴 拒绝,
+    // etc.) without needing to enumerate them.
     const hasProxyProviders = !!(runConfig && runConfig['proxy-providers']
         && Object.keys(runConfig['proxy-providers']).length > 0);
     const includeAllGroups = buildIncludeAllSet(runConfig);
     const isIncludeAllGroup = uiGroupName
         ? (uiGroupName === 'GLOBAL' || includeAllGroups.has(uiGroupName))
         : false;
-    const hasRealProxies = Array.isArray(proxies)
-        && proxies.some(name => typeof name === 'string' && !SPECIAL_GROUPS.has(name.toUpperCase()));
-    const providerLoading = hasProxyProviders && isIncludeAllGroup && !hasRealProxies;
+
+    // Build sets of local proxy names and group names from run_config
+    const localProxyNames = new Set(
+        Array.isArray(runConfig?.proxies)
+            ? runConfig.proxies.map(/** @param {any} p */ p => p?.name).filter(Boolean)
+            : []
+    );
+    const groupNames = new Set(
+        Array.isArray(runConfig?.['proxy-groups'])
+            ? runConfig['proxy-groups'].map(/** @param {any} g */ g => g?.name).filter(Boolean)
+            : []
+    );
+
+    // A "provider proxy" is one that is not built-in, not local, and not a group
+    const hasProviderProxies = Array.isArray(proxies)
+        && proxies.some(name =>
+            typeof name === 'string'
+            && !SPECIAL_GROUPS.has(name.toUpperCase())
+            && !localProxyNames.has(name)
+            && !groupNames.has(name)
+        );
+    const providerLoading = hasProxyProviders && isIncludeAllGroup && !hasProviderProxies;
 
     return {
         // Legacy compat fields
