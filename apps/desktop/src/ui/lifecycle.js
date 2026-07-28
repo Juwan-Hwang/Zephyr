@@ -38,7 +38,11 @@ export async function switchToConfig(configName, customArgs = []) {
     // 使用短超时 —— 如果 mihomo 繁忙（如延迟测试仍在队列中），
     // 回退到 appStore 状态而不是阻塞数秒
     let timer;
-    const fetchPromise = fetchProxyGroups();
+    // Pass preferredGroupName so the resolver targets the user's chosen group
+    // instead of the effective group.  Without this, `current` may come from
+    // a different group (e.g., "兜底分流") whose `now` is a group name (e.g.,
+    // "手动切换"), which would be incorrectly saved as the proxy node.
+    const fetchPromise = fetchProxyGroups({ preferredGroupName: groupName || undefined });
     const timeoutPromise = new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); });
     const currentProxyGroups = await Promise.race([fetchPromise, timeoutPromise]);
     clearTimeout(timer);
