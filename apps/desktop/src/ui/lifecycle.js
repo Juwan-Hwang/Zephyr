@@ -38,7 +38,11 @@ export async function switchToConfig(configName, customArgs = []) {
     // 使用短超时 —— 如果 mihomo 繁忙（如延迟测试仍在队列中），
     // 回退到 appStore 状态而不是阻塞数秒
     let timer;
-    const fetchPromise = fetchProxyGroups();
+    // Pass preferredGroupName so the resolver targets the user's chosen group
+    // instead of the effective group.  Without this, `current` may come from
+    // a different group (e.g., "兜底分流") whose `now` is a group name (e.g.,
+    // "手动切换"), which would be incorrectly saved as the proxy node.
+    const fetchPromise = fetchProxyGroups({ preferredGroupName: groupName ?? undefined });
     const timeoutPromise = new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); });
     const currentProxyGroups = await Promise.race([fetchPromise, timeoutPromise]);
     clearTimeout(timer);
@@ -56,9 +60,16 @@ export async function switchToConfig(configName, customArgs = []) {
       const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
       const activeConfig = liveSettings.last_config || 'config.yaml';
       const { saveProxySelection } = await import('./proxy-memory.js');
+      // Use the resolver's uiGroupName when live data was available
+      // (it may normalize or fall back from the raw appStore value).
+      // On timeout fallback, use the raw groupName to keep node and
+      // group sources consistent.
+      const resolvedGroup = (currentProxyGroups && currentProxyGroups.current)
+        ? (currentProxyGroups.uiGroupName || currentProxyGroups.mainGroup || groupName || null)
+        : (groupName || null);
       await saveProxySelection(activeConfig, {
         node: nodeToSave,
-        group: groupName,
+        group: resolvedGroup,
       });
     }
   } catch (e) {
