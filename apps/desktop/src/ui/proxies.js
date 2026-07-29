@@ -1261,8 +1261,15 @@ let _providerPollInFlight = false;
 /** Maximum provider-loading retries (≈30 s at 1.5 s interval). */
 const PROVIDER_POLL_MAX = 20;
 
+/** Delay (ms) before retrying a stale-cache proxy re-fetch. */
+const STALE_CACHE_RETRY_DELAY = 500;
+
 /** Generation token: incremented on stop to cancel in-flight poll callbacks. */
 let _providerPollGeneration = 0;
+
+/** Render generation token: prevents stale renderProxies() invocations from
+ *  overwriting a newer render after an async stale-cache recovery delay. */
+let _renderGeneration = 0;
 
 /**
  * Group name for which provider polling was exhausted (undefined = not exhausted).
@@ -1916,6 +1923,42 @@ export async function renderProxies() {
     }
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+
+    // --- Stale-cache recovery ---
+    // `data` was fetched via getProxiesCached() at the top of this function.
+    // When proxy-providers finish downloading, mihomo updates group.all[] with
+    // new node names before the node details appear in the /proxies response.
+    // If the cached data is in this "half-updated" state, the proxies array
+    // (from group.all[]) will contain names that don't exist in data.proxies.
+    // buildProxyWrappers() skips nodes missing from data.proxies (if (!proxy)
+    // return), resulting in an empty container — the user sees no nodes.
+    //
+    // Fix: if any proxy name is missing from data.proxies, invalidate the cache
+    // and re-fetch. If still missing (mihomo not fully updated), retry once
+    // after a short delay. All recovery failures are caught so rendering
+    // continues with the original (stale) data rather than aborting.
+    const _renderGen = ++_renderGeneration;
+    if (data?.proxies) {
+        const hasMissing = proxies.some(name => !data.proxies[name]);
+        if (hasMissing) {
+            invalidateProxiesCache();
+            try {
+                let freshData = /** @type {any} */ (await getProxies());
+                if (freshData?.proxies && proxies.some(name => !freshData.proxies[name])) {
+                    await new Promise(r => setTimeout(r, STALE_CACHE_RETRY_DELAY));
+                    freshData = /** @type {any} */ (await getProxies());
+                }
+                // Guard: user may have switched groups during the await/delay.
+                // If so, abort this render — the newer render takes precedence.
+                if (_renderGen !== _renderGeneration) return;
+                if (freshData?.proxies) {
+                    data.proxies = freshData.proxies;
+                }
+            } catch (e) {
+                proxyLogger.warn('[renderProxies] stale-cache recovery failed, using cached data:', e);
+            }
+        }
+    }
 
 // --- Provider-loading guard ---
 // If the uiGroup uses include-all/include-all-providers and its all[] has
