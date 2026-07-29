@@ -121,7 +121,7 @@ describe('Provider poller state machine', () => {
         it('calls invalidateProxiesCache when nodes arrive during polling', async () => {
             vi.useFakeTimers();
 
-            const proxyData = { proxies: { MyGroup: { type: 'Selector', all: ['n1', 'n2'] } } };
+            const proxyData = { proxies: { MyGroup: { type: 'Selector', all: ['n1', 'n2'] }, n1: { type: 'Shadowsocks' }, n2: { type: 'Shadowsocks' } } };
             getProxies.mockResolvedValue(proxyData);
             getConfigCached.mockResolvedValue({ mode: 'rule' });
             fetchProxyGroups.mockResolvedValue({
@@ -162,6 +162,54 @@ describe('Provider poller state machine', () => {
             expect(getProxies).toHaveBeenCalledTimes(2);
         });
     });
+
+    // ─── Missing node details ─────────────────────────────────────────
+    describe('missing node details', () => {
+        it('retries when proxy names exist in all[] but details missing from data.proxies', async () => {
+            vi.useFakeTimers();
+
+            // Group has nodes in all[], but data.proxies doesn't have their details
+            // (mihomo half-updated state)
+            getProxies.mockResolvedValue({ proxies: { MyGroup: { type: 'Selector', all: ['n1', 'n2'] } } });
+            getConfigCached.mockResolvedValue({ mode: 'rule' });
+            fetchProxyGroups.mockResolvedValue({
+                proxies: ['n1', 'n2'],
+                providerLoading: false,
+                uiGroupName: 'MyGroup',
+            });
+
+            startProviderPoll('MyGroup', 'MyGroup', 0);
+            await vi.advanceTimersByTimeAsync(1500);
+
+            // Should NOT call invalidateProxiesCache — nodes are still missing details
+            expect(invalidateProxiesCache).not.toHaveBeenCalled();
+            // Should retry — schedule next poll
+            expect(getProxies).toHaveBeenCalledTimes(1);
+
+            await vi.advanceTimersByTimeAsync(1500);
+            expect(getProxies).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not retry when all[] contains special names (DIRECT, COMPATIBLE) alongside detailed nodes', async () => {
+            vi.useFakeTimers();
+
+            // Group has DIRECT + COMPATIBLE (special, no detail records) + real nodes
+            getProxies.mockResolvedValue({ proxies: { MyGroup: { type: 'Selector', all: ['DIRECT', 'COMPATIBLE', 'n1'] }, n1: { type: 'Shadowsocks' } } });
+            getConfigCached.mockResolvedValue({ mode: 'rule' });
+            fetchProxyGroups.mockResolvedValue({
+                proxies: ['DIRECT', 'COMPATIBLE', 'n1'],
+                providerLoading: false,
+                uiGroupName: 'MyGroup',
+            });
+
+            startProviderPoll('MyGroup', 'MyGroup', 0);
+            await vi.advanceTimersByTimeAsync(1500);
+
+            // Should call invalidateProxiesCache — special names are excluded from check
+            expect(invalidateProxiesCache).toHaveBeenCalledTimes(1);
+        });
+    });
+
 
     // ─── Exhaustion ─────────────────────────────────────────────────────
     describe('exhaustion after max retries', () => {
@@ -239,7 +287,7 @@ describe('Provider poller state machine', () => {
         it('allows starting a new poll after stop', async () => {
             vi.useFakeTimers();
 
-            getProxies.mockResolvedValue({ proxies: { G: { type: 'Selector', all: ['n1'] } } });
+            getProxies.mockResolvedValue({ proxies: { G: { type: 'Selector', all: ['n1'] }, n1: { type: 'Shadowsocks' } } });
             getConfigCached.mockResolvedValue({ mode: 'rule' });
             fetchProxyGroups.mockResolvedValue({ proxies: ['n1'], providerLoading: false });
 
