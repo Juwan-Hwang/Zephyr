@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
     getConfig: vi.fn(),
+    SPECIAL_PROXY_NAMES: Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE'])),
 }));
 vi.mock('./run-config-cache.js', () => ({
     getRunConfigCached: vi.fn(),
