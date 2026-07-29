@@ -1917,6 +1917,33 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
+    // --- Stale-cache recovery ---
+    // `data` was fetched via getProxiesCached() at the top of this function.
+    // When proxy-providers finish downloading, mihomo updates group.all[] with
+    // new node names before the node details appear in the /proxies response.
+    // If the cached data is in this "half-updated" state, the proxies array
+    // (from group.all[]) will contain names that don't exist in data.proxies.
+    // buildProxyWrappers() skips nodes missing from data.proxies (if (!proxy)
+    // return), resulting in an empty container — the user sees no nodes.
+    //
+    // Fix: if any proxy name is missing from data.proxies, invalidate the cache
+    // and re-fetch. If still missing (mihomo not fully updated), retry once
+    // after a short delay.
+    if (data?.proxies) {
+        const hasMissing = proxies.some(name => !data.proxies[name]);
+        if (hasMissing) {
+            invalidateProxiesCache();
+            let freshData = /** @type {any} */ (await getProxies());
+            if (freshData?.proxies && proxies.some(name => !freshData.proxies[name])) {
+                await new Promise(r => setTimeout(r, 500));
+                freshData = /** @type {any} */ (await getProxies());
+            }
+            if (freshData?.proxies) {
+                data.proxies = freshData.proxies;
+            }
+        }
+    }
+
 // --- Provider-loading guard ---
 // If the uiGroup uses include-all/include-all-providers and its all[] has
 // no real proxy nodes (empty or only special entries like COMPATIBLE),
