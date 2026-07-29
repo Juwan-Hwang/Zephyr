@@ -5,18 +5,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // (cache), fetchProxyGroupsShared (proxy-groups).  All other imports are mocked
 // as no-ops so the module loads cleanly.
 
-vi.mock('../api.js', () => ({
-    switchProxy: vi.fn(),
-    testProxy: vi.fn(),
-    abortLatencyTests: vi.fn(),
-    closeAllConnections: vi.fn(),
-    getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
-    invoke: vi.fn(),
-    getLatencyTestSignal: vi.fn(),
-    resetLatencyTestController: vi.fn(),
-    restartCore: vi.fn(),
-    getProxies: vi.fn(),
-}));
+vi.mock('../api.js', async (importOriginal) => {
+    const real = await importOriginal();
+    return {
+        ...real,
+        switchProxy: vi.fn(),
+        testProxy: vi.fn(),
+        abortLatencyTests: vi.fn(),
+        closeAllConnections: vi.fn(),
+        getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
+        invoke: vi.fn(),
+        getLatencyTestSignal: vi.fn(),
+        resetLatencyTestController: vi.fn(),
+        restartCore: vi.fn(),
+        getProxies: vi.fn(),
+        getProxiesMerged: vi.fn().mockImplementation((data) => Promise.resolve(data)),
+    };
+});
 
 vi.mock('../utils/logger.js', () => ({ proxyLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('../utils/sanitize.js', () => ({ escapeHtml: vi.fn(s => s) }));

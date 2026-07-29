@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock API + run-config-cache so fetchProxyGroups can be tested in isolation
-vi.mock('../api.js', () => ({
-    getProxies: vi.fn(),
-    getConfig: vi.fn(),
-}));
+vi.mock('../api.js', async (importOriginal) => {
+    const real = await importOriginal();
+    return {
+        ...real,
+        getProxies: vi.fn(),
+        getConfig: vi.fn(),
+    };
+});
 vi.mock('./run-config-cache.js', () => ({
     getRunConfigCached: vi.fn(),
     invalidateRunConfigCache: vi.fn(),
