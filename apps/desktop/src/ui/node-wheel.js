@@ -67,8 +67,8 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     const nameEl = trigger.querySelector('#current-node-name');
     if (nameEl) {
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
-        nameEl.textContent = t.switching || "Switching...";
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
+        nameEl.textContent = typeof t.switching === 'string' ? t.switching : "Switching...";
     }
     closeWheel();
     abortLatencyTests();
@@ -150,10 +150,11 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
         // a brief loading hint instead of an empty dropdown.
         if (proxies.length === 0) {
             const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const tObj = /** @type {Record<string, string>} */(translations[langKey]);
+            const tObj = /** @type {Record<string, unknown>} */(translations[langKey]);
             const hint = document.createElement('div');
             hint.className = 'px-3 py-2 text-xs text-[var(--text-muted)] text-center';
-            hint.textContent = tObj?.loadingNodes || 'Loading nodes...';
+            const loadingNodes = typeof tObj?.loadingNodes === 'string' ? tObj.loadingNodes : 'Loading nodes...';
+            hint.textContent = loadingNodes;
             /** @type {any} */ (list)._virtObserver?.disconnect();
             list.replaceChildren();
             list.appendChild(hint);

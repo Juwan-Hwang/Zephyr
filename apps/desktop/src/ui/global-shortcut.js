@@ -6,11 +6,11 @@
  * and executes the corresponding UI actions.
  */
 
-import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections, getConfig } from '../api.js';
+import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections } from '../api.js';
 import { saveSetting } from './settings-helpers.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
-import { updateSysProxyUI } from './sysproxy.js';
+import { setSysProxyEnabled } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { updateModeUI } from './modes.js';
 import { appStore } from './state.js';
@@ -522,21 +522,14 @@ async function toggleProxy() {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
         const enabled = await invoke(COMMANDS.GET_SYS_PROXY);
-        if (enabled) {
-            await invoke(COMMANDS.DISABLE_SYSPROXY);
-            showNotification(t.proxyInactive || 'System proxy disabled', 'info');
-        } else {
-            /** @type {Record<string, any>} */
-            const currentConfig = await getConfig();
-            const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-            await invoke(COMMANDS.ENABLE_SYSPROXY, {
-                server: `127.0.0.1:${currentPort}`,
-                bypass: null,
-            });
+        const newState = !enabled;
+        await setSysProxyEnabled(newState);
+        if (newState) {
             showNotification(t.proxyActive || 'System proxy enabled', 'success');
+        } else {
+            showNotification(t.proxyInactive || 'System proxy disabled', 'info');
         }
-        // Update UI and tray after toggle (await UI update first so tray reads correct state)
-        await updateSysProxyUI();
+        // Update tray after toggle
         await updateTrayStatus();
         updateTrayMenu().catch(() => {});
     } catch (err) {
