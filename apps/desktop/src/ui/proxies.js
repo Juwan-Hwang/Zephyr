@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies } from '../api.js';
+import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -1458,13 +1458,16 @@ function startProviderPoll(preferredGroupName, exhaustionKey, attempt = 0) {
             if (gen !== _providerPollGeneration) return;
             // Use non-cached fetch to avoid invalidating the global cache
             // (which would force other UI components to re-fetch too).
-            const data = /** @type {any} */ (await getProxies());
+            // Merge with provider data so missing-detail checks include provider nodes.
+            const rawProxies = /** @type {any} */ (await getProxies());
             if (gen !== _providerPollGeneration) return;  // Cancelled during await
-            if (!data || !data.proxies) {
+            if (!rawProxies || !rawProxies.proxies) {
                 // Malformed response — treat as retryable
                 startProviderPoll(preferredGroupName, exhaustionKey, attempt + 1);
                 return;
             }
+            const data = await getProxiesMerged(rawProxies);
+            if (gen !== _providerPollGeneration) return;  // Cancelled during await
 
             // Pass cached config to avoid an extra /configs HTTP request
             const cachedConfig = await getConfigCached();
@@ -1869,9 +1872,9 @@ export async function renderProxies() {
         renderProxiesLoading(container, t.loadingNodes);
     }
 
-    // Fetch proxies and config in parallel using cached versions
+    // Fetch proxies (merged with provider data) and config in parallel
     const [data, config] = await Promise.all([
-        getProxiesCached(),
+        getProxiesCached().then(getProxiesMerged),
         getConfigCached(),
     ]);
 
@@ -1953,49 +1956,12 @@ export async function renderProxies() {
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
 
-    // --- Stale-cache recovery ---
-    // `data` was fetched via getProxiesCached() at the top of this function.
-    // When proxy-providers finish downloading, mihomo updates group.all[] with
-    // new node names before the node details appear in the /proxies response.
-    // If the cached data is in this "half-updated" state, the proxies array
-    // (from group.all[]) will contain names that don't exist in data.proxies.
-    // buildProxyWrappers() skips nodes missing from data.proxies (if (!proxy)
-    // return), resulting in an empty container — the user sees no nodes.
-    //
-    // Fix: if any proxy name is missing from data.proxies, invalidate the cache
-    // and re-fetch. If still missing (mihomo not fully updated), retry once
-    // after a short delay. All recovery failures are caught so rendering
-    // continues with the original (stale) data rather than aborting.
-    if (data?.proxies) {
-        const hasMissing = hasMissingProxyDetails(proxies, data.proxies);
-        if (hasMissing) {
-            invalidateProxiesCache();
-            try {
-                let freshData = /** @type {any} */ (await getProxies());
-                // Guard: if a newer render started while fetching fresh proxies,
-                // skip retry/delay work; the newer render will handle data.
-                if (_renderGen !== _renderGeneration) return;
-                if (freshData?.proxies && hasMissingProxyDetails(proxies, freshData.proxies)) {
-                    await new Promise(r => setTimeout(r, STALE_CACHE_RETRY_DELAY));
-                    freshData = /** @type {any} */ (await getProxies());
-                }
-                // Guard: user may have switched groups during the await/delay.
-                // If so, abort this render — the newer render takes precedence.
-                if (_renderGen !== _renderGeneration) return;
-                if (freshData?.proxies) {
-                    data.proxies = freshData.proxies;
-                }
-            } catch (e) {
-                if (_renderGen !== _renderGeneration) return;
-                proxyLogger.warn('[renderProxies] stale-cache recovery failed, using cached data:', e);
-            }
-            // If nodes are STILL missing after recovery (or recovery failed),
-            // force providerLoading so the guard below shows a loading state +
-            // starts the poller instead of rendering an empty container.
-            if (hasMissingProxyDetails(proxies, data.proxies)) {
-                proxyGroupsResult.providerLoading = true;
-            }
-        }
+    // Provider nodes are now merged by getProxiesMerged() at the top of this
+    // function (combines /proxies + /providers/proxies). If nodes are still
+    // missing (provider not yet downloaded or /providers/proxies failed),
+    // force providerLoading so the poller starts.
+    if (data?.proxies && hasMissingProxyDetails(proxies, data.proxies)) {
+        proxyGroupsResult.providerLoading = true;
     }
 
 // --- Provider-loading guard ---
