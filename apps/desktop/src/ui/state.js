@@ -387,6 +387,7 @@ export const appStore = createStore('zephyr.app', {
     currentTheme: lsGet('appTheme') || 'purple',
     currentLang: lsGet('lang') || detectSystemLanguage(),
     currentPage: 'home',
+    homePageMode: 'minimal', // 'minimal' or 'console' — synced from settings.json
     currentThemeMode: 'auto', // Actual value synced from settings.json in initSettings()
 
     // Proxy state
