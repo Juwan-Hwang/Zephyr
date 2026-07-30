@@ -6,7 +6,7 @@
 
 import { getProxies, switchProxy, abortLatencyTests, closeAllConnections } from '../api.js';
 import { nodeWheelLogger } from '../utils/logger.js';
-import { translations, currentLang } from '../i18n.js';
+import { t } from '../i18n.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { sortProxiesByLatency, syncCoreConfig, renderProxies } from './proxies.js';
 import { appStore } from './state.js';
@@ -66,9 +66,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     }
     const nameEl = trigger.querySelector('#current-node-name');
     if (nameEl) {
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
-        nameEl.textContent = t.switching || "Switching...";
+        nameEl.textContent = t('switching') || "Switching...";
     }
     closeWheel();
     abortLatencyTests();
@@ -149,11 +147,9 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
         // Guard: if the group has no nodes (provider still loading), show
         // a brief loading hint instead of an empty dropdown.
         if (proxies.length === 0) {
-            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const tObj = /** @type {Record<string, string>} */(translations[langKey]);
             const hint = document.createElement('div');
             hint.className = 'px-3 py-2 text-xs text-[var(--text-muted)] text-center';
-            hint.textContent = tObj?.loadingNodes || 'Loading nodes...';
+            hint.textContent = t('loadingNodes') || 'Loading nodes...';
             /** @type {any} */ (list)._virtObserver?.disconnect();
             list.replaceChildren();
             list.appendChild(hint);
