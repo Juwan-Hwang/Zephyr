@@ -65,19 +65,13 @@ const DEFAULT_MASQUE_PORT: u16 = 443;
 const AUTH_TIMEOUT_SECS: u64 = 300;
 
 fn warp_headers() -> reqwest::header::HeaderMap {
-
     let mut h = reqwest::header::HeaderMap::new();
-
     h.insert("User-Agent", "WARP for Android".parse().unwrap());
-
     h.insert("CF-Client-Version", "a-6.35-4471".parse().unwrap());
-
     h.insert("Content-Type", "application/json; charset=UTF-8".parse().unwrap());
-
+    h.insert("Accept", "*/*".parse().unwrap());
     h.insert("Connection", "Keep-Alive".parse().unwrap());
-
     h
-
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -146,7 +140,7 @@ fn generate_ec_keypair() -> Result<(String, String), String> {
 
     use p256::ecdsa::SigningKey;
 
-    use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+    use p256::pkcs8::EncodePublicKey;
 
     let mut key_bytes = [0u8; 32];
 
@@ -156,12 +150,6 @@ fn generate_ec_keypair() -> Result<(String, String), String> {
 
         if let Ok(signing_key) = SigningKey::from_slice(&key_bytes) {
 
-            let priv_der = signing_key
-
-                .to_pkcs8_der()
-
-                .map_err(|e| format!("Failed to encode EC private key: {e}"))?;
-
             let pub_der = signing_key
 
                 .verifying_key()
@@ -170,7 +158,46 @@ fn generate_ec_keypair() -> Result<(String, String), String> {
 
                 .map_err(|e| format!("Failed to encode EC public key: {e}"))?;
 
-            return Ok((b64.encode(priv_der.as_bytes()), b64.encode(pub_der.as_bytes())));
+            // Build SEC1 ECPrivateKey DER manually:
+            // ECPrivateKey ::= SEQUENCE {
+            //   version INTEGER (1),
+            //   privateKey OCTET STRING,
+            //   parameters [0] EXPLICIT OBJECT IDENTIFIER,  -- P-256 OID = 1.2.840.10045.3.1.7
+            //   publicKey [1] EXPLICIT BIT STRING OPTIONAL
+            // }
+            let verifying = signing_key.verifying_key();
+            let pub_point = verifying.to_sec1_bytes(); // 04 + 32X + 32Y = 65 bytes
+
+            // privateKey OCTET STRING (32 bytes)
+            let mut content = Vec::new();
+            // version = 1
+            content.extend_from_slice(&[0x02, 0x01, 0x01]);
+            // privateKey OCTET STRING
+            content.extend_from_slice(&[0x04, 0x20]); // tag + length(32)
+            content.extend_from_slice(&key_bytes);
+            // parameters [0] EXPLICIT OID (P-256: 1.2.840.10045.3.1.7)
+            // OID encoding: 06 08 2a 86 48 ce 3d 03 01 07
+            content.extend_from_slice(&[0xa0, 0x0a]); // [0] EXPLICIT, length=10
+            content.extend_from_slice(&[0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]);
+            // publicKey [1] EXPLICIT BIT STRING
+            let bit_string: Vec<u8> = std::iter::once(0x00u8) // no unused bits
+                .chain(pub_point.iter().copied())
+                .collect(); // 1 + 65 = 66 bytes
+            content.push(0xa1); // [1] EXPLICIT
+            content.push(0x44); // length = 68 (0x03 + 0x42 + 66 bytes)
+            content.push(0x03); // BIT STRING tag
+            content.push(0x42); // length = 66
+            content.extend_from_slice(&bit_string);
+
+            // Outer SEQUENCE
+            let mut sec1 = Vec::new();
+            sec1.push(0x30); // SEQUENCE
+            sec1.push(content.len() as u8);
+            sec1.extend_from_slice(&content);
+
+            eprintln!("[WARP] EC SEC1: {}B, pub_point: {}B, pub_der: {}B",
+                sec1.len(), pub_point.len(), pub_der.as_bytes().len());
+            return Ok((b64.encode(&sec1), b64.encode(pub_der.as_bytes())));
 
         }
 
@@ -189,19 +216,12 @@ fn random_android_serial() -> String {
 }
 
 fn tos_string() -> String {
-
     use chrono::{FixedOffset, Utc};
-
     let offset = FixedOffset::west_opt(7 * 3600).unwrap();
-
     Utc::now()
-
         .with_timezone(&offset)
-
-        .format("%Y-%m-%dT%H:%M:%S.000%z")
-
+        .format("%Y-%m-%dT%H:%M:%S.000%:z")
         .to_string()
-
 }
 
 // 闁冲厜鍋撻柍鍏夊亾闁冲厜鍋?API response models 闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾闁冲厜鍋撻柍鍏夊亾
@@ -342,6 +362,7 @@ async fn register_device(jwt: Option<&str>) -> Result<Registration, String> {
 
     if let Some(jwt) = jwt {
 
+        eprintln!("[WARP] JWT header len={}, first 50: {}", jwt.len(), &jwt[..jwt.len().min(50)]);
         headers.insert(
 
             "CF-Access-Jwt-Assertion",
@@ -350,6 +371,14 @@ async fn register_device(jwt: Option<&str>) -> Result<Registration, String> {
 
         );
 
+    }
+
+    eprintln!("[WARP] register body: {}", serde_json::to_string(&body).unwrap_or_default());
+
+    // Log all headers being sent
+    for (k, v) in headers.iter() {
+        let val_str = v.to_str().unwrap_or("<binary>");
+        eprintln!("[WARP] header: {k}: {}", &val_str[..val_str.len().min(80)]);
     }
 
     let resp = http_client()?
@@ -655,6 +684,9 @@ fn generate_mihomo_yaml(outbound: &MihomoOutbound, name: &str) -> String {
         "mtu": 1280,
 
         "udp": true,
+
+        "sni": "warp.cloudflareclient.com",
+        "congestion-controller": "bbr",
 
     });
 
@@ -1134,7 +1166,7 @@ async fn warp_register_inner(
 
     let config_path = paths.profiles_dir.join(profile_name);
 
-    write_profile_file(&config_path, &yaml, true)?;
+    write_profile_file(&config_path, &yaml, false)?;
 
     // Save metadata
 
@@ -1302,6 +1334,8 @@ pub async fn warp_register_zero_trust(
         .map_err(|e| format!("app_local_data_dir: {e}"))?
         .join("EBWebView-Auth");
     let _ = std::fs::create_dir_all(&auth_data_dir);
+    let nav_port = callback_port;
+    let tx_nav = tx.clone();
     app.run_on_main_thread(move || {
             let wv = tauri::webview::WebviewWindowBuilder::new(
                 &app_main, &label_s,
@@ -1310,6 +1344,24 @@ pub async fn warp_register_zero_trust(
             .title("Cloudflare WARP Login")
             .inner_size(900.0, 650.0)
             .data_directory(auth_data_dir)
+            .on_navigation(move |url| {
+                let url_str = url.as_str();
+                eprintln!("[WARP] on_navigation: {url_str}");
+
+                // Intercept the com.cloudflare.warp:// redirect — JWT is in the URL!
+                if url_str.starts_with("com.cloudflare.warp://") {
+                    if let Some(jwt) = extract_jwt_from_url(url_str) {
+                        eprintln!("[WARP] on_navigation: got JWT from warp:// URL! len={}", jwt.len());
+                        if let Some(sender) = tx_nav.lock().unwrap().take() {
+                            let _ = sender.send(jwt);
+                        }
+                    } else {
+                        eprintln!("[WARP] on_navigation: warp:// URL but no JWT found");
+                    }
+                    return false; // Cancel navigation
+                }
+                true
+            })
             .build();
             if let Ok(wv) = wv {
                 eprintln!("[WARP] WebView opened for authentication");
@@ -1317,12 +1369,13 @@ pub async fn warp_register_zero_trust(
             }
         }).map_err(|e| format!("run_on_main_thread: {e}"))?;
 
-    // Poll: eval() to send cookies to HTTP server, and check for HTTP callback
+        // Poll: eval() to send cookies to HTTP server via XHR
+    // XHR worked before (poll#8 got 3775 bytes) — document.title doesn't work (wv.title() returns OS window title)
     let poll_app = app.clone();
     let poll_label = label.to_string();
     let poll_tx = tx.clone();
     let eval_js = format!(
-        r#"try{{var c=document.cookie||'';if(c.length>0){{var x=new XMLHttpRequest();x.open('POST','http://127.0.0.1:{callback_port}/',false);x.send(c);}}}}catch(e){{}}"#
+        r#"try{{var c=document.cookie||'';if(c.length>0){{var x=new XMLHttpRequest();x.open('POST','http://127.0.0.1:{callback_port}/',true);x.send(c);}}}}catch(e){{}}"#
     );
     let mut tick = 0u32;
     let mut got_callback = false;
@@ -1336,7 +1389,6 @@ pub async fn warp_register_zero_trust(
                 eprintln!("[WARP] poll#{tick}: HTTP callback from {addr}");
                 if let Some(cookies) = read_http_body(stream) {
                     eprintln!("[WARP] poll#{tick}: got cookies, len={}", cookies.len());
-                    // Use cookies to fetch auth page via reqwest
                     match fetch_jwt_with_cookies(&app, &auth_url, &cookies).await {
                         Ok(jwt) => {
                             eprintln!("[WARP] got JWT via eval+HTTP! len={}", jwt.len());
@@ -1351,10 +1403,12 @@ pub async fn warp_register_zero_trust(
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => { eprintln!("[WARP] poll#{tick}: accept err: {e}"); }
+            Err(e) => {
+                eprintln!("[WARP] poll#{tick}: accept err: {e}");
+            }
         }
 
-        // Eval to send cookies
+        // Eval to send cookies via XHR
         if let Some(wv) = poll_app.get_webview_window(&poll_label) {
             eprintln!("[WARP] poll#{tick}: eval() on WebView...");
             let _ = wv.eval(&eval_js);
@@ -1365,15 +1419,23 @@ pub async fn warp_register_zero_trust(
                 break;
             }
         }
+
+        // Check if on_navigation already sent JWT via channel
+        if poll_tx.lock().unwrap().is_none() {
+            eprintln!("[WARP] poll#{tick}: JWT received via on_navigation!");
+            got_callback = true;
+            break;
+        }
     }
 
-    // If we got JWT via callback, register now
+    // If we got JWT (via on_navigation or HTTP callback), register now
     if got_callback {
         if let Some(wv) = poll_app.get_webview_window(&poll_label) {
             let _ = wv.close();
         }
         match rx.await {
             Ok(jwt) if !jwt.is_empty() => {
+                eprintln!("[WARP] registering with JWT, len={}", jwt.len());
                 let (result, _) = warp_register_inner(&app, Some(&jwt)).await?;
                 return Ok(result);
             }
@@ -1415,22 +1477,55 @@ fn read_http_body(mut stream: std::net::TcpStream) -> Option<String> {
     None
 }
 
-/// Fetch auth page with cookies and extract JWT from meta refresh.
+/// Fetch auth page with cookies and extract JWT.
+/// Uses manual redirect handling to capture `com.cloudflare.warp://` Location headers.
 async fn fetch_jwt_with_cookies(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     auth_url: &str,
     cookie_header: &str,
 ) -> Result<String, String> {
     eprintln!("[WARP] fetching auth page with cookies...");
-    let client = http_client()?;
+    // Build client that does NOT auto-follow redirects — we want to inspect 302 Location
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
     let resp = client.get(auth_url)
         .header("Cookie", cookie_header)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         .send().await
         .map_err(|e| format!("fetch auth: {e}"))?;
+
+    let status = resp.status();
+    eprintln!("[WARP] auth response status: {status}");
+
+    // Check Location header for redirect (com.cloudflare.warp://...?token=eyJ...)
+    if let Some(loc) = resp.headers().get("location") {
+        let loc_str = loc.to_str().unwrap_or("");
+        eprintln!("[WARP] Location header: {loc_str}");
+        if let Some(jwt) = extract_jwt_from_url(loc_str) {
+            return Ok(jwt);
+        }
+        // Maybe the redirect URL itself contains token=
+        if let Some(pos) = loc_str.find("token=") {
+            let raw = &loc_str[pos + 6..];
+            let jwt = raw.split('&').next().unwrap_or(raw).to_string();
+            if jwt.starts_with("eyJ") {
+                return Ok(jwt);
+            }
+        }
+    }
+
     let html = resp.text().await
         .map_err(|e| format!("read auth: {e}"))?;
     eprintln!("[WARP] auth HTML len: {}", html.len());
+
+    // Dump first 500 chars for debugging
+    let preview: String = html.chars().take(500).collect();
+    eprintln!("[WARP] auth HTML preview: {preview}");
 
     if let Some(pos) = html.find("token=") {
         let raw = &html[pos + 6..];
