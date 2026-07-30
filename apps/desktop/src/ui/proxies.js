@@ -969,7 +969,7 @@ async function handleFailoverAction(action) {
  * @param {Set<string>} [visited] - Internal set to detect cycles
  * @returns {string|null} - Leaf node name or null
  */
-function resolveLeafNode(name, proxyMap, visited = new Set()) {
+export function resolveLeafNode(name, proxyMap, visited = new Set()) {
     if (!name || !proxyMap) return null;
     if (visited.has(name)) return null; // Cycle detected
     visited.add(name);
