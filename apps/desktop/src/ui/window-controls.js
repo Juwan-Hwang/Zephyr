@@ -6,7 +6,7 @@
  * @module ui/window-controls
  */
 
-import { getCurrentWindow } from '../api.js';
+import { getCurrentWindow, invoke, listen } from '../api.js';
 
 /**
  * Initialize window control event listeners.
@@ -35,4 +35,18 @@ export function initWindowControls() {
             /** @type {HTMLImageElement} */ (this).src = 'app-icon.png';
         }, { once: true });
     }
+
+    // Sync the is-maximized class on <html> so CSS can disable the
+    // overlay clip-path rounding when the window is maximized.
+    // Tauri's window-state plugin restores maximized state on startup,
+    // so we check immediately and listen for future changes.
+    const syncMaximized = async () => {
+        try {
+            const isMaximized = await invoke('plugin:window|is_maximized', { label: getCurrentWindow().label });
+            document.documentElement.classList.toggle('is-maximized', !!isMaximized);
+        } catch { /* non-Tauri environment */ }
+    };
+    syncMaximized();
+    // Listen for Tauri resize events (fires on maximize/unmaximize/restore)
+    listen('tauri://resize', () => syncMaximized()).catch(() => {});
 }

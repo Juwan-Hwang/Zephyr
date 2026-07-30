@@ -2163,7 +2163,7 @@ const _renderExplanationBarFromStore = debounce(async () => {
     const proxiesPage = document.querySelector('[data-page="proxies"]');
     if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
         try {
-            const data = await getProxiesCached();
+            const data = await getProxiesCached().then(getProxiesMerged);
             const uiGroupName = appStore.get('uiGroupName');
             const effectiveGroupName = appStore.get('effectiveGroupName');
             const observedGroupName = appStore.get('observedGroupName');
@@ -2202,7 +2202,7 @@ const updateCapsuleDisplay = () => {
     const currentGroupName = currentNodeEl.dataset.group;
     if (!currentGroupName) return;
 
-    getProxiesCached().then(data => {
+    getProxiesCached().then(getProxiesMerged).then(data => {
         // Verify the group hasn't changed during the async API call to prevent race conditions
         if (currentNodeEl.dataset.group !== currentGroupName) return;
 
