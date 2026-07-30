@@ -159,27 +159,21 @@ async function handleConfigUpdate(path, value) {
         invalidateConfigCache();
         const persisted = await persistConfigChanges(payload);
         if (!persisted) {
-            const { translations, currentLang } = await import('../i18n.js').then(m => m);
-            const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const t = /** @type {Record<string, string>} */(translations[langKey]);
-            showNotification(`${t.errorPrefix || 'Error'}: Config validation failed, changes not persisted`, 'error');
+            const { t } = await import('../i18n.js').then(m => m);
+            showNotification(`${t('errorPrefix')}: ${t('notifNoActiveConfig')}`, 'error');
             renderAdvancedSettings();
             return;
         }
 
-        const { translations, currentLang } = await import('../i18n.js').then(m => m);
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
-        showNotification(t.configSuccess || 'Configuration saved', 'success');
+        const { t } = await import('../i18n.js').then(m => m);
+        showNotification(t('configSuccess'), 'success');
 
-        import('./proxies.js').then(m => m.syncCoreConfig());
+        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
     } catch (err) {
         advancedLogger.error('Failed to update config', err);
-        const { translations, currentLang } = await import('../i18n.js').then(m => m);
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
+        const { t } = await import('../i18n.js').then(m => m);
         const errorObj = toError(err);
-        showNotification(`${t.errorPrefix || 'Error'}: ${errorObj.message}`, 'error');
+        showNotification(`${t('errorPrefix')}: ${errorObj.message}`, 'error');
         renderAdvancedSettings();
     }
 }
