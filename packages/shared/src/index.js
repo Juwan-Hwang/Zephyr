@@ -17,6 +17,7 @@ export const CORE = Object.freeze({
     START_CORE: "start_core",
     STOP_CORE: "stop_core",
     GET_CORE_VERSION: "get_core_version",
+    GET_CORE_UPTIME: "get_core_uptime",
     READ_CONFIG: "read_config",
     UPDATE_CONFIG: "update_config",
     READ_LOG: "read_core_log",
@@ -138,6 +139,7 @@ export const SETTINGS = Object.freeze({
 
 export const MISC = Object.freeze({
     GET_APP_VERSION: "get_app_version",
+    GET_PORTABLE_MODE: "get_portable_mode",
     SHOW_MAIN_WINDOW: "show_main_window",
     SEND_NOTIFICATION: "rate_limited_send_notification",
     EXEMPT_UWP_APPS: "exempt_uwp_apps",
