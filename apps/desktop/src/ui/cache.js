@@ -140,19 +140,28 @@ function getCached(key, fetcher) {
     const pending = inFlight.get(key);
     if (pending) return pending;
 
+    // Identity Guard: snapshot current entry reference so we can detect
+    // if invalidateXxxCache() replaced it while the fetch was in-flight.
+    const entrySnapshot = apiCache.get(key);
+
     const promise = fetcher().then(/** @param {any} data */ (data) => {
-        _ensureEntry(key);
-        const e = apiCache.get(key);
-        if (e) {
-            e.data = data;
-            e.time = Date.now();
+        // Only update if the entry hasn't been replaced (e.g. by invalidate)
+        if (apiCache.get(key) === entrySnapshot) {
+            _ensureEntry(key);
+            const e = apiCache.get(key);
+            if (e) {
+                e.data = data;
+                e.time = Date.now();
+            }
+            _lruTouch(key);
+            _lruEvict();
         }
-        _lruTouch(key);
-        _lruEvict();
-        inFlight.delete(key);
+        // Only delete our own inFlight entry — if invalidate cleared and
+        // a new fetch started, don't clobber the new promise's entry.
+        if (inFlight.get(key) === promise) inFlight.delete(key);
         return data;
     }).catch(/** @param {any} err */ (err) => {
-        inFlight.delete(key);
+        if (inFlight.get(key) === promise) inFlight.delete(key);
         throw err;
     });
 
