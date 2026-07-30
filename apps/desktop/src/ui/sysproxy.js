@@ -41,6 +41,58 @@ export async function updateSysProxyUI() {
     }
 }
 
+/** @type {Promise<void>} Serializes concurrent sys-proxy transitions. */
+let _sysProxyChain = Promise.resolve();
+
+/**
+ * Apply sys-proxy enable/disable to the backend and sync appStore.
+ * Extracted from the toggle change handler so console-home can call it
+ * directly without relying on DOM event dispatching.
+ *
+ * Concurrent calls are serialized via a promise chain to prevent
+ * ENABLE/DISABLE commands from executing out of order.
+ *
+ * @param {boolean} enabled
+ * @throws {unknown} Re-throws the backend error so callers can handle
+ *   notification and UI rollback.
+ */
+export async function setSysProxyEnabled(enabled) {
+    /** @type {(value?: any) => void} */ let resolve;
+    /** @type {(err: unknown) => void} */ let reject;
+    const gate = new Promise((res, rej) => { resolve = res; reject = rej; });
+
+    _sysProxyChain = _sysProxyChain.then(async () => {
+        try {
+            await _doSetSysProxyEnabled(enabled);
+            resolve();
+        } catch (err) {
+            reject(err);
+        }
+    });
+
+    return gate;
+}
+
+/** @param {boolean} enabled */
+async function _doSetSysProxyEnabled(enabled) {
+    if (enabled) {
+        /** @type {Record<string, any>} */
+        const currentConfig = await getConfig();
+        const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+        await invoke(COMMANDS.ENABLE_SYSPROXY, {
+            server: `127.0.0.1:${currentPort}`,
+            bypass: null,
+        });
+    } else {
+        await invoke(COMMANDS.DISABLE_SYSPROXY);
+    }
+
+    appStore.set('isSysProxyEnabled', enabled);
+    // Await UI refresh inside the serialized chain so a stale GET_SYS_PROXY
+    // response from an earlier transition cannot overwrite a newer state.
+    await updateSysProxyUI();
+}
+
 export async function initProxyToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('sys-proxy-toggle'));
     const statusText = document.getElementById('proxy-status-text');
@@ -62,28 +114,13 @@ export async function initProxyToggle() {
         const enabled = target.checked;
 
         try {
-            /** @type {Record<string, any>} */
-            const currentConfig = await getConfig();
-            const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-
-            if (enabled) {
-                await invoke(COMMANDS.ENABLE_SYSPROXY, {
-                    server: `127.0.0.1:${currentPort}`,
-                    bypass: null,
-                });
-            } else {
-                await invoke(COMMANDS.DISABLE_SYSPROXY);
-            }
-
-            appStore.set('isSysProxyEnabled', enabled);
-            // Reactive: bind() and subscribe() in initReactiveBindings() handle UI updates
+            await setSysProxyEnabled(enabled);
         } catch (err) {
             sysproxyLogger.error('Failed to set sys proxy', err);
             const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
             showNotification(`${t.errorPrefix || 'Error'}: ${err}`, 'error');
-            toggle.checked = !enabled;
+            target.checked = !enabled;
             appStore.set('isSysProxyEnabled', !enabled);
-            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         }
     });
 }
