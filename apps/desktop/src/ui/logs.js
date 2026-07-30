@@ -148,6 +148,9 @@ let _extAutoScroll = true;
 /** @type {ReturnType<typeof createVirtualScroll>|null} */
 let _vs = null;
 
+/** @type {((entry: { type: string, message: string, timestamp: string, source?: string }) => void) | null} */
+let _extLogCb = null;
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -193,7 +196,10 @@ export function destroyLogsPage() {
     stopPolling();
     _vs?.destroy();
     _vs = null;
-    unsubscribeFromEvents();
+    if (_extLogCb) {
+        unsubscribeFromEvents(_extLogCb);
+        _extLogCb = null;
+    }
 }
 
 // ── State Management ───────────────────────────────────────────────────────
@@ -252,8 +258,9 @@ function startPolling() {
 /** @param {string} key */
 function t(key) {
     const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */ (currentLang);
-    const dict = /** @type {Record<string, string>} */ (translations[langKey]) || /** @type {Record<string, string>} */ (translations.en);
-    return dict[key] || key;
+    const dict = /** @type {Record<string, unknown>} */ (translations[langKey]) || /** @type {Record<string, unknown>} */ (translations.en);
+    const val = dict[key];
+    return typeof val === 'string' && val ? val : key;
 }
 
 function buildPageHTML() {
@@ -376,9 +383,13 @@ function bindEvents() {
     tabExt?.addEventListener('click', switchToExtTab);
 
     // Subscribe to new events from global listener
-    subscribeToEvents((entry) => {
+    if (_extLogCb) {
+        unsubscribeFromEvents(_extLogCb);
+    }
+    _extLogCb = (entry) => {
         renderExtLogEntry(entry);
-    });
+    };
+    subscribeToEvents(_extLogCb);
 
     // Rebuild ext-log DOM from accumulated events (if any)
     rebuildExtLogDOM();
