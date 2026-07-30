@@ -336,6 +336,166 @@ export async function getProxies() {
 }
 
 /**
+ * 获取全部代理提供者数据（含 provider 下载的节点详情）
+ * mihomo 的 /proxies API 不包含 proxy-provider 下载的节点，
+ * 需要通过 /providers/proxies 获取。
+ * @returns {Promise<Object>} mihomo `/providers/proxies` 响应体
+ * @throws {ApiError}
+ */
+export async function getProxyProviders() {
+  const res = await apiFetch('/providers/proxies');
+  return res.json();
+}
+
+/**
+ * 获取单个代理提供者数据
+ * @param {string} name - provider 名称
+ * @returns {Promise<Object>} 单个 provider 详情（含节点列表）
+ * @throws {ApiError}
+ */
+export async function getProxyProvider(name) {
+  const res = await apiFetch(`/providers/proxies/${encodeURIComponent(name)}`);
+  return res.json();
+}
+
+// ── Provider 缓存（避免轮询期间重复拉取 /providers/proxies） ─────────────
+/** @type {any} */
+let _providerCache = null;
+/** @type {any} */
+let _providerInFlight = null;
+let _providerGen = 0; // Incremented on core restart to invalidate in-flight requests
+const _PROVIDER_CACHE_TTL = 5000;
+
+// Safari/old WebView compat: Object.hasOwn is not available everywhere
+const hasOwn = (/** @type {any} */ obj, /** @type {string} */ key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/**
+ * Built-in proxy names that never have detail records in /proxies.
+ * Shared between api.js and ui/proxies.js to prevent drift.
+ */
+export const SPECIAL_PROXY_NAMES = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE', 'GLOBAL']);
+
+/**
+ * Clear provider cache. Called on core restart to prevent stale data.
+ */
+export function clearProviderCache() {
+  _providerCache = null;
+  _providerInFlight = null;
+  _providerGen++;
+}
+
+/**
+ * Collect proxy names from all group.all[] arrays.
+ * @param {Record<string, any>} proxiesMap - The proxies map from /proxies
+ * @returns {Set<string>} All names found in any group's all[]
+ */
+function collectAllProxyNames(proxiesMap) {
+  const names = new Set();
+  for (const key of Object.keys(proxiesMap)) {
+    const entry = proxiesMap[key];
+    if (entry?.all && Array.isArray(entry.all)) {
+      for (const name of entry.all) {
+        if (typeof name === 'string') names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Extract provider nodes from /providers/proxies response into a flat map.
+ * @param {any} providersResp - Response from /providers/proxies
+ * @returns {Record<string, any>} Map of proxy name → proxy detail
+ */
+function extractProviderNodes(providersResp) {
+  const result = Object.create(null);
+  const providers = Object.values(providersResp?.providers ?? {});
+  for (const provider of providers) {
+    const proxies = Array.isArray(provider?.proxies) ? provider.proxies : [];
+    for (const proxy of proxies) {
+      if (proxy?.name) result[proxy.name] = proxy;
+    }
+  }
+  return result;
+}
+
+/**
+ * 合并 /proxies + /providers/proxies 的数据。
+ * 按需懒加载：只有当 /proxies 的节点缺失时才拉 provider 数据。
+ *
+ * @param {any} [existingData] - 已有的 /proxies 响应（避免重复请求）
+ * @returns {Promise<any>} 合并后的数据
+ * @throws {ApiError}
+ */
+export async function getProxiesMerged(existingData) {
+  const data = existingData || await getProxies();
+  if (!data?.proxies) return data;
+
+  const allNames = collectAllProxyNames(data.proxies);
+  const missingNames = [...allNames].filter(
+    n => !SPECIAL_PROXY_NAMES.has(n.toUpperCase()) && !hasOwn(data.proxies, n)
+  );
+  if (missingNames.length === 0) return data;
+
+  const now = Date.now();
+
+  // Clone proxies map with null prototype to prevent prototype pollution
+  const mergedProxies = Object.assign(Object.create(null), data.proxies);
+
+  // Cache hit: TTL valid AND cached map covers all currently-missing names.
+  // This is intentionally loose — fingerprint is not required to match exactly,
+  // since the cached provider map is a full flatten of /providers/proxies.
+  if (_providerCache && (now - _providerCache.ts) < _PROVIDER_CACHE_TTL) {
+    const cached = _providerCache.proxies;
+    const allCovered = missingNames.every(n => cached[n] || hasOwn(mergedProxies, n));
+    if (allCovered) {
+      for (const name of missingNames) {
+        if (cached[name] && !hasOwn(mergedProxies, name)) {
+          mergedProxies[name] = cached[name];
+        }
+      }
+      return { ...data, proxies: mergedProxies };
+    }
+  }
+
+  // Dedup concurrent requests — reuse in-flight promise if same generation
+  const gen = _providerGen;
+  if (!_providerInFlight || _providerInFlight.gen !== gen) {
+    _providerInFlight = {
+      gen,
+      promise: getProxyProviders().then(providersResp => {
+        const providerProxies = extractProviderNodes(providersResp);
+        // Only write cache if generation hasn't changed (no restart)
+        if (gen === _providerGen) {
+          _providerCache = { proxies: providerProxies, ts: Date.now() };
+          _providerInFlight = null;
+        }
+        return providerProxies;
+      }).catch(err => {
+        if (gen === _providerGen) {
+          _providerCache = { proxies: {}, ts: Date.now() };
+          _providerInFlight = null;
+        }
+        apiLogger.warn('[getProxiesMerged] /providers/proxies fetch failed, using raw /proxies data', err);
+        return null;
+      }),
+    };
+  }
+
+  const providerProxies = await _providerInFlight.promise;
+  // Ignore results from a previous generation (pre-restart)
+  if (providerProxies && gen === _providerGen) {
+    for (const name of missingNames) {
+      if (providerProxies[name] && !hasOwn(mergedProxies, name)) {
+        mergedProxies[name] = providerProxies[name];
+      }
+    }
+  }
+
+  return { ...data, proxies: mergedProxies };
+}
+
+/**
  * 切换代理组中的选中节点
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
@@ -604,6 +764,7 @@ export async function restartCore(configPath, customArgs = []) {
   setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
   setWsSecret(coreResult.secret);
   setCoreReachable(true);
+  clearProviderCache();
   Bus.emit(Events.CORE_RESTARTED);
   return coreResult;
 }

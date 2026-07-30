@@ -16,6 +16,8 @@ vi.mock('../api.js', () => ({
     resetLatencyTestController: vi.fn(),
     restartCore: vi.fn(),
     getProxies: vi.fn(),
+    getProxiesMerged: vi.fn().mockImplementation((data) => Promise.resolve(data)),
+    SPECIAL_PROXY_NAMES: new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE', 'GLOBAL']),
 }));
 
 vi.mock('../utils/logger.js', () => ({ proxyLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
