@@ -41,6 +41,32 @@ export async function updateSysProxyUI() {
     }
 }
 
+/**
+ * Apply sys-proxy enable/disable to the backend and sync appStore.
+ * Extracted from the toggle change handler so console-home can call it
+ * directly without relying on DOM event dispatching.
+ * @param {boolean} enabled
+ * @throws {unknown} Re-throws the backend error so callers can handle
+ *   notification and UI rollback.
+ */
+export async function setSysProxyEnabled(enabled) {
+    /** @type {Record<string, any>} */
+    const currentConfig = await getConfig();
+    const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+
+    if (enabled) {
+        await invoke(COMMANDS.ENABLE_SYSPROXY, {
+            server: `127.0.0.1:${currentPort}`,
+            bypass: null,
+        });
+    } else {
+        await invoke(COMMANDS.DISABLE_SYSPROXY);
+    }
+
+    appStore.set('isSysProxyEnabled', enabled);
+    updateSysProxyUI();
+}
+
 export async function initProxyToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('sys-proxy-toggle'));
     const statusText = document.getElementById('proxy-status-text');
@@ -62,28 +88,13 @@ export async function initProxyToggle() {
         const enabled = target.checked;
 
         try {
-            /** @type {Record<string, any>} */
-            const currentConfig = await getConfig();
-            const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-
-            if (enabled) {
-                await invoke(COMMANDS.ENABLE_SYSPROXY, {
-                    server: `127.0.0.1:${currentPort}`,
-                    bypass: null,
-                });
-            } else {
-                await invoke(COMMANDS.DISABLE_SYSPROXY);
-            }
-
-            appStore.set('isSysProxyEnabled', enabled);
-            // Reactive: bind() and subscribe() in initReactiveBindings() handle UI updates
+            await setSysProxyEnabled(enabled);
         } catch (err) {
             sysproxyLogger.error('Failed to set sys proxy', err);
             const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
             showNotification(`${t.errorPrefix || 'Error'}: ${err}`, 'error');
-            toggle.checked = !enabled;
+            target.checked = !enabled;
             appStore.set('isSysProxyEnabled', !enabled);
-            // Reactive: subscribe() in initReactiveBindings() handles tray updates
         }
     });
 }
