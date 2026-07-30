@@ -10,7 +10,7 @@ import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections, get
 import { saveSetting } from './settings-helpers.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
-import { updateSysProxyUI } from './sysproxy.js';
+import { refreshSysProxyStatus } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { updateModeUI } from './modes.js';
 import { appStore } from './state.js';
@@ -536,7 +536,7 @@ async function toggleProxy() {
             showNotification(t.proxyActive || 'System proxy enabled', 'success');
         }
         // Update UI and tray after toggle (await UI update first so tray reads correct state)
-        await updateSysProxyUI();
+        await refreshSysProxyStatus();
         await updateTrayStatus();
         updateTrayMenu().catch(() => {});
     } catch (err) {

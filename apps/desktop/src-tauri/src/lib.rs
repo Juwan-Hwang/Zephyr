@@ -34,11 +34,11 @@ use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
-    encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_version,
-    grant_linux_tun_permission, init_tun_mode_from_config, is_machine_key_persisted,
-    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, open_log_folder,
-    read_config_file, rename_config, restart_core_as_root_cmd, set_tun_enabled,
-    smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
+    encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_uptime,
+    get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
+    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
+    open_config_folder, open_log_folder, read_config_file, rename_config, restart_core_as_root_cmd,
+    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
     update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
@@ -254,6 +254,11 @@ pub(crate) struct Settings {
     /// Values: "bash", "fish", "cmd", "powershell", "nushell".
     #[serde(default = "default_copy_env_format")]
     copy_env_format: String,
+    /// Home page mode: "minimal" (default) or "console".
+    /// Controls which layout is shown when the user navigates to the home page.
+    #[serde(default)]
+    home_page_mode: Option<String>,
+
     /// Settings schema version for automatic migration.
     /// Increment when breaking changes are made to the Settings struct.
     /// On load, if the stored version < `CURRENT_SCHEMA_VERSION`, migration
@@ -780,6 +785,32 @@ fn patch_settings(
             patch_field!(log_retention_days);
             patch_field!(log_max_file_mb);
             patch_field!(copy_env_format);
+            // Validate home_page_mode: only accept 'minimal', 'console', or null (reset to default)
+            if let Some(v) = map.get("home_page_mode") {
+                if v.is_null() {
+                    guard.home_page_mode = None;
+                    modified = true;
+                } else if let Ok(val) = serde_json::from_value::<String>(v.clone()) {
+                    if val == "minimal" || val == "console" {
+                        guard.home_page_mode = Some(val);
+                        modified = true;
+                    } else {
+                        emit_warn!(
+                            Core,
+                            CORE_START_FAILED,
+                            "rejected invalid home_page_mode: {:?}",
+                            val
+                        );
+                    }
+                } else {
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "rejected non-string home_page_mode: {:?}",
+                        v
+                    );
+                }
+            }
         }
         if !modified {
             return Ok(());
@@ -1377,45 +1408,12 @@ pub fn run() {
             } else {
                 Settings {
                     close_to_tray: true, // 默认开启
-                    auto_update: false,
-                    auto_update_client: false,
-                    autostart: false,
-                    theme: None,
-                    last_config: None,
-                    custom_args: Vec::new(),
-                    dns_nameservers: None,
-                    dns_fallbacks: None,
-                    auto_apply: false,
                     ui_scale: 1.0,
-                    config_order: Vec::new(),
-                    last_proxy_selection: std::collections::HashMap::new(),
-                    primary_group_preference: std::collections::HashMap::new(),
-                    subscription_user_agent: None,
-                    hide_timeout_nodes: false,
-                    // Global user preferences (all None = use YAML defaults)
-                    mode: None,
-                    tun_enabled: None,
-                    mixed_port: None,
-                    socks_port: None,
-                    http_port: None,
-                    ipv6: None,
-                    allow_lan: None,
-                    unified_delay: None,
-                    dns_rewrite_enabled: None,
-                    theme_mode: None,
-                    app_opacity: None,
-                    node_scroll: None,
-                    failover_enabled: false,
-                    network_optim_auto_apply: false,
-                    lightweight_mode: false,
-                    silent_start: false,
-                    encrypt_configs: false,
-                    log_app_enabled: false,
-                    log_core_enabled: false,
                     log_retention_days: default_log_retention_days(),
                     log_max_file_mb: default_log_max_file_mb(),
                     copy_env_format: default_copy_env_format(),
                     schema_version: CURRENT_SCHEMA_VERSION,
+                    ..Default::default()
                 }
             };
 
@@ -1599,6 +1597,7 @@ invalidate_heartbeat(window.app_handle());
             update_subscription_user_agent,
             update_last_config,
             get_core_version,
+            get_core_uptime,
             exempt_uwp_apps,
             read_config_file,
             write_config_file,
