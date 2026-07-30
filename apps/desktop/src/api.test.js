@@ -6,6 +6,9 @@ import {
     isCoreReachable,
     setCoreReachable,
     getProxies,
+    getProxiesMerged,
+    clearProviderCache,
+    SPECIAL_PROXY_NAMES,
     switchProxy,
     getConfig,
     patchConfig,
@@ -507,5 +510,57 @@ describe('listen', () => {
 describe('openUrl', () => {
     it('throws when Tauri IPC is not available', async () => {
         await expect(openUrl('https://example.com')).rejects.toThrow('[API] Tauri IPC not available');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  getProxiesMerged / SPECIAL_PROXY_NAMES / clearProviderCache
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SPECIAL_PROXY_NAMES', () => {
+    it('contains expected built-in proxy names', () => {
+        expect(SPECIAL_PROXY_NAMES.has('DIRECT')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('REJECT')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('PASS')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('COMPATIBLE')).toBe(true);
+    });
+
+    it('does not contain GLOBAL (GLOBAL is a real group)', () => {
+        expect(SPECIAL_PROXY_NAMES.has('GLOBAL')).toBe(false);
+    });
+});
+
+describe('getProxiesMerged', () => {
+    beforeEach(() => {
+        clearProviderCache();
+        vi.restoreAllMocks();
+    });
+
+    it('returns data as-is when no proxies are missing', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['node1', 'node2'] },
+                'node1': { name: 'node1', type: 'Shadowsocks' },
+                'node2': { name: 'node2', type: 'Vmess' },
+            },
+        };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data); // No merge needed — same data returned
+    });
+
+    it('returns data as-is when only special names are missing', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['DIRECT', 'REJECT'] },
+            },
+        };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data);
+    });
+
+    it('returns data unchanged when data.proxies is missing', async () => {
+        const data = { mode: 'rule' };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data);
     });
 });
