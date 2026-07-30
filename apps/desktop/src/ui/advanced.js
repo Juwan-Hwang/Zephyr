@@ -161,25 +161,28 @@ async function handleConfigUpdate(path, value) {
         if (!persisted) {
             const { translations, currentLang } = await import('../i18n.js').then(m => m);
             const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const t = /** @type {Record<string, string>} */(translations[langKey]);
-            showNotification(`${t.errorPrefix || 'Error'}: Config validation failed, changes not persisted`, 'error');
+            const t = /** @type {Record<string, unknown>} */(translations[langKey]);
+            const errorPrefix = typeof t.errorPrefix === 'string' ? t.errorPrefix : 'Error';
+            showNotification(`${errorPrefix}: No active configuration or YAML parser unavailable`, 'error');
             renderAdvancedSettings();
             return;
         }
 
         const { translations, currentLang } = await import('../i18n.js').then(m => m);
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
-        showNotification(t.configSuccess || 'Configuration saved', 'success');
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
+        const configSuccess = typeof t.configSuccess === 'string' ? t.configSuccess : 'Configuration saved';
+        showNotification(configSuccess, 'success');
 
-        import('./proxies.js').then(m => m.syncCoreConfig());
+        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
     } catch (err) {
         advancedLogger.error('Failed to update config', err);
         const { translations, currentLang } = await import('../i18n.js').then(m => m);
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
         const errorObj = toError(err);
-        showNotification(`${t.errorPrefix || 'Error'}: ${errorObj.message}`, 'error');
+        const errorPrefix = typeof t.errorPrefix === 'string' ? t.errorPrefix : 'Error';
+        showNotification(`${errorPrefix}: ${errorObj.message}`, 'error');
         renderAdvancedSettings();
     }
 }
