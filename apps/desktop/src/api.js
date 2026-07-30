@@ -336,6 +336,131 @@ export async function getProxies() {
 }
 
 /**
+ * 获取全部代理提供者数据（含 provider 下载的节点详情）
+ * mihomo 的 /proxies API 不包含 proxy-provider 下载的节点，
+ * 需要通过 /providers/proxies 获取。
+ * @returns {Promise<Object>} mihomo `/providers/proxies` 响应体
+ * @throws {ApiError}
+ */
+export async function getProxyProviders() {
+  const res = await apiFetch('/providers/proxies');
+  return res.json();
+}
+
+/**
+ * 获取单个代理提供者数据
+ * @param {string} name - provider 名称
+ * @returns {Promise<Object>} 单个 provider 详情（含节点列表）
+ * @throws {ApiError}
+ */
+export async function getProxyProvider(name) {
+  const res = await apiFetch(`/providers/proxies/${encodeURIComponent(name)}`);
+  return res.json();
+}
+
+// ── Provider 缓存（避免轮询期间重复拉取 /providers/proxies） ─────────────
+/** @type {any} */
+let _providerCache = null;
+const _PROVIDER_CACHE_TTL = 5000;
+const _SPECIAL_PROXY_NAMES = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE', 'GLOBAL']);
+
+/**
+ * Clear provider cache. Called on core restart to prevent stale data.
+ */
+export function clearProviderCache() {
+  _providerCache = null;
+}
+
+/**
+ * Collect proxy names from all group.all[] arrays.
+ * @param {Record<string, any>} proxiesMap - The proxies map from /proxies
+ * @returns {Set<string>} All names found in any group's all[]
+ */
+function collectAllProxyNames(proxiesMap) {
+  const names = new Set();
+  for (const key of Object.keys(proxiesMap)) {
+    const entry = proxiesMap[key];
+    if (entry?.all && Array.isArray(entry.all)) {
+      for (const name of entry.all) {
+        if (typeof name === 'string') names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Extract provider nodes from /providers/proxies response into a flat map.
+ * @param {any} providersResp - Response from /providers/proxies
+ * @returns {Record<string, any>} Map of proxy name → proxy detail
+ */
+function extractProviderNodes(providersResp) {
+  /** @type {Record<string, any>} */
+  const result = {};
+  if (providersResp?.providers) {
+    for (const providerName of Object.keys(providersResp.providers)) {
+      const provider = providersResp.providers[providerName];
+      if (provider?.proxies && Array.isArray(provider.proxies)) {
+        for (const proxy of provider.proxies) {
+          if (proxy?.name) result[proxy.name] = proxy;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * 合并 /proxies + /providers/proxies 的数据。
+ * 按需懒加载：只有当 /proxies 的节点缺失时才拉 provider 数据。
+ *
+ * @param {any} [existingData] - 已有的 /proxies 响应（避免重复请求）
+ * @returns {Promise<any>} 合并后的数据
+ * @throws {ApiError}
+ */
+export async function getProxiesMerged(existingData) {
+  const data = existingData || await getProxies();
+  if (!data?.proxies) return data;
+
+  const allNames = collectAllProxyNames(data.proxies);
+  const missingNames = [...allNames].filter(
+    n => !_SPECIAL_PROXY_NAMES.has(n.toUpperCase()) && !Object.hasOwn(data.proxies, n)
+  );
+  if (missingNames.length === 0) return data;
+
+  const fingerprint = [...missingNames].sort().join('|');
+  const now = Date.now();
+
+  // 缓存命中 — 只合并缺失的节点，不覆盖已有数据
+  if (_providerCache?.fingerprint === fingerprint && (now - _providerCache.ts) < _PROVIDER_CACHE_TTL) {
+    for (const name of missingNames) {
+      if (_providerCache.proxies[name] && !Object.hasOwn(data.proxies, name)) {
+        data.proxies[name] = _providerCache.proxies[name];
+      }
+    }
+    return data;
+  }
+
+  // 拉 /providers/proxies 并缓存
+  try {
+    const providersResp = await getProxyProviders();
+    const providerProxies = extractProviderNodes(providersResp);
+    _providerCache = { proxies: providerProxies, fingerprint, ts: now };
+    // 只合并缺失的节点，不覆盖已有数据
+    for (const name of missingNames) {
+      if (providerProxies[name] && !Object.hasOwn(data.proxies, name)) {
+        data.proxies[name] = providerProxies[name];
+      }
+    }
+  } catch {
+    // provider 拉取失败 — 不阻塞渲染，fallback 会处理仍然缺失的节点
+    console.warn('[getProxiesMerged] /providers/proxies fetch failed, using raw /proxies data');
+  }
+
+  return data;
+}
+
+/**
  * 切换代理组中的选中节点
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
