@@ -161,25 +161,25 @@ async function handleConfigUpdate(path, value) {
         if (!persisted) {
             const { translations, currentLang } = await import('../i18n.js').then(m => m);
             const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-            const t = /** @type {Record<string, string>} */(translations[langKey]);
-            showNotification(`${t.errorPrefix || 'Error'}: Config validation failed, changes not persisted`, 'error');
+            const t = /** @type {Record<string, unknown>} */(translations[langKey]);
+            showNotification(`${String(t.errorPrefix || 'Error')}: Config validation failed, changes not persisted`, 'error');
             renderAdvancedSettings();
             return;
         }
 
         const { translations, currentLang } = await import('../i18n.js').then(m => m);
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
-        showNotification(t.configSuccess || 'Configuration saved', 'success');
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
+        showNotification(String(t.configSuccess || 'Configuration saved'), 'success');
 
         import('./proxies.js').then(m => m.syncCoreConfig());
     } catch (err) {
         advancedLogger.error('Failed to update config', err);
         const { translations, currentLang } = await import('../i18n.js').then(m => m);
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
         const errorObj = toError(err);
-        showNotification(`${t.errorPrefix || 'Error'}: ${errorObj.message}`, 'error');
+        showNotification(`${String(t.errorPrefix || 'Error')}: ${errorObj.message}`, 'error');
         renderAdvancedSettings();
     }
 }
