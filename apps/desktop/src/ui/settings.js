@@ -24,8 +24,7 @@ import {
     setSecret,
     setBaseUrl,
 } from '../api.js';
-import { setWsSecret, setWsBaseUrl, connectTraffic } from '../websocket.js';
-import { updateTrafficData } from '../modules/traffic-chart.js';
+import { setWsSecret, setWsBaseUrl, forceReconnect } from '../websocket.js';
 import { translations, setLanguage } from '../i18n.js';
 import { debounce } from '../utils/debounce.js';
 import { settingsLogger } from '../utils/logger.js';
@@ -55,8 +54,9 @@ import * as prism from './prism.js';
 // The following modules have not yet been extracted from ui.js.
 // We import them from ui.js for now; when they are extracted, these
 // imports will be updated to point to their own files.
-import { switchPage } from './navigation.js';
+import { navigateTo } from './navigation.js';
 import { initCustomDropdown } from './dropdown.js';
+import { registerCleanup } from '../utils/cleanup-registry.js';
 import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies.js';
 
 // Settings submodules
@@ -862,7 +862,7 @@ function initFakeClient() {
 // ---------------------------------------------------------------------------
 export async function initSettings() {
     // Portable mode: hide unsupported options
-    const isPortable = await invoke('get_portable_mode');
+    const isPortable = await invoke(COMMANDS.GET_PORTABLE_MODE);
     if (isPortable) {
         const autostartRow = document.getElementById('row-autostart');
         const clientUpdateRow = document.getElementById('row-client-update');
@@ -917,21 +917,22 @@ export async function initSettings() {
 
     // ---- Subscription & Config management (delegated to settings/subscriptions.js) ----
     // Initialized early so renderConfigs is available for language dropdown and drag-drop listeners.
-    const subApi = initSubscriptionSettings({
-        subAddBtn: document.getElementById('add-sub-btn'),
-        updateAllSubBtn: document.getElementById('update-all-sub-btn'),
-        configsList,
-    });
-    const renderConfigs = subApi.renderConfigs;
+const subApi = initSubscriptionSettings({
+subAddBtn: document.getElementById('add-sub-btn'),
+updateAllSubBtn: document.getElementById('update-all-sub-btn'),
+configsList,
+});
+const renderConfigs = subApi.renderConfigs;
+/** Store destroy for cleanup during settings reset/teardown. */
+const _destroySubscriptionSettings = subApi.destroy;
+if (typeof _destroySubscriptionSettings === 'function') {
+    registerCleanup(_destroySubscriptionSettings);
+}
 
     // ---- Advanced settings navigation ----
     if (gotoAdvancedBtn) {
         gotoAdvancedBtn.onclick = () => {
-            switchPage('advanced');
-            // renderAdvancedSettings lives in ui.js (or its future module);
-            // it is called via the navigation handler in initNavigation.
-            // We import it lazily to avoid circular deps.
-            import('./advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {});
+            navigateTo('advanced');
         };
     }
 
@@ -945,7 +946,7 @@ export async function initSettings() {
 
     if (backSettingsBtn) {
         backSettingsBtn.onclick = () => {
-            switchPage('settings');
+            navigateTo('settings');
         };
     }
 
@@ -1069,6 +1070,56 @@ export async function initSettings() {
     if (settings.ui_scale && settings.ui_scale > 0) {
         applyUiScale(settings.ui_scale);
     }
+
+    // ---- Home page mode ----
+    const homeModeSlider = document.getElementById('setting-home-mode-slider');
+    const homeModeButtons = document.querySelectorAll('[data-home-mode]');
+    /** @param {string} mode */
+    const setHomeModeUI = (mode) => {
+        const isConsole = mode === 'console';
+        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(100%)' : 'translateX(0)';
+        homeModeButtons.forEach((btn) => {
+            const btnMode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            const isSelected = btnMode === mode;
+            btn.setAttribute('aria-pressed', String(isSelected));
+            if (isSelected) {
+                btn.classList.remove('text-[var(--text-secondary)]');
+                btn.classList.add('text-[var(--text-primary)]');
+            } else {
+                btn.classList.add('text-[var(--text-secondary)]');
+                btn.classList.remove('text-[var(--text-primary)]');
+            }
+        });
+    };
+    const savedHomePageMode = settings.home_page_mode === 'console' ? 'console' : 'minimal';
+    setHomeModeUI(savedHomePageMode);
+    appStore.set('homePageMode', savedHomePageMode);
+    /** @type {boolean} In-flight guard for home-mode PATCH_SETTINGS. */
+    let homeModeBusy = false;
+    homeModeButtons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const mode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            if (!mode || homeModeBusy) return;
+            const previous = appStore.get('homePageMode') || 'minimal';
+            if (mode === previous) return; // no-op: skip network round trip
+            homeModeBusy = true;
+            // Optimistically update UI, revert on failure
+            setHomeModeUI(mode);
+            appStore.set('homePageMode', mode);
+            try {
+                await invoke(COMMANDS.PATCH_SETTINGS, { patch: { home_page_mode: mode } });
+                invalidateSettingsCache();
+                Bus.emit(Events.HOME_PAGE_MODE_CHANGED, { mode, previous });
+            } catch (err) {
+                settingsLogger.error('Failed to save home_page_mode', err);
+                setHomeModeUI(previous);
+                appStore.set('homePageMode', previous);
+                showNotification(toError(err).message, 'error');
+            } finally {
+                homeModeBusy = false;
+            }
+        });
+    });
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
@@ -1250,10 +1301,20 @@ export async function initSettings() {
                 }
                 successItems.push('themeColor');
 
-                await trackResult('appSettings', async () => {
+                const appSettingsSaved = await trackResult('appSettings', async () => {
+                    settings.home_page_mode = 'minimal';
                     await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 });
                 invalidateSettingsCache();
+                if (appSettingsSaved) {
+                    const previousHomeMode = appStore.get('homePageMode') || 'minimal';
+                    appStore.set('homePageMode', 'minimal');
+                    setHomeModeUI('minimal');
+                    // Emit event so main.js switches the visible page if needed
+                    if (previousHomeMode !== 'minimal') {
+                        Bus.emit(Events.HOME_PAGE_MODE_CHANGED, { mode: 'minimal', previous: previousHomeMode });
+                    }
+                }
 
                 // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
                 const proxyContainer = document.getElementById('proxies-list');
@@ -1881,10 +1942,16 @@ appStore.set('isNetworkUpdating', false);
             setSecret(coreResult.secret);
             setWsSecret(coreResult.secret);
 
-            // Reconnect traffic WebSocket to the new core instance
-            connectTraffic((/** @type {any} */ data) => {
-                updateTrafficData(data);
-            });
+            // Reconnect traffic WebSocket to the new core instance.
+            // Use forceReconnect() instead of connectTraffic() to preserve
+            // the original callback (which emits TRAFFIC_UPDATE for the
+            // console dashboard). Store the returned handle so callers can
+            // close the new connection during teardown.
+            const newHandle = forceReconnect();
+            if (newHandle) {
+                // Dispatch a CORE_RESTARTED event so main.js updates _trafficWsHandle
+                Bus.emit(Events.CORE_RESTARTED, { handle: newHandle });
+            }
 
             showNotification(t.notifUpdateSuccess, 'success');
             await loadCoreVersion();

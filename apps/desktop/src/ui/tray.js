@@ -53,7 +53,7 @@ export async function updateTrayMenu(forceRefresh = false) {
     const useCache = !forceRefresh && (now - trayMenuCache.lastUpdate) < TRAY_CACHE_TTL;
 
     const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-    const t = /** @type {Record<string, string>} */(translations[langKey]);
+    const t = /** @type {Record<string, unknown>} */(translations[langKey]);
 
     const sysProxyEnabled = appStore.get('isSysProxyEnabled');
     const tunEnabled = appStore.get('isTunEnabled');
@@ -226,7 +226,7 @@ export async function initTrayEventListeners() {
         const ev = event;
         const subName = ev.payload;
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
+        const t = /** @type {Record<string, unknown>} */(translations[langKey]);
 
         try {
             /** @type {any} */
@@ -294,8 +294,8 @@ export async function initTrayEventListeners() {
     // Rust now handles the clipboard write via arboard, so we just show the notification.
     const unlisten6 = await listen('tray-copy-env-done', async () => {
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
-        showNotification(t.trayCopyEnvSuccess || 'Proxy env vars copied', 'info');
+        const t = /** @type {Record<string, unknown>} */(translations[langKey] || {});
+        showNotification(String(t.trayCopyEnvSuccess || 'Proxy env vars copied'), 'info');
     });
     _trayEventUnlisteners.push(unlisten6);
 
@@ -304,7 +304,7 @@ export async function initTrayEventListeners() {
         /** @type {any} */
         const ev = event;
         const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
+        const t = /** @type {Record<string, unknown>} */(translations[langKey] || {});
         showNotification(`${t.trayCopyEnvFailed || 'Failed to copy proxy env'}: ${ev.payload}`, 'error');
     });
     _trayEventUnlisteners.push(unlisten7);
