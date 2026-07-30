@@ -19,6 +19,7 @@ pub use core::{
     export_logs,
     fetch_text,
     get_core_exe_path,
+    get_core_uptime,
     get_core_version,
     grant_linux_tun_permission,
     init_tun_mode_from_config,
