@@ -538,6 +538,10 @@ describe('getProxiesMerged', () => {
         vi.restoreAllMocks();
     });
 
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it('returns data as-is when no proxies are missing', async () => {
         const data = {
             proxies: {
@@ -564,5 +568,39 @@ describe('getProxiesMerged', () => {
         const data = { mode: 'rule' };
         const result = await getProxiesMerged(data);
         expect(result).toEqual(data);
+    });
+
+    it('merges provider-backed nodes missing from /proxies', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['provider-node'] },
+            },
+        };
+        const providerNode = { name: 'provider-node', type: 'Shadowsocks' };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ providers: { 'p1': { proxies: [providerNode] } } }),
+        }));
+
+        const result = await getProxiesMerged(data);
+
+        expect(result.proxies['provider-node']).toEqual(providerNode);
+        // Original data must not be mutated.
+        expect(data.proxies['provider-node']).toBeUndefined();
+    });
+
+    it('returns original data when provider fetch fails', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['missing-node'] },
+            },
+        };
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+
+        const result = await getProxiesMerged(data);
+
+        // Should return data with the original proxies (no crash).
+        expect(result.proxies['GLOBAL']).toBeDefined();
+        expect(result.proxies['missing-node']).toBeUndefined();
     });
 });
