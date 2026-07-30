@@ -20,6 +20,7 @@ import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showModal, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
+import { Bus, Events } from '../events.js';
 import { formatFileSize } from '../../utils/format.js';
 import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
@@ -1007,8 +1008,13 @@ export function initSubscriptionSettings({
     };
 
     // ---- Config management (renderConfigs) ----
+    /** @type {number} Render revision — incremented to invalidate stale in-flight renders */
+    let _renderRev = 0;
+
     async function renderConfigs(forceFresh = false) {
         if (!configsList) return;
+
+        const rev = ++_renderRev;
 
         const cfgSettings = forceFresh
             ? await invoke(COMMANDS.GET_SETTINGS)
@@ -1016,6 +1022,9 @@ export function initSubscriptionSettings({
         const configs = forceFresh
             ? await invoke(COMMANDS.LIST_CONFIGS)
             : await getConfigsCached();
+
+        // A newer render or destroy() has superseded this call — bail out.
+        if (rev !== _renderRev) return;
 
         const currentConfig = cfgSettings.last_config || 'config.yaml';
         const customArgs = cfgSettings.custom_args || [];
@@ -1439,10 +1448,28 @@ export function initSubscriptionSettings({
     // Initial render
     renderConfigs();
 
+    // Auto-refresh when config changes (e.g. subscription switch from console).
+    // Skip the expensive re-render when the settings list is not visible,
+    // but still invalidate caches so data is fresh when the user returns.
+    const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, () => {
+        invalidateSettingsCache();
+        invalidateConfigsCache();
+        const isVisible = configsList && !configsList.closest('.hidden');
+        if (!isVisible) {
+            _renderRev++; // Invalidate any in-flight render even when hidden.
+            return;
+        }
+        renderConfigs().catch((e) => rulesLogger.warn('[settings] renderConfigs failed after CONFIG_UPDATED', e));
+    });
+
     // Set module-level reference for use by showEditPanel
     moduleRenderConfigs = renderConfigs;
 
     return {
         renderConfigs,
+        destroy: () => {
+            _renderRev++; // Invalidate any in-flight render.
+            _configUpdatedUnsub();
+        },
     };
 }
