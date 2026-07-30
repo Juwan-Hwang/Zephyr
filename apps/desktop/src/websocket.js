@@ -54,6 +54,9 @@ let _connectionState = ConnectionState.DISCONNECTED;
 /** @type {{close: Function, reconnect: Function, isMaxRetriesReached: Function} | null} */
 let globalConnectionHandle = null;
 
+/** @type {Function | null} Stored callback so forceReconnect() can re-create the stream. */
+let _trafficCallback = null;
+
 /** @type {Function | null} */
 let connectionLostCallback = null;
 
@@ -99,11 +102,20 @@ export function onConnectionLost(callback) {
 /**
  * Programmatically trigger a reconnection attempt.
  * Resets retry counters and aborts the current stream.
+ * If the handle was released by close(), creates a new connection with the
+ * stored callback and returns the new handle. The caller must replace its
+ * own handle reference with the returned value.
+ * @returns {ReturnType<typeof connectTraffic> | null}
  */
 export function forceReconnect() {
   if (globalConnectionHandle) {
     globalConnectionHandle.reconnect();
+    return globalConnectionHandle;
+  } else if (_trafficCallback) {
+    // Handle was lost — re-create the stream with the stored callback.
+    return connectTraffic(_trafficCallback);
   }
+  return null;
 }
 
 /**
@@ -172,7 +184,11 @@ function setState(newState) {
  * @returns {{ close: Function, reconnect: Function, isMaxRetriesReached: Function }}
  */
 export function connectTraffic(callback) {
-  // Close any existing connection to prevent resource leaks
+  // Store callback first so it survives the close() call below.
+  // close() no longer clears _trafficCallback, preserving it for recovery.
+  _trafficCallback = callback;
+
+  // Close any existing connection to prevent resource leaks.
   if (globalConnectionHandle) {
     globalConnectionHandle.close();
     globalConnectionHandle = null;
@@ -193,8 +209,8 @@ export function connectTraffic(callback) {
   /** @type {boolean} */
   let maxRetriesReached = false;
 
-  /** @type {boolean} Guard against double connection during force-reconnect */
-  let isForceReconnecting = false;
+  /** @type {number} Generation token — incremented on each reconnect to invalidate stale callbacks */
+  let _generation = 0;
 
   /** @type {boolean} Whether the last error was a connection-refused (core not running) */
   let isConnectionRefused = false;
@@ -236,6 +252,9 @@ export function connectTraffic(callback) {
   const connect = async () => {
     if (retryTimer) clearTimeout(retryTimer);
     if (isClosed) return;
+
+    // Capture generation so stale callbacks from aborted streams can be ignored.
+    const gen = _generation;
 
     setState(
       retryCount > 0
@@ -334,16 +353,18 @@ export function connectTraffic(callback) {
         }
       }
 
-      // Stream ended gracefully
+      // Stream ended gracefully — ignore if a newer generation has replaced us.
+      if (gen !== _generation) return;
       handleClose();
     } catch (err) {
       const error = /** @type {Error} */ (err);
-      if (error.name === 'AbortError' && !isClosed) {
+      if (error.name === 'AbortError') {
+        // Stale stream aborted by reconnect(), or permanently closed.
+        if (isClosed || gen !== _generation) return;
         // Heartbeat timeout or force-reconnect — treat as disconnection
         handleClose();
         return;
       }
-      if (error.name === 'AbortError') return;
 
       // 检测连接被拒绝（内核未运行）
       isConnectionRefused = isConnectionRefusedError(error);
@@ -359,6 +380,9 @@ export function connectTraffic(callback) {
       } else {
         log.error('stream error:', error.message || error);
       }
+      // Ignore errors from superseded streams — only the latest generation
+      // should schedule retries.
+      if (gen !== _generation) return;
       handleClose();
     }
   };
@@ -370,7 +394,7 @@ export function connectTraffic(callback) {
   function handleClose() {
     stopHeartbeat();
 
-    if (isForceReconnecting || isClosed) return;
+    if (isClosed) return;
 
     // 内核未运行时使用更少的重试次数
     const effectiveMaxRetries = isConnectionRefused ? MAX_RETRIES_REFUSED : MAX_RETRIES;
@@ -436,15 +460,16 @@ export function connectTraffic(callback) {
      * Force an immediate reconnection (resets retry counters).
      */
     reconnect() {
+      if (isClosed) return;
       if (retryTimer) clearTimeout(retryTimer);
       stopHeartbeat();
       maxRetriesReached = false;
       retryCount = 0;
       isConnectionRefused = false;
-      isForceReconnecting = true;
+      // Increment generation to invalidate stale callbacks from the old stream.
+      _generation++;
       abortController.abort();
       abortController = new AbortController();
-      isForceReconnecting = false;
       connect();
     },
 

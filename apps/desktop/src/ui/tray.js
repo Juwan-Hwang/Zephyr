@@ -6,7 +6,7 @@
 
 import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
 import { switchToConfig } from './lifecycle.js';
-import { translations, currentLang } from '../i18n.js';
+import { t as tFunc } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
 import { trayMenuCache, TRAY_CACHE_TTL, invalidateProxiesCache } from './cache.js';
@@ -52,8 +52,9 @@ export async function updateTrayMenu(forceRefresh = false) {
     const now = Date.now();
     const useCache = !forceRefresh && (now - trayMenuCache.lastUpdate) < TRAY_CACHE_TTL;
 
-    const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-    const t = /** @type {Record<string, string>} */(translations[langKey]);
+    // Use t() helper for type-safe string resolution — prevents [object Object]
+    // from leaking into Tauri IPC params when a translation key holds a plural object.
+    const t = tFunc;
 
     const sysProxyEnabled = appStore.get('isSysProxyEnabled');
     const tunEnabled = appStore.get('isTunEnabled');
@@ -141,16 +142,16 @@ export async function updateTrayMenu(forceRefresh = false) {
     try {
         await invoke(COMMANDS.UPDATE_TRAY_FULL_MENU, {
             params: {
-                showText: t.trayShow || "Show Zephyr",
-                quitText: t.trayQuit || "Quit",
-                sysProxyText: t.traySysProxy || "System Proxy",
-                tunText: t.trayTunMode || "TUN Mode",
-                ruleText: t.rule || "Rule",
-                globalText: t.global || "Global",
-                directText: t.direct || "Direct",
-                subscriptionsText: t.traySubscriptions || "Subscriptions",
-                proxiesText: t.trayProxies || "Proxies",
-                copyEnvText: t.trayCopyEnv || "Copy Proxy Env",
+                showText: t('trayShow') || "Show Zephyr",
+                quitText: t('trayQuit') || "Quit",
+                sysProxyText: t('traySysProxy') || "System Proxy",
+                tunText: t('trayTunMode') || "TUN Mode",
+                ruleText: t('rule') || "Rule",
+                globalText: t('global') || "Global",
+                directText: t('direct') || "Direct",
+                subscriptionsText: t('traySubscriptions') || "Subscriptions",
+                proxiesText: t('trayProxies') || "Proxies",
+                copyEnvText: t('trayCopyEnv') || "Copy Proxy Env",
                 sysProxyEnabled,
                 tunEnabled,
                 configs,
@@ -179,7 +180,7 @@ export async function initTrayEventListeners() {
         // Rust backend has already toggled the system proxy; just sync the UI.
         appStore.set('isSysProxyEnabled', enabled);
         if (toggle) toggle.checked = enabled;
-        import('./sysproxy.js').then(m => m.updateSysProxyUI());
+        import('./sysproxy.js').then(m => m.refreshSysProxyStatus()).catch(() => {});
         // appStore.subscribe in main.js already triggers updateTrayMenu()
     });
     _trayEventUnlisteners.push(unlisten1);
@@ -225,8 +226,6 @@ export async function initTrayEventListeners() {
         /** @type {any} */
         const ev = event;
         const subName = ev.payload;
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey]);
 
         try {
             /** @type {any} */
@@ -237,7 +236,7 @@ export async function initTrayEventListeners() {
 
             // 只在没有回退时显示切换通知（回退时已显示警告）
             if (!result.fallbackOccurred) {
-                showNotification(`${t.notifSwitchTo || 'Switched to'} ${subName}`, 'info');
+                showNotification(`${tFunc('notifSwitchTo') || 'Switched to'} ${subName}`, 'info');
             }
 
             // Sync core config first (updates appStore including TUN state), then update tray
@@ -293,9 +292,7 @@ export async function initTrayEventListeners() {
     // which isn't guaranteed when clicking from the tray menu.
     // Rust now handles the clipboard write via arboard, so we just show the notification.
     const unlisten6 = await listen('tray-copy-env-done', async () => {
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
-        showNotification(t.trayCopyEnvSuccess || 'Proxy env vars copied', 'info');
+        showNotification(tFunc('trayCopyEnvSuccess') || 'Proxy env vars copied', 'info');
     });
     _trayEventUnlisteners.push(unlisten6);
 
@@ -303,9 +300,7 @@ export async function initTrayEventListeners() {
     const unlisten7 = await listen('tray-copy-env-failed', async (event) => {
         /** @type {any} */
         const ev = event;
-        const langKey = /** @type {'en'|'zh'|'ja'|'ko'} */(currentLang);
-        const t = /** @type {Record<string, string>} */(translations[langKey] || {});
-        showNotification(`${t.trayCopyEnvFailed || 'Failed to copy proxy env'}: ${ev.payload}`, 'error');
+        showNotification(`${tFunc('trayCopyEnvFailed') || 'Failed to copy proxy env'}: ${ev.payload}`, 'error');
     });
     _trayEventUnlisteners.push(unlisten7);
 }
@@ -336,7 +331,7 @@ export function startUnifiedSync() {
             if (!sysProxyOn && hasOwnership) {
                 await invoke(COMMANDS.RESTORE_SYS_PROXY);
                 appStore.set('isSysProxyEnabled', true);
-                import('./sysproxy.js').then(m => m.updateSysProxyUI());
+                import('./sysproxy.js').then(m => m.refreshSysProxyStatus()).catch(() => {});
             }
         } catch (_) {
             // Non-critical: periodic sync will retry
@@ -353,7 +348,7 @@ export function startUnifiedSync() {
 
             if (realSysProxyState !== appStore.get('isSysProxyEnabled')) {
                 appStore.set('isSysProxyEnabled', realSysProxyState);
-                import('./sysproxy.js').then(m => m.updateSysProxyUI());
+                import('./sysproxy.js').then(m => m.refreshSysProxyStatus()).catch(() => {});
             }
 
             // Guard: if we own the proxy but it was disabled externally, restore it
@@ -362,7 +357,7 @@ export function startUnifiedSync() {
                     try {
                         await invoke(COMMANDS.RESTORE_SYS_PROXY);
                         appStore.set('isSysProxyEnabled', true);
-                        import('./sysproxy.js').then(m => m.updateSysProxyUI());
+                        import('./sysproxy.js').then(m => m.refreshSysProxyStatus()).catch(() => {});
                     } catch (restoreErr) {
                         trayLogger.error('Failed to restore system proxy', restoreErr);
                     }
