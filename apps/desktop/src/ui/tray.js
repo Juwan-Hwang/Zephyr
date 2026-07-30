@@ -4,7 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
+import { getConfig, getProxies, getProxiesMerged, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
 import { switchToConfig } from './lifecycle.js';
 import { translations, currentLang } from '../i18n.js';
 import { showNotification } from './notifications.js';
@@ -75,7 +75,7 @@ export async function updateTrayMenu(forceRefresh = false) {
         const [config, configsList, proxyData, settings] = await Promise.all([
             getConfig(),
             invoke(COMMANDS.LIST_CONFIGS),
-            getProxies(),
+            getProxies().then(getProxiesMerged),
             invoke(COMMANDS.GET_SETTINGS),
         ]);
 
