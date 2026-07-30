@@ -5,6 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // (cache), fetchProxyGroupsShared (proxy-groups).  All other imports are mocked
 // as no-ops so the module loads cleanly.
 
+// NOTE: Can't use importOriginal() because it loads the real api.js module graph
+// (websocket.js, events.js, etc.) which requires logger exports not mocked here.
 vi.mock('../api.js', () => ({
     switchProxy: vi.fn(),
     testProxy: vi.fn(),
@@ -16,6 +18,8 @@ vi.mock('../api.js', () => ({
     resetLatencyTestController: vi.fn(),
     restartCore: vi.fn(),
     getProxies: vi.fn(),
+    getProxiesMerged: vi.fn().mockImplementation((data) => Promise.resolve(data)),
+    SPECIAL_PROXY_NAMES: Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE'])),
 }));
 
 vi.mock('../utils/logger.js', () => ({ proxyLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));

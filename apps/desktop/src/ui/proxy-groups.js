@@ -13,13 +13,12 @@
  * @module ui/proxy-groups
  */
 
-import { getProxies, getConfig } from '../api.js';
+import { getProxies, getConfig, SPECIAL_PROXY_NAMES } from '../api.js';
 import { getRunConfigCached } from './run-config-cache.js';
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
-/** Names that are always treated as special / non-selectable groups. */
-const SPECIAL_GROUPS = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE']);
+// SPECIAL_PROXY_NAMES imported from api.js (single source of truth)
 
 /**
  * Returns true if the proxy entry is a "group node" (has `all` array).
@@ -86,7 +85,7 @@ function buildOrderedGroups(runConfig, proxyMap) {
     if (runConfig && Array.isArray(runConfig['proxy-groups'])) {
         for (const pg of runConfig['proxy-groups']) {
             const name = pg?.name;
-            if (!name || SPECIAL_GROUPS.has(name.toUpperCase())) continue;
+            if (!name || SPECIAL_PROXY_NAMES.has(name.toUpperCase())) continue;
             if (seen.has(name)) continue;
             seen.add(name);
 
@@ -104,7 +103,7 @@ function buildOrderedGroups(runConfig, proxyMap) {
     // 2. Fallback: GLOBAL.all (preserves subscription-defined order)
     if (all.length === 0 && proxyMap['GLOBAL']?.all) {
         for (const name of proxyMap['GLOBAL'].all) {
-            if (SPECIAL_GROUPS.has(name.toUpperCase())) continue;
+            if (SPECIAL_PROXY_NAMES.has(name.toUpperCase())) continue;
             if (seen.has(name)) continue;
             const p = proxyMap[name];
             if (!p || !isGroup(p)) continue;
@@ -120,7 +119,7 @@ function buildOrderedGroups(runConfig, proxyMap) {
     // 3. Last resort: all group nodes from proxyMap, sorted by name
     if (all.length === 0) {
         for (const name of Object.keys(proxyMap).sort()) {
-            if (SPECIAL_GROUPS.has(name.toUpperCase())) continue;
+            if (SPECIAL_PROXY_NAMES.has(name.toUpperCase())) continue;
             const p = proxyMap[name];
             if (!isGroup(p)) continue;
             if (p.hidden) continue;
@@ -199,7 +198,7 @@ function buildTopLevelGroups(proxyMap, orderedGroups) {
     // 1. GLOBAL.all items that are also groups (preserves subscription order)
     if (proxyMap['GLOBAL']?.all) {
         for (const name of proxyMap['GLOBAL'].all) {
-            if (SPECIAL_GROUPS.has(name.toUpperCase())) continue;
+            if (SPECIAL_PROXY_NAMES.has(name.toUpperCase())) continue;
             const p = proxyMap[name];
             if (!p || !isGroup(p)) continue;
             if (p.hidden) continue;
@@ -453,7 +452,7 @@ export async function fetchProxyGroups(options = {}) {
     const hasProviderProxies = Array.isArray(proxies)
         && proxies.some(name =>
             typeof name === 'string'
-            && !SPECIAL_GROUPS.has(name.toUpperCase())
+            && !SPECIAL_PROXY_NAMES.has(name.toUpperCase())
             && !localProxyNames.has(name)
             && !groupNames.has(name)
         );
