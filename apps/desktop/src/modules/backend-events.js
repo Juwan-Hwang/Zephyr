@@ -9,6 +9,9 @@
 
 import { listen } from '../api.js';
 import { showNotification } from '../ui/notifications.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('backend-events');
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -24,8 +27,8 @@ let _prismEventUnlisten = null;
 /** @type {(() => void) | null} */
 let _backendEventUnlisten = null;
 
-/** @type {((entry: { type: string, message: string, timestamp: string, source?: string }) => void) | null} */
-let _onNewEvent = null;
+/** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string }) => void>} */
+const _eventSubscribers = new Set();
 
 // ── Internal Helpers ─────────────────────────────────────────────────────────
 
@@ -51,10 +54,13 @@ function _pushEvent(entry) {
     if (_extLogEvents.length > 500) {
         _extLogEvents = _extLogEvents.slice(-500);
     }
-    try {
-        _onNewEvent?.(entry);
-    } catch {
-        // Subscriber failure should not block event ingestion or toast handling
+    for (const cb of _eventSubscribers) {
+        try {
+            cb(entry);
+        } catch (e) {
+            // Subscriber failure should not block event ingestion or toast handling
+            logger.warn('Event subscriber threw', e);
+        }
     }
 }
 
@@ -223,18 +229,22 @@ function _handlePrismEvent(event) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Subscribe to new events. Called by logs page when it mounts.
+ * Subscribe to new events. Multiple subscribers can coexist.
+ * Returns an unsubscribe function for clean teardown.
  * @param {(entry: { type: string, message: string, timestamp: string, source?: string }) => void} callback
+ * @returns {() => void}
  */
 export function subscribeToEvents(callback) {
-    _onNewEvent = callback;
+    _eventSubscribers.add(callback);
+    return () => { _eventSubscribers.delete(callback); };
 }
 
 /**
- * Unsubscribe from new events. Called by logs page when it unmounts.
+ * Unsubscribe a specific callback from new events.
+ * @param {(entry: { type: string, message: string, timestamp: string, source?: string }) => void} callback
  */
-export function unsubscribeFromEvents() {
-    _onNewEvent = null;
+export function unsubscribeFromEvents(callback) {
+    _eventSubscribers.delete(callback);
 }
 
 /**

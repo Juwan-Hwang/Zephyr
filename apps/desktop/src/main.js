@@ -62,10 +62,11 @@ import * as prism from './ui/prism.js';
 import { showNotification } from './ui/notifications.js';
 import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
-import { initNavigation } from './ui/navigation.js';
+import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
+import { initConsoleHome, activateConsole, deactivateConsole } from './ui/console-home.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
 import { initNodeWheel } from './ui/node-wheel.js';
@@ -186,6 +187,181 @@ function initReactiveBindings() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  Helper: Start core and configure API endpoints
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Start the mihomo core, apply early UI settings, and configure API endpoints.
+ * Returns true on success, false on failure (error already shown to user).
+ * @returns {Promise<boolean>}
+ */
+async function startCoreAndConfigure() {
+  /** @type {string|null} */
+  let secret = null;
+  try {
+    const tGetSettings = performance.now();
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
+    apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
+
+    // Apply saved UI scale early (before UI renders)
+    if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
+      document.documentElement.style.setProperty('--ui-scale', String(settings.ui_scale));
+    }
+
+    // Set home page mode and apply initial page visibility BEFORE any UI renders.
+    // This prevents the flash of the minimal home page when console mode is enabled.
+    const homePageMode = settings.home_page_mode || 'minimal';
+    appStore.set('homePageMode', homePageMode);
+    if (homePageMode === 'console') {
+      // Use switchPage() to toggle page + glow visibility consistently
+      switchPage('console');
+      // Initialize console DOM early so content exists before rendering.
+      // activateConsole() is called later in step 8b after the core is started.
+      try { initConsoleHome(); } catch (err) { apiLogger.warn('Early console init failed', err); }
+    }
+
+    const tStartCore = performance.now();
+    const configPath = settings.last_config || 'config.yaml';
+    const customArgs = settings.custom_args || [];
+    apiLogger.info(`[Zephyr] calling start_core (config=${configPath})`);
+    const coreResult = await invoke(COMMANDS.START_CORE, {
+      configPath,
+      test: false,
+      customArgs,
+      secret: null,
+    });
+    apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
+
+    // If start_core silently fell back (requested config doesn't exist),
+    // correct last_config to the actually loaded file.
+    if (coreResult.active_config && coreResult.active_config !== configPath) {
+      apiLogger.info(`[Zephyr] config fallback detected: requested "${configPath}" but loaded "${coreResult.active_config}", updating last_config`);
+      try {
+        await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: coreResult.active_config });
+      } catch (e) {
+        apiLogger.warn(`[Zephyr] failed to update last_config after fallback: ${e}`);
+      }
+    }
+
+    secret = coreResult.secret;
+    const port = coreResult.port;
+
+    setBaseUrl(`http://127.0.0.1:${port}`);
+    setWsBaseUrl(`ws://127.0.0.1:${port}`);
+    setSecret(secret || '');
+    setWsSecret(secret || '');
+    setCoreReachable(true);
+
+    // 5b. Initialize Prism engine — compile patches and populate rule annotations.
+    const tPrism = performance.now();
+    prism.apply().then((applyResult) => {
+        const elapsed = (performance.now() - tPrism).toFixed(0);
+        const stats = applyResult?.stats;
+        const annotationCount = applyResult?.rule_annotations?.length ?? 0;
+        apiLogger.info(
+            `[Zephyr] prism.apply: +${elapsed}ms | patches=${stats?.succeeded ?? '?'}/${stats?.total ?? '?'} | annotations=${annotationCount}`
+        );
+        if (annotationCount === 0 && (stats?.total ?? 0) > 0) {
+            apiLogger.warn(
+                '[Zephyr] prism.apply succeeded but produced 0 rule annotations.',
+                'Check that .prism.yaml files use $prepend/$append DSL syntax.',
+            );
+        }
+    }).catch((err) => {
+        apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
+    });
+
+    // 5c. Apply all enabled overrides (JS + Prism YAML).
+    invoke(COMMANDS.OVERRIDE.APPLY_ALL).then((logs) => {
+        const successCount = logs?.filter((/** @type {{success: boolean}} */ l) => l.success).length ?? 0;
+        const failCount = logs?.filter((/** @type {{success: boolean}} */ l) => !l.success).length ?? 0;
+        if (logs && logs.length > 0) {
+            apiLogger.info(`[Zephyr] override_apply_all: ${successCount} succeeded, ${failCount} failed (${logs.length} total)`);
+        }
+    }).catch((err) => {
+        apiLogger.warn('[Zephyr] override_apply_all failed (non-fatal):', err);
+    });
+  } catch (err) {
+    const message = err?.toString?.() || 'Core start failed';
+    apiLogger.error('Failed to start core', err);
+    sendOSNotification('Zephyr', message).catch(() => {});
+    alert(message);
+    return false;
+  }
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Helper: Auto-check for updates on startup
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Check for core and client updates after a short delay.
+ * Non-blocking — all errors are caught and logged.
+ */
+/** Check if a core update is available. @returns {Promise<boolean>} */
+async function hasCoreUpdate() {
+  try {
+    const latest = await invoke(COMMANDS.GET_LATEST_VERSION);
+    const currentVersion = await invoke(COMMANDS.GET_CORE_VERSION);
+    return latest.version !== currentVersion;
+  } catch (e) {
+    apiLogger.warn('Auto core update check failed', e);
+    return false;
+  }
+}
+
+/** Check if a client update is available. @returns {Promise<boolean>} */
+async function hasClientUpdate() {
+  try {
+    if (await invoke(COMMANDS.GET_PORTABLE_MODE)) return false;
+    const info = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSION);
+    const currentVersion = await invoke(COMMANDS.GET_APP_VERSION);
+    return info.version !== currentVersion;
+  } catch (e) {
+    apiLogger.warn('Auto client update check failed', e);
+    return false;
+  }
+}
+
+function scheduleAutoUpdateCheck() {
+  setTimeout(async () => {
+    try {
+      const settings = await invoke(COMMANDS.GET_SETTINGS);
+      const lang = localStorage.getItem('lang') || 'en';
+      /** @type {Record<string, string>} */
+      const t = /** @type {Record<string, string>} */ (
+        /** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en
+      );
+
+      const coreHasUpdate = settings.auto_update ? await hasCoreUpdate() : false;
+      const clientHasUpdate = settings.auto_update_client ? await hasClientUpdate() : false;
+
+      // Notify the user about available updates
+      if (coreHasUpdate && clientHasUpdate) {
+        showNotification(
+          t.bothUpdateAvailable || 'Both core and client have updates',
+          'warning',
+          t.recommendFullVersion || 'Recommend installing Full version'
+        );
+      } else if (coreHasUpdate) {
+        showNotification(
+          t.coreUpdateAvailable || 'Core update available',
+          'warning'
+        );
+      } else if (clientHasUpdate) {
+        showNotification(
+          t.clientUpdateAvailable || 'Update Available',
+          'warning'
+        );
+      }
+    } catch (e) {
+      apiLogger.warn('Auto update check failed', e);
+    }
+  }, 5000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  initApp — Main initialization sequence
 // ═══════════════════════════════════════════════════════════════════
 
@@ -242,91 +418,7 @@ async function initApp() {
   }, 50);
 
   // 5. Start core and configure endpoints
-  /** @type {string|null} */
-  let secret = null;
-  try {
-    const tGetSettings = performance.now();
-    const settings = await invoke(COMMANDS.GET_SETTINGS);
-    apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
-
-    // Apply saved UI scale early (before UI renders)
-    if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
-      document.documentElement.style.setProperty('--ui-scale', String(settings.ui_scale));
-    }
-
-    const tStartCore = performance.now();
-    const configPath = settings.last_config || 'config.yaml';
-    const customArgs = settings.custom_args || [];
-    apiLogger.info(`[Zephyr] calling start_core (config=${configPath})`);
-    const coreResult = await invoke(COMMANDS.START_CORE, {
-      configPath,
-      test: false,
-      customArgs,
-      secret: null,
-    });
-    apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
-
-    // 如果 start_core 发生了静默回退（请求的配置文件不存在），
-    // 用实际加载的配置名纠正 last_config，避免下次冷启动仍然指向已不存在的文件。
-    if (coreResult.active_config && coreResult.active_config !== configPath) {
-      apiLogger.info(`[Zephyr] config fallback detected: requested "${configPath}" but loaded "${coreResult.active_config}", updating last_config`);
-      try {
-        await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: coreResult.active_config });
-      } catch (e) {
-        apiLogger.warn(`[Zephyr] failed to update last_config after fallback: ${e}`);
-      }
-    }
-
-    secret = coreResult.secret;
-    const port = coreResult.port;
-
-    setBaseUrl(`http://127.0.0.1:${port}`);
-    setWsBaseUrl(`ws://127.0.0.1:${port}`);
-    setSecret(secret || '');
-    setWsSecret(secret || '');
-    setCoreReachable(true);
-
-    // 5b. Initialize Prism engine — compile patches and populate rule annotations.
-    // mihomo already started with run_config.yaml (previous compile output), so rules
-    // are already active. This apply() runs in the background to refresh annotations
-    // for the "Active Rules" tab. Non-blocking: UI renders immediately.
-    const tPrism = performance.now();
-    prism.apply().then((applyResult) => {
-        const elapsed = (performance.now() - tPrism).toFixed(0);
-        const stats = applyResult?.stats;
-        const annotationCount = applyResult?.rule_annotations?.length ?? 0;
-        apiLogger.info(
-            `[Zephyr] prism.apply: +${elapsed}ms | patches=${stats?.succeeded ?? '?'}/${stats?.total ?? '?'} | annotations=${annotationCount}`
-        );
-        if (annotationCount === 0 && (stats?.total ?? 0) > 0) {
-            apiLogger.warn(
-                '[Zephyr] prism.apply succeeded but produced 0 rule annotations.',
-                'Check that .prism.yaml files use $prepend/$append DSL syntax.',
-            );
-        }
-    }).catch((err) => {
-        apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
-    });
-
-    // 5c. Apply all enabled overrides (JS + Prism YAML).
-    // Runs independently of prism.apply so overrides are always applied on startup,
-    // even if Prism compilation fails.
-    invoke(COMMANDS.OVERRIDE.APPLY_ALL).then((logs) => {
-        const successCount = logs?.filter((/** @type {{success: boolean}} */ l) => l.success).length ?? 0;
-        const failCount = logs?.filter((/** @type {{success: boolean}} */ l) => !l.success).length ?? 0;
-        if (logs && logs.length > 0) {
-            apiLogger.info(`[Zephyr] override_apply_all: ${successCount} succeeded, ${failCount} failed (${logs.length} total)`);
-        }
-    }).catch((err) => {
-        apiLogger.warn('[Zephyr] override_apply_all failed (non-fatal):', err);
-    });
-  } catch (err) {
-    const message = err?.toString?.() || 'Core start failed';
-    apiLogger.error('Failed to start core', err);
-    sendOSNotification('Zephyr', message).catch(() => {});
-    alert(message);
-    return;
-  }
+  if (!(await startCoreAndConfigure())) return;
 
   // 6. Initialize all UI modules
   const tUI = performance.now();
@@ -335,6 +427,8 @@ async function initApp() {
     onProxies: () => { renderProxies(); },
     onAdvanced: () => { import('./ui/advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {}); },
     onHome: () => { updateSysProxyUI(); },
+    onConsole: () => { activateConsole(); },
+    onLeaveConsole: () => { deactivateConsole(); },
     onRuleLibrary: () => { import('./ui/rule-library.js').then(m => m.initRuleLibraryPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
@@ -405,66 +499,66 @@ async function initApp() {
     apiLogger.warn('Initial sync failed', err);
   }
 
-  // 8b. Auto-check for updates on startup if enabled
-  setTimeout(async () => {
-    try {
-      const settings = await invoke(COMMANDS.GET_SETTINGS);
-      const lang = localStorage.getItem('lang') || 'en';
-      /** @type {Record<string, string>} */
-      const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang]);
-
-      let coreHasUpdate = false;
-      let clientHasUpdate = false;
-
-      // Check core update if auto_update is enabled
-      if (settings.auto_update) {
-        try {
-          const latest = await invoke(COMMANDS.GET_LATEST_VERSION);
-          const currentVersion = await invoke(COMMANDS.GET_CORE_VERSION);
-          if (latest.version !== currentVersion) {
-            coreHasUpdate = true;
-          }
-        } catch (e) {
-          apiLogger.warn('Auto core update check failed', e);
-        }
+  // 8b. Activate console home page (if enabled and still visible)
+  try {
+    if (appStore.get('homePageMode') === 'console') {
+      const consolePage = document.querySelector('[data-page="console"]');
+      const isConsoleVisible = consolePage && !consolePage.classList.contains('hidden');
+      // initConsoleHome() is idempotent (guarded by isInitialized).
+      initConsoleHome();
+      // Only activate if the console page is still visible - the user may
+      // have navigated to another page during the async startup steps.
+      if (isConsoleVisible) {
+        activateConsole();
       }
-
-      // Check client update if auto_update_client is enabled (skip in portable mode)
-      const isPortable = await invoke('get_portable_mode');
-      if (!isPortable && settings.auto_update_client) {
-        try {
-          const info = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSION);
-          const currentVersion = await invoke(COMMANDS.GET_APP_VERSION);
-          if (info.version !== currentVersion) {
-            clientHasUpdate = true;
-          }
-        } catch (e) {
-          apiLogger.warn('Auto client update check failed', e);
-        }
-      }
-
-      // If both have updates, show special notification recommending Full version
-      if (coreHasUpdate && clientHasUpdate) {
-        showNotification(
-          t.bothUpdateAvailable || 'Both core and client have updates',
-          'warning',
-          t.recommendFullVersion || 'Recommend installing Full version'
-        );
-      }
-    } catch (e) {
-      apiLogger.warn('Auto update check failed', e);
     }
-  }, 5000);
+  } catch (err) {
+    apiLogger.warn('Failed to init console home', err);
+  }
+
+  // 8c. Auto-check for updates on startup if enabled
+  scheduleAutoUpdateCheck();
 
   // 9. Traffic WebSocket
   _trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
-    updateTrafficData(data);
+    // Skip the minimal-home traffic pipeline when console mode is active -
+    // the console dashboard subscribes to TRAFFIC_UPDATE directly.
+    if (appStore.get('homePageMode') !== 'console') {
+      updateTrafficData(data);
+    }
+    Bus.emit(Events.TRAFFIC_UPDATE, data);
   });
 
   // 9b. Reconnect traffic stream when core restarts
-  const _unsubCoreRestarted = Bus.on(Events.CORE_RESTARTED, () => {
-    if (_trafficWsHandle) {
+  const _unsubCoreRestarted = Bus.on(Events.CORE_RESTARTED, (/** @type {{ handle?: any }} */ { handle } = {}) => {
+    // If forceReconnect() returned a new handle (fallback path), adopt it.
+    if (handle) {
+      _trafficWsHandle = handle;
+    } else if (_trafficWsHandle) {
       _trafficWsHandle.reconnect();
+    }
+  });
+
+  // 10b. Apply home page mode changes immediately when the user toggles
+  //      the setting, so the visible page switches without requiring a
+  //      manual navigation away and back.
+  const _unsubHomePageMode = Bus.on(Events.HOME_PAGE_MODE_CHANGED, (/** @type {{ mode?: string, previous?: string }} */ { mode } = {}) => {
+    if (!mode) return;
+    // Update the store first so navigateToInternal() sees the new mode
+    // and does not short-circuit on stale state.
+    appStore.set('homePageMode', mode);
+    // Only switch if the home or console page is currently visible.
+    const homePage = document.querySelector('[data-page="home"]');
+    const consolePage = document.querySelector('[data-page="console"]');
+    const isHomeVisible = homePage && !homePage.classList.contains('hidden');
+    const isConsoleVisible = consolePage && !consolePage.classList.contains('hidden');
+    if (!isHomeVisible && !isConsoleVisible) return;
+
+    if (mode === 'console') {
+      try { initConsoleHome(); } catch (err) { apiLogger.warn('Console init failed on mode switch', err); }
+      navigateTo('console');
+    } else {
+      navigateTo('home');
     }
   });
 
@@ -477,6 +571,9 @@ async function initApp() {
   });
   registerCleanup(() => {
     _unsubCoreRestarted();
+  });
+  registerCleanup(() => {
+    _unsubHomePageMode();
   });
   registerCleanup(() => {
     if (_trafficWsHandle) {
