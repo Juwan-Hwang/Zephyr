@@ -6,6 +6,9 @@ import {
     isCoreReachable,
     setCoreReachable,
     getProxies,
+    getProxiesMerged,
+    clearProviderCache,
+    SPECIAL_PROXY_NAMES,
     switchProxy,
     getConfig,
     patchConfig,
@@ -507,5 +510,93 @@ describe('listen', () => {
 describe('openUrl', () => {
     it('throws when Tauri IPC is not available', async () => {
         await expect(openUrl('https://example.com')).rejects.toThrow('[API] Tauri IPC not available');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  getProxiesMerged / SPECIAL_PROXY_NAMES / clearProviderCache
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SPECIAL_PROXY_NAMES', () => {
+    it('contains expected built-in proxy names', () => {
+        expect(SPECIAL_PROXY_NAMES.has('DIRECT')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('REJECT')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('REJECT-DROP')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('PASS')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('PASS-RULE')).toBe(true);
+        expect(SPECIAL_PROXY_NAMES.has('COMPATIBLE')).toBe(true);
+    });
+
+    it('does not contain GLOBAL (GLOBAL is a real group)', () => {
+        expect(SPECIAL_PROXY_NAMES.has('GLOBAL')).toBe(false);
+    });
+});
+
+describe('getProxiesMerged', () => {
+    beforeEach(() => {
+        clearProviderCache();
+        vi.restoreAllMocks();
+    });
+
+    it('returns data as-is when no proxies are missing', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['node1', 'node2'] },
+                'node1': { name: 'node1', type: 'Shadowsocks' },
+                'node2': { name: 'node2', type: 'Vmess' },
+            },
+        };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data); // No merge needed — same data returned
+    });
+
+    it('returns data as-is when only special names are missing', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['DIRECT', 'REJECT'] },
+            },
+        };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data);
+    });
+
+    it('returns data unchanged when data.proxies is missing', async () => {
+        const data = { mode: 'rule' };
+        const result = await getProxiesMerged(data);
+        expect(result).toEqual(data);
+    });
+
+    it('merges provider-backed nodes missing from /proxies', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['provider-node'] },
+            },
+        };
+        const providerNode = { name: 'provider-node', type: 'Shadowsocks' };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ providers: { 'p1': { proxies: [providerNode] } } }),
+        }));
+
+        const result = await getProxiesMerged(data);
+
+        expect(result.proxies['provider-node']).toEqual(providerNode);
+        // Original data must not be mutated.
+        expect(data.proxies['provider-node']).toBeUndefined();
+    });
+
+    it('returns original data when provider fetch fails', async () => {
+        const data = {
+            proxies: {
+                'GLOBAL': { name: 'GLOBAL', all: ['missing-node'] },
+            },
+        };
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+
+        const result = await getProxiesMerged(data);
+
+        // Should return data with the original proxies (no crash).
+        expect(result.proxies['GLOBAL']).toBeDefined();
+        expect(result.proxies['missing-node']).toBeUndefined();
     });
 });

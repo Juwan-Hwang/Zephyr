@@ -39,17 +39,35 @@ describe('translations', () => {
         expect(zhKeys).toEqual(enKeys);
     });
 
-    it('all en translations are non-empty strings', () => {
+    it('all en translations are non-empty strings or plural objects', () => {
         for (const [key, value] of Object.entries(translations.en)) {
-            expect(typeof value).toBe('string');
-            expect(value.length).toBeGreaterThan(0);
+            if (typeof value === 'object' && value !== null) {
+                const variants = Object.keys(value);
+                expect(variants.length).toBeGreaterThan(0);
+                for (const [variant, text] of Object.entries(value)) {
+                    expect(typeof text).toBe('string');
+                    expect(text.length).toBeGreaterThan(0);
+                }
+            } else {
+                expect(typeof value).toBe('string');
+                expect(value.length).toBeGreaterThan(0);
+            }
         }
     });
 
-    it('all zh translations are non-empty strings', () => {
+    it('all zh translations are non-empty strings or plural objects', () => {
         for (const [key, value] of Object.entries(translations.zh)) {
-            expect(typeof value).toBe('string');
-            expect(value.length).toBeGreaterThan(0);
+            if (typeof value === 'object' && value !== null) {
+                const variants = Object.keys(value);
+                expect(variants.length).toBeGreaterThan(0);
+                for (const [variant, text] of Object.entries(value)) {
+                    expect(typeof text).toBe('string');
+                    expect(text.length).toBeGreaterThan(0);
+                }
+            } else {
+                expect(typeof value).toBe('string');
+                expect(value.length).toBeGreaterThan(0);
+            }
         }
     });
 });
@@ -189,11 +207,24 @@ describe('t() — interpolation', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('t() — pluralization', () => {
-    // No current translations use plural objects, but we can test the fallback behavior
     it('returns string as-is when no plural object', () => {
         // 'home' is a plain string, passing a count should still return 'Home'
         expect(t('home', 1)).toBe('Home');
         expect(t('home', 5)).toBe('Home');
+    });
+
+    it('returns singular form for count === 1', () => {
+        const result = t('consoleSubDaysLeft', 1, { d: '1' });
+        expect(typeof result).toBe('string');
+        expect(result).toContain('1');
+        expect(result).toContain('day left');
+    });
+
+    it('returns plural form for count !== 1', () => {
+        const result = t('consoleSubDaysLeft', 30, { d: '30' });
+        expect(typeof result).toBe('string');
+        expect(result).toContain('30');
+        expect(result).toContain('days left');
     });
 });
 
