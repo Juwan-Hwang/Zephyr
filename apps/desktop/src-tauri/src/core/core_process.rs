@@ -1427,6 +1427,14 @@ pub async fn start_core_inner(
     #[cfg(target_os = "macos")]
     if is_tun_mode() {
         let secret = restart_core_as_root(&app, true).await?;
+        // Record uptime for the TUN start path (restart_core_as_root spawns
+        // mihomo as root; the normal spawn path below is never reached).
+        // Best-effort: if the lock fails, mihomo is already running — don't
+        // fail the entire start just because we couldn't record the timestamp.
+        if let Ok(mut lock) = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+        {
+            lock.set_started_at(Some(std::time::Instant::now()));
+        }
         // For TUN mode, use the config_path as-is to match the frontend's requested name.
         // Do NOT strip extension here, as normal mode returns full filename with extension.
         return Ok(CoreStartResult {
@@ -1597,6 +1605,7 @@ pub async fn start_core_inner(
         &paths.app_data_dir,
     )
     .await?;
+    let started_at = std::time::Instant::now();
 
     // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
     // mihomo is automatically terminated if the Tauri process dies (even from
@@ -1638,6 +1647,7 @@ pub async fn start_core_inner(
     lock.set_last_port(Some(port));
     lock.set_last_proxy_port(Some(proxy_port));
     lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
+    lock.set_started_at(Some(started_at));
     drop(lock);
 
     Ok(CoreStartResult {
@@ -1693,6 +1703,7 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
             .map_err(|e| format!("Failed to lock state: {e}"))?;
         lock.set_last_port(None);
         lock.set_last_proxy_port(None);
+        lock.set_started_at(None);
         lock.take_process()
     };
 
@@ -1770,6 +1781,56 @@ pub async fn stop_core(app: AppHandle) -> Result<String, String> {
     .await
     .map_err(|e| format!("Failed to stop core: {e}"))??;
     Ok("Core stopped and cleaned up".to_owned())
+}
+
+/// Returns the number of seconds since mihomo was spawned, or `None` if the
+/// core is not running.  Uses the monotonic timestamp recorded at spawn in
+/// `CoreData::started_at` (`std::time::Instant`), immune to system clock changes.
+#[tauri::command]
+pub async fn get_core_uptime(app: AppHandle) -> Result<Option<u64>, String> {
+    let state = app.state::<MihomoState>();
+    let mut lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+    // If we have a Child handle, verify liveness via try_wait().
+    // Distinguish "process exited" from "try_wait error" — only clear
+    // started_at when the process actually exited.
+    if let Some(child) = lock.process_mut() {
+        match child.try_wait() {
+            Ok(None) => { /* alive — proceed */ }
+            Ok(Some(_)) => {
+                // Process exited — clear started_at, process handle, and stale ports.
+                // Without clearing ports, other commands (e.g. update_config) may
+                // attempt requests to a stale/reused localhost port.
+                lock.set_started_at(None);
+                lock.set_process(None);
+                lock.set_last_port(None);
+                lock.set_last_proxy_port(None);
+                return Ok(None);
+            }
+            Err(e) => {
+                // Could not determine process state — log and trust started_at.
+                emit_warn!(
+                    Core,
+                    CORE_HEALTH_CHECK_FAILED,
+                    "Failed to check core process status: {}",
+                    e
+                );
+            }
+        }
+    }
+    // If there's no Child (e.g. macOS TUN mode where mihomo is started as root),
+    // we cannot check process liveness via try_wait(). We trust started_at as a
+    // best-effort uptime. Known limitation: if the root-spawned process exits
+    // unexpectedly, this branch will continue reporting stale uptime until the
+    // next start_core/stop_core call clears started_at. The frontend mitigates
+    // this by re-syncing uptime every 30 seconds and detecting core stops via
+    // traffic WS disconnection and connection API failures.
+    match lock.started_at() {
+        Some(start) => {
+            let elapsed = start.elapsed().as_secs();
+            Ok(Some(elapsed))
+        }
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]

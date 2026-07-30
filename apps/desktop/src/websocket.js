@@ -54,6 +54,9 @@ let _connectionState = ConnectionState.DISCONNECTED;
 /** @type {{close: Function, reconnect: Function, isMaxRetriesReached: Function} | null} */
 let globalConnectionHandle = null;
 
+/** @type {Function | null} Stored callback so forceReconnect() can re-create the stream. */
+let _trafficCallback = null;
+
 /** @type {Function | null} */
 let connectionLostCallback = null;
 
@@ -99,10 +102,15 @@ export function onConnectionLost(callback) {
 /**
  * Programmatically trigger a reconnection attempt.
  * Resets retry counters and aborts the current stream.
+ * If the handle was lost (e.g. max retries reached or stream closed),
+ * falls back to creating a new connection with the original callback.
  */
 export function forceReconnect() {
   if (globalConnectionHandle) {
     globalConnectionHandle.reconnect();
+  } else if (_trafficCallback) {
+    // Handle was lost — re-create the stream with the stored callback.
+    connectTraffic(_trafficCallback);
   }
 }
 
@@ -172,6 +180,8 @@ function setState(newState) {
  * @returns {{ close: Function, reconnect: Function, isMaxRetriesReached: Function }}
  */
 export function connectTraffic(callback) {
+  // Store callback so forceReconnect() can re-create the stream if the handle is lost.
+  _trafficCallback = callback;
   // Close any existing connection to prevent resource leaks
   if (globalConnectionHandle) {
     globalConnectionHandle.close();
