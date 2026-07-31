@@ -77,9 +77,9 @@ Zephyr 正受到开发者与用户的关注。
 
 <a href="https://www.star-history.com/?repos=Juwan-Hwang%2FZephyr&type=timeline&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&theme=dark&legend=top-left&sealed_token=9u8sH1MEGjxYwGiBSxFnlE2tmRGgyc9waDK5SC038FuQSetnSJ1fL8VzE3dTGq3UCdzVkg8zJ5xLglEOYUvAOMfqQ8Yj3S2uSoBN28CPEEgKjP6OmiYF4JYhyqmqr_xZ1xe54PiHYVWcmnho6sATvXDLKO6Z9R_4FSh55ICi2AT_UD1Ely68SAfI1BQ7" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&legend=top-left&sealed_token=9u8sH1MEGjxYwGiBSxFnlE2tmRGgyc9waDK5SC038FuQSetnSJ1fL8VzE3dTGq3UCdzVkg8zJ5xLglEOYUvAOMfqQ8Yj3S2uSoBN28CPEEgKjP6OmiYF4JYhyqmqr_xZ1xe54PiHYVWcmnho6sATvXDLKO6Z9R_4FSh55ICi2AT_UD1Ely68SAfI1BQ7" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&legend=top-left&sealed_token=9u8sH1MEGjxYwGiBSxFnlE2tmRGgyc9waDK5SC038FuQSetnSJ1fL8VzE3dTGq3UCdzVkg8zJ5xLglEOYUvAOMfqQ8Yj3S2uSoBN28CPEEgKjP6OmiYF4JYhyqmqr_xZ1xe54PiHYVWcmnho6sATvXDLKO6Z9R_4FSh55ICi2AT_UD1Ely68SAfI1BQ7" width="450" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&theme=dark&legend=top-left&sealed_token=-MfgZENBGQk33mqI72bPomo_DYnwV5HR5eEIQ3-amxVkrI6KWYmyTSKoBY1pIqD1dkB8kBEUK__Vobo7d9jG765hv-V-ssqUn3v-A4PiBZigzHC5BmSv6w" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&legend=top-left&sealed_token=-MfgZENBGQk33mqI72bPomo_DYnwV5HR5eEIQ3-amxVkrI6KWYmyTSKoBY1pIqD1dkB8kBEUK__Vobo7d9jG765hv-V-ssqUn3v-A4PiBZigzHC5BmSv6w" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Juwan-hwang/zephyr&type=date&legend=top-left&sealed_token=-MfgZENBGQk33mqI72bPomo_DYnwV5HR5eEIQ3-amxVkrI6KWYmyTSKoBY1pIqD1dkB8kBEUK__Vobo7d9jG765hv-V-ssqUn3v-A4PiBZigzHC5BmSv6w" width="450" />
   </picture>
 </a>
 
