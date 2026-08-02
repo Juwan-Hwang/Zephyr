@@ -19,6 +19,7 @@
     <div id="app-main-container" class="w-full h-full flex overflow-hidden p-3 gap-0 rounded-[var(--zephyr-radius-overlay)] transition-all duration-[var(--zephyr-time-standard)] relative">
         <!-- Page Background Glows (shared layer, above sidebar but below content) -->
         <div id="glow-home" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0"></div>
+        <div id="glow-console" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-subscriptions" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-proxies" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-connections" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
@@ -213,6 +214,9 @@
                 </div>
             </div>
 
+            <!-- Console Dashboard Page (injected by ui/console-home.js) -->
+            <div data-page="console" class="flex-1 hidden flex flex-col overflow-hidden relative min-w-0"></div>
+
             <!-- Subscriptions Page -->
             <div data-page="subscriptions" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
 
@@ -356,7 +360,7 @@
                 <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
                 <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 relative z-10 shrink-0" data-flex-class="flex"></div>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
-                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
                 </div>
             </div>
@@ -512,6 +516,26 @@
                                     <button type="button" id="ui-scale-110" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">110%</button>
                                     <button type="button" id="ui-scale-125" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">125%</button>
                                     <button type="button" id="ui-scale-150" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">150%</button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Home Page Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="homePageMode">Home Page Mode</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="homePageModeDesc">Switch between minimal and console dashboard</p>
+                                    </div>
+                                </div>
+                                <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
+                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                                    <button data-home-mode="minimal" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageMinimal">Minimal</button>
+                                    <button data-home-mode="console" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageConsole">Console</button>
                                 </div>
                             </div>
                         </div>

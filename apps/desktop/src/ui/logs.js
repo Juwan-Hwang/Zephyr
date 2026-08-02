@@ -148,6 +148,9 @@ let _extAutoScroll = true;
 /** @type {ReturnType<typeof createVirtualScroll>|null} */
 let _vs = null;
 
+/** @type {((entry: { type: string, message: string, timestamp: string, source?: string }) => void) | null} */
+let _extLogCb = null;
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -193,7 +196,10 @@ export function destroyLogsPage() {
     stopPolling();
     _vs?.destroy();
     _vs = null;
-    unsubscribeFromEvents();
+    if (_extLogCb) {
+        unsubscribeFromEvents(_extLogCb);
+        _extLogCb = null;
+    }
 }
 
 // ── State Management ───────────────────────────────────────────────────────
@@ -376,9 +382,10 @@ function bindEvents() {
     tabExt?.addEventListener('click', switchToExtTab);
 
     // Subscribe to new events from global listener
-    subscribeToEvents((entry) => {
+    _extLogCb = (entry) => {
         renderExtLogEntry(entry);
-    });
+    };
+    subscribeToEvents(_extLogCb);
 
     // Rebuild ext-log DOM from accumulated events (if any)
     rebuildExtLogDOM();
