@@ -46,6 +46,8 @@ pub struct CoreData {
     last_port: Option<u16>,
     last_proxy_port: Option<u16>,
     last_log_path: Option<String>,
+    /// Wall-clock time when mihomo process was spawned (None if not started).
+    started_at: Option<std::time::SystemTime>,
 }
 
 impl Default for CoreData {
@@ -65,6 +67,7 @@ impl CoreData {
             last_port: None,
             last_proxy_port: None,
             last_log_path: None,
+            started_at: None,
         }
     }
 
@@ -125,6 +128,13 @@ impl CoreData {
     pub fn set_last_log_path(&mut self, p: Option<String>) {
         self.last_log_path = p;
     }
+    #[must_use]
+    pub const fn started_at(&self) -> Option<std::time::SystemTime> {
+        self.started_at
+    }
+    pub const fn set_started_at(&mut self, t: Option<std::time::SystemTime>) {
+        self.started_at = t;
+    }
 }
 pub struct MihomoState(pub Mutex<CoreData>);
 
@@ -178,8 +188,9 @@ pub use config_manager::{
 };
 pub use core_log::read_core_log;
 pub use core_process::{
-    core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_version,
-    kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner, DEFAULT_MIXED_PORT,
+    core_binary_name, ensure_app_storage, ensure_executable, get_core_exe_path, get_core_uptime,
+    get_core_version, kill_mihomo, resolve_app_paths, start_core, stop_core, stop_core_inner,
+    DEFAULT_MIXED_PORT,
 };
 pub use crypto::{
     decrypt_all_profiles, encrypt_all_profiles, is_machine_key_persisted, read_profile_file,
