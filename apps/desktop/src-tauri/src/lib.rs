@@ -34,11 +34,11 @@ use config_manager::{read_config, update_config};
 use core_manager::core::subscription_scheduler::start_scheduler;
 use core_manager::{
     decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
-    encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_version,
-    grant_linux_tun_permission, init_tun_mode_from_config, is_machine_key_persisted,
-    kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs, open_config_folder, open_log_folder,
-    read_config_file, rename_config, restart_core_as_root_cmd, set_tun_enabled,
-    smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
+    encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_uptime,
+    get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
+    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
+    open_config_folder, open_log_folder, read_config_file, rename_config, restart_core_as_root_cmd,
+    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
     update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
@@ -254,6 +254,11 @@ pub(crate) struct Settings {
     /// Values: "bash", "fish", "cmd", "powershell", "nushell".
     #[serde(default = "default_copy_env_format")]
     copy_env_format: String,
+    /// Home page mode: "minimal" (default) or "console".
+    /// Controls which layout is shown when the user navigates to the home page.
+    #[serde(default)]
+    home_page_mode: Option<String>,
+
     /// Settings schema version for automatic migration.
     /// Increment when breaking changes are made to the Settings struct.
     /// On load, if the stored version < `CURRENT_SCHEMA_VERSION`, migration
@@ -780,6 +785,7 @@ fn patch_settings(
             patch_field!(log_retention_days);
             patch_field!(log_max_file_mb);
             patch_field!(copy_env_format);
+            patch_field!(home_page_mode);
         }
         if !modified {
             return Ok(());
@@ -1415,6 +1421,7 @@ pub fn run() {
                     log_retention_days: default_log_retention_days(),
                     log_max_file_mb: default_log_max_file_mb(),
                     copy_env_format: default_copy_env_format(),
+                    home_page_mode: None,
                     schema_version: CURRENT_SCHEMA_VERSION,
                 }
             };
@@ -1599,6 +1606,7 @@ invalidate_heartbeat(window.app_handle());
             update_subscription_user_agent,
             update_last_config,
             get_core_version,
+            get_core_uptime,
             exempt_uwp_apps,
             read_config_file,
             write_config_file,
