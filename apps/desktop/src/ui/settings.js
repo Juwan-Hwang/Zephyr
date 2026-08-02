@@ -1070,6 +1070,36 @@ export async function initSettings() {
         applyUiScale(settings.ui_scale);
     }
 
+    // ---- Home page mode ----
+    const homeModeSlider = document.getElementById('setting-home-mode-slider');
+    const homeModeButtons = document.querySelectorAll('[data-home-mode]');
+    /** @param {string} mode */
+    const setHomeModeUI = (mode) => {
+        const isConsole = mode === 'console';
+        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(100%)' : 'translateX(0)';
+        homeModeButtons.forEach((btn) => {
+            const btnMode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            if (btnMode === mode) {
+                btn.classList.remove('text-[var(--text-secondary)]');
+                btn.classList.add('text-[var(--text-primary)]');
+            } else {
+                btn.classList.add('text-[var(--text-secondary)]');
+                btn.classList.remove('text-[var(--text-primary)]');
+            }
+        });
+    };
+    const savedHomePageMode = settings.home_page_mode || 'minimal';
+    setHomeModeUI(savedHomePageMode);
+    homeModeButtons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const mode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            if (!mode) return;
+            setHomeModeUI(mode);
+            appStore.set('homePageMode', mode);
+            await saveSetting('home_page_mode', mode);
+        });
+    });
+
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
         savedTheme: settings.theme,
@@ -1250,10 +1280,15 @@ export async function initSettings() {
                 }
                 successItems.push('themeColor');
 
-                await trackResult('appSettings', async () => {
+                const appSettingsSaved = await trackResult('appSettings', async () => {
+                    settings.home_page_mode = 'minimal';
                     await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 });
                 invalidateSettingsCache();
+                if (appSettingsSaved) {
+                    appStore.set('homePageMode', 'minimal');
+                    setHomeModeUI('minimal');
+                }
 
                 // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
                 const proxyContainer = document.getElementById('proxies-list');
