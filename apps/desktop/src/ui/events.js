@@ -209,6 +209,7 @@ export const Events = Object.freeze({
     CONFIG_UPDATED: 'config-updated',
     CORE_RESTARTED: 'core-restarted',
     RULES_CHANGED: 'rules-changed',
+    TRAFFIC_UPDATE: 'traffic-update',
     CONNECTIONS_FLUSHED: 'connections-flushed',
     TRAY_MENU_UPDATE: 'tray-menu-update',
     NOTIFICATION: 'notification',
