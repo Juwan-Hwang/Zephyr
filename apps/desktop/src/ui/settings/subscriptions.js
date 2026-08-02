@@ -20,6 +20,7 @@ import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showModal, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
+import { Bus, Events } from '../events.js';
 import { formatFileSize } from '../../utils/format.js';
 import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
@@ -1439,10 +1440,18 @@ export function initSubscriptionSettings({
     // Initial render
     renderConfigs();
 
+    // Auto-refresh when config changes (e.g. subscription switch from console)
+    const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, () => {
+        invalidateSettingsCache();
+        invalidateConfigsCache();
+        renderConfigs().catch((e) => rulesLogger.warn('[settings] renderConfigs failed after CONFIG_UPDATED', e));
+    });
+
     // Set module-level reference for use by showEditPanel
     moduleRenderConfigs = renderConfigs;
 
     return {
         renderConfigs,
+        destroy: () => { _configUpdatedUnsub(); },
     };
 }

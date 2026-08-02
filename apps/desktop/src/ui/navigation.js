@@ -7,6 +7,7 @@
  */
 
 import { setup3DEffect } from './3d-effect.js';
+import { appStore } from './state.js';
 
 /**
  * Switch the visible page by pageId.
@@ -51,6 +52,8 @@ const leaveTimeouts = new WeakMap();
  * @param {Function} [callbacks.onLogs] - Called when navigating to logs page
  * @param {Function} [callbacks.onLeaveLogs] - Called when navigating away from logs page
  * @param {Function} [callbacks.onLeaveProxies] - Called when navigating away from proxies page
+ * @param {Function} [callbacks.onConsole] - Called when navigating to console page
+ * @param {Function} [callbacks.onLeaveConsole] - Called when navigating away from console page
  */
 export function initNavigation(callbacks = {}) {
     const navItems = document.querySelectorAll('[data-nav]');
@@ -59,11 +62,25 @@ export function initNavigation(callbacks = {}) {
     setup3DEffect(navItems);
 
     /** @type {string|null} Track the current page for leave callbacks */
+    // Detect which page is initially visible (main.js may have already switched to console)
     let currentPage = null;
+    const initialVisible = document.querySelector('[data-page]:not(.hidden)');
+    if (initialVisible) {
+        const initialPage = /** @type {HTMLElement} */ (initialVisible).dataset.page ?? null;
+        // If console mode redirected home→console, treat it as 'console' not 'home'
+        currentPage = (initialPage === 'home' && appStore.get('homePageMode') === 'console')
+            ? 'console'
+            : initialPage;
+    }
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {
-            const targetPage = item.getAttribute('data-nav');
+            let targetPage = /** @type {HTMLElement} */ (item).dataset.nav ?? null;
+
+            // Redirect 'home' to 'console' when console mode is enabled
+            if (targetPage === 'home' && appStore.get('homePageMode') === 'console') {
+                targetPage = 'console';
+            }
 
             // Fire leave callback for the previous page
             if (currentPage === 'logs' && targetPage !== 'logs' && callbacks.onLeaveLogs) {
@@ -71,6 +88,9 @@ export function initNavigation(callbacks = {}) {
             }
             if (currentPage === 'proxies' && targetPage !== 'proxies' && callbacks.onLeaveProxies) {
                 callbacks.onLeaveProxies();
+            }
+            if (currentPage === 'console' && targetPage !== 'console' && callbacks.onLeaveConsole) {
+                callbacks.onLeaveConsole();
             }
 
             // Update nav item active styling — visual (UnoCSS) + animation (is-active/is-leaving)
@@ -111,6 +131,8 @@ export function initNavigation(callbacks = {}) {
                 callbacks.onAdvanced();
             } else if (targetPage === 'home' && callbacks.onHome) {
                 callbacks.onHome();
+            } else if (targetPage === 'console' && callbacks.onConsole) {
+                callbacks.onConsole();
             } else if (targetPage === 'rule-library' && callbacks.onRuleLibrary) {
                 callbacks.onRuleLibrary();
             } else if (targetPage === 'connections' && callbacks.onConnections) {
