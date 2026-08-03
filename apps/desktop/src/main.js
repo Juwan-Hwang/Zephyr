@@ -66,6 +66,7 @@ import { initNavigation } from './ui/navigation.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
+import { initConsoleHome, activateConsole, deactivateConsole } from './ui/console-home.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
 import { initNodeWheel } from './ui/node-wheel.js';
@@ -254,6 +255,25 @@ async function initApp() {
       document.documentElement.style.setProperty('--ui-scale', String(settings.ui_scale));
     }
 
+    // Set home page mode and apply initial page visibility BEFORE any UI renders.
+    // This prevents the flash of the minimal home page when console mode is enabled.
+    const homePageMode = settings.home_page_mode || 'minimal';
+    appStore.set('homePageMode', homePageMode);
+    if (homePageMode === 'console') {
+      // Hide minimal home, show console page immediately
+      const homePage = document.querySelector('[data-page="home"]');
+      const consolePage = document.querySelector('[data-page="console"]');
+      const glowHome = document.getElementById('glow-home');
+      const glowConsole = document.getElementById('glow-console');
+      homePage?.classList.add('hidden');
+      consolePage?.classList.remove('hidden');
+      glowHome?.classList.add('hidden');
+      glowConsole?.classList.remove('hidden');
+      // Initialize console DOM early so content exists before rendering.
+      // activateConsole() is called later in step 8b after the core is started.
+      try { initConsoleHome(); } catch (err) { apiLogger.warn('Early console init failed', err); }
+    }
+
     const tStartCore = performance.now();
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
@@ -335,6 +355,8 @@ async function initApp() {
     onProxies: () => { renderProxies(); },
     onAdvanced: () => { import('./ui/advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {}); },
     onHome: () => { updateSysProxyUI(); },
+    onConsole: () => { activateConsole(); },
+    onLeaveConsole: () => { deactivateConsole(); },
     onRuleLibrary: () => { import('./ui/rule-library.js').then(m => m.initRuleLibraryPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
@@ -405,7 +427,20 @@ async function initApp() {
     apiLogger.warn('Initial sync failed', err);
   }
 
-  // 8b. Auto-check for updates on startup if enabled
+  // 8b. Activate console home page (if enabled)
+  try {
+    if (appStore.get('homePageMode') === 'console') {
+      // initConsoleHome() is idempotent (guarded by isInitialized).
+      // If console mode was enabled, it was already called during step 5;
+      // this call is a no-op safety net.
+      initConsoleHome();
+      activateConsole();
+    }
+  } catch (err) {
+    apiLogger.warn('Failed to init console home', err);
+  }
+
+  // 8c. Auto-check for updates on startup if enabled
   setTimeout(async () => {
     try {
       const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -458,7 +493,12 @@ async function initApp() {
 
   // 9. Traffic WebSocket
   _trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
-    updateTrafficData(data);
+    // Skip the minimal-home traffic pipeline when console mode is active -
+    // the console dashboard subscribes to TRAFFIC_UPDATE directly.
+    if (appStore.get('homePageMode') !== 'console') {
+      updateTrafficData(data);
+    }
+    Bus.emit(Events.TRAFFIC_UPDATE, data);
   });
 
   // 9b. Reconnect traffic stream when core restarts

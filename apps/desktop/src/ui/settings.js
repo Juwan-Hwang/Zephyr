@@ -917,12 +917,14 @@ export async function initSettings() {
 
     // ---- Subscription & Config management (delegated to settings/subscriptions.js) ----
     // Initialized early so renderConfigs is available for language dropdown and drag-drop listeners.
-    const subApi = initSubscriptionSettings({
-        subAddBtn: document.getElementById('add-sub-btn'),
-        updateAllSubBtn: document.getElementById('update-all-sub-btn'),
-        configsList,
-    });
-    const renderConfigs = subApi.renderConfigs;
+const subApi = initSubscriptionSettings({
+subAddBtn: document.getElementById('add-sub-btn'),
+updateAllSubBtn: document.getElementById('update-all-sub-btn'),
+configsList,
+});
+const renderConfigs = subApi.renderConfigs;
+/** Store destroy for cleanup during settings reset/teardown. */
+const _destroySubscriptionSettings = subApi.destroy;
 
     // ---- Advanced settings navigation ----
     if (gotoAdvancedBtn) {
@@ -1069,6 +1071,49 @@ export async function initSettings() {
     if (settings.ui_scale && settings.ui_scale > 0) {
         applyUiScale(settings.ui_scale);
     }
+
+    // ---- Home page mode ----
+    const homeModeSlider = document.getElementById('setting-home-mode-slider');
+    const homeModeButtons = document.querySelectorAll('[data-home-mode]');
+    /** @param {string} mode */
+    const setHomeModeUI = (mode) => {
+        const isConsole = mode === 'console';
+        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(100%)' : 'translateX(0)';
+        homeModeButtons.forEach((btn) => {
+            const btnMode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            const isSelected = btnMode === mode;
+            btn.setAttribute('aria-pressed', String(isSelected));
+            if (isSelected) {
+                btn.classList.remove('text-[var(--text-secondary)]');
+                btn.classList.add('text-[var(--text-primary)]');
+            } else {
+                btn.classList.add('text-[var(--text-secondary)]');
+                btn.classList.remove('text-[var(--text-primary)]');
+            }
+        });
+    };
+    const savedHomePageMode = settings.home_page_mode || 'minimal';
+    setHomeModeUI(savedHomePageMode);
+    homeModeButtons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const mode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
+            if (!mode) return;
+            const previous = appStore.get('homePageMode') || 'minimal';
+            if (mode === previous) return; // no-op: skip network round trip
+            // Optimistically update UI, revert on failure
+            setHomeModeUI(mode);
+            appStore.set('homePageMode', mode);
+            try {
+                await invoke(COMMANDS.PATCH_SETTINGS, { patch: { home_page_mode: mode } });
+                invalidateSettingsCache();
+            } catch (err) {
+                settingsLogger.error('Failed to save home_page_mode', err);
+                setHomeModeUI(previous);
+                appStore.set('homePageMode', previous);
+                showNotification(toError(err).message, 'error');
+            }
+        });
+    });
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
@@ -1250,10 +1295,15 @@ export async function initSettings() {
                 }
                 successItems.push('themeColor');
 
-                await trackResult('appSettings', async () => {
+                const appSettingsSaved = await trackResult('appSettings', async () => {
+                    settings.home_page_mode = 'minimal';
                     await invoke(COMMANDS.SAVE_SETTINGS, { settings });
                 });
                 invalidateSettingsCache();
+                if (appSettingsSaved) {
+                    appStore.set('homePageMode', 'minimal');
+                    setHomeModeUI('minimal');
+                }
 
                 // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
                 const proxyContainer = document.getElementById('proxies-list');
