@@ -62,10 +62,11 @@ import * as prism from './ui/prism.js';
 import { showNotification } from './ui/notifications.js';
 import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
-import { initNavigation } from './ui/navigation.js';
+import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
+import { initConsoleHome, activateConsole, deactivateConsole } from './ui/console-home.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
 import { initNodeWheel } from './ui/node-wheel.js';
@@ -254,6 +255,18 @@ async function initApp() {
       document.documentElement.style.setProperty('--ui-scale', String(settings.ui_scale));
     }
 
+    // Set home page mode and apply initial page visibility BEFORE any UI renders.
+    // This prevents the flash of the minimal home page when console mode is enabled.
+    const homePageMode = settings.home_page_mode || 'minimal';
+    appStore.set('homePageMode', homePageMode);
+    if (homePageMode === 'console') {
+      // Use switchPage() to toggle page + glow visibility consistently
+      switchPage('console');
+      // Initialize console DOM early so content exists before rendering.
+      // activateConsole() is called later in step 8b after the core is started.
+      try { initConsoleHome(); } catch (err) { apiLogger.warn('Early console init failed', err); }
+    }
+
     const tStartCore = performance.now();
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
@@ -335,6 +348,8 @@ async function initApp() {
     onProxies: () => { renderProxies(); },
     onAdvanced: () => { import('./ui/advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {}); },
     onHome: () => { updateSysProxyUI(); },
+    onConsole: () => { activateConsole(); },
+    onLeaveConsole: () => { deactivateConsole(); },
     onRuleLibrary: () => { import('./ui/rule-library.js').then(m => m.initRuleLibraryPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
@@ -405,7 +420,24 @@ async function initApp() {
     apiLogger.warn('Initial sync failed', err);
   }
 
-  // 8b. Auto-check for updates on startup if enabled
+  // 8b. Activate console home page (if enabled and still visible)
+  try {
+    if (appStore.get('homePageMode') === 'console') {
+      const consolePage = document.querySelector('[data-page="console"]');
+      const isConsoleVisible = consolePage && !consolePage.classList.contains('hidden');
+      // initConsoleHome() is idempotent (guarded by isInitialized).
+      initConsoleHome();
+      // Only activate if the console page is still visible - the user may
+      // have navigated to another page during the async startup steps.
+      if (isConsoleVisible) {
+        activateConsole();
+      }
+    }
+  } catch (err) {
+    apiLogger.warn('Failed to init console home', err);
+  }
+
+  // 8c. Auto-check for updates on startup if enabled
   setTimeout(async () => {
     try {
       const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -458,13 +490,38 @@ async function initApp() {
 
   // 9. Traffic WebSocket
   _trafficWsHandle = connectTraffic((/** @type {any} */ data) => {
-    updateTrafficData(data);
+    // Skip the minimal-home traffic pipeline when console mode is active -
+    // the console dashboard subscribes to TRAFFIC_UPDATE directly.
+    if (appStore.get('homePageMode') !== 'console') {
+      updateTrafficData(data);
+    }
+    Bus.emit(Events.TRAFFIC_UPDATE, data);
   });
 
   // 9b. Reconnect traffic stream when core restarts
   const _unsubCoreRestarted = Bus.on(Events.CORE_RESTARTED, () => {
     if (_trafficWsHandle) {
       _trafficWsHandle.reconnect();
+    }
+  });
+
+  // 10b. Apply home page mode changes immediately when the user toggles
+  //      the setting, so the visible page switches without requiring a
+  //      manual navigation away and back.
+  const _unsubHomePageMode = Bus.on(Events.HOME_PAGE_MODE_CHANGED, (/** @type {{ mode?: string, previous?: string }} */ { mode } = {}) => {
+    if (!mode) return;
+    // Only switch if the home or console page is currently visible.
+    const homePage = document.querySelector('[data-page="home"]');
+    const consolePage = document.querySelector('[data-page="console"]');
+    const isHomeVisible = homePage && !homePage.classList.contains('hidden');
+    const isConsoleVisible = consolePage && !consolePage.classList.contains('hidden');
+    if (!isHomeVisible && !isConsoleVisible) return;
+
+    if (mode === 'console') {
+      try { initConsoleHome(); } catch (err) { apiLogger.warn('Console init failed on mode switch', err); }
+      navigateTo('console');
+    } else {
+      navigateTo('home');
     }
   });
 
@@ -477,6 +534,9 @@ async function initApp() {
   });
   registerCleanup(() => {
     _unsubCoreRestarted();
+  });
+  registerCleanup(() => {
+    _unsubHomePageMode();
   });
   registerCleanup(() => {
     if (_trafficWsHandle) {
