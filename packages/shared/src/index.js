@@ -17,6 +17,7 @@ export const CORE = Object.freeze({
     START_CORE: "start_core",
     STOP_CORE: "stop_core",
     GET_CORE_VERSION: "get_core_version",
+    GET_CORE_UPTIME: "get_core_uptime",
     READ_CONFIG: "read_config",
     UPDATE_CONFIG: "update_config",
     READ_LOG: "read_core_log",
