@@ -561,7 +561,7 @@ export function initSubscriptionSettings({
 
         // Flow array: profile: [a, b]
         if (rest.startsWith('[')) {
-            const items = rest.replace(/,\s*$/, '').slice(1, -1).split(',').map(/** @type {string} */ s => s.trim()).filter(Boolean);
+            const items = rest.replace(/,\s*$/, '').slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
             return { items, startLine: profileLineIdx, endLine: profileLineIdx, indent };
         }
 
@@ -678,7 +678,7 @@ export function initSubscriptionSettings({
             if (!parsed) continue;
 
             // Already present?
-            if (parsed.items.some(/** @type {string} */ item => item.toLowerCase() === lowerName)) {
+            if (parsed.items.some(item => item.toLowerCase() === lowerName)) {
                 return content;
             }
 
@@ -707,7 +707,7 @@ export function initSubscriptionSettings({
             const parsed = parseProfileBlock(lines, i);
             if (!parsed) continue;
 
-            const filtered = parsed.items.filter(/** @type {string} */ item => item.toLowerCase() !== lowerName);
+            const filtered = parsed.items.filter(item => item.toLowerCase() !== lowerName);
 
             let newLines;
             if (filtered.length === 0) {
