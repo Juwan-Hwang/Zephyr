@@ -170,7 +170,7 @@ async function renderRulesList(searchQuery = '') {
         const policy = parts[2] || 'Proxy';
 
         const item = document.createElement('div');
-        item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
+        item.className = 'glass-card p-4 flex items-center justify-between group rtl-slide transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
 
         // Mark Prism-managed rules with a visual indicator
         const isPrismManaged = await isPrismRule(index);
@@ -187,7 +187,7 @@ async function renderRulesList(searchQuery = '') {
                 <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
             </div>
             <div class="flex items-center gap-2">
-                <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
+                <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider me-2">${escapeHtml(policy)}</div>
 
                 <button type="button" class="btn-move-top-rule opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color]" title="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}" aria-label="${escapeAttr(/** @type {any} */ (translations)[currentLang]?.moveToTop || 'Move to Top')}">
                     ${SVG_ICONS.arrowUp}
