@@ -99,7 +99,7 @@ export async function pluginCheckPermission(pluginId, permission) {
 /** Execute a script against the running config.
  *  @param {string} script - JavaScript source code
  *  @param {string} scriptName - Name for logging
- *  @returns {Promise<{logs: Array, duration_us: number, success: boolean, error: string|null, patches: Array}>}
+ *  @returns {Promise<{logs: Array<{level: string, message: string}>, duration_us: number, success: boolean, error: string|null}>}
  */
 export async function scriptExecute(script, scriptName) {
     return invoke(COMMANDS.SCRIPT.EXECUTE, { script, scriptName });
