@@ -48,7 +48,7 @@ const _wsState = Object.seal({ secret: '' });
 /** @type {string} */
 let wsBaseUrl = 'ws://127.0.0.1:9090';
 
-/** @type {ConnectionState} */
+/** @type {typeof ConnectionState[keyof typeof ConnectionState]} */
 let _connectionState = ConnectionState.DISCONNECTED;
 
 /** @type {{close: Function, reconnect: Function, isMaxRetriesReached: Function} | null} */
@@ -134,7 +134,7 @@ export function isTrafficConnected() {
 /**
  * Read-only snapshot of the current connection state.
  *
- * @returns {ConnectionState}
+ * @returns {typeof ConnectionState[keyof typeof ConnectionState]}
  */
 export function getConnectionState() {
   return _connectionState;
@@ -159,7 +159,7 @@ function formatSpeed(bytes) {
 /**
  * Transition the global connection state and log the change.
  *
- * @param {ConnectionState} newState
+ * @param {typeof ConnectionState[keyof typeof ConnectionState]} newState
  */
 function setState(newState) {
   if (_connectionState === newState) return;
