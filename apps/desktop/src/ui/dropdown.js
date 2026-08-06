@@ -70,6 +70,7 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             isPortalActive = false;
             menu.style.position = '';
             menu.style.left = '';
+            menu.style.insetInlineStart = '';
             menu.style.top = '';
             menu.style.width = '';
             menu.style.zIndex = '';

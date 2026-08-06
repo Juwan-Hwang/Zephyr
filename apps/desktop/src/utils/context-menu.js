@@ -47,7 +47,7 @@ export function createContextMenuContainer(e) {
 
     const menu = document.createElement('div');
     menu.className = `${ROOT_CLASS} fixed z-[9999] min-w-[180px] max-w-[320px] max-h-[60vh] overflow-hidden shadow-xl border border-[var(--zephyr-border-default)] rounded-lg glass-card`;
-    menu.style.left = `${e.clientX / uiScale}px`;
+    menu.style.insetInlineStart = `${e.clientX / uiScale}px`;
     menu.style.top = `${e.clientY / uiScale}px`;
 
     // Inner scroll wrapper so scrollbar is clipped by outer border-radius
@@ -69,8 +69,10 @@ export function attachContextMenuCloseHandlers(menu) {
     requestAnimationFrame(() => {
         const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
         const rect = menu.getBoundingClientRect();
-        if (rect.right > window.innerWidth) {
-            menu.style.left = `${(window.innerWidth - rect.width - 8) / uiScale}px`;
+        const isRTL = document.documentElement.dir === 'rtl';
+        if (isRTL ? rect.left < 0 : rect.right > window.innerWidth) {
+            menu.style.insetInlineStart = 'auto';
+            menu.style.insetInlineEnd = `${8 / uiScale}px`;
         }
         if (rect.bottom > window.innerHeight) {
             menu.style.top = `${(window.innerHeight - rect.height - 8) / uiScale}px`;
@@ -146,7 +148,7 @@ export function showContextMenu(e, items) {
 
         // Standard button item
         const btn = document.createElement('button');
-        btn.className = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] transition-colors text-left';
+        btn.className = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] transition-colors text-start';
         const iconHtml = item.icon ? '<span class="w-4 shrink-0">' + sanitizeHtml(item.icon) + '</span>' : '';
         // eslint-disable-next-line no-unsanitized/property -- label escaped, icon sanitized
         btn.innerHTML = iconHtml + '<span>' + escapeHtml(item.label || '') + '</span>'; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
