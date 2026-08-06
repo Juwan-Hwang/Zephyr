@@ -6,6 +6,9 @@ import {
     setQAMode,
     isQAMode,
     getLocAttributes,
+    getDirection,
+    getRTLSign,
+    setHTMLAttributes,
     mapStatusMessage,
 } from './i18n.js';
 
@@ -88,6 +91,10 @@ describe('isRTL', () => {
     it('ja is not RTL', () => expect(isRTL('ja')).toBe(false));
     it('ko is not RTL', () => expect(isRTL('ko')).toBe(false));
     it('unknown is not RTL', () => expect(isRTL('fr')).toBe(false));
+    it('ar-SA is RTL (BCP-47 region tag)', () => expect(isRTL('ar-SA')).toBe(true));
+    it('he-IL is RTL (BCP-47 region tag)', () => expect(isRTL('he-IL')).toBe(true));
+    it('arm is not RTL (3-letter code, not "ar")', () => expect(isRTL('arm')).toBe(false));
+    it('art-x-fi is not RTL (3-letter primary subtag)', () => expect(isRTL('art-x-fi')).toBe(false));
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -120,6 +127,49 @@ describe('getLocAttributes', () => {
     it('returns only dir and lang properties', () => {
         const attrs = getLocAttributes('en-US');
         expect(Object.keys(attrs).sort()).toEqual(['dir', 'lang']);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  getDirection & getRTLSign
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('getDirection', () => {
+    afterEach(() => {
+        document.documentElement.removeAttribute('dir');
+        document.documentElement.removeAttribute('lang');
+    });
+
+    it('returns "ltr" when dir is not set', () => {
+        document.documentElement.removeAttribute('dir');
+        expect(getDirection()).toBe('ltr');
+    });
+
+    it('returns "ltr" for LTR languages', () => {
+        setHTMLAttributes('en');
+        expect(getDirection()).toBe('ltr');
+    });
+
+    it('returns "rtl" for RTL languages', () => {
+        setHTMLAttributes('ar');
+        expect(getDirection()).toBe('rtl');
+    });
+});
+
+describe('getRTLSign', () => {
+    afterEach(() => {
+        document.documentElement.removeAttribute('dir');
+        document.documentElement.removeAttribute('lang');
+    });
+
+    it('returns 1 for LTR', () => {
+        setHTMLAttributes('en');
+        expect(getRTLSign()).toBe(1);
+    });
+
+    it('returns -1 for RTL', () => {
+        setHTMLAttributes('ar');
+        expect(getRTLSign()).toBe(-1);
     });
 });
 

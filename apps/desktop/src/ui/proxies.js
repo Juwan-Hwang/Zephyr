@@ -12,7 +12,7 @@ import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
 import { debounce } from '../utils/debounce.js';
-import { translations, currentLang, t } from '../i18n.js';
+import { translations, currentLang, t, getDirection } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
@@ -409,7 +409,7 @@ function setActiveNode(card, _container) {
 
     if (!card.querySelector('.active-dot')) {
         const activeDot = document.createElement('div');
-        activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
+        activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
         card.appendChild(activeDot);
     }
 
@@ -510,7 +510,7 @@ function updateModeUI(mode) {
     const idx = modes.indexOf(mode.toLowerCase());
 
     if (idx !== -1 && slider) {
-        slider.style.transform = `translateX(${idx * 100}%)`;
+        slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
         buttons.forEach((b, i) => {
             if (i === idx) {
                 b.classList.add('text-[var(--text-primary)]');
@@ -1080,7 +1080,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Dismiss button
     const dismiss = document.createElement('button');
-    dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ml-2 flex-shrink-0';
+    dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ms-2 flex-shrink-0';
      
     dismiss.textContent = '\u00D7';
     dismiss.title = t('dismiss');
@@ -1148,7 +1148,7 @@ function renderGroupSelector(groups, currentGroup) {
     groups.forEach(groupName => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'proxy-group-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
+        btn.className = 'proxy-group-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         if (groupName === currentGroup) {
             btn.classList.add('active');
         }
@@ -1209,7 +1209,10 @@ function renderGroupSelector(groups, currentGroup) {
                 // Position the fixed menu below the trigger
                 const rect = trigger.getBoundingClientRect();
                 const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
-                menu.style.left = (rect.left / uiScale) + 'px';
+                const isRTL = getDirection() === 'rtl';
+                const inlineStart = isRTL ? (window.innerWidth - rect.right) : rect.left;
+                menu.style.insetInlineStart = (inlineStart / uiScale) + 'px';
+                menu.style.insetInlineEnd = 'auto';
                 menu.style.top = ((rect.bottom + 6) / uiScale) + 'px';
                 menu.style.width = (Math.max(rect.width, 160) / uiScale) + 'px';
                 menu.classList.remove('hidden');
@@ -1580,7 +1583,7 @@ async function updateProxiesInPlace(container, proxies, data, current) {
                 card.classList.remove(INACTIVE_HOVER_CLASS);
                 if (!card.querySelector('.active-dot')) {
                     const activeDot = document.createElement('div');
-                    activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
+                    activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
                     card.appendChild(activeDot);
                 }
             } else {
@@ -1733,7 +1736,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
 
         if (isSelected) {
             const activeDot = document.createElement('div');
-            activeDot.className = 'active-dot absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
+            activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
             card.appendChild(activeDot);
         }
 
@@ -1742,7 +1745,7 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
         // Smart score badge (between title and UDP rows, only visible when smart mode is enabled)
         // Use absolute positioning with fixed pixel value for consistent cross-system placement
         const scoreBadge = document.createElement('div');
-        scoreBadge.className = 'score-badge absolute left-4 top-[40px] text-center text-2xs tabular-nums font-bold';
+        scoreBadge.className = 'score-badge absolute start-4 top-[40px] text-center text-2xs tabular-nums font-bold';
         scoreBadge.setAttribute('data-score-badge', 'true');
         scoreBadge.textContent = '--';
         card.appendChild(scoreBadge);
