@@ -1637,7 +1637,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
         let latFromWrapper = null;
-        if ((/** @type {HTMLElement} */ (wrapper)).dataset.latency) latFromWrapper = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.latency, 10);
+        const _latency = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
+        if (_latency) latFromWrapper = parseInt(_latency, 10);
 
         const isPending = (/** @type {HTMLElement} */ (wrapper)).dataset.pending === '1';
 

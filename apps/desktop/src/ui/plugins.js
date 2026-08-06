@@ -1443,7 +1443,7 @@ function openFullscreenEditor() {
     setupFullscreenEditorStatus();
 
     // Focus editor
-    /** @type {{focus: function(): void}} */ (/** @type {unknown} */ (fullscreenEditorView)).focus();
+    (/** @type {{focus: () => void}} */ (/** @type {unknown} */ (fullscreenEditorView))).focus();
 
     // Clear output
     clearFullscreenOutput();
