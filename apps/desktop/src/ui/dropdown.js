@@ -44,6 +44,8 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         // are in the container's coordinate space. Divide by ui-scale to compensate.
         const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
         menu.style.position = 'fixed';
+        menu.style.insetInlineStart = 'auto';
+        menu.style.insetInlineEnd = 'auto';
         menu.style.left = `${rect.left / uiScale}px`;
         menu.style.top = `${(rect.bottom + 6) / uiScale}px`;
         menu.style.width = `${rect.width / uiScale}px`;
@@ -70,6 +72,8 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             isPortalActive = false;
             menu.style.position = '';
             menu.style.left = '';
+            menu.style.insetInlineStart = '';
+            menu.style.insetInlineEnd = '';
             menu.style.top = '';
             menu.style.width = '';
             menu.style.zIndex = '';

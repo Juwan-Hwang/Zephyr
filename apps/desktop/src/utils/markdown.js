@@ -62,7 +62,7 @@ export function markdownToHtml(md) {
     html = html.replace(/^# (.+)$/gm, (_, t) => `<h2 class="text-lg font-bold text-[var(--text-primary)] mt-5 mb-2">${t}</h2>`);
 
     // 5. Blockquotes
-    html = html.replace(/^&gt; (.+)$/gm, (_, t) => `<blockquote class="border-l-2 border-accent/40 pl-3 my-2 text-xs text-[var(--text-secondary)] italic">${t}</blockquote>`);
+    html = html.replace(/^&gt; (.+)$/gm, (_, t) => `<blockquote class="border-s-2 border-accent/40 ps-3 my-2 text-xs text-[var(--text-secondary)] italic">${t}</blockquote>`);
 
     // 6. Bold (before italic to avoid ** being partially consumed)
     html = html.replace(/\*\*(.+?)\*\*/g, (_, t) => `<strong class="font-semibold text-[var(--text-primary)]">${t}</strong>`);
@@ -96,11 +96,11 @@ export function markdownToHtml(md) {
     });
 
     // 12. Unordered lists
-    html = html.replace(/^(\s*)[-*] (.+)$/gm, (_, indent, t) => `${indent}<li class="ml-4 list-disc text-xs text-[var(--text-secondary)] leading-relaxed py-0.5">${t}</li>`);
+    html = html.replace(/^(\s*)[-*] (.+)$/gm, (_, indent, t) => `${indent}<li class="ms-4 list-disc text-xs text-[var(--text-secondary)] leading-relaxed py-0.5">${t}</li>`);
     html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="my-3 space-y-2">$1</ul>');
 
     // 13. Ordered lists
-    html = html.replace(/^\d+\. (.+)$/gm, (_, t) => `<li class="ml-4 list-decimal text-xs text-[var(--text-secondary)] leading-relaxed py-0.5">${t}</li>`);
+    html = html.replace(/^\d+\. (.+)$/gm, (_, t) => `<li class="ms-4 list-decimal text-xs text-[var(--text-secondary)] leading-relaxed py-0.5">${t}</li>`);
 
     // 14. Paragraphs: wrap remaining loose lines that aren't already HTML tags or code block placeholders
     html = html.replace(/^(?!\s*<[a-z/]|\s*\x00CODEBLOCK)(.*\S.*)$/gm, (_, t) => `<p class="text-xs text-[var(--text-secondary)] leading-relaxed my-2">${t}</p>`);
