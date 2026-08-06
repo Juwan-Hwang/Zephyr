@@ -346,7 +346,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     `;
 
     const dropdownMenu = document.createElement('div');
-    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
+    dropdownMenu.className = 'shortcut-dropdown-menu hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30';
 
     const menuScroll = document.createElement('div');
     menuScroll.className = 'menu-scroll max-h-[200px]';
@@ -362,7 +362,7 @@ function addShortcutRow(t, actionId, existingAccelerator) {
         const opt = document.createElement('button');
         opt.type = 'button';
         opt.dataset.value = actionDef.id;
-        opt.className = 'dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
+        opt.className = 'dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         if (actionDef.id === actionId) opt.classList.add('active');
         opt.textContent = getActionLabel(actionDef.id, t);
         opt.addEventListener('click', () => {

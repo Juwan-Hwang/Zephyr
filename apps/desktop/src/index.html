@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="bg-transparent h-screen w-screen overflow-hidden">
+<html lang="zh-CN" dir="ltr" class="bg-transparent h-screen w-screen overflow-hidden">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,12 +20,12 @@
         <!-- Page Background Glows (shared layer, above sidebar but below content) -->
         <div id="glow-home" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0"></div>
         <div id="glow-console" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-subscriptions" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-proxies" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-connections" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-rule-library" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
-        <div id="glow-logs" class="absolute top-[6%] right-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-settings" class="absolute top-[6%] left-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-subscriptions" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-proxies" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-connections" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-logs" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
         <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
 
         <!-- Sidebar -->
@@ -90,7 +90,7 @@
 
                 <div class="flex flex-col items-center justify-center py-12 relative z-10">
                     <!-- Current Node Display (Interactive Wheel) -->
-                    <div id="node-wheel-container" class="absolute top-0 left-0 right-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-2">
+                    <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-2">
                         <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false">
                             <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
                             <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold tracking-wide truncate max-w-[280px]">Loading...</span>
@@ -161,7 +161,7 @@
                             <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="mode">Proxy Mode</h3>
                         </div>
                         <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
-                            <div id="mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                            <div id="mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
                             <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="rule">Rule</button>
                             <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="global">Global</button>
                             <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="direct">Direct</button>
@@ -182,7 +182,7 @@
     <span class="switch-slider"></span>
 </label>
                         </div>
-                        <div class="mt-auto pl-1 flex items-center gap-2">
+                        <div class="mt-auto ps-1 flex items-center gap-2">
                             <div id="tun-spinner" class="hidden w-2.5 h-2.5 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
                             <p class="text-2xs text-[var(--text-muted)] font-medium transition-colors" id="tun-status-text" data-i18n="virtualAdapter">Virtual Adapter</p>
                         </div>
@@ -240,7 +240,7 @@
                     </div>
                 </header>
 
-                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pr-2 pt-2 -mt-2 -mb-8 custom-scrollbar relative z-10">
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pe-2 pt-2 -mt-2 -mb-8 custom-scrollbar relative z-10">
                     <!-- Subscriptions will be rendered here -->
                 </div>
 
@@ -268,14 +268,14 @@
                                     <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
-                                <div id="plugin-new-dropdown" class="hidden absolute right-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
-                                    <button class="text-xs text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
-                                    <button class="text-xs text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
+                                <div id="plugin-new-dropdown" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
+                                    <button class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
+                                    <button class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
                                     <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button class="text-xs text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
+                                    <button class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
                                     <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button class="text-xs text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
-                                    <button class="text-xs text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
+                                    <button class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
+                                    <button class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
                                 </div>
                             </div>
                             <button id="plugin-enable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideEnableAll">启用全部</button>
@@ -297,7 +297,7 @@
                             <!-- Scrollable content area -->
                             <div id="plugin-script-scroll-area" class="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
                                 <!-- CodeMirror editor -->
-                                <div id="plugin-script-cm6" class="w-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg overflow-hidden" style="height: 240px; min-height: 120px;"></div>
+                                <div id="plugin-script-cm6" data-code-editor class="w-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg overflow-hidden" style="height: 240px; min-height: 120px;"></div>
                                 <!-- Action buttons -->
                                 <div class="flex items-center gap-2 shrink-0">
                                     <button id="plugin-script-validate-btn" class="btn-ghost text-xs" data-i18n="overrideValidate">验证</button>
@@ -306,7 +306,7 @@
                                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
                                         <span data-i18n="overrideFullscreen">全屏</span>
                                     </button>
-                                    <span id="plugin-script-status" class="text-2xs ml-auto"></span>
+                                    <span id="plugin-script-status" class="text-2xs ms-auto"></span>
                                 </div>
                                 <!-- Collapsible output -->
                                 <div id="plugin-script-output-wrap" class="bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg shrink-0">
@@ -384,7 +384,7 @@
                         <button type="button" id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryImport">Import Rules</button>
                     </div>
                 </header>
-                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pr-2 pt-2 -mt-2 -mb-8 space-y-4 relative z-10">
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pe-2 pt-2 -mt-2 -mb-8 space-y-4 relative z-10">
                     <!-- Rendered by rule-library.js -->
                 </div>
             </div>
@@ -398,8 +398,8 @@
 
                     <!-- 1. Appearance -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAppearance">Appearance</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAppearance">Appearance</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Language -->
                             <div class="flex items-center justify-between">
@@ -419,12 +419,12 @@
                                             <path d="m6 9 6 6 6-6"></path>
                                         </svg>
                                     </button>
-                                    <div id="setting-lang-menu" class="hidden absolute right-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                                    <div id="setting-lang-menu" class="hidden absolute end-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                                         <div class="menu-scroll">
-                                            <button type="button" data-lang-value="en" class="setting-lang-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">English</button>
-                                            <button type="button" data-lang-value="zh" class="setting-lang-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">简体中文</button>
-                                            <button type="button" data-lang-value="ja" class="setting-lang-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">日本語</button>
-                                            <button type="button" data-lang-value="ko" class="setting-lang-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">한국어</button>
+                                            <button type="button" data-lang-value="en" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">English</button>
+                                            <button type="button" data-lang-value="zh" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">简体中文</button>
+                                            <button type="button" data-lang-value="ja" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">日本語</button>
+                                            <button type="button" data-lang-value="ko" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">한국어</button>
                                         </div>
                                     </div>
                                     <select id="setting-lang" class="hidden">
@@ -450,7 +450,7 @@
                                     </div>
                                 </div>
                                 <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
                                     <button data-theme-mode="light" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeLight">Light</button>
                                     <button data-theme-mode="auto" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeAuto">Auto</button>
                                     <button data-theme-mode="dark" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeDark">Dark</button>
@@ -537,7 +537,7 @@
                                     </div>
                                 </div>
                                 <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
                                     <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageMinimal">Minimal</button>
                                     <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageConsole">Console</button>
                                 </div>
@@ -547,8 +547,8 @@
 
                     <!-- 2. App Behavior -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAppBehavior">App Behavior</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAppBehaviorDesc">Window lifecycle, startup and runtime behavior</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAppBehavior">App Behavior</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAppBehaviorDesc">Window lifecycle, startup and runtime behavior</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Close Behavior -->
                             <div class="flex items-center justify-between">
@@ -647,8 +647,8 @@
 
                     <!-- 3. Proxy Behavior -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsProxyBehavior">Proxy Behavior</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsProxyBehaviorDesc">How proxy selection, testing and failover work</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsProxyBehavior">Proxy Behavior</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsProxyBehaviorDesc">How proxy selection, testing and failover work</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Unified Delay -->
                             <div class="flex items-center justify-between">
@@ -755,8 +755,8 @@
 
                     <!-- 4. Network -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsNetwork">Network</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsNetworkDesc">Local ports, DNS, LAN access and port forwarding</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsNetwork">Network</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsNetworkDesc">Local ports, DNS, LAN access and port forwarding</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- IPv6 -->
                             <div class="flex items-center justify-between">
@@ -813,7 +813,7 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <p class="text-2xs text-[var(--text-muted)] ml-9" data-i18n="dnsRewriteDesc">Force standard DNS settings to prevent leaks</p>
+                                    <p class="text-2xs text-[var(--text-muted)] ms-9" data-i18n="dnsRewriteDesc">Force standard DNS settings to prevent leaks</p>
                                 </div>
                                 <label class="ios-switch">
     <input type="checkbox" id="dns-rewrite-toggle">
@@ -900,7 +900,7 @@
                                     </div>
                                     <svg class="w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </summary>
-                                <div class="mt-4 pl-9 pr-2">
+                                <div class="mt-4 ps-9 pe-2">
                                     <div class="flex items-center justify-between mb-3">
                                         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="tunnelsList">Rules</span>
                                         <button id="add-tunnel-btn" class="text-xs text-accent hover:text-accent/80 transition-colors" data-i18n="add">Add</button>
@@ -916,8 +916,8 @@
 
                     <!-- 5. Subscription & Rules -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSubscriptionRulesDesc">Subscription download behavior and rule file management</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSubscriptionRulesDesc">Subscription download behavior and rule file management</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Subscription Fake Client -->
                             <div class="flex items-start justify-between flex-col gap-3">
@@ -937,7 +937,7 @@
 </label>
                                 </div>
 
-                                <div id="fake-client-options" class="w-full pl-9 pr-2 transition-all duration-[var(--zephyr-time-standard)] max-h-0 opacity-0 overflow-hidden">
+                                <div id="fake-client-options" class="w-full ps-9 pe-2 transition-all duration-[var(--zephyr-time-standard)] max-h-0 opacity-0 overflow-hidden">
                                     <div class="glass-card p-3 mt-2 space-y-3">
                                         <div>
                                             <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Client Type</label>
@@ -946,13 +946,13 @@
                                                     <span id="fake-client-label">Clash Verge Rev</span>
                                                     <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                                                 </button>
-                                                <div id="fake-client-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                                                <div id="fake-client-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                                                     <div class="menu-scroll">
-                                                        <button type="button" data-value="clash-verge/1.6.0" data-label="Clash Verge Rev" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Clash Verge Rev</button>
-                                                        <button type="button" data-value="mihomo-party/1.0.0" data-label="mihomo-party" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">mihomo-party</button>
-                                                        <button type="button" data-value="Flclash/1.0.0" data-label="Flclash" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Flclash</button>
-                                                        <button type="button" data-value="Shadowrocket/3.0.0" data-label="Shadowrocket" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Shadowrocket</button>
-                                                        <button type="button" data-value="custom" data-label="Custom..." data-i18n="custom" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Custom...</button>
+                                                        <button type="button" data-value="clash-verge/1.6.0" data-label="Clash Verge Rev" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Clash Verge Rev</button>
+                                                        <button type="button" data-value="mihomo-party/1.0.0" data-label="mihomo-party" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">mihomo-party</button>
+                                                        <button type="button" data-value="Flclash/1.0.0" data-label="Flclash" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Flclash</button>
+                                                        <button type="button" data-value="Shadowrocket/3.0.0" data-label="Shadowrocket" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Shadowrocket</button>
+                                                        <button type="button" data-value="custom" data-label="Custom..." data-i18n="custom" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Custom...</button>
                                                     </div>
                                                 </div>
                                                 <select id="fake-client-select" class="hidden">
@@ -1015,8 +1015,8 @@
 
                     <!-- 6. Security & Diagnostics -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSecurityDiagnostics">Security & Diagnostics</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSecurityDiagnosticsDesc">Config encryption and log diagnostics</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSecurityDiagnostics">Security & Diagnostics</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSecurityDiagnosticsDesc">Config encryption and log diagnostics</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Encrypt Configs -->
                             <div class="flex items-center justify-between">
@@ -1063,8 +1063,8 @@
 
                     <!-- 7. Core & Updates -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsCoreUpdates">Core & Updates</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsCoreUpdatesDesc">Core engine, client updates and Geo data maintenance</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsCoreUpdates">Core & Updates</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsCoreUpdatesDesc">Core engine, client updates and Geo data maintenance</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Version Info (Check Updates 行尾低权重) -->
                             <div class="flex items-center justify-between">
@@ -1176,8 +1176,8 @@
 
                     <!-- 8. System & Compatibility -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsSystemCompatibility">System & Compatibility</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsSystemCompatibilityDesc">System integration, platform compatibility and advanced entries</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSystemCompatibility">System & Compatibility</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSystemCompatibilityDesc">System integration, platform compatibility and advanced entries</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Global Shortcuts -->
                             <div class="flex items-center justify-between">
@@ -1219,7 +1219,7 @@
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
                             <!-- Advanced Settings (Drill-in) -->
-                            <button type="button" id="btn-goto-advanced" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-left">
+                            <button type="button" id="btn-goto-advanced" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
                                 <span class="flex items-center gap-4">
                                     <span class="w-10 h-10 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
@@ -1236,11 +1236,11 @@
 
                     <!-- 9. About -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ml-1" data-i18n="settingsAbout">About</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ml-1" data-i18n="settingsAboutDesc">Project links and danger zone</p>
+                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAbout">About</h3>
+                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAboutDesc">Project links and danger zone</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- GitHub Homepage (链接行) -->
-                            <a id="btn-goto-github" href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-left no-underline">
+                            <a id="btn-goto-github" href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start no-underline">
                                 <span class="flex items-center gap-4">
                                     <span class="w-10 h-10 rounded-md bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] group-hover:bg-[var(--zephyr-bg-muted)] group-hover:text-[var(--text-primary)] transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -1255,7 +1255,7 @@
 
                             <!-- Danger Zone: Restore Defaults -->
                             <div class="border-t mt-6 pt-4" style="border-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);">
-                                <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-left">
+                                <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
                                     <span class="flex items-center gap-4">
                                         <span class="w-10 h-10 rounded-md bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 group-hover:bg-red-500/20 transition-colors">
                                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -1313,7 +1313,7 @@
     </div>
 
     <!-- Notifications Container -->
-    <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 right-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
+    <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 end-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
 
     <!-- Modal Background -->
     <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-[var(--zephyr-time-standard)] opacity-0 pointer-events-auto">
@@ -1342,13 +1342,13 @@
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
                     <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
                 </div>
                 
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
                     <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
                 </div>
             </div>
             
@@ -1367,27 +1367,27 @@
 
             <div class="space-y-4">
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
+                    <label for="port-mixed-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
                     <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
+                    <label for="port-socks-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
                     <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
+                    <label for="port-redir-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
                     <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
+                    <label for="port-tproxy-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
                     <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ml-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
                 </div>
             </div>
 
@@ -1409,11 +1409,11 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <button id="fullscreen-editor-validate-btn" class="btn-ghost text-sm">
-                        <svg class="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <svg class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                         <span data-i18n="overrideValidate">验证</span>
                     </button>
                     <button id="fullscreen-editor-run-btn" class="btn-accent text-sm">
-                        <svg class="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+                        <svg class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
                         <span data-i18n="overrideSaveAndRun">保存并执行</span>
                     </button>
                     <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
@@ -1426,7 +1426,7 @@
             <div class="flex-1 flex overflow-hidden">
                 <!-- Main Editor -->
                 <div id="fullscreen-editor-main" class="flex-1 flex flex-col min-w-[300px]" style="flex-basis: 60%;">
-                    <div id="fullscreen-editor-cm6" class="flex-1 w-full overflow-hidden"></div>
+                    <div id="fullscreen-editor-cm6" data-code-editor class="flex-1 w-full overflow-hidden"></div>
                     <!-- Status Bar -->
                     <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
                         <div class="flex items-center gap-4" style="color: var(--text-muted);">
@@ -1438,7 +1438,7 @@
                 </div>
                 <!-- Resizer Handle -->
                 <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--bg-tertiary);">
-                    <div class="absolute inset-y-0 -left-1 -right-1"></div>
+                    <div class="absolute inset-y-0 -start-1 -end-1"></div>
                     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-primary, #6366f1);"></div>
                 </div>
                 <!-- Right Sidebar - Output Panel -->
