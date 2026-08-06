@@ -160,7 +160,7 @@ async function updateStatusBar() {
             else if (isCompiling) stateLabel = t.ruleLibraryStatusCompiling || 'Compiling';
             else stateLabel = t.ruleLibraryStatusReady || 'Ready';
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-            statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} mr-1.5"></span>${escapeHtml(stateLabel)}`;
+            statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full ${dotColor} me-1.5"></span>${escapeHtml(stateLabel)}`;
         }
 
         if (statsEl) {
@@ -171,7 +171,7 @@ async function updateStatusBar() {
     } catch {
         // Fallback to local computation
         if (statusEl) {
-            const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>';
+            const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 me-1.5"></span>';
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
             statusEl.innerHTML = dot + escapeHtml(t.ruleLibraryStatusReady || 'Ready'); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         }
@@ -393,7 +393,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Toggle collapse
     const body = document.createElement('div');
-    body.className = 'space-y-2 pl-2 transition-all duration-[var(--zephyr-time-standard)]';
+    body.className = 'space-y-2 ps-2 transition-all duration-[var(--zephyr-time-standard)]';
     const bodyId = generateDomId('rl-group-body');
     body.id = bodyId;
     header.setAttribute('aria-controls', bodyId);
@@ -426,7 +426,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 function buildFileCard(file, _fileMap) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang] || {});
     const card = document.createElement('div');
-    card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
+    card.className = 'glass-card p-4 flex items-center justify-between group rtl-slide hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
 
     const sourceBadge = getSourceBadge(file.source);
 
@@ -588,7 +588,7 @@ function renderActiveRules(container) {
 
     // Virtual scroll container
     const scrollBox = document.createElement('div');
-    scrollBox.className = 'overflow-y-auto custom-scrollbar pr-1';
+    scrollBox.className = 'overflow-y-auto custom-scrollbar pe-1';
     scrollBox.innerHTML = '<div id="arl-vs-spacer-top" style="height:0"></div><div id="arl-vs-lines" class="space-y-1"></div><div id="arl-vs-spacer-bottom" style="height:0"></div>'; // nosemgrep: js-innerhtml-assignment — static HTML
     ct.appendChild(scrollBox);
 
@@ -676,7 +676,7 @@ function renderActiveRules(container) {
 
                 const el = document.createElement('div');
                 el.setAttribute('data-line-idx', String(idx));
-                el.className = 'glass-card p-3 flex items-center justify-between group hover:translate-x-1 transition-transform duration-[var(--zephyr-time-micro)]';
+                el.className = 'glass-card p-3 flex items-center justify-between group rtl-slide transition-transform duration-[var(--zephyr-time-micro)]';
                 // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 el.innerHTML = `
                     <div class="flex items-center gap-4 flex-1 min-w-0">
@@ -971,7 +971,7 @@ async function handleMoveToGroup(filename) {
 
     // Use a simple modal to pick group
     const optionsHtml = groupNames
-        .map((name, i) => `<button type="button" class="w-full text-left px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg" data-group-index="${i}">${escapeHtml(name)}</button>`)
+        .map((name, i) => `<button type="button" class="w-full text-start px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg" data-group-index="${i}">${escapeHtml(name)}</button>`)
         .join('');
 
     const result = await showModal(
@@ -1100,14 +1100,14 @@ function buildEditorHtml(t) {
                     </button>
                 </div>
             </div>
-            <div id="rl-editor-visual" class="flex-1 min-h-0 overflow-y-auto overflow-x-clip custom-scrollbar pr-1 relative mt-4">
+            <div id="rl-editor-visual" class="flex-1 min-h-0 overflow-y-auto overflow-x-clip custom-scrollbar pe-1 relative mt-4">
                 <div id="rl-vs-spacer-top" style="height:0"></div>
                 <div id="rl-vs-lines" class="space-y-2"></div>
                 <div id="rl-vs-spacer-bottom" style="height:0"></div>
             </div>
             <div id="rl-editor-text" class="hidden flex-1 min-h-0 overflow-y-auto custom-scrollbar mt-4">
                 <textarea id="rl-editor-textarea" class="form-control form-control-mono hidden w-full min-h-full p-4 text-xs resize-none" aria-label="${escapeAttr(t.ruleLibraryRuleEditor || 'Rule Editor')}" spellcheck="false"></textarea>
-                <div id="rl-editor-cm6" class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl overflow-hidden"></div>
+                <div id="rl-editor-cm6" data-code-editor class="w-full min-h-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-default)] rounded-xl overflow-hidden"></div>
             </div>
             <div class="flex items-center justify-end gap-2 pt-3 border-t border-[var(--zephyr-border-subtle)] shrink-0">
                 <button type="button" id="rl-editor-save" class="px-4 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
@@ -1198,7 +1198,7 @@ async function handleEditRule(filename) {
             const isLast = index === rules.length - 1;
 
             const item = document.createElement('div');
-            item.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
+            item.className = 'glass-card p-4 flex items-center justify-between group rtl-slide hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
             item.draggable = true;
             item.style.setProperty('-webkit-user-drag', 'element');
             item.dataset.ruleIndex = String(index);
@@ -1211,7 +1211,7 @@ async function handleEditRule(filename) {
                     <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[240px]">${escapeHtml(value)}</div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider mr-2">${escapeHtml(policy)}</div>
+                    <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider me-2">${escapeHtml(policy)}</div>
                     <button type="button" class="btn-rl-rule-top opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst ? 'invisible' : ''}" title="${escapeAttr(t.moveToTop || 'Move to Top')}" aria-label="${escapeAttr(t.moveToTop || 'Move to Top')}">
                         ${SVG_ICONS.arrowUp}
                     </button>
@@ -1435,7 +1435,7 @@ async function handleViewChanges(filename) {
                     <span class="text-xs text-[var(--text-muted)]">${escapeHtml(filename)}</span>
                     <span class="text-xs text-[var(--text-muted)]">${totalChanges} ${t.ruleLibraryDiffChanges || 'changes'}</span>
                 </div>
-                <div class="space-y-3 overflow-y-auto max-h-[400px] custom-scrollbar pr-1">${diffHtml}</div>
+                <div class="space-y-3 overflow-y-auto max-h-[400px] custom-scrollbar pe-1">${diffHtml}</div>
             </div>
         `;
 
@@ -1656,7 +1656,7 @@ async function handleExtractFromSubscription() {
             .map((/** @type {any} */ p, /** @type {number} */ i) => {
                 const pName = p.name || p.label || p.id || `Profile ${i + 1}`;
                 const pId = p.id || p.name || p;
-                return `<button type="button" class="w-full text-left px-4 py-3 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
+                return `<button type="button" class="w-full text-start px-4 py-3 text-sm text-[var(--text-secondary)] hover:bg-accent/10 hover:text-accent transition-colors rounded-lg flex items-center justify-between group/prof" data-profile-id="${escapeHtml(String(pId))}">
                     <span>${escapeHtml(String(pName))}</span>
                     <span class="text-xs text-[var(--text-muted)]">${escapeHtml(String(pId))}</span>
                 </button>`;

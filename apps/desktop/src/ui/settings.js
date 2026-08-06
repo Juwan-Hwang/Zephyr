@@ -226,7 +226,7 @@ function initCopyEnvSettings() {
                 </div>
                 <div class="space-y-1">
                     ${formats.map(f => `
-                        <button type="button" class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}" aria-pressed="${f.key === currentFormat ? 'true' : 'false'}">
+                        <button type="button" class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-start transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}" aria-pressed="${f.key === currentFormat ? 'true' : 'false'}">
                             <span class="text-xs text-[var(--text-primary)]">${f.label}</span>
                             ${f.key === currentFormat ? '<svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
                         </button>
@@ -592,14 +592,14 @@ function initLogSettingsModal() {
                                 <path d="m6 9 6 6 6-6"></path>
                             </svg>
                         </button>
-                        <div id="log-level-menu" class="hidden absolute left-0 right-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                        <div id="log-level-menu" class="hidden absolute inset-inline-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
-                                <button type="button" data-value="fatal" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">FATAL</button>
-                                <button type="button" data-value="error" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">ERROR</button>
-                                <button type="button" data-value="warn" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">WARN</button>
-                                <button type="button" data-value="info" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">INFO</button>
-                                <button type="button" data-value="debug" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">DEBUG</button>
-                                <button type="button" data-value="trace" class="w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">TRACE</button>
+                                <button type="button" data-value="fatal" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">FATAL</button>
+                                <button type="button" data-value="error" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">ERROR</button>
+                                <button type="button" data-value="warn" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">WARN</button>
+                                <button type="button" data-value="info" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">INFO</button>
+                                <button type="button" data-value="debug" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">DEBUG</button>
+                                <button type="button" data-value="trace" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">TRACE</button>
                             </div>
                         </div>
                         <select id="log-export-level" class="hidden">
@@ -1078,7 +1078,7 @@ export async function initSettings() {
     /** @param {string} mode */
     const setHomeModeUI = (mode) => {
         const isConsole = mode === 'console';
-        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(100%)' : 'translateX(0)';
+        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(calc(var(--rtl-sign, 1) * 100%))' : '';
         homeModeButtons.forEach((btn) => {
             const btnMode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
             const isSelected = btnMode === mode;

@@ -93,7 +93,7 @@ export function updateModeUI(mode) {
     const idx = modes.indexOf(mode.toLowerCase());
 
     if (idx !== -1 && slider) {
-        slider.style.transform = `translateX(${idx * 100}%)`;
+        slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
         buttons.forEach((b, i) => {
             if (i === idx) {
                 b.classList.add('text-[var(--text-primary)]');
