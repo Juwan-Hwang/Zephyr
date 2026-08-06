@@ -78,12 +78,12 @@ const PAGE_HTML = `
     <div class="flex items-center gap-3">
         <!-- Search -->
         <div class="relative group flex items-center">
-            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <div class="absolute inset-y-0 start-0 ps-4 flex items-center pointer-events-none">
                 <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
-            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 pl-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
+            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
         </div>
         <!-- Close All / Clear All Button -->
         <button id="close-all-conns-btn" class="btn-danger">
@@ -131,13 +131,13 @@ const PAGE_HTML = `
         </div>
         <!-- Table Header (clickable for sort) -->
         <div style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.625rem 1rem; user-select:none;" id="conn-table-header">
-            <div class="sortable pl-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
+            <div class="sortable ps-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
             <div class="sortable text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="rule" data-i18n="ruleCol">Rule</div>
-            <div class="sortable text-right pr-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-purple-500/70 uppercase tracking-widest cursor-pointer hover:text-purple-400 transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-purple-500/50 uppercase tracking-widest cursor-pointer hover:text-purple-300 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
-            <div class="sortable text-right pr-1 text-[9px] font-bold text-blue-500/70 uppercase tracking-widest cursor-pointer hover:text-blue-400 transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
-            <div class="sortable text-right pr-2 text-[9px] font-bold text-blue-500/50 uppercase tracking-widest cursor-pointer hover:text-blue-300 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
+            <div class="sortable text-end pe-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-purple-500/70 uppercase tracking-widest cursor-pointer hover:text-purple-400 transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-purple-500/50 uppercase tracking-widest cursor-pointer hover:text-purple-300 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-blue-500/70 uppercase tracking-widest cursor-pointer hover:text-blue-400 transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
+            <div class="sortable text-end pe-2 text-[9px] font-bold text-blue-500/50 uppercase tracking-widest cursor-pointer hover:text-blue-300 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
         </div>
     </div>
     <!-- List Body -->
@@ -728,7 +728,7 @@ function buildConnectionRow(conn, mode) {
     return `
     <div class="conn-row group hover:bg-[var(--zephyr-bg-muted)] transition-[color,border-color] duration-[var(--zephyr-time-micro)] items-center cursor-pointer border border-transparent hover:border-[var(--zephyr-border-subtle)] ${dimClass}" style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:var(--zephyr-radius-surface); align-items:center;" data-conn-id="${id}" data-mode="${mode}">
         <!-- Host + Destination subtitle -->
-        <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding-left:0.25rem;">
+        <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding-inline-start:0.25rem;">
             <span class="text-xs text-[var(--text-primary)] font-medium truncate" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${host}</span>
             ${subtitleHtml}
         </div>
@@ -737,23 +737,23 @@ function buildConnectionRow(conn, mode) {
             <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
         </div>
         <!-- Chains -->
-        <div style="text-align:right; min-width:0;">
-            <span style="font-size:10px; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-left:auto; max-width:100%;">${chains || '-'}</span>
+        <div style="text-align:end; min-width:0;">
+            <span style="font-size:10px; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-inline-start:auto; max-width:100%;">${chains || '-'}</span>
         </div>
         <!-- Download Speed -->
-        <div style="text-align:right; min-width:0; padding-right:0.25rem;">
+        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
             <span style="font-size:10px; color:#c084fc; font-variant-numeric:tabular-nums; line-height:1;">${dlSpeed}</span>
         </div>
         <!-- Download Total -->
-        <div style="text-align:right; min-width:0; padding-right:0.25rem;">
+        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
             <span style="font-size:9px; color:rgba(192,132,252,0.5); font-variant-numeric:tabular-nums; line-height:1;">${dlTotal}</span>
         </div>
         <!-- Upload Speed -->
-        <div style="text-align:right; min-width:0; padding-right:0.25rem;">
+        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
             <span style="font-size:10px; color:#60a5fa; font-variant-numeric:tabular-nums; line-height:1;">${ulSpeed}</span>
         </div>
         <!-- Upload Total -->
-        <div style="text-align:right; min-width:0; padding-right:0.5rem;">
+        <div style="text-align:end; min-width:0; padding-inline-end:0.5rem;">
             <span style="font-size:9px; color:rgba(96,165,250,0.5); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
         </div>
     </div>`;
@@ -829,7 +829,7 @@ function showConnDetail(conn, mode) {
     <div class="glass-card w-full max-w-lg p-6 relative" id="conn-detail-panel">
         <!-- Header -->
         <div class="flex items-start justify-between mb-5">
-            <div class="min-w-0 flex-1 pr-4">
+            <div class="min-w-0 flex-1 pe-4">
                 <h3 class="text-lg font-light text-[var(--text-primary)] truncate">${host}</h3>
                 <p class="text-xs text-[var(--text-secondary)] mt-1 font-mono truncate">${id}</p>
             </div>
@@ -1001,8 +1001,8 @@ function renderDetailRow(label, value, rowId) {
     const idAttr = rowId ? ` id="${rowId}"` : '';
     return `
   <div class="flex items-center justify-between py-1.5 border-b border-[var(--zephyr-border-subtle)] last:border-0">
-    <span class="text-[var(--text-muted)] shrink-0 mr-4">${_esc(label)}</span>
-    <span${idAttr} class="text-[var(--text-secondary)] font-mono text-right truncate min-w-0 tabular-nums">${_esc(value)}</span>
+    <span class="text-[var(--text-muted)] shrink-0 me-4">${_esc(label)}</span>
+    <span${idAttr} class="text-[var(--text-secondary)] font-mono text-end truncate min-w-0 tabular-nums">${_esc(value)}</span>
   </div>`;
 }
 

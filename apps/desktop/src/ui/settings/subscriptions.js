@@ -134,7 +134,7 @@ async function showEditPanel(configInfo) {
 
     // Build dropdown menu items (escape labels for XSS safety)
     const dropdownMenuItems = autoUpdateOptions.map(opt => 
-        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
+        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
     ).join('');
 
     // Determine which UA option is currently selected (prefix match for versioned values)
@@ -148,7 +148,7 @@ async function showEditPanel(configInfo) {
     // Build UA dropdown menu items
     const uaMenuItems = UA_OPTIONS.map(opt => {
         const lbl = uaLabel(opt, t);
-        return `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(lbl)}" class="dropdown-option w-full text-left px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(lbl)}</button>`;
+        return `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(lbl)}" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(lbl)}</button>`;
     }).join('');
 
     // Remove any existing modal to prevent duplicate IDs
@@ -197,7 +197,7 @@ async function showEditPanel(configInfo) {
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-ua-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                        <div id="edit-ua-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
                                 ${uaMenuItems}
                             </div>
@@ -217,7 +217,7 @@ async function showEditPanel(configInfo) {
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute left-0 right-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
+                        <div id="edit-auto-update-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
                             <div class="menu-scroll">
                                 ${dropdownMenuItems}
                             </div>
@@ -871,7 +871,7 @@ export function initSubscriptionSettings({
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
-                        spinner.className = 'animate-spin ml-1 text-[var(--text-muted)]';
+                        spinner.className = 'animate-spin ms-1 text-[var(--text-muted)]';
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
@@ -967,7 +967,7 @@ export function initSubscriptionSettings({
                     label.textContent = file.filename.replace(/\.yaml\.prism\.yaml$/i, '').replace(/\.(yaml|yml)$/i, '');
 
                     const count = document.createElement('span');
-                    count.className = 'ml-auto text-2xs text-[var(--text-tertiary)] shrink-0';
+                    count.className = 'ms-auto text-2xs text-[var(--text-tertiary)] shrink-0';
                     count.textContent = String(file.rule_count || 0);
 
                     item.appendChild(checkbox);
