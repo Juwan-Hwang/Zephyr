@@ -46,7 +46,7 @@ export function showNotification(message, type = 'info', title = null, { log = t
     }
 
     const notif = document.createElement('div');
-    notif.className = 'glass-card py-3 px-5 border-l-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 translate-x-full opacity-0 pointer-events-auto min-w-0 max-w-[480px]';
+    notif.className = 'glass-card py-3 px-5 border-s-4 flex flex-col gap-1 shadow-2xl transition-all duration-500 notif-offscreen opacity-0 pointer-events-auto min-w-0 max-w-[480px]';
 
     const colors = {
         info: 'border-accent text-accent',
@@ -85,11 +85,11 @@ export function showNotification(message, type = 'info', title = null, { log = t
     }
 
     requestAnimationFrame(() => {
-        notif.classList.remove('translate-x-full', 'opacity-0');
+        notif.classList.remove('notif-offscreen', 'opacity-0');
     });
 
     setTimeout(() => {
-        notif.classList.add('translate-x-full', 'opacity-0');
+        notif.classList.add('notif-offscreen', 'opacity-0');
         setTimeout(() => notif.remove(), 500);
     }, title ? 4000 : 3000);
 
@@ -184,7 +184,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
                 if (isCustomContent) {
                     container.classList.remove('w-[560px]', 'max-w-[90vw]');
                     container.classList.add('w-[400px]');
-                    contentArea.classList.remove('overflow-y-auto', 'max-h-[65vh]', 'pr-1', 'custom-scrollbar');
+                    contentArea.classList.remove('overflow-y-auto', 'max-h-[65vh]', 'pe-1', 'custom-scrollbar');
                     cancelBtn.classList.remove('hidden');
                     confirmBtn.classList.remove('hidden');
                 }
@@ -201,7 +201,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
         if (isCustomContent) {
             container.classList.remove('w-[400px]');
             container.classList.add('w-[560px]', 'max-w-[90vw]');
-            contentArea.classList.add('overflow-y-auto', 'max-h-[65vh]', 'pr-1');
+            contentArea.classList.add('overflow-y-auto', 'max-h-[65vh]', 'pe-1');
             contentArea.classList.add('custom-scrollbar');
             // Hide default Cancel/Confirm buttons — custom content has its own action buttons
             cancelBtn.classList.add('hidden');
