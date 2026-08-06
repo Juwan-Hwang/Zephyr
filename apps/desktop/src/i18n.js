@@ -22,7 +22,7 @@ import { Bus, Events } from './ui/events.js';
  * @returns {boolean}
  */
 export function isRTL(lang) {
-    return ['ar', 'he', 'fa', 'ur'].includes(lang);
+    return ['ar', 'he', 'fa', 'ur'].includes(lang.slice(0, 2).toLowerCase());
 }
 
 // ---------------------------------------------------------------------------
@@ -3245,12 +3245,33 @@ export function t(key, optionsOrCount, extraVars) {
 /**
  * Set `lang` and `dir` attributes on the <html> element for a given language.
  * Uses BCP 47 format for the lang attribute and detects RTL/LTR direction.
+ * Also ensures CSS custom properties (--rtl-sign, --scroll-fade-dir) stay in sync.
  * @param {string} language - ISO 639-1 language code (e.g. 'en', 'zh', 'ar')
  */
 export function setHTMLAttributes(language) {
     const html = document.documentElement;
     html.setAttribute('lang', language);
     html.setAttribute('dir', isRTL(language) ? 'rtl' : 'ltr');
+}
+
+/**
+ * Get the current text direction ('ltr' or 'rtl').
+ * Reads from the <html> element's `dir` attribute, which is kept in sync
+ * by `setHTMLAttributes()` / `setLanguage()`.
+ * @returns {'ltr'|'rtl'}
+ */
+export function getDirection() {
+    return document.documentElement.dir === 'rtl' ? 'rtl' : 'ltr';
+}
+
+/**
+ * Get the RTL sign multiplier: 1 for LTR, -1 for RTL.
+ * Use this in JS for directional math (e.g. `translateX(sign * px)`).
+ * For CSS, prefer `var(--rtl-sign)` instead — it updates automatically.
+ * @returns {number}
+ */
+export function getRTLSign() {
+    return getDirection() === 'rtl' ? -1 : 1;
 }
 
 /**
@@ -3261,9 +3282,8 @@ export function setHTMLAttributes(language) {
  * @returns {{ dir: 'rtl'|'ltr', lang: string }}
  */
 export function getLocAttributes(locale) {
-    const lang = locale.slice(0, 2).toLowerCase();
     return {
-        dir: isRTL(lang) ? 'rtl' : 'ltr',
+        dir: isRTL(locale) ? 'rtl' : 'ltr',
         lang: locale,
     };
 }
