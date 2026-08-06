@@ -1183,7 +1183,7 @@ function syncModeSegs(/** @type {string} */ mode) {
     for (const { seg, slider } of MODE_SEGS) {
         if (!seg) continue;
         seg.querySelectorAll('button').forEach((/** @type {HTMLButtonElement} */ b, /** @type {number} */ j) => b.classList.toggle('active', j === idx));
-        if (slider) slider.style.transform = `translateX(${idx * 100}%)`;
+        if (slider) slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
     }
 }
 
