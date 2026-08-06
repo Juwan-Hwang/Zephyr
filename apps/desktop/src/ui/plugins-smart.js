@@ -227,7 +227,7 @@ async function loadPermissionsList() {
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div>
                     <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(p.name)}</span>
-                    <span class="text-2xs text-[var(--text-muted)] ml-2">${esc(p.displayName)}</span>
+                    <span class="text-2xs text-[var(--text-muted)] ms-2">${esc(p.displayName)}</span>
                 </div>
                 <div class="flex gap-2">
                     ${p.allowedForConfigPlugin ? '<span class="text-2xs text-blue-400">config</span>' : ''}
@@ -263,9 +263,9 @@ async function loadKvStore() {
             <div class="flex items-center justify-between py-1 px-2 rounded-md hover:bg-[var(--zephyr-bg-muted)]">
                 <div class="flex-1 min-w-0">
                     <span class="text-xs text-[var(--text-secondary)] font-mono">${esc(e.key)}</span>
-                    <span class="text-2xs text-[var(--text-tertiary)] ml-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
+                    <span class="text-2xs text-[var(--text-tertiary)] ms-2 truncate">${esc(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
                 </div>
-                <div class="flex items-center gap-1 ml-2">
+                <div class="flex items-center gap-1 ms-2">
                     <button class="kv-edit-btn text-2xs text-blue-400 hover:text-blue-300" data-key="${esc(e.key)}">edit</button>
                     <button class="kv-delete-key-btn text-2xs text-red-400 hover:text-red-300" data-key="${esc(e.key)}">✕</button>
                 </div>
@@ -601,12 +601,12 @@ async function loadSmartRankings() {
             const barColor = barWidth >= 80 ? 'bg-success' : barWidth >= 50 ? 'bg-warning' : 'bg-danger';
             return `
                 <div class="flex items-center gap-3 py-1">
-                    <span class="text-2xs text-[var(--text-tertiary)] w-6 text-right">#${i + 1}</span>
+                    <span class="text-2xs text-[var(--text-tertiary)] w-6 text-end">#${i + 1}</span>
                     <span class="text-xs text-[var(--text-secondary)] flex-1 truncate font-mono">${esc(r.name || 'Unknown')}</span>
                     <div class="w-24 h-2 bg-[var(--zephyr-bg-input)] rounded-full overflow-hidden">
                         <div class="${barColor} h-full rounded-full transition-[width]" style="width: ${barWidth}%"></div>
                     </div>
-                    <span class="text-xs font-bold text-[var(--text-primary)] w-10 text-right">${score}</span>
+                    <span class="text-xs font-bold text-[var(--text-primary)] w-10 text-end">${score}</span>
                 </div>`;
         }).join('');
     } catch (e) {

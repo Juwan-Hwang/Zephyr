@@ -489,14 +489,14 @@ function renderConfigItem(key, value, fullKey) {
         const input = document.createElement('input');
         input.type = "number";
         input.value = String(value);
-        input.className = "form-control form-control-md form-control-mono max-w-[100px] text-right";
+        input.className = "form-control form-control-md form-control-mono max-w-[100px] text-end";
         input.onchange = () => handleConfigUpdate(fullKey, Number(input.value));
         valueContainer.appendChild(input);
     } else if (typeof value === 'string') {
         const input = document.createElement('input');
         input.type = "text";
         input.value = value;
-        input.className = "form-control form-control-md form-control-mono text-right";
+        input.className = "form-control form-control-md form-control-mono w-full max-w-[200px] text-end";
         input.onchange = () => handleConfigUpdate(fullKey, input.value);
         valueContainer.appendChild(input);
     } else if (Array.isArray(value)) {
