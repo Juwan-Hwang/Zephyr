@@ -1025,7 +1025,7 @@ function updateOverrideCardContent(card, item) {
  */
 function buildOverrideCard(item) {
     const card = document.createElement('div');
-    card.className = 'glass-card p-4 flex items-center justify-between group hover:translate-x-1 hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
+    card.className = 'glass-card p-4 flex items-center justify-between group rtl-slide hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
     card.dataset.id = item.id;
 
     // ── Type badge color ───────────────────────────────────────
@@ -1443,7 +1443,7 @@ function openFullscreenEditor() {
     setupFullscreenEditorStatus();
 
     // Focus editor
-    /** @type {{focus: function(): void}} */ (/** @type {unknown} */ (fullscreenEditorView)).focus();
+    (/** @type {{focus: () => void}} */ (/** @type {unknown} */ (fullscreenEditorView))).focus();
 
     // Clear output
     clearFullscreenOutput();

@@ -91,7 +91,7 @@ export function initThemeSettings({
     const updateThemeModeUI = (mode) => {
         const idx = themeModeMap.indexOf(mode);
         if (themeModeSlider && idx !== -1) {
-            themeModeSlider.style.transform = `translateX(${idx * 100}%)`;
+            themeModeSlider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
         }
         themeModeButtons.forEach((btn, btnIdx) => {
             if (btnIdx === idx) {
