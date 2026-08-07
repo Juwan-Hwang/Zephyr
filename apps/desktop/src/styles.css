@@ -15,13 +15,14 @@
    --rtl-sign: 1 in LTR, -1 in RTL. Used for translateX flips.
    --scroll-fade-dir: controls gradient mask direction for scrolling text.
    ═══════════════════════════════════════════════════════════════ */
-:root[dir="rtl"] { --rtl-sign: -1; --scroll-fade-dir: left; }
+:root[dir="rtl"] { --rtl-sign: -1; --scroll-fade-dir: left; --scale-origin-x: right; }
 
 /* ── Font stack + Accent + 圆角系统 (原 @theme → :root) ── */
 :root {
   --rtl-sign: 1;
   --scroll-fade-dir: right;
   --ui-scale: 1;
+  --scale-origin-x: left;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
     "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
@@ -406,10 +407,14 @@ input:checked + .switch-slider:before {
     transform: translateX(calc(var(--rtl-sign, 1) * 14px));
 }
 
-/* UI Scale — applied on body to avoid conflicting with #app-main-container transitions */
+/* UI Scale — applied on body to avoid conflicting with #app-main-container transitions.
+   transform-origin follows the inline-start edge via --scale-origin-x
+   (defined in the :root / :root[dir="rtl"] rules above):
+   LTR → top left, RTL → top right (CSS 2.1 §10.3.3).
+   Scaling from the wrong edge pushes content outside the viewport. */
 body {
   transform: scale(var(--ui-scale));
-  transform-origin: top left;
+  transform-origin: top var(--scale-origin-x);
   width: calc(100% / var(--ui-scale));
   height: calc(100% / var(--ui-scale));
   clip-path: inset(0 round var(--zephyr-radius-window-clip, 24px));
@@ -1548,7 +1553,7 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 .dz-sub-used b { font-size: 26px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .dz-sub-used span { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; }
 .dz-progress { height: 6px; border-radius: 3px; background: var(--zephyr-bg-muted); overflow: hidden; margin-top: 14px; }
-.dz-progress-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 65%, white)); position: relative; }
+.dz-progress-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 65%, white)); position: relative; overflow: hidden; }
 .dz-progress-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 35%, transparent), transparent); animation: dz-shimmer 2.6s ease-in-out infinite; }
 @keyframes dz-shimmer { 0% { transform: translateX(calc(var(--rtl-sign, 1) * -100%)); } 60%,100% { transform: translateX(calc(var(--rtl-sign, 1) * 100%)); } }
 .dz-sub-rows { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
