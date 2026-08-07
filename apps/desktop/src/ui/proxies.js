@@ -1334,12 +1334,13 @@ const ACCENT_BTN_CLASS = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-
  * @param {string} [id] - Optional element ID
  * @returns {HTMLButtonElement}
  */
-function createAccentButton(text, onClick, id) {
+function createAccentButton(text, onClick, id, i18nKey) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = ACCENT_BTN_CLASS;
     btn.style.cssText = ACCENT_BTN_CSS;
     btn.textContent = text;
+    if (i18nKey) btn.setAttribute('data-i18n', i18nKey);
     if (id) btn.id = id;
     btn.addEventListener('click', () => onClick(btn));
     return btn;
@@ -1353,6 +1354,7 @@ function createAccentButton(text, onClick, id) {
  */
 async function handleCoreRestart(btn, tObj, context) {
     btn.disabled = true;
+    btn.setAttribute('data-i18n', 'restartingCore');
     btn.textContent = tObj.restartingCore || 'Restarting...';
     try {
         const settings = await getSettingsCached();
@@ -1365,6 +1367,7 @@ async function handleCoreRestart(btn, tObj, context) {
         proxyLogger.error(`Failed to restart core from ${context}`, err);
         showNotification(String(err), 'error');
         btn.disabled = false;
+        btn.setAttribute('data-i18n', 'restartCore');
         btn.textContent = tObj.restartCore || 'Restart Core';
     }
 }
@@ -1382,6 +1385,7 @@ function renderProxiesLoading(container, loadingText) {
     loading.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     loading.id = 'proxies-loading-state';
     const span = document.createElement('span');
+    span.setAttribute('data-i18n', 'loadingNodes');
     span.textContent = loadingText;
     const spinner = document.createElement('div');
     spinner.className = 'w-6 h-6 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin';
@@ -1398,7 +1402,8 @@ function renderProxiesLoading(container, loadingText) {
         const btn = createAccentButton(
             tObj.restartCore || 'Restart Core',
             (b) => handleCoreRestart(b, tObj, 'loading state'),
-            'restart-core-btn'
+            'restart-core-btn',
+            'restartCore'
         );
         btn.className = 'mt-2 ' + ACCENT_BTN_CLASS;
         existing.appendChild(btn);
@@ -1417,6 +1422,7 @@ function renderProviderPollExhausted(container, tObj) {
     const wrap = document.createElement('div');
     wrap.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     const msg = document.createElement('span');
+    msg.setAttribute('data-i18n', 'providerPollExhausted');
     msg.textContent = tObj.providerPollExhausted || 'No nodes available from provider yet. The provider may still be downloading or failed to load.';
     wrap.appendChild(msg);
     const retryBtn = createAccentButton(
@@ -1424,7 +1430,9 @@ function renderProviderPollExhausted(container, tObj) {
         () => {
             _providerPollExhaustedGroup = undefined;
             renderProxies().catch(() => {});
-        }
+        },
+        undefined,
+        'retry'
     );
     wrap.appendChild(retryBtn);
     container.appendChild(wrap);
@@ -1902,12 +1910,15 @@ export async function renderProxies() {
         const errWrap = document.createElement('div');
         errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
+        errText.setAttribute('data-i18n', 'failedToConnect');
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);
         // Add restart core button on connection failure
         const restartBtn = createAccentButton(
             t.restartCore || 'Restart Core',
-            (b) => handleCoreRestart(b, t, 'error state')
+            (b) => handleCoreRestart(b, t, 'error state'),
+            undefined,
+            'restartCore'
         );
         errWrap.appendChild(restartBtn);
         container.appendChild(errWrap);
