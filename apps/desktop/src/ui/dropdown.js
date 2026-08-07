@@ -35,6 +35,21 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     const arrow = trigger.querySelector('.dropdown-arrow');
     let isPortalActive = false;
 
+    // Capture the nearest scrollable ancestor of the dropdown *before* the
+    // menu is portaled to <body>.  Once portaled, the menu's DOM parent is
+    // <body>, so traversing up from the menu would never reach the settings
+    // panel.  We need this reference for the wheel-passthrough fallback below.
+    const getScrollParent = (/** @type {Element|null} */ el) => {
+        let node = el?.parentElement;
+        while (node) {
+            const { overflowY } = getComputedStyle(node);
+            if (overflowY === 'auto' || overflowY === 'scroll') return node;
+            node = node.parentElement;
+        }
+        return null;
+    };
+    const scrollAncestor = getScrollParent(wrap);
+
     // Position the menu relative to the trigger (used when portaled to body)
     const positionMenu = () => {
         const rect = trigger.getBoundingClientRect();
@@ -52,15 +67,41 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         menu.style.zIndex = '99999';
     };
 
-    // Wheel scroll: JS passthrough with smooth scrolling
+    // ── Wheel scroll handling ──────────────────────────────────────
+    // Two modes depending on whether the menu itself can scroll:
+    //
+    // 1. Menu HAS scrollable content (e.g. language dropdown with 14 items
+    //    and max-h-[300px]):
+    //    Let .menu-scroll handle native scrolling. Call stopPropagation()
+    //    so the wheel event doesn't leak to the background page.
+    //
+    // 2. Menu content fits without scrolling (e.g. fake-client dropdown
+    //    with only 5 items, no max-height):
+    //    The menu is portaled to <body> as a sibling of the settings panel,
+    //    so natural scroll-chaining can't reach the background. Manually
+    //    pass the wheel delta to the nearest scrollable ancestor so the
+    //    user can still scroll the settings page behind the dropdown.
+    //
+    // DO NOT DELETE the passthrough branch — it is required for short
+    // dropdowns like fake-client. Only the first branch (canScroll) is
+    // the scroll-penetration fix added for long dropdowns like language.
+    // ──────────────────────────────────────────────────────────────
     menu.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const delta = e.deltaY;
-        document.querySelectorAll('.overflow-y-auto, .custom-scrollbar').forEach(el => {
-            if (el.scrollHeight > el.clientHeight) {
-                el.scrollBy({ top: delta, behavior: 'smooth' });
+        const scrollContainer = menu.querySelector('.menu-scroll');
+        const canScroll = scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight;
+        if (canScroll) {
+            // Menu has scrollable content — block passthrough so scrolling
+            // stays inside the menu and doesn't leak to the background.
+            e.stopPropagation();
+        } else {
+            // Menu content fits — pass wheel delta to the nearest scrollable
+            // ancestor (captured before portaling) so only the background
+            // panel behind this dropdown scrolls, not every scroll pane.
+            if (scrollAncestor) {
+                e.preventDefault();
+                scrollAncestor.scrollBy({ top: e.deltaY, behavior: 'smooth' });
             }
-        });
+        }
     }, { passive: false, signal });
 
     const closeMenu = () => {
