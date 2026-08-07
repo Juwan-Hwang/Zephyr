@@ -1332,14 +1332,16 @@ const ACCENT_BTN_CLASS = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-
  * @param {string} text - Button label text
  * @param {(btn: HTMLButtonElement) => void} onClick - Click handler
  * @param {string} [id] - Optional element ID
+ * @param {string} [i18nKey] - Optional data-i18n key for live language switching
  * @returns {HTMLButtonElement}
  */
-function createAccentButton(text, onClick, id) {
+function createAccentButton(text, onClick, id, i18nKey) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = ACCENT_BTN_CLASS;
     btn.style.cssText = ACCENT_BTN_CSS;
     btn.textContent = text;
+    if (i18nKey) btn.dataset.i18n = i18nKey;
     if (id) btn.id = id;
     btn.addEventListener('click', () => onClick(btn));
     return btn;
@@ -1347,25 +1349,32 @@ function createAccentButton(text, onClick, id) {
 
 /**
  * Handle core restart from a button element.
+ * Reads translations live from currentLang so labels stay correct even if
+ * the user changed language between render time and button click.
  * @param {HTMLButtonElement} btn - The button that triggered the restart
- * @param {any} tObj - i18n translations object
  * @param {string} context - Logging context (e.g. 'loading state', 'error state')
  */
-async function handleCoreRestart(btn, tObj, context) {
+async function handleCoreRestart(btn, context) {
+    const t = /** @type {any} */ (translations)[currentLang] || {};
     btn.disabled = true;
-    btn.textContent = tObj.restartingCore || 'Restarting...';
+    btn.dataset.i18n = 'restartingCore';
+    btn.textContent = t.restartingCore || 'Restarting...';
     try {
         const settings = await getSettingsCached();
         const configPath = settings?.last_config || 'config.yaml';
         const customArgs = settings?.custom_args || [];
         await restartCore(configPath, customArgs);
         await postRestartRecovery(configPath);
-        showNotification(tObj.coreRestarted || 'Core restarted', 'success');
+        // Re-read after awaits: user may have switched language during restart.
+        const tSuccess = /** @type {any} */ (translations)[currentLang] || {};
+        showNotification(tSuccess.coreRestarted || 'Core restarted', 'success');
     } catch (err) {
         proxyLogger.error(`Failed to restart core from ${context}`, err);
         showNotification(String(err), 'error');
+        const t = /** @type {any} */ (translations)[currentLang] || {};
         btn.disabled = false;
-        btn.textContent = tObj.restartCore || 'Restart Core';
+        btn.dataset.i18n = 'restartCore';
+        btn.textContent = t.restartCore || 'Restart Core';
     }
 }
 
@@ -1382,6 +1391,7 @@ function renderProxiesLoading(container, loadingText) {
     loading.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     loading.id = 'proxies-loading-state';
     const span = document.createElement('span');
+    span.dataset.i18n = 'loadingNodes';
     span.textContent = loadingText;
     const spinner = document.createElement('div');
     spinner.className = 'w-6 h-6 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin';
@@ -1397,8 +1407,9 @@ function renderProxiesLoading(container, loadingText) {
         const tObj = /** @type {any} */ (translations)[currentLang] || {};
         const btn = createAccentButton(
             tObj.restartCore || 'Restart Core',
-            (b) => handleCoreRestart(b, tObj, 'loading state'),
-            'restart-core-btn'
+            (b) => handleCoreRestart(b, 'loading state'),
+            'restart-core-btn',
+            'restartCore'
         );
         btn.className = 'mt-2 ' + ACCENT_BTN_CLASS;
         existing.appendChild(btn);
@@ -1417,6 +1428,7 @@ function renderProviderPollExhausted(container, tObj) {
     const wrap = document.createElement('div');
     wrap.className = 'col-span-full text-center py-10 text-[var(--text-muted)] flex flex-col items-center gap-4';
     const msg = document.createElement('span');
+    msg.dataset.i18n = 'providerPollExhausted';
     msg.textContent = tObj.providerPollExhausted || 'No nodes available from provider yet. The provider may still be downloading or failed to load.';
     wrap.appendChild(msg);
     const retryBtn = createAccentButton(
@@ -1424,7 +1436,9 @@ function renderProviderPollExhausted(container, tObj) {
         () => {
             _providerPollExhaustedGroup = undefined;
             renderProxies().catch(() => {});
-        }
+        },
+        undefined,
+        'retry'
     );
     wrap.appendChild(retryBtn);
     container.appendChild(wrap);
@@ -1878,7 +1892,7 @@ export async function renderProxies() {
         }
     }
 
-    const t = /** @type {any} */ (translations)[currentLang];
+    let t = /** @type {any} */ (translations)[currentLang];
 
     // Show loading state if empty
     if (container.children.length === 0) {
@@ -1897,17 +1911,23 @@ export async function renderProxies() {
     // Clear loading timeout — data fetch completed (success or failure)
     clearLoadingTimeout();
 
+    // Re-read after await: user may have switched language during fetch.
+    t = /** @type {any} */ (translations)[currentLang] || {};
+
     if (!data || !data.proxies) {
         container.replaceChildren();
         const errWrap = document.createElement('div');
         errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
         const errText = document.createElement('span');
+        errText.dataset.i18n = 'failedToConnect';
         errText.textContent = t.failedToConnect;
         errWrap.appendChild(errText);
         // Add restart core button on connection failure
         const restartBtn = createAccentButton(
             t.restartCore || 'Restart Core',
-            (b) => handleCoreRestart(b, t, 'error state')
+            (b) => handleCoreRestart(b, 'error state'),
+            undefined,
+            'restartCore'
         );
         errWrap.appendChild(restartBtn);
         container.appendChild(errWrap);
@@ -1935,6 +1955,10 @@ export async function renderProxies() {
         existingConfig: config,
         preferredGroupName,
     });
+    // Guard: if a newer render started while fetching, abort.
+    if (_renderGen !== _renderGeneration) return;
+    // Re-read after await: user may have switched language during fetch.
+    t = /** @type {any} */ (translations)[currentLang] || {};
     if (!proxyGroupsResult) {
  
     container.replaceChildren();
@@ -2032,6 +2056,10 @@ export async function renderProxies() {
 
     // Filter out unavailable (timeout) proxies if setting is enabled
     const settings = await getSettingsCached();
+    // Guard: if a newer render started while fetching, abort.
+    if (_renderGen !== _renderGeneration) return;
+    // Re-read after await: user may have switched language during settings fetch.
+    t = /** @type {any} */ (translations)[currentLang] || {};
     if (settings?.hide_timeout_nodes) {
         const preFilterCount = proxies.length;
         proxies = proxies.filter((/** @type {string} */ name) => {
@@ -2072,6 +2100,8 @@ export async function renderProxies() {
 
     // --- In-place update path ---
     if (await updateProxiesInPlace(container, proxies, data, current)) {
+        // Guard: if a newer render started while updating, abort.
+        if (_renderGen !== _renderGeneration) return;
         // Still backfill scores even on in-place updates (badges may not exist yet on first render)
         backfillSmartScores(container);
         return;
@@ -2094,10 +2124,13 @@ export async function renderProxies() {
 
     // Backfill existing smart scores from backend (avoids showing '--' when scores exist)
     await backfillSmartScores(container);
+    // Guard: if a newer render started while backfilling, abort.
+    if (_renderGen !== _renderGeneration) return;
 
     // Apply smart sort on initial render if mode is 'smart' (e.g. restored from localStorage)
     if (appStore.get('currentSortMode') === 'smart') {
         await applySmartSortToDom();
+        if (_renderGen !== _renderGeneration) return;
     }
 }
 
