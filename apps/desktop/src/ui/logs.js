@@ -265,7 +265,7 @@ function startPolling() {
 
 /** @param {string} key */
 function t(key) {
-    const langKey = /** @type {'en'|'zh'|'ja'|'ko'|'ru'|'es'|'fa'|'tk'|'my'|'ar'|'ur'} */ (currentLang);
+    const langKey = /** @type {'en'|'zh'|'ja'|'ko'|'ru'|'es'|'fa'|'tk'|'my'|'ar'|'ur'|'sw'|'tr'|'vi'} */ (currentLang);
     const dict = /** @type {Record<string, unknown>} */ (translations[langKey]) || /** @type {Record<string, unknown>} */ (translations.en);
     const val = dict[key];
     return typeof val === 'string' && val ? val : key;
