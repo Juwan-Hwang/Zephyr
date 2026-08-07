@@ -525,12 +525,17 @@ pub(crate) fn touch_heartbeat(app: &tauri::AppHandle) {
     }
 }
 
-/// Mark the heartbeat as stale (e.g. after window destroy).
+/// Mark the heartbeat as stale (e.g. after window destroy or WebView2 crash).
 ///
 /// This is the **only** place that writes `i64::MIN` — the sentinel for
 /// "explicitly invalidated". `is_webview_alive` checks `last == i64::MIN`
-/// first and returns `false` immediately, so the window is guaranteed to
-/// be recreated on the next show attempt.
+/// **before** any other logic (including the hidden-window shortcut), so
+/// the window is guaranteed to be recreated on the next show attempt or
+/// crash recovery path.
+///
+/// Called from:
+/// - `show_or_recreate_main_window` (after destroying a zombie window)
+/// - `webview_recovery::handle_process_failed` (before `recreate_window`)
 ///
 /// `i64::MIN` is used instead of `0` to avoid a collision with the 10s
 /// grace period calculation (`monotonic_ms() - 35_000`) which could
@@ -573,18 +578,24 @@ pub(crate) fn release_reconstruct_gate(app: &tauri::AppHandle) {
 /// when hidden, so the heartbeat naturally stops), or if the health state
 /// is not yet registered.
 pub(crate) fn is_webview_alive(app: &tauri::AppHandle) -> bool {
-    // If the window is hidden, the browser engine throttles JS timers,
-    // so the heartbeat will naturally stop. Treat the webview as alive
-    // to avoid false-positive recreation when showing.
-    if let Some(window) = app.get_webview_window("main") {
-        if !window.is_visible().unwrap_or(true) {
-            return true;
-        }
-    }
     if let Some(health) = app.try_state::<WebviewHealth>() {
         let last = health.last_heartbeat_ms.load(Ordering::Relaxed);
+        // Check the explicit invalidation sentinel FIRST — before the
+        // hidden-window shortcut below.  Otherwise, if WebView2 crashes
+        // while the window is hidden-to-tray, invalidate_heartbeat() would
+        // set the sentinel but is_webview_alive() would short-circuit to
+        // `true` at the hidden check, causing recreate_window() to skip
+        // recreation and leaving a transparent zombie window.
         if last == i64::MIN {
             return false;
+        }
+        // If the window is hidden, the browser engine throttles JS timers,
+        // so the heartbeat will naturally stop. Treat the webview as alive
+        // to avoid false-positive recreation when showing.
+        if let Some(window) = app.get_webview_window("main") {
+            if !window.is_visible().unwrap_or(true) {
+                return true;
+            }
         }
         let elapsed_ms = monotonic_ms() - last;
         let timeout_ms = i64::try_from(HEARTBEAT_TIMEOUT_SECS)
@@ -593,6 +604,14 @@ pub(crate) fn is_webview_alive(app: &tauri::AppHandle) -> bool {
             .unwrap_or(i64::MAX);
         elapsed_ms < timeout_ms
     } else {
+        // No health state registered — assume alive to avoid false-positive
+        // recreation during early startup.
+        // If the window is hidden, also treat as alive (same throttle rationale).
+        if let Some(window) = app.get_webview_window("main") {
+            if !window.is_visible().unwrap_or(true) {
+                return true;
+            }
+        }
         true
     }
 }
