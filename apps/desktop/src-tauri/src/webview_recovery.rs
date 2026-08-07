@@ -145,6 +145,8 @@ fn handle_process_failed(
             "Browser process exited — recreating window"
         );
         UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
+        // Invalidate heartbeat so is_webview_alive() returns false in recreate_window().
+        crate::invalidate_heartbeat(app);
         recreate_window(app);
     } else if raw_kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
         // Rate-limit: if the render process crashes repeatedly within a
@@ -178,6 +180,7 @@ fn handle_process_failed(
                 "Render process crashing repeatedly — escalating to full window recreation"
             );
             EXIT_COUNT.store(0, Ordering::Relaxed);
+            crate::invalidate_heartbeat(app);
             recreate_window(app);
         } else {
             reload_webview(app);
