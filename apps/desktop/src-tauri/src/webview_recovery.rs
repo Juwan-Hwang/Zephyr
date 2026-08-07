@@ -145,6 +145,8 @@ fn handle_process_failed(
             "Browser process exited — recreating window"
         );
         UNRESPONSIVE_COUNT.store(0, Ordering::Relaxed);
+        // Invalidate heartbeat so is_webview_alive() returns false in recreate_window().
+        crate::invalidate_heartbeat(app);
         recreate_window(app);
     } else if raw_kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
         // Rate-limit: if the render process crashes repeatedly within a
@@ -178,6 +180,7 @@ fn handle_process_failed(
                 "Render process crashing repeatedly — escalating to full window recreation"
             );
             EXIT_COUNT.store(0, Ordering::Relaxed);
+            crate::invalidate_heartbeat(app);
             recreate_window(app);
         } else {
             reload_webview(app);
@@ -264,6 +267,12 @@ fn recreate_window(app: &AppHandle) {
             crate::release_reconstruct_gate(&cloned);
             return;
         }
+        // Capture visibility *before* destroying the old window so crash
+        // recovery can respect the hidden-to-tray state.
+        let was_visible = cloned
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(true);
         if let Some(window) = cloned.get_webview_window("main") {
             // Destroy the old window (and its dead controller).
             let _ = window.destroy();
@@ -272,8 +281,13 @@ fn recreate_window(app: &AppHandle) {
         // crash recovery once the new webview finishes loading.
         match crate::recreate_main_window(&cloned) {
             Ok(window) => {
-                let _ = window.show();
-                let _ = window.set_focus();
+                // Only surface the recreated window if it was visible
+                // before the crash — otherwise keep it hidden to respect
+                // the user's close-to-tray preference.
+                if was_visible {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
             Err(e) => {
                 crate::emit_error!(
