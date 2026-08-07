@@ -43,7 +43,7 @@ import { getSubscriptionUserAgent } from './settings.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
-const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR' };
+const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM' };
 
 /** Resolve the current app language to a BCP-47 locale tag. @returns {string} */
 function uiLocale() {
