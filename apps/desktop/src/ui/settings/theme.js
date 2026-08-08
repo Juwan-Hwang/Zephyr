@@ -8,7 +8,7 @@
  * @module ui/settings/theme
  */
 
-import { applyTheme } from '../theme.js';
+import { applyTheme, currentTheme } from '../theme.js';
 import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
@@ -177,12 +177,19 @@ export function initThemeSettings({
         media._zephyrBound = true;
     }
 
-    applyColorTheme(savedTheme);
+    const saved = typeof savedTheme === 'string' && savedTheme.trim() ? savedTheme : null;
+    const stored = appStore.get('currentTheme');
+    const storedTheme = typeof stored === 'string' && stored.trim() ? stored : null;
+    const initialTheme = saved ?? storedTheme ?? 'purple';
+    applyColorTheme(initialTheme);
+    appStore.set('currentTheme', currentTheme);
 
     if (customColorInput) {
         customColorInput.onchange = () => {
             const color = customColorInput.value;
             applyColorTheme(color);
+            appStore.set('currentTheme', currentTheme);
+            Bus.emit(Events.THEME_CHANGED, currentTheme);
             save();
         };
     }
