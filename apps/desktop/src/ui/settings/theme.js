@@ -8,7 +8,7 @@
  * @module ui/settings/theme
  */
 
-import { applyTheme } from '../theme.js';
+import { applyTheme, currentTheme } from '../theme.js';
 import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
@@ -178,11 +178,14 @@ export function initThemeSettings({
     }
 
     applyColorTheme(savedTheme);
+    appStore.set('currentTheme', currentTheme);
 
     if (customColorInput) {
         customColorInput.onchange = () => {
             const color = customColorInput.value;
             applyColorTheme(color);
+            appStore.set('currentTheme', color);
+            Bus.emit(Events.THEME_CHANGED, color);
             save();
         };
     }
