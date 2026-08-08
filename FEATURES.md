@@ -77,7 +77,7 @@
 - **CI Security Pipeline** — 12-job security workflow: cargo-audit, cargo-deny (AGPL-3.0 deny), Clippy (170 rules), Semgrep SAST + SARIF upload, Trufflehog (SHA-pinned) + custom grep, OSSF Scorecard (SARIF + artifact), Tauri audit, build verification, macOS cross-compile check
 - **SBOM Generation** — CycloneDX format (Rust via `cargo cyclonedx` + frontend via `npm sbom`), merged via `scripts/merge-sboms.py`, published as Release asset
 - **SignPath Code Signing** — Windows Authenticode signing (NSIS + MSI + Portable exe) via SignPath Foundation, x64 + ARM64, 4-step flow with partial-signing prevention
-- **Supply Chain Hardening** — All GitHub Actions pinned to commit SHA, `persist-credentials: false` on checkout, `pnpm overrides` for transitive vulnerability fixes (nanoid/brace-expansion/ws), `engines.node >= 20`
+- **Supply Chain Hardening** — All GitHub Actions pinned to commit SHA, `persist-credentials: false` on checkout, `pnpm overrides` for transitive vulnerability fixes (nanoid/brace-expansion/ws), `engines.node >= 20.18.1`
 
 ## System Integration
 
