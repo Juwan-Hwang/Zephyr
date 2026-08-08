@@ -178,11 +178,14 @@ export function initThemeSettings({
     }
 
     applyColorTheme(savedTheme);
+    appStore.set('currentTheme', savedTheme);
 
     if (customColorInput) {
         customColorInput.onchange = () => {
             const color = customColorInput.value;
             applyColorTheme(color);
+            appStore.set('currentTheme', color);
+            Bus.emit(Events.THEME_CHANGED, color);
             save();
         };
     }
