@@ -12,6 +12,126 @@ use zephyr_core::config::sanitizer::validate_path_within_dir;
 use super::prism_data_dir;
 use super::types::sanitize_filename;
 
+// ── WiFi SSID detection (for `__when__.ssid` condition) ──────────────────
+
+/// SSID cache TTL — avoids spawning a subprocess on every patch compilation.
+const SSID_CACHE_TTL_SECS: u64 = 5;
+
+/// Cached SSID with the instant it was observed.
+static SSID_CACHE: std::sync::Mutex<Option<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
+/// Detect the current `WiFi` SSID via platform-specific commands.
+///
+/// Results are cached for `SSID_CACHE_TTL_SECS` to avoid excessive subprocess
+/// spawning during frequent recompilations (e.g. rapid rule edits).
+fn detect_ssid() -> Option<String> {
+    // Fast path: return cached value if still fresh.
+    if let Ok(cache) = SSID_CACHE.lock() {
+        if let Some((ssid, instant)) = cache.as_ref() {
+            if instant.elapsed().as_secs() < SSID_CACHE_TTL_SECS {
+                return Some(ssid.clone());
+            }
+        }
+    }
+
+    let ssid = detect_ssid_uncached();
+
+    // Update cache (best-effort; lock failure is non-fatal).
+    if let Ok(mut cache) = SSID_CACHE.lock() {
+        *cache = ssid
+            .as_ref()
+            .map(|s| (s.clone(), std::time::Instant::now()));
+    }
+
+    ssid
+}
+
+/// Platform-specific SSID detection without caching.
+#[cfg(target_os = "windows")]
+fn detect_ssid_uncached() -> Option<String> {
+    use std::os::windows::process::CommandExt as _;
+    let output = std::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .creation_flags(crate::core_manager::CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // Parse: "    SSID                   : MyWiFi"
+    // Skip:  "    BSSID                  : aa:bb:cc:dd:ee:ff"
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("SSID") && !line.starts_with("BSSID"))
+        .and_then(|line| line.split_once(':').map(|(_, v)| v.trim().to_owned()))
+        .filter(|s| !s.is_empty())
+}
+
+/// Platform-specific SSID detection without caching.
+#[cfg(target_os = "macos")]
+fn detect_ssid_uncached() -> Option<String> {
+    let output = std::process::Command::new("networksetup")
+        .args(["-getairportnetwork", "en0"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // Output: "Current Wi-Fi Network: MyWiFi"
+    String::from_utf8_lossy(&output.stdout)
+        .strip_prefix("Current Wi-Fi Network: ")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// Platform-specific SSID detection without caching.
+#[cfg(target_os = "linux")]
+fn detect_ssid_uncached() -> Option<String> {
+    // Try nmcli first (most common on modern Linux desktops).
+    let output = std::process::Command::new("nmcli")
+        .args(["-t", "-f", "active,ssid", "dev", "wifi"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        // Output: "active:MyWiFi"
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Some(ssid) = line.strip_prefix("active:") {
+                let ssid = ssid.trim();
+                if !ssid.is_empty() {
+                    return Some(ssid.to_string());
+                }
+            }
+        }
+    }
+
+    // Fallback: iwconfig (writes to stderr on some systems).
+    let output = std::process::Command::new("iwconfig").output().ok()?;
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        // Parse: '    ESSID:"MyWiFi"'
+        if let Some(rest) = line.split("ESSID:").nth(1) {
+            let rest = rest.trim();
+            if let Some(stripped) = rest.strip_prefix('"') {
+                if let Some(end) = stripped.find('"') {
+                    let ssid = &stripped[..end];
+                    if !ssid.is_empty() {
+                        return Some(ssid.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Platform-specific SSID detection without caching.
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn detect_ssid_uncached() -> Option<String> {
+    None
+}
+
 pub(crate) struct ZephyrPrismHost {
     app: tauri::AppHandle,
 }
@@ -294,5 +414,9 @@ impl PrismHost for ZephyrPrismHost {
 
         let _ = std::fs::remove_file(&tmp_path);
         Ok(output.status.success())
+    }
+
+    fn get_ssid(&self) -> Option<String> {
+        detect_ssid()
     }
 }
