@@ -8,18 +8,40 @@
 #   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
 #
-# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki 0.103.11 name constraints issues
-#   Indirect dependency via reqwest -> hyper-rustls -> tokio-rustls -> rustls -> rustls-webpki
-#   Fix requires rustls >= 0.23.39 (pins webpki >=0.103.12); currently blocked on upstream release
-#   Track:
-#     https://rustsec.org/advisories/RUSTSEC-2026-0098.html
-#     https://rustsec.org/advisories/RUSTSEC-2026-0099.html
+# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki name constraints — RESOLVED
+#   Fixed by rustls-webpki 0.103.13 (>=0.103.12); waivers removed.
 #
-# RUSTSEC-2024-0418: gdk-sys / gtk-rs GTK3 bindings unmaintained
+# RUSTSEC-2024-0411..0420: gtk-rs GTK3 unmaintained
 #   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
+#
+# RUSTSEC-2024-0429: glib 0.18.x unsound VariantStrIter
+#   Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
+#
+# RUSTSEC-2025-0141: bincode unmaintained (transitive dep)
+# RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive dep)
+# RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
+# RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 ignore = [
   "RUSTSEC-2026-0097",
-  "RUSTSEC-2026-0098",
-  "RUSTSEC-2026-0099",
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
   "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
+  # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
+  "RUSTSEC-2024-0429",
+  "RUSTSEC-2025-0141",
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
 ]
