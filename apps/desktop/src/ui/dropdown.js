@@ -34,6 +34,26 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
 
     const arrow = trigger.querySelector('.dropdown-arrow');
     let isPortalActive = false;
+    let cachedScrollParent = /** @type {Element|null} */ (null);
+
+    // Capture the nearest scrollable ancestor of the dropdown *before* the
+    // menu is portaled to <body>.  Once portaled, the menu's DOM parent is
+    // <body>, so traversing up from the menu would never reach the settings
+    // panel.  We need this reference for the wheel-passthrough fallback below.
+    // Returns the nearest ancestor with overflow-y auto/scroll that also has
+    // overflow content (scrollHeight > clientHeight).  If the nearest overflow
+    // ancestor can't scroll, keep walking to find one that can.
+    const getScrollParent = (/** @type {Element|null} */ el) => {
+        let node = el?.parentElement;
+        while (node) {
+            const { overflowY } = getComputedStyle(node);
+            if (overflowY === 'auto' || overflowY === 'scroll') {
+                if (node.scrollHeight > node.clientHeight) return node;
+            }
+            node = node.parentElement;
+        }
+        return null;
+    };
 
     // Position the menu relative to the trigger (used when portaled to body)
     const positionMenu = () => {
@@ -52,15 +72,59 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
         menu.style.zIndex = '99999';
     };
 
-    // Wheel scroll: JS passthrough with smooth scrolling
+    // ── Wheel scroll handling ──────────────────────────────────────
+    // Two modes depending on whether the menu itself can scroll:
+    //
+    // 1. Menu HAS scrollable content (e.g. language dropdown with 14 items
+    //    and max-h-[300px]):
+    //    Let .menu-scroll handle native scrolling. Call stopPropagation()
+    //    so the wheel event doesn't leak to the background page.
+    //
+    // 2. Menu content fits without scrolling (e.g. fake-client dropdown
+    //    with only 5 items, no max-height):
+    //    The menu is portaled to <body> as a sibling of the settings panel,
+    //    so natural scroll-chaining can't reach the background. Manually
+    //    pass the wheel delta to the nearest scrollable ancestor so the
+    //    user can still scroll the settings page behind the dropdown.
+    //
+    // DO NOT DELETE the passthrough branch — it is required for short
+    // dropdowns like fake-client. Only the first branch (canScroll) is
+    // the scroll-penetration fix added for long dropdowns like language.
+    // ──────────────────────────────────────────────────────────────
     menu.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const delta = e.deltaY;
-        document.querySelectorAll('.overflow-y-auto, .custom-scrollbar').forEach(el => {
-            if (el.scrollHeight > el.clientHeight) {
-                el.scrollBy({ top: delta, behavior: 'smooth' });
+        const scrollContainer = menu.querySelector('.menu-scroll');
+        const canScroll = scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight;
+        if (canScroll) {
+            // Menu has scrollable content — block passthrough so scrolling
+            // stays inside the menu and doesn't leak to the background.
+            // overscroll-behavior:contain on .menu-scroll (CSS) prevents
+            // scroll chaining when the menu reaches its top/bottom edge.
+            e.stopPropagation();
+        } else {
+            // Menu content fits — use the cached scroll parent from
+            // openMenu(), but re-walk if it's no longer scrollable
+            // (content may have changed since open).
+            let target = cachedScrollParent;
+            if (!target || target.scrollHeight <= target.clientHeight) {
+                target = getScrollParent(wrap);
+                cachedScrollParent = target;
             }
-        });
+            if (target) {
+                e.preventDefault();
+                // Normalize deltaMode: browsers may report deltas in lines (1)
+                // or pages (2) instead of pixels (0). Convert to pixels so
+                // scrollBy scrolls the right amount regardless of platform.
+                let dy = e.deltaY;
+                if (e.deltaMode === 1) {          // DOM_DELTA_LINE
+                    dy *= 16;                    // CSS default line height
+                } else if (e.deltaMode === 2) {  // DOM_DELTA_PAGE
+                    dy *= target.clientHeight;
+                }
+                // Use 'auto' (not 'smooth') so successive wheel events apply
+                // immediately without queued animation conflicts.
+                target.scrollBy({ top: dy });
+            }
+        }
     }, { passive: false, signal });
 
     const closeMenu = () => {
@@ -83,6 +147,9 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
 
     const openMenu = () => {
         menu.classList.remove('hidden');
+        // Cache scroll parent on open — avoids re-walking the DOM on
+        // every wheel event (getComputedStyle is not free).
+        cachedScrollParent = getScrollParent(wrap);
         if (arrow) arrow.classList.add('rotate-180');
         trigger.classList.add('border-[var(--zephyr-border-strong)]');
         // Portal to body to escape any parent stacking context
