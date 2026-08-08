@@ -15,11 +15,34 @@
 #     https://rustsec.org/advisories/RUSTSEC-2026-0098.html
 #     https://rustsec.org/advisories/RUSTSEC-2026-0099.html
 #
-# RUSTSEC-2024-0418: gdk-sys / gtk-rs GTK3 bindings unmaintained
+# RUSTSEC-2024-0411..0420, 0429: gtk-rs GTK3 / glib 0.18.x unmaintained
 #   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
+#
+# RUSTSEC-2025-0141: bincode unmaintained (transitive dep)
+# RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive dep)
+# RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
+# RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 ignore = [
   "RUSTSEC-2026-0097",
   "RUSTSEC-2026-0098",
   "RUSTSEC-2026-0099",
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
   "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  "RUSTSEC-2024-0429",
+  "RUSTSEC-2025-0141",
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
 ]

@@ -9,8 +9,26 @@ ignore = [
   "RUSTSEC-2026-0097",
   "RUSTSEC-2026-0098",
   "RUSTSEC-2026-0099",
-  "RUSTSEC-2026-0194",
-  "RUSTSEC-2026-0195",
+  # gtk-rs GTK3 bindings — unmaintained; fix requires Tauri GTK4 migration
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
+  "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  "RUSTSEC-2024-0429",  # glib 0.18.x soundness (locked by gtk-rs)
+  "RUSTSEC-2025-0141",  # bincode unmaintained
+  "RUSTSEC-2024-0370",  # proc-macro-error unmaintained
+  "RUSTSEC-2024-0436",  # paste unmaintained
+  "RUSTSEC-2025-0075",  # unic-char-range unmaintained
+  "RUSTSEC-2025-0080",  # unic-common unmaintained
+  "RUSTSEC-2025-0081",  # unic-char-property unmaintained
+  "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
+  "RUSTSEC-2025-0100",  # unic-ucd-ident unmaintained
 ]
 # RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
 #   Indirect dependency via clash-prism-script v0.1.3 (latest, still uses rand 0.8)
@@ -22,8 +40,15 @@ ignore = [
 #   Fixed by rustls 0.23.40 + webpki 0.103.13 (>=0.103.12); kept in ignore for older lock files
 #
 # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml DoS vulnerabilities
-#   Fixed by upgrading plist 1.9.0 → 1.10.0 (quick-xml 0.39.4 → 0.41.0)
-#   and tauri-winrt-notification 0.7.2 → 0.7.3 (removed quick-xml 0.37.5 entirely)
+#   FIXED: upgraded wayland-scanner 0.31.10 → 0.31.11 (quick-xml 0.39.4 → 0.41.0)
+#
+# RUSTSEC-2024-0411..0420, 0429: gtk-rs GTK3 / glib 0.18.x unmaintained
+#   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
+#
+# RUSTSEC-2025-0141: bincode unmaintained (transitive dep)
+# RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive dep)
+# RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
+# RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 #
 # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
 #   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)

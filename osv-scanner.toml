@@ -1,0 +1,100 @@
+# OSV Scanner configuration
+# https://google.github.io/osv-scanner/configuration/
+#
+# Used by OSSF Scorecard's VulnerabilitiesID check to identify known
+# vulnerabilities.  Entries here tell Scorecard/OSV to suppress advisories
+# that are known and accepted risks (unmaintained crates with no fix).
+
+# ── Rust: gtk-rs GTK3 unmaintained ──
+# Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration.
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0411"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0412"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0413"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0414"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0415"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0416"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0417"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0418"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0419"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0420"
+reason = "gtk-rs GTK3 unmaintained; requires Tauri GTK4 migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+reason = "glib 0.18.x soundness; locked by gtk-rs GTK3, requires GTK4 migration"
+
+# ── Rust: unmaintained crates (no fix available) ──
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0141"
+reason = "bincode unmaintained; transitive dep, no drop-in replacement"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+reason = "proc-macro-error unmaintained; transitive dep via derive macros"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+reason = "paste unmaintained; transitive dep via gtk-rs"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0075"
+reason = "unic-char-range unmaintained; transitive dep"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0080"
+reason = "unic-common unmaintained; transitive dep"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0081"
+reason = "unic-char-property unmaintained; transitive dep"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0098"
+reason = "unic-ucd-version unmaintained; transitive dep"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0100"
+reason = "unic-ucd-ident unmaintained; transitive dep"
+
+# ── Rust: upstream-blocked soundness fixes ──
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0097"
+reason = "rand 0.8 unsound; transitive via tauri ecosystem, our code pins rand 0.10.1"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0098"
+reason = "rustls-webpki name constraints; transitive via reqwest, blocked on upstream release"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0099"
+reason = "rustls-webpki name constraints; transitive via reqwest, blocked on upstream release"
