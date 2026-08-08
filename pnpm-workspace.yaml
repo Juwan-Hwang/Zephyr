@@ -9,10 +9,16 @@ onlyBuiltDependencies:
 overrides:
   vite: 8.1.4
   # CVE-2024-4068: brace-expansion ReDoS — fix not backported to 1.x/2.x.
-  brace-expansion: 5.0.7
+  brace-expansion: 5.0.9
   # CVE-2024-37890: ws DoS via overly long headers.
   ws: 8.21.1
   # nanoid 5.x is ESM-only; postcss (and other CommonJS consumers) require
   # the 3.x line.  Pin to latest 3.x to get security patches without
   # breaking CJS compatibility.
-  nanoid@3: 3.3.16
+  nanoid@3: 3.3.17
+  # undici: CRLF injection (CVE-2026-15157), cookie injection (CVE-2026-16729),
+  # cache poisoning (CVE-2026-13697, CVE-2026-14643), response desync
+  # (CVE-2026-16728).  Transitive dep of @cyclonedx/cdxgen & cheerio.
+  undici: 7.29.0
+  # CVE-2026-69152: tar uncontrolled recursion DoS via long-path member selection.
+  tar: 7.5.21
