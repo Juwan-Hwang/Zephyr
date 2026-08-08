@@ -54,7 +54,7 @@ aes-gcm = "0.11"
 pbkdf2 = "0.12"
 hmac = "0.12"
 clash-prism-core = "0.1.5"
-clash-prism-extension = { version = "0.1.8", features = ["watcher"] }
+clash-prism-extension = { version = "0.1.9", features = ["watcher"] }
 clash-prism-plugin = "0.1.1"
 clash-prism-script = "0.1.3"
 clash-prism-smart = "0.1.1"
