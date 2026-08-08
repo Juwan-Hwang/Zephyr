@@ -2,11 +2,33 @@
 # https://rustsec.org/
 # This file is at src-tauri/.cargo/audit.toml because CI runs `cargo audit`
 # from the src-tauri working directory. Mirror of .cargo/audit.toml (project root).
+# cargo-audit does not support ignoreUntil/expiry fields.
+# Review by: 2027-12-31 (aligned with osv-scanner.toml ignoreUntil dates).
+# Ignored advisories are fully suppressed from cargo-audit output.
 
 [advisories]
 ignore = [
   "RUSTSEC-2026-0097",
-  "RUSTSEC-2026-0098",
-  "RUSTSEC-2026-0099",
+  # gtk-rs GTK3 bindings — unmaintained; fix requires Tauri GTK4 migration
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
   "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
+  # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
+  "RUSTSEC-2024-0429",
+  "RUSTSEC-2025-0141",  # bincode unmaintained
+  "RUSTSEC-2024-0370",  # proc-macro-error unmaintained
+  "RUSTSEC-2024-0436",  # paste unmaintained
+  "RUSTSEC-2025-0075",  # unic-char-range unmaintained
+  "RUSTSEC-2025-0080",  # unic-common unmaintained
+  "RUSTSEC-2025-0081",  # unic-char-property unmaintained
+  "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
+  "RUSTSEC-2025-0100",  # unic-ucd-ident unmaintained
 ]

@@ -104,7 +104,7 @@ PRs will not be merged if any CI check fails.
 ### Prerequisites
 
 - **Rust** 1.96.0+ (see `rust-toolchain.toml`)
-- **Node.js** 20+ (see `package.json` `engines.node`)
+- **Node.js** 20.18.1+ (see `package.json` `engines.node`)
 - **pnpm** 9+
 
 ### Build Commands

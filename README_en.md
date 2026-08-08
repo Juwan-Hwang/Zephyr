@@ -214,7 +214,7 @@ Get the appropriate package from [GitHub Releases](https://github.com/Juwan-Hwan
 ### Prerequisites
 
 - Rust 1.92 or higher
-- Node.js 18 or higher
+- Node.js 20.18.1 or higher
 - pnpm 10 or higher
 - Platform-specific Tauri system dependencies
 
