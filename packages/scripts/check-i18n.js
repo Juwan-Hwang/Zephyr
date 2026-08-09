@@ -22,13 +22,17 @@
  *   - Stale keys per locale (present in target but absent from en — likely
  *     orphaned after an en key was renamed or removed)
  *   - Duplicate keys per locale (silently overwritten — a translation defect)
+ *   - Missing or invalid CLDR plural categories per locale (en value is
+ *     a plural object but target lacks a required plural form for its
+ *     locale — runtime falls back through other/one forms in same locale)
+ *   - Unused plural forms per locale (defined in target but never
+ *     selected by the locale's CLDR plural rules — informational)
  *   - data-i18n / data-i18n-placeholder attributes used in HTML/JS but
  *     missing from en translations
  *
  * Exit codes:
- *   0  — no issues, or issues found without --strict (warnings only;
- *        incomplete locales fall back to English)
- *   1  — when --strict is passed AND issues are found, or on fatal error
+ *   0  — no issues found (all locales complete)
+ *   1  — issues found (blocking — CI will fail), or on fatal error
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -39,13 +43,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
 const I18N_PATH = resolve(ROOT, 'apps/desktop/src/i18n.js');
 const SRC_DIR = resolve(ROOT, 'apps/desktop/src');
-
-// ---------------------------------------------------------------------------
-// CLI flags
-// ---------------------------------------------------------------------------
-
-const args = process.argv.slice(2);
-const strict = args.includes('--strict');
 
 // ---------------------------------------------------------------------------
 // Static object literal parser (module-level class to keep cognitive
@@ -238,7 +235,7 @@ class ObjectLiteralParser {
  * @throws {Error} If the object cannot be found or parsed
  */
 function loadTranslations(content) {
-    const declMatch = /export\s+const\s+translations\s*=/.exec(content);
+    const declMatch = /^\s*export\s+const\s+translations\s*=/m.exec(content);
     if (!declMatch) throw new Error('Could not find `export const translations =` in i18n.js');
 
     const parser = new ObjectLiteralParser(content, declMatch.index + declMatch[0].length);
@@ -301,6 +298,8 @@ function extractDataI18nKeys(srcDir) {
 // Type-compatibility checker
 // ---------------------------------------------------------------------------
 
+const _pluralCatCache = new Map();
+
 /**
  * Determine the set of CLDR plural categories that a given locale requires.
  *
@@ -312,8 +311,6 @@ function extractDataI18nKeys(srcDir) {
  * @param {string} locale - Locale code (e.g. 'zh', 'ru', 'en')
  * @returns {Set<string>} Set of required plural categories for this locale
  */
-const _pluralCatCache = new Map();
-
 function getRequiredPluralCategories(locale) {
     const cached = _pluralCatCache.get(locale);
     if (cached) return cached;
@@ -443,6 +440,36 @@ function main() {
     console.log(`  Base locale "en": ${enKeys.size} keys`);
     console.log('========================================\n');
 
+    // Validate the base locale's own plural objects against English CLDR
+    // rules. If en itself has a malformed plural object (missing required
+    // categories, empty forms, non-string values), the runtime chain
+    // pluralObj[category] || pluralObj.other || pluralObj.one || key
+    // can reach `key` and render the raw key name in the base locale.
+    const enCats = getRequiredPluralCategories('en');
+    const enIssues = [];
+    for (const key of enKeys) {
+        const enVal = enObj[key];
+        if (typeof enVal !== 'object' || enVal === null) continue;
+        for (const sub of enCats) {
+            if (!Object.hasOwn(enVal, sub)) {
+                enIssues.push(`${key}.${sub}`);
+            } else if (typeof enVal[sub] !== 'string') {
+                enIssues.push(`${key}.${sub} (type: ${typeof enVal[sub]})`);
+            } else if (enVal[sub].trim() === '') {
+                enIssues.push(`${key}.${sub} (empty)`);
+            }
+        }
+    }
+    if (enIssues.length > 0) {
+        console.log(`[en] ${enIssues.length} base-locale plural issue(s):`);
+        for (const issue of enIssues) console.log(`  - ${issue}`);
+        console.log('');
+        totalIssues += enIssues.length;
+    } else {
+        console.log('[en] OK — base locale plural forms validated');
+        console.log('');
+    }
+
     for (const locale of targetLocales) {
         const localeObj = translations[locale];
         if (!localeObj || typeof localeObj !== 'object') {
@@ -492,17 +519,13 @@ function main() {
                             empty.push(`${key}.${sub}`);
                         }
                     }
-                    // Classify nested sub-keys:
-                    // - required by CLDR → valid, skip
-                    // - not in en and not required → stale (orphaned)
-                    // - in en but not required → unused (harmless redundancy)
+                    // Classify nested sub-keys that are not required by
+                    // this locale's CLDR rules. These are never selected
+                    // at runtime — classify as unused (informational),
+                    // not stale (blocking).
                     for (const sub of Object.keys(val)) {
                         if (requiredCats.has(sub)) continue;
-                        if (!Object.hasOwn(enVal, sub)) {
-                            extra.push(`${key}.${sub}`);
-                        } else {
-                            unused.push(`${key}.${sub}`);
-                        }
+                        unused.push(`${key}.${sub}`);
                     }
                 }
             }
@@ -514,7 +537,8 @@ function main() {
         totalIssues += localeIssues;
 
         if (localeIssues === 0) {
-            console.log(`[${locale}] OK — ${localeKeyCount}/${enKeys.size} keys, 0 issues`);
+            const infoTag = unused.length > 0 ? ` (+${unused.length} informational)` : '';
+            console.log(`[${locale}] OK — ${localeKeyCount}/${enKeys.size} keys, 0 issues${infoTag}`);
         } else {
             console.log(`[${locale}] ${localeIssues} issue(s) — ${localeKeyCount}/${enKeys.size} keys present`);
 
@@ -605,13 +629,10 @@ function main() {
     console.log('----------------------------------------');
 
     if (totalIssues > 0) {
-        console.log('\nNOTE: Some locales may have incomplete translations.');
-        console.log('      Missing keys fall back to English; empty strings show blank.');
-        console.log('      Re-run with --strict to make this check fail (exit 1).\n');
-
-        if (strict) {
-            process.exit(1);
-        }
+        console.log('\nBLOCKING: i18n completeness check failed.');
+        console.log('          Missing keys fall back to English; empty strings show blank.');
+        console.log('          Fix all issues above before merging.\n');
+        process.exit(1);
     }
 }
 
