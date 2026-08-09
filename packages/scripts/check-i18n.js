@@ -3,21 +3,29 @@
 /**
  * Zephyr i18n Completeness Checker
  *
- * Extracts translation keys from apps/desktop/src/i18n.js using a
- * brace-depth-aware parser (no AST dependency, no DOM dependency).
+ * Evaluates the `translations` object from i18n.js using the exact same
+ * JavaScript semantics as the runtime — no regex approximation. This
+ * guarantees that if the checker passes, the runtime i18n system will
+ * behave identically.
+ *
+ * Key design principle: the checker mirrors `resolveKey()` and `t()` from
+ * i18n.js — using `hasOwnProperty` for key existence (same as resolveKey)
+ * and `typeof value === 'string'` for value type (same as t()).
  *
  * Reports:
- *   - Missing keys per locale (present in `en` but absent in target)
- *   - Empty-string keys per locale (present but will fallback to English)
+ *   - Missing keys per locale (present in `en` but absent in target —
+ *     runtime falls back to English)
+ *   - Empty-string keys per locale (present but blank — runtime shows "",
+ *     does NOT fall back to English)
  *   - data-i18n / data-i18n-placeholder attributes used in HTML/JS but
  *     missing from en translations
  *
  * Exit codes:
- *   0  — always (warnings only; ja/ko are known skeleton translations)
+ *   0  — always (warnings only; incomplete locales fall back to English)
  *   1  — when --strict is passed AND issues are found
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,32 +42,38 @@ const args = process.argv.slice(2);
 const strict = args.includes('--strict');
 
 // ---------------------------------------------------------------------------
-// Brace-depth-aware block extractor
+// Translations object evaluator
 // ---------------------------------------------------------------------------
 
 /**
- * Given the full source text and a language identifier, locate the
- * `lang: { ... }` block and return its inner content as a string.
+ * Extract and evaluate the `translations` object from i18n.js source.
  *
- * Handles nested braces inside string literals correctly.
+ * By evaluating the actual object literal — using the same JavaScript string
+ * parsing semantics as the runtime — we guarantee that what the checker sees
+ * is exactly what the runtime sees. No regex approximation, no false positives
+ * from mixed quotes, key names matching value prefixes, or any other edge case
+ * that a regex-based parser would miss.
+ *
+ * The object literal is pure data (string literals + nested objects), so it
+ * is safe to evaluate with `new Function`.
+ *
+ * @param {string} content - Full source text of i18n.js
+ * @returns {Record<string, Record<string, unknown>>} The evaluated translations object
  */
-function extractBlock(content, lang) {
-    // Validate lang to prevent ReDoS — only allow word chars and hyphens
-    if (!/^[\w-]+$/.test(lang)) return null;
-    // Use [ \t] instead of \s to avoid super-linear backtracking (SonarCloud)
-    const blockStart = /(?:^|\n)[ \t]*([\w-]+)[ \t]*:[ \t]*\{/g;
-    let match;
-    while ((match = blockStart.exec(content)) !== null) {
-        if (match[1] === lang) break;
+function loadTranslations(content) {
+    const startMatch = /export\s+const\s+translations\s*=\s*\{/g.exec(content);
+    if (!startMatch) {
+        throw new Error('Could not find `export const translations = {` in i18n.js');
     }
-    if (!match || match[1] !== lang) return null;
 
+    // Track brace depth to find the matching `}`, being aware of string
+    // literals so that braces inside strings don't affect depth tracking.
+    const openBracePos = startMatch.index + startMatch[0].length - 1; // position of `{`
     let depth = 0;
     let inString = false;
     let stringChar = '';
-    const start = match.index + match[0].length;
 
-    for (let i = start; i < content.length; i++) {
+    for (let i = openBracePos; i < content.length; i++) {
         const ch = content[i];
 
         if (inString) {
@@ -76,39 +90,16 @@ function extractBlock(content, lang) {
 
         if (ch === '{') depth++;
         if (ch === '}') {
-            if (depth === 0) return content.substring(start, i);
             depth--;
+            if (depth === 0) {
+                const objectLiteral = content.substring(openBracePos, i + 1);
+                // eslint-disable-next-line no-new-func
+                return new Function('return ' + objectLiteral)();
+            }
         }
     }
 
-    return null;
-}
-
-/**
- * Extract all top-level keys from a block string.
- * Matches lines like `  someKey: "value"` or `someKey: 'value'`.
- */
-function extractKeys(block) {
-    const keys = new Set();
-    const keyRegex = /^\s*(\w+)\s*:/gm;
-    let m;
-    while ((m = keyRegex.exec(block)) !== null) {
-        keys.add(m[1]);
-    }
-    return keys;
-}
-
-/**
- * Extract keys whose values are empty strings: `key: ""` or `key: ''`.
- */
-function extractEmptyKeys(block) {
-    const empty = new Set();
-    const emptyRegex = /^\s*(\w+)\s*:\s*["']\s*["']/gm;
-    let m;
-    while ((m = emptyRegex.exec(block)) !== null) {
-        empty.add(m[1]);
-    }
-    return empty;
+    throw new Error('Could not find end of translations object (unbalanced braces)');
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +110,9 @@ function extractEmptyKeys(block) {
  * Recursively walk SRC_DIR and extract all unique keys from
  * data-i18n="key" and data-i18n-placeholder="key" attributes
  * in .html and .js files.
+ *
+ * @param {string} srcDir - Root directory to walk
+ * @returns {Set<string>} Unique i18n keys referenced in HTML attributes
  */
 function extractDataI18nKeys(srcDir) {
     const keys = new Set();
@@ -156,15 +150,28 @@ function extractDataI18nKeys(srcDir) {
 
 function main() {
     const content = readFileSync(I18N_PATH, 'utf-8');
+    const translations = loadTranslations(content);
 
-    const enBlock = extractBlock(content, 'en');
-    if (!enBlock) {
-        console.error(`[check-i18n] ERROR: Could not locate "en" block in ${I18N_PATH}`);
+    // Use the exact same lookup that resolveKey() uses at runtime:
+    //   translations.en  →  the base locale
+    const enObj = translations.en;
+    if (!enObj || typeof enObj !== 'object') {
+        console.error(`[check-i18n] ERROR: "en" locale not found or invalid in ${I18N_PATH}`);
         process.exit(1);
     }
 
-    const enKeys = extractKeys(enBlock);
-    const targetLocales = ['zh', 'ja', 'ko'];
+    // Object.keys() returns own enumerable properties — exactly what
+    // resolveKey() iterates over via hasOwnProperty.
+    const enKeys = new Set(Object.keys(enObj));
+
+    // Discover all target locales dynamically: every key in translations
+    // except 'en'. This never goes stale when new languages are added.
+    const targetLocales = Object.keys(translations).filter(l => l !== 'en');
+
+    if (targetLocales.length === 0) {
+        console.error('[check-i18n] ERROR: No target locales found in translations object');
+        process.exit(1);
+    }
 
     let totalIssues = 0;
 
@@ -174,36 +181,54 @@ function main() {
     console.log('========================================\n');
 
     for (const locale of targetLocales) {
-        const block = extractBlock(content, locale);
-        if (!block) {
-            console.error(`[check-i18n] ERROR: Could not locate "${locale}" block in ${I18N_PATH}`);
+        const localeObj = translations[locale];
+        if (!localeObj || typeof localeObj !== 'object') {
+            console.error(`[check-i18n] ERROR: Locale "${locale}" is defined but has no object value`);
             totalIssues += enKeys.size;
             continue;
         }
 
-        const localeKeys = extractKeys(block);
-        const emptyKeys = extractEmptyKeys(block);
+        // Mirror resolveKey(): check hasOwnProperty for each en key.
+        // If the key exists in the target locale, resolveKey() returns
+        // its value (even if it's ""). If not, resolveKey() falls back
+        // to the en value.
+        const missing = [];
+        const empty = [];
 
-        const missing = [...enKeys].filter(k => !localeKeys.has(k));
-        const empty = [...emptyKeys];
+        for (const key of enKeys) {
+            if (!Object.prototype.hasOwnProperty.call(localeObj, key)) {
+                // Key absent → runtime falls back to English
+                missing.push(key);
+            } else {
+                // Key present → check if the value is an empty string.
+                // At runtime, t() checks `typeof value === 'string'`.
+                // An empty string IS a string, so t() returns "" —
+                // the UI shows blank, with NO English fallback.
+                const val = localeObj[key];
+                if (typeof val === 'string' && val === '') {
+                    empty.push(key);
+                }
+            }
+        }
 
+        const localeKeyCount = Object.keys(localeObj).length;
         const localeIssues = missing.length + empty.length;
         totalIssues += localeIssues;
 
         if (localeIssues === 0) {
-            console.log(`[${locale}] OK — ${localeKeys.size}/${enKeys.size} keys, 0 issues`);
+            console.log(`[${locale}] OK — ${localeKeyCount}/${enKeys.size} keys, 0 issues`);
         } else {
-            console.log(`[${locale}] ${localeIssues} issue(s) — ${localeKeys.size}/${enKeys.size} keys present`);
+            console.log(`[${locale}] ${localeIssues} issue(s) — ${localeKeyCount}/${enKeys.size} keys present`);
 
             if (missing.length > 0) {
-                console.log(`  Missing keys (${missing.length}):`);
+                console.log(`  Missing keys (${missing.length}, runtime falls back to English):`);
                 for (const key of missing) {
                     console.log(`    - ${key}`);
                 }
             }
 
             if (empty.length > 0) {
-                console.log(`  Empty-string keys (${empty.length}, fallback to English):`);
+                console.log(`  Empty-string keys (${empty.length}, blank at runtime — no English fallback):`);
                 for (const key of empty) {
                     console.log(`    - ${key}`);
                 }
@@ -240,7 +265,8 @@ function main() {
     console.log('----------------------------------------');
 
     if (totalIssues > 0) {
-        console.log('\nNOTE: ja/ko are skeleton translations — missing keys are expected.');
+        console.log('\nNOTE: Some locales may have incomplete translations.');
+        console.log('      Missing keys fall back to English; empty strings show blank.');
         console.log('      Re-run with --strict to make this check fail (exit 1).\n');
 
         if (strict) {
