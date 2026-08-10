@@ -29,32 +29,32 @@ importers:
         specifier: ^66.7.5
         version: 66.7.5
       eslint:
-        specifier: 10.8.0
-        version: 10.8.0(jiti@2.7.0)
+        specifier: 10.8.1
+        version: 10.8.1(jiti@2.7.0)
       globals:
-        specifier: ^17.8.0
-        version: 17.8.0
+        specifier: ^17.9.0
+        version: 17.9.0
       happy-dom:
-        specifier: ^20.11.1
-        version: 20.11.1
+        specifier: ^20.11.2
+        version: 20.11.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
       style-dictionary:
-        specifier: ^5.5.0
-        version: 5.5.0(tslib@2.8.1)
+        specifier: ^5.5.1
+        version: 5.5.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
       unocss:
         specifier: ^66.7.5
-        version: 66.7.5(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
+        version: 66.7.5(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
       vite:
         specifier: 8.1.4
-        version: 8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
+        version: 8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
       vitest:
         specifier: 4.1.10
-        version: 4.1.10(@types/node@26.1.2)(happy-dom@20.11.1)(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
+        version: 4.1.10(@types/node@26.2.0)(happy-dom@20.11.2)(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
 
   apps/desktop:
     dependencies:
@@ -77,8 +77,8 @@ importers:
         specifier: ^6.7.1
         version: 6.7.1
       '@codemirror/view':
-        specifier: ^6.43.7
-        version: 6.43.7
+        specifier: ^6.43.8
+        version: 6.43.8
       '@tauri-apps/plugin-autostart':
         specifier: 2.5.1
         version: 2.5.1
@@ -90,8 +90,8 @@ importers:
         specifier: ^0.28.1
         version: 0.28.1
       eslint:
-        specifier: 10.8.0
-        version: 10.8.0(jiti@2.7.0)
+        specifier: 10.8.1
+        version: 10.8.1(jiti@2.7.0)
 
   packages/scripts: {}
 
@@ -277,8 +277,8 @@ packages:
   '@codemirror/state@6.7.1':
     resolution: {integrity: sha512-9QzNDgE4EYDnAHfrTlR2lwiPciiOymLtwKK+8yHQzCc7GXhAP9xdEbEJFy2IWB1j9UGUl9BsgMmTo/ImA02T7A==}
 
-  '@codemirror/view@6.43.7':
-    resolution: {integrity: sha512-FZsExxkoxnAN+d9TgqXLg5g4A1oQwzX9WlkOT5i2PKkcW7xx3Bmu0vs90g6fo9Mpdsb/l96dnAraQ8932aO4/g==}
+  '@codemirror/view@6.43.8':
+    resolution: {integrity: sha512-qtItTDssZ/5GFfi94hrILu9j/VUeFPDPkhovEfmWFj2ipTxnzPB8DdHgfbb8HYTzLTYhrndKmyQxXUz/PDLenw==}
 
   '@cyclonedx/cdxgen@12.8.2':
     resolution: {integrity: sha512-CmJy1LscnEK4f1X5UdBXY7FQlxazCGjtjxsNJjqLOsp6GEyyKKgI2PKyIzpWdhe+v+L7iLeJmOqqz9nFD57r6w==}
@@ -581,50 +581,50 @@ packages:
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-core@4.64.0':
-    resolution: {integrity: sha512-zs2TAq7Six5jgMuoMNjpspAvOP3mhtgq/k1UyQodEzCtQi/N83y2/y+zcvnZSGp/Rxq96DBN+bValOBQAyn/ew==}
+  '@jsonjoy.com/fs-core@4.68.1':
+    resolution: {integrity: sha512-V5oZ4Gt9WJKyQef0n9cAd0N9qjSkIBm3E4MYsgNIWBk5aINCDPKxMPo1i29rBxqiT4Ixf1epklqV9VJMKIxwlw==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-fsa@4.64.0':
-    resolution: {integrity: sha512-nMWOVbkLFyEgmXZih3wyvxA9XpgyyqyfrINMHvEFqhi7uqfRl7c9ERJt6yX7vgMPrB9Uo+OJO+Spa0cFzPD01w==}
+  '@jsonjoy.com/fs-fsa@4.68.1':
+    resolution: {integrity: sha512-HCG72UioncuO7Gw09XNVG+S85e3cq2hrUC/mexBrsWsa3mI7eePkkqWie3uVYbtsb64OR9YGQs5SqaufDRYBcg==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-node-builtins@4.64.0':
-    resolution: {integrity: sha512-/o7WRFhUWaM/fOrslwLZGnzn4RmRILykn+lAL+mNObqqRNw+CQSiij6hpCeZ+C7buhdoVo7go/OYqzaSUfDYmA==}
+  '@jsonjoy.com/fs-node-builtins@4.68.1':
+    resolution: {integrity: sha512-HK1BTksysokNZxNspqDH0yPaqN9YgR/AYIlYiIaU2Ys4BOk5CdybI7r6BgiZuiiPiV8n4sK/kZdice7Znpy2Kw==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-node-to-fsa@4.64.0':
-    resolution: {integrity: sha512-WDD9WVs0hb7UAEKTgZW2f66WDrbj7gIIWwpP3spbLyXa0rghtUaFTB8L4gdR3ZCWwiKIsj38/CNijpVmpnuPUw==}
+  '@jsonjoy.com/fs-node-to-fsa@4.68.1':
+    resolution: {integrity: sha512-lpKmU4X9e/oh8GIuAI7EXaS5QiLNM3KD15CkdhfS6PYmrGvoJqKQcyEfnLgnnaGslh/PFUMYSIZBCf2ejJGw8g==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-node-utils@4.64.0':
-    resolution: {integrity: sha512-k5Indsx9hWW9xSF7Y6oSKKwtCUNhzZxadub3owhIlitc+iMRVlPPdX2duTKQWBL3qNWpXya8jykgaaWpheeS4w==}
+  '@jsonjoy.com/fs-node-utils@4.68.1':
+    resolution: {integrity: sha512-/GxfW1DWm9SCdkfbvqevLO/P5duobQfmKkHXxdMIDbcZMQeAgooAstIfZhkXpATzq9QbCQsnoWFM/dGHdZfndw==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-node@4.64.0':
-    resolution: {integrity: sha512-dO+NNkODbUli4uV42bcNrrLvq5rE7SNpdZ5TNd0dtbLsAaNK3MDiIC9lUi+brboGoIjW6vd2fB1qao60nrk5xA==}
+  '@jsonjoy.com/fs-node@4.68.1':
+    resolution: {integrity: sha512-R5D9mWtqdURzcOWj1vdXr3APCwX0xchtFT+kmW7fXLNDifWdDrnh26jSID8pdnUfFBxTyfHtFtTL/NWKzIH7kQ==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-print@4.64.0':
-    resolution: {integrity: sha512-PHZFccchvkhWrwPWHjmVAhbC3vSHCtyZvlZfJJ3ho2bnzl450hXri6/8e6pbkWdH+SkmLXNml0sV8e5HDAfxKw==}
+  '@jsonjoy.com/fs-print@4.68.1':
+    resolution: {integrity: sha512-oGeZOGPYKK9v1CgeVeEDsLomH1lCnslSpqUN5GmPzrmAVGQlsmsdcXNA2O4lV8Y4xkuSuynx2ITBkUHJVaTbow==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
 
-  '@jsonjoy.com/fs-snapshot@4.64.0':
-    resolution: {integrity: sha512-oM7UDeL83q6NBzzsfKAsYKXKVXlykKFqqOLh4xZZKAzzROTlInkPbc6LTDGThEOnPiFiUzA7tYziHG9xavd76Q==}
+  '@jsonjoy.com/fs-snapshot@4.68.1':
+    resolution: {integrity: sha512-XZfP0FDZN32bbc4t2bZN2qRrYHg5AktJnzk22HRoKGK4BprrbNRH2k5ceSNS/kupKYcofCs+O841+xaAbjnxwQ==}
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
@@ -1035,8 +1035,8 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
-  '@types/node@26.1.2':
-    resolution: {integrity: sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg==}
+  '@types/node@26.2.0':
+    resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
 
   '@types/whatwg-mimetype@3.0.2':
     resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
@@ -1259,8 +1259,8 @@ packages:
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==}
 
-  '@zip.js/zip.js@2.8.26':
-    resolution: {integrity: sha512-RQ4h9F6DOiHxpdocUDrOl6xBM+yOtz+LkUol47AVWcfebGBDpZ7w7Xvz9PS24JgXvLGiXXzSAfdCdVy1tPlaFA==}
+  '@zip.js/zip.js@2.8.37':
+    resolution: {integrity: sha512-hCjUGI0e0s7KNAV/f0Cs5rKLFt9+LsRcE0hAq9zvRkUehyUrrMFBWGLvjCs0JARJjKehyv/AUVB4yr89dLZurA==}
     engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
 
   acorn-jsx@5.3.2:
@@ -1580,8 +1580,8 @@ packages:
     resolution: {integrity: sha512-tD40eHxA35h0PEIZNeIjkHoDR4YjjJp34biM0mDvplBe//mB+IHCqHDGV7pxF+7MklTvighcCPPZC7ynWyjdTA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  eslint@10.8.0:
-    resolution: {integrity: sha512-nuKKvN+oIBO0koN7Tm7dlkmnkc21mtt0QJLwAKzjLq14y6lRTdVG36MZHJ8eQHwdJMwZbQNMlPOYedMq/oVJvQ==}
+  eslint@10.8.1:
+    resolution: {integrity: sha512-wqA7W2jbsC/BnV9Iv1UZpKVFkO1AdNoSmYW8NWG4HNOBbkAMvIqDZ27pI2f07dqn583NcIC44ckjAcOXDL1QbQ==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     hasBin: true
     peerDependencies:
@@ -1707,8 +1707,8 @@ packages:
     resolution: {integrity: sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw==}
     engines: {node: 18 || 20 || >=22}
 
-  globals@17.8.0:
-    resolution: {integrity: sha512-Zz/LMDZScFmkakeL2cTHzf+PbWKdpU3uclqkZT7TjDG58j5WPt0PpA+n9uPI24fZtlw07q0OtEi84K+umsRzqQ==}
+  globals@17.9.0:
+    resolution: {integrity: sha512-m/MvAW61QVU5VDNF1Vj8axt016h8w7L5TU1e9zlab7XIttAT2YAlCwl75K1fOqvMM9apmD7lbCIRhpfkhmxhCg==}
     engines: {node: '>=18'}
 
   gopd@1.2.0:
@@ -1719,8 +1719,8 @@ packages:
     resolution: {integrity: sha512-ax7ZYomf6jqPTQ4+XCpUGyXKHk5WweS+e05MBO4/y3WJ5RkmPXNKvX+bx1behVILVwr6JSQvZAku021CHPXG3Q==}
     engines: {node: '>=10'}
 
-  happy-dom@20.11.1:
-    resolution: {integrity: sha512-XSt8tMzbW9ymE7687xztkO1ckR7qJNQ3LywY9vlYGhGi3zXrGBHuUo2Cl1ztZaICW+1eAGdkLbj6iwVqDT33kg==}
+  happy-dom@20.11.2:
+    resolution: {integrity: sha512-7MB+bJLkxu3SowAfBJbjW+c55kNz5tkR45gu2qzrxznezhLeN5YIlJbwUgSzlGc+qWoZ8Ykg71H5ezz69xixrw==}
     engines: {node: '>=20.0.0'}
 
   has-property-descriptors@1.0.2:
@@ -1987,10 +1987,8 @@ packages:
     resolution: {integrity: sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ==}
     engines: {node: '>= 0.8'}
 
-  memfs@4.64.0:
-    resolution: {integrity: sha512-Kw72fgY7Wn+sD8KmtNWSafl1dz0UvAsE/PHs3YVfLiaZuA3HxNm9sRLqAu0ATiBGJvME1PxZXbBZPv5GycDeAw==}
-    peerDependencies:
-      tslib: '2'
+  memfs@4.68.1:
+    resolution: {integrity: sha512-OD+IDRUvIxu3QHL+nFm9gdyugInD27FDJ+sl4B5QgomPHXMlbw+GP918P8VNKu2FkNlVeqBkpzkwROpamVifRw==}
 
   mime-db@1.54.0:
     resolution: {integrity: sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==}
@@ -2180,16 +2178,16 @@ packages:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
 
-  postcss@8.5.25:
-    resolution: {integrity: sha512-DTPx3RWSSnWyzLxQnlH0rJP+EW5ekl16ZU4/psbIhA0e53kJfdgaN5vKM+xP7yJtXVu+nfdVFmlgFDEKAe4Pyw==}
+  postcss@8.5.26:
+    resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
 
-  prettier@3.9.5:
-    resolution: {integrity: sha512-/FVl766LpUfB5vXgCYOYa0MeV/441Ia99AeICQIQFTY/Nw0roZwULcXpku5i1/m5kt/baz+s4Zogspd839HSMg==}
+  prettier@3.9.6:
+    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -2342,8 +2340,8 @@ packages:
     resolution: {integrity: sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==}
     engines: {node: '>=12'}
 
-  style-dictionary@5.5.0:
-    resolution: {integrity: sha512-AGkOZtAc3OTz99wlzstrmj5OM5BWOW2IbmXD74sf0MXFPi271TGBdywokgd7bS3L0tKOk9M0FR+R9gnbXRSSfg==}
+  style-dictionary@5.5.1:
+    resolution: {integrity: sha512-+fwPuRKopBLNolzefOHrAtCQomJqj0HVbH0XWBwXEQR3CV+i2pkNY5yCSPPv0qNHc3ibnbuzF4Qui3tZehexIw==}
     engines: {node: '>=22.0.0'}
     hasBin: true
 
@@ -2354,8 +2352,8 @@ packages:
     resolution: {integrity: sha512-XdhtCvlMywwxpCW8YEq3lOXBJpUPTR2OHHcwLPO3HwsJqOHa2Ok/oJ7ruGzp+JrKoRPVCzJwAdEjqLW/vNRPHA==}
     engines: {node: '>=18'}
 
-  thingies@2.6.0:
-    resolution: {integrity: sha512-rMHRjmlFLM1R96UYPvpmnc3LYtdFrT33JIB7L9hetGue1qAPfn1N2LJeEjxUSidu1Iku+haLZXDuEXUHNGO/lg==}
+  thingies@2.6.1:
+    resolution: {integrity: sha512-cV/CMGTK3M4MlnJ/0At6ismOw/A0EEniDNScajjz/Br3c1sqE72YD01rGpPTKwd27wAxI5Pr+6+0w8yofzFRYw==}
     engines: {node: '>=10.18'}
     peerDependencies:
       tslib: ^2
@@ -2753,17 +2751,15 @@ snapshots:
       string_decoder: 1.3.0
       url: 0.11.4
 
-  '@bundled-es-modules/memfs@4.17.0(tslib@2.8.1)':
+  '@bundled-es-modules/memfs@4.17.0':
     dependencies:
       assert: 2.1.0
       buffer: 6.0.3
       events: 3.3.0
-      memfs: 4.64.0(tslib@2.8.1)
+      memfs: 4.68.1
       path: 0.12.7
       stream: 0.0.3
       util: 0.12.5
-    transitivePeerDependencies:
-      - tslib
 
   '@cdxgen/cdx-hbom@0.5.1':
     optional: true
@@ -2830,14 +2826,14 @@ snapshots:
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.1
-      '@codemirror/view': 6.43.7
+      '@codemirror/view': 6.43.8
       '@lezer/common': 1.5.2
 
   '@codemirror/commands@6.10.4':
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.1
-      '@codemirror/view': 6.43.7
+      '@codemirror/view': 6.43.8
       '@lezer/common': 1.5.2
 
   '@codemirror/lang-javascript@6.2.5':
@@ -2846,7 +2842,7 @@ snapshots:
       '@codemirror/language': 6.12.4
       '@codemirror/lint': 6.9.5
       '@codemirror/state': 6.7.1
-      '@codemirror/view': 6.43.7
+      '@codemirror/view': 6.43.8
       '@lezer/common': 1.5.2
       '@lezer/javascript': 1.5.4
 
@@ -2863,7 +2859,7 @@ snapshots:
   '@codemirror/language@6.12.4':
     dependencies:
       '@codemirror/state': 6.7.1
-      '@codemirror/view': 6.43.7
+      '@codemirror/view': 6.43.8
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.10
@@ -2872,14 +2868,14 @@ snapshots:
   '@codemirror/lint@6.9.5':
     dependencies:
       '@codemirror/state': 6.7.1
-      '@codemirror/view': 6.43.7
+      '@codemirror/view': 6.43.8
       crelt: 1.0.7
 
   '@codemirror/state@6.7.1':
     dependencies:
       '@marijn/find-cluster-break': 1.0.3
 
-  '@codemirror/view@6.43.7':
+  '@codemirror/view@6.43.8':
     dependencies:
       '@codemirror/state': 6.7.1
       crelt: 1.0.7
@@ -3052,9 +3048,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@eslint-community/eslint-utils@4.10.1(eslint@10.8.0(jiti@2.7.0))':
+  '@eslint-community/eslint-utils@4.10.1(eslint@10.8.1(jiti@2.7.0))':
     dependencies:
-      eslint: 10.8.0(jiti@2.7.0)
+      eslint: 10.8.1(jiti@2.7.0)
       eslint-visitor-keys: 3.4.3
 
   '@eslint-community/regexpp@4.12.2': {}
@@ -3159,59 +3155,59 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-core@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-core@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
-      thingies: 2.6.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-fsa@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-fsa@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-core': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
-      thingies: 2.6.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-core': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-node-builtins@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-node-builtins@4.68.1(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-node-to-fsa@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-node-to-fsa@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-fsa': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-fsa': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-node-utils@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-node-utils@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
       glob-to-regex.js: 1.2.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-node@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-node@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-core': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-print': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-snapshot': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-core': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-print': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-snapshot': 4.68.1(tslib@2.8.1)
       glob-to-regex.js: 1.2.0(tslib@2.8.1)
-      thingies: 2.6.0(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-print@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-print@4.68.1(tslib@2.8.1)':
     dependencies:
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
       tree-dump: 1.1.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@jsonjoy.com/fs-snapshot@4.64.0(tslib@2.8.1)':
+  '@jsonjoy.com/fs-snapshot@4.68.1(tslib@2.8.1)':
     dependencies:
       '@jsonjoy.com/buffers': 17.67.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
       '@jsonjoy.com/json-pack': 17.67.0(tslib@2.8.1)
       '@jsonjoy.com/util': 17.67.0(tslib@2.8.1)
       tslib: 2.8.1
@@ -3224,7 +3220,7 @@ snapshots:
       '@jsonjoy.com/json-pointer': 1.0.2(tslib@2.8.1)
       '@jsonjoy.com/util': 1.9.0(tslib@2.8.1)
       hyperdyperid: 1.2.0
-      thingies: 2.6.0(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tree-dump: 1.1.0(tslib@2.8.1)
       tslib: 2.8.1
 
@@ -3236,7 +3232,7 @@ snapshots:
       '@jsonjoy.com/json-pointer': 17.67.0(tslib@2.8.1)
       '@jsonjoy.com/util': 17.67.0(tslib@2.8.1)
       hyperdyperid: 1.2.0
-      thingies: 2.6.0(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tree-dump: 1.1.0(tslib@2.8.1)
       tslib: 2.8.1
 
@@ -3537,7 +3533,7 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
-  '@types/node@26.1.2':
+  '@types/node@26.2.0':
     dependencies:
       undici-types: 8.3.0
 
@@ -3545,7 +3541,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 26.1.2
+      '@types/node': 26.2.0
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -3723,7 +3719,7 @@ snapshots:
     dependencies:
       '@unocss/core': 66.7.5
 
-  '@unocss/vite@66.7.5(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))':
+  '@unocss/vite@66.7.5(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))':
     dependencies:
       '@jridgewell/remapping': 2.3.5
       '@unocss/config': 66.7.5
@@ -3734,7 +3730,7 @@ snapshots:
       pathe: 2.0.3
       tinyglobby: 0.2.17
       unplugin-utils: 0.3.2
-      vite: 8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
+      vite: 8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
 
   '@vitest/expect@4.1.10':
     dependencies:
@@ -3745,13 +3741,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.10(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))':
+  '@vitest/mocker@4.1.10(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 4.1.10
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
+      vite: 8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -3777,7 +3773,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@zip.js/zip.js@2.8.26': {}
+  '@zip.js/zip.js@2.8.37': {}
 
   acorn-jsx@5.3.2(acorn@8.18.0):
     dependencies:
@@ -3848,7 +3844,7 @@ snapshots:
 
   buffer-image-size@0.6.4:
     dependencies:
-      '@types/node': 26.1.2
+      '@types/node': 26.2.0
 
   buffer@6.0.3:
     dependencies:
@@ -4126,9 +4122,9 @@ snapshots:
 
   eslint-visitor-keys@5.0.1: {}
 
-  eslint@10.8.0(jiti@2.7.0):
+  eslint@10.8.1(jiti@2.7.0):
     dependencies:
-      '@eslint-community/eslint-utils': 4.10.1(eslint@10.8.0(jiti@2.7.0))
+      '@eslint-community/eslint-utils': 4.10.1(eslint@10.8.1(jiti@2.7.0))
       '@eslint-community/regexpp': 4.12.2
       '@eslint/config-array': 0.23.5
       '@eslint/config-helpers': 0.7.0
@@ -4277,7 +4273,7 @@ snapshots:
       minipass: 7.1.3
       path-scurry: 2.0.2
 
-  globals@17.8.0: {}
+  globals@17.9.0: {}
 
   gopd@1.2.0: {}
 
@@ -4285,9 +4281,9 @@ snapshots:
     dependencies:
       duplexer: 0.1.2
 
-  happy-dom@20.11.1:
+  happy-dom@20.11.2:
     dependencies:
-      '@types/node': 26.1.2
+      '@types/node': 26.2.0
       '@types/whatwg-mimetype': 3.0.2
       '@types/ws': 8.18.1
       buffer-image-size: 0.6.4
@@ -4522,20 +4518,20 @@ snapshots:
   media-typer@1.1.1:
     optional: true
 
-  memfs@4.64.0(tslib@2.8.1):
+  memfs@4.68.1:
     dependencies:
-      '@jsonjoy.com/fs-core': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-fsa': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-builtins': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-to-fsa': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-node-utils': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-print': 4.64.0(tslib@2.8.1)
-      '@jsonjoy.com/fs-snapshot': 4.64.0(tslib@2.8.1)
+      '@jsonjoy.com/fs-core': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-fsa': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-builtins': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-to-fsa': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-node-utils': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-print': 4.68.1(tslib@2.8.1)
+      '@jsonjoy.com/fs-snapshot': 4.68.1(tslib@2.8.1)
       '@jsonjoy.com/json-pack': 1.21.0(tslib@2.8.1)
       '@jsonjoy.com/util': 1.9.0(tslib@2.8.1)
       glob-to-regex.js: 1.2.0(tslib@2.8.1)
-      thingies: 2.6.0(tslib@2.8.1)
+      thingies: 2.6.1(tslib@2.8.1)
       tree-dump: 1.1.0(tslib@2.8.1)
       tslib: 2.8.1
 
@@ -4750,7 +4746,7 @@ snapshots:
 
   possible-typed-array-names@1.1.0: {}
 
-  postcss@8.5.25:
+  postcss@8.5.26:
     dependencies:
       nanoid: 3.3.17
       picocolors: 1.1.1
@@ -4758,7 +4754,7 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier@3.9.5: {}
+  prettier@3.9.6: {}
 
   proc-log@6.1.0: {}
 
@@ -4926,12 +4922,12 @@ snapshots:
     dependencies:
       ansi-regex: 6.2.2
 
-  style-dictionary@5.5.0(tslib@2.8.1):
+  style-dictionary@5.5.1:
     dependencies:
       '@bundled-es-modules/deepmerge': 4.3.2
       '@bundled-es-modules/glob': 13.0.6
-      '@bundled-es-modules/memfs': 4.17.0(tslib@2.8.1)
-      '@zip.js/zip.js': 2.8.26
+      '@bundled-es-modules/memfs': 4.17.0
+      '@zip.js/zip.js': 2.8.37
       chalk: 5.6.2
       change-case: 5.4.4
       colorjs.io: 0.5.2
@@ -4939,10 +4935,8 @@ snapshots:
       is-plain-obj: 4.1.0
       json5: 2.2.3
       path-unified: 0.2.0
-      prettier: 3.9.5
+      prettier: 3.9.6
       tinycolor2: 1.6.0
-    transitivePeerDependencies:
-      - tslib
 
   style-mod@4.1.3: {}
 
@@ -4954,7 +4948,7 @@ snapshots:
       minizlib: 3.1.0
       yallist: 5.0.0
 
-  thingies@2.6.0(tslib@2.8.1):
+  thingies@2.6.1(tslib@2.8.1):
     dependencies:
       tslib: 2.8.1
 
@@ -5042,7 +5036,7 @@ snapshots:
 
   undici@7.29.0: {}
 
-  unocss@66.7.5(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)):
+  unocss@66.7.5(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)):
     dependencies:
       '@unocss/cli': 66.7.5
       '@unocss/core': 66.7.5
@@ -5060,7 +5054,7 @@ snapshots:
       '@unocss/transformer-compile-class': 66.7.5
       '@unocss/transformer-directives': 66.7.5
       '@unocss/transformer-variant-group': 66.7.5
-      '@unocss/vite': 66.7.5(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
+      '@unocss/vite': 66.7.5(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
     transitivePeerDependencies:
       - vite
 
@@ -5108,24 +5102,24 @@ snapshots:
   vary@1.1.2:
     optional: true
 
-  vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0):
+  vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
-      postcss: 8.5.25
+      postcss: 8.5.26
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 26.1.2
+      '@types/node': 26.2.0
       esbuild: 0.28.1
       fsevents: 2.3.3
       jiti: 2.7.0
       yaml: 2.9.0
 
-  vitest@4.1.10(@types/node@26.1.2)(happy-dom@20.11.1)(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)):
+  vitest@4.1.10(@types/node@26.2.0)(happy-dom@20.11.2)(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
+      '@vitest/mocker': 4.1.10(vite@8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
       '@vitest/pretty-format': 4.1.10
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
@@ -5142,11 +5136,11 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.4(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
+      vite: 8.1.4(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 26.1.2
-      happy-dom: 20.11.1
+      '@types/node': 26.2.0
+      happy-dom: 20.11.2
     transitivePeerDependencies:
       - msw
 
