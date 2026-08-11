@@ -108,6 +108,7 @@ Zephyr includes a rule engine based on `clash-prism-*` crates to enhance Mihomo 
 | **Failover** | Automatic node switching on failure, with thresholds, cooldown, and rollback strategies |
 | **Script Sandbox** | QuickJS execution environment with time, memory, string length, loop, and recursion limits |
 | **Plugin System** | Plugin discovery, loading, lifecycle hooks, and fine-grained permission control |
+| **Override System** | Prism DSL + JavaScript dual-engine config overrides, global/per-profile scope, drag-reorder, import/export |
 | **KV Storage** | Persistent key-value storage capabilities |
 
 ### Security Design
@@ -156,7 +157,7 @@ Zephyr implements defense-in-depth security measures:
 - CodeMirror 6 editor with Prism DSL highlighting and completion
 - Proxy node card 3D interaction effects
 - Theme system: preset themes and custom colors
-- i18n: English baseline, complete Chinese translation, Japanese/Korean partial (fallback to English)
+- i18n: 14 languages (en, zh, ja, ko, ru, es, fa, tk, my, ar, ur, sw, tr, vi), RTL layout support, CLDR plural rule validation
 - Frontend event bus, centralized state, and caching layer
 
 ---
@@ -183,7 +184,7 @@ Zephyr implements defense-in-depth security measures:
 | Platform | Architecture | Minimum Version |
 |:--------:|:--------:|----------------|
 | Windows | x64 / ARM64 | Windows 10 1809+ |
-| macOS | x64 / ARM64 (Apple Silicon) | macOS 10.15 (Catalina)+ |
+| macOS | x64 / ARM64 (Apple Silicon) | macOS 10.13 (High Sierra)+ |
 | Linux | x64 / ARM64 | glibc 2.31+ (Ubuntu 20.04+, Debian 11+, Fedora 34+) |
 
 **Hardware**: ~300MB RAM, ~50MB disk space (Full version)
