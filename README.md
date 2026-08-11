@@ -109,6 +109,7 @@ Zephyr 内置基于 `clash-prism-*` crate 的规则引擎，用以增强 Mihomo 
 | **Failover** | 节点故障时自动切换，支持阈值、冷却与回退策略 |
 | **脚本沙箱** | QuickJS 执行环境，设有时间、内存、字符串长度、循环与递归等资源限制 |
 | **插件系统** | 插件发现、加载、生命周期钩子及细粒度权限控制 |
+| **Override 系统** | Prism DSL + JavaScript 双引擎配置覆写，全局/逐配置作用域，拖拽排序，导入/导出 |
 | **KV 存储** | 持久化键值存储 |
 
 ### 安全设计
@@ -152,12 +153,12 @@ Zephyr 采用纵深防御策略：
 ### UI / UX
 
 - 透明无边框窗口，自定义标题栏
-- **UI 缩放**：1x - 1.5x 界面缩放，适配不同分辨率
+- **UI 缩放**：1x – 1.5x 界面缩放，适配不同分辨率
 - 虚拟滚动日志，分级过滤，正则搜索
 - CodeMirror 6 编辑器，支持 Prism DSL 语法高亮与补全
 - 代理节点卡片 3D 交互效果
 - 主题系统：预设主题与自定义颜色
-- i18n：英文基准，中文完整翻译，日文/韩文部分翻译（回退至英文）
+- i18n：14 种语言（en、zh、ja、ko、ru、es、fa、tk、my、ar、ur、sw、tr、vi），RTL 布局支持，CLDR 复数规则验证
 - 前端事件总线、集中式状态与缓存层
 
 ---
@@ -184,7 +185,7 @@ Zephyr 采用纵深防御策略：
 | 平台 | 架构 | 最低版本 |
 |:--------:|:--------:|----------------|
 | Windows | x64 / ARM64 | Windows 10 1809+ |
-| macOS | x64 / ARM64 (Apple Silicon) | macOS 10.15 (Catalina)+ |
+| macOS | x64 / ARM64 (Apple Silicon) | macOS 10.13 (High Sierra)+ |
 | Linux | x64 / ARM64 | glibc 2.31+（Ubuntu 20.04+、Debian 11+、Fedora 34+） |
 
 **硬件**：约 300MB 内存，约 50MB 磁盘空间（完整版）

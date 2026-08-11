@@ -46,7 +46,7 @@
 
 ## Prism Engine (`clash-prism-*`)
 
-- **Rule Engine** — Compile and apply rule patches via Prism DSL (`$prepend`/`$append`/`$filter`/`$override` + `__when__` conditions)
+- **Rule Engine** — Compile and apply rule patches via Prism DSL (`$prepend`/`$append`/`$filter`/`$override` + `__when__` conditions with WiFi SSID detection)
 - **Rule Library** — CRUD for `.prism.yaml` rule files, groups, import (text/file/URL), auto-apply, file watching
 - **Smart Proxy Selector** — EMA scoring (latency/success rate/stability), adaptive scheduler, auto-select best node, observed group/node tracking with special group exclusion
 - **Failover** — Automatic node switching on failure, configurable thresholds, cooldown, and fallback groups
@@ -93,6 +93,7 @@
 ## UI/UX
 
 - **Custom Window** — Frameless transparent window with custom title bar, Linux custom titlebar with traffic light buttons
+- **Console Dashboard** — Information-dense home page with real-time traffic chart, KPI strip (DL/UL/total/connections/latency), node card, connections summary, and recent logs
 - **UI Scaling** — 0.5x – 2.0x interface scaling with CSS `transform: scale()`, dropdown/context-menu position correction under transform
 - **Virtual Scroll Log Viewer** — O(log n) binary search, incremental polling, 5-level filtering, regex search
 - **CodeMirror 6 Editor** — Prism DSL syntax highlighting and auto-completion
@@ -101,8 +102,8 @@
 - **Design Token System** — Style Dictionary pipeline with 3 layers (Primitive → Semantic → Component), 4-level radius system (Control 8px / Surface 12px / Overlay 16px / Full 9999px), semantic surface layers (page/raised/elevated/input/overlay), hardcoded color elimination
 - **Component System** — Unified Form Control (sm/md/lg sizes + mono variant), Status Dot (online/offline/error/warning), Latency Badge (fast/medium/slow color-coded), Danger Zone styling, Status Ring (SVG stroke-dashoffset circular progress), Button State Matrix (disabled/loading/aria-busy)
 - **Accessibility Enhancements** — Unified disabled state across all interactive elements, hover protection for disabled buttons, collapsible ARIA (role/button/tabindex/aria-expanded/aria-controls/keyboard), dropdown disabled guards, proxies reduced-motion support, theme-aware focus ring via color-mix, transition tokens
-- **Theme System** — 5 presets (purple, blue, green, orange, pink) + custom hex color, automatic dark/light switching via CSS custom properties
-- **i18n** — 4 languages (en, zh, ja, ko)
+- **Theme System** — 5 presets (purple, blue, green, orange, pink) + custom hex color with cross-restart persistence, automatic dark/light switching via CSS custom properties
+- **i18n** — 14 languages (en, zh, ja, ko, ru, es, fa, tk, my, ar, ur, sw, tr, vi) with full RTL layout support (Arabic/Persian/Urdu) and CLDR plural rule validation
 - **Event Bus** — Inter-module communication (`Bus`/`Events`)
 - **Centralized State** — `appStore` for reactive state management
 - **Cache Layer** — Config and proxy data caching with invalidation, run-config TTL cache (5 s) with request coalescing
@@ -112,13 +113,13 @@
 
 ```
 apps/desktop/src-tauri/src/
-  lib.rs                    — App entry, command registration (170+ IPC), state management, rate limiting, resume handler
-  backend_event.rs          — Structured event system, 83 error codes, path redaction, frontend dispatch
+  lib.rs                    — App entry, command registration (166 IPC), state management, rate limiting, resume handler
+  backend_event.rs          — Structured event system, 85 error codes, path redaction, frontend dispatch
   config_manager.rs         — Tauri commands for runtime config read/update (delegates logic to zephyr_core)
   core_manager.rs           — Core state management, profile file I/O, app storage helpers
   core_event_bridge.rs      — Bridge between backend events and Tauri frontend
   os_notification.rs        — OS-level notification dispatch, UTF-8 safe truncation
-  prism.rs                  — Prism Engine Tauri command layer (77 commands, thin wrappers around clash-prism crates)
+  prism.rs                  — Prism Engine Tauri command layer (95 commands, thin wrappers around clash-prism crates)
   backup.rs                 — Transactional config export/import: ZIP + manifest + SHA-256 + 3-phase commit + rollback
   webview_recovery.rs       — WebView2 crash recovery: ProcessFailed → reload/recreate, heartbeat
   minisign_verify.rs        — Minisign Ed25519 signature verification (hardcoded public key)
@@ -143,7 +144,7 @@ apps/desktop/src-tauri/src/
     core_log.rs             — Mihomo core log incremental reading
     network_optim_tests.rs  — Golden snapshot tests (generate_linux_optim_script)
     subscription_scheduler_test.rs — Subscription scheduler tests
-  prism/                    — Prism engine (21 files, 4700+ lines, 119+ tests)
+  prism/                    — Prism engine (21 files, 4700+ lines, 125+ tests)
     commands_core.rs        — Core Prism commands (apply/validate/status/config/watch/trace)
     rule_library.rs         — Rule CRUD, import, extract, groups
     smart_commands.rs       — Smart proxy selector (EMA scoring, scheduler)
@@ -191,4 +192,4 @@ crates/core/                 — Cross-platform core library (FFI-safe, no Tauri
 crates/core-ffi/             — UniFFI bindings for core crate (generates FFI for future mobile/desktop reuse)
 ```
 
-170+ IPC commands · 524 Rust tests + 376 frontend test cases · Tauri 2.x · Rust 1.96.0 · 83 error codes
+166 IPC commands · 500+ Rust tests · 400+ frontend test cases · Tauri 2.x · Rust 1.96.0 · 85 error codes
