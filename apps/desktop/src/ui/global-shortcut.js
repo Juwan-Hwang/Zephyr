@@ -10,6 +10,7 @@ import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections } fr
 import { saveSetting } from './settings-helpers.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
+import { escapeHtml } from '../utils/sanitize.js';
 import { toggleSysProxy } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
 import { updateModeUI } from './modes.js';
@@ -200,17 +201,17 @@ function openShortcutModal() {
     const modal = document.createElement('div');
     modal.id = 'shortcut-modal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys only // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     modal.innerHTML = `
         <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.globalShortcut || 'Global Shortcuts'}</h3>
+                <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.globalShortcut || 'Global Shortcuts')}</h3>
                 <button id="shortcut-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="flex items-center justify-between py-2">
-                <span class="text-xs text-[var(--text-tertiary)]">${t.enableGlobalShortcuts || 'Enable Global Shortcuts'}</span>
+                <span class="text-xs text-[var(--text-tertiary)]">${escapeHtml(t.enableGlobalShortcuts || 'Enable Global Shortcuts')}</span>
                 <label class="ios-switch">
                     <input type="checkbox" id="shortcut-enable-toggle" ${enabled ? 'checked' : ''} />
                     <span class="switch-slider"></span>
@@ -219,8 +220,8 @@ function openShortcutModal() {
             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
             <div id="shortcut-list" class="space-y-3"></div>
             <div class="flex items-center justify-between pt-2 border-t border-[var(--zephyr-border-default)]">
-                <button id="shortcut-add-btn" class="btn-ghost text-xs px-3 py-1.5 text-accent">+ ${t.addShortcut || 'Add Shortcut'}</button>
-                <button id="shortcut-modal-done" class="btn-ghost text-xs px-3 py-1.5">${t.done || 'Done'}</button>
+                <button id="shortcut-add-btn" class="btn-ghost text-xs px-3 py-1.5 text-accent">+ ${escapeHtml(t.addShortcut || 'Add Shortcut')}</button>
+                <button id="shortcut-modal-done" class="btn-ghost text-xs px-3 py-1.5">${escapeHtml(t.done || 'Done')}</button>
             </div>
         </div>
     `;
@@ -339,9 +340,9 @@ function addShortcutRow(t, actionId, existingAccelerator) {
     selectBtn.type = 'button';
     selectBtn.className = 'select-common w-full flex items-center justify-between';
     const currentLabel = actionId ? getActionLabel(actionId, t) : (t.selectAction || 'Select action');
-    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     selectBtn.innerHTML = `
-        <span class="select-label">${currentLabel}</span>
+        <span class="select-label">${escapeHtml(currentLabel)}</span>
         <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
     `;
 
