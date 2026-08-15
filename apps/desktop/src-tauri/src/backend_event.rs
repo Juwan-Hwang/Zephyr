@@ -247,6 +247,8 @@ pub mod codes {
     pub const PRISM_SCRIPT_EXEC_FAILED: u16 = 3005;
     /// Script pipeline completed with warnings / informational output.
     pub const PRISM_SCRIPT_INFO: u16 = 3006;
+    /// Sandbox configuration changed / permissions granted.
+    pub const PRISM_SANDBOX_CHANGED: u16 = 3007;
 
     // Config: 4000-4999
     pub const CONFIG_SAVE_FAILED: u16 = 4001;
