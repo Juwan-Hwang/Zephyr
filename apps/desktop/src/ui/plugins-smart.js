@@ -7,7 +7,7 @@
  */
 
 import * as prism from './prism.js';
-import { showNotification } from './notifications.js';
+import { showNotification, showConfirmModal } from './notifications.js';
 import { t } from '../i18n.js';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -354,12 +354,25 @@ function initScriptsSection() {
     const sandboxSaveBtn = document.getElementById('sandbox-save-btn');
     if (sandboxSaveBtn) {
         sandboxSaveBtn.addEventListener('click', async () => {
+            const allowNetwork = getCheckboxValue('sandbox-allow-network');
+            const allowFilesystem = getCheckboxValue('sandbox-allow-filesystem');
+            const allowChildProcess = getCheckboxValue('sandbox-allow-child-process');
+            const allowWorkers = getCheckboxValue('sandbox-allow-workers');
+
+            if (allowChildProcess || allowFilesystem) {
+                const confirmed = await showConfirmModal(
+                    t('sandboxSecurityWarningTitle') || 'Security Warning',
+                    t('sandboxSecurityWarningDesc') || 'Enabling Child Process or Filesystem access significantly weakens the script sandbox isolation. Only enable these permissions for scripts you completely trust. Do you want to continue?'
+                );
+                if (!confirmed) return;
+            }
+
             try {
                 await prism.scriptSetSandbox({
-                    allowNetwork: getCheckboxValue('sandbox-allow-network'),
-                    allowFilesystem: getCheckboxValue('sandbox-allow-filesystem'),
-                    allowChildProcess: getCheckboxValue('sandbox-allow-child-process'),
-                    allowWorkers: getCheckboxValue('sandbox-allow-workers'),
+                    allowNetwork,
+                    allowFilesystem,
+                    allowChildProcess,
+                    allowWorkers,
                 });
                 showNotification('Sandbox config saved', 'success');
                 loadSandboxConfig();
