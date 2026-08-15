@@ -122,6 +122,16 @@ pub fn script_get_sandbox(state: State<PrismState>) -> Result<serde_json::Value,
     }))
 }
 
+/// Minimum and maximum bounds for script limits (defense-in-depth against resource exhaustion and misconfiguration).
+pub const MIN_EXECUTION_TIME_MS: u64 = 100;
+pub const MAX_EXECUTION_TIME_MS: u64 = 300_000; // 5 minutes
+pub const MIN_MEMORY_BYTES: usize = 1024 * 1024; // 1 MB
+pub const MAX_MEMORY_BYTES: usize = 512 * 1024 * 1024; // 512 MB
+pub const MIN_LOOP_ITERATIONS: u64 = 1_000;
+pub const MAX_LOOP_ITERATIONS: u64 = 10_000_000;
+pub const MIN_RECURSION_DEPTH: u32 = 8;
+pub const MAX_RECURSION_DEPTH: u32 = 512;
+
 /// Set the sandbox configuration.
 /// Security: This is a sensitive operation that weakens script isolation.
 /// Changes are logged for audit purposes.
@@ -140,10 +150,16 @@ pub fn script_set_sandbox(
     lock.sandbox_config.allow_workers = allow_workers;
     drop(lock);
 
-    // Log after successful mutation to ensure audit accuracy
-    emit_info!(Prism, PRISM_SCRIPT_ERROR,
-        "[SECURITY] Script sandbox config changed: network={allow_network}, filesystem={allow_filesystem}, child_process={allow_child_process}, workers={allow_workers}"
-    );
+    // High-visibility security audit logging for sensitive permission grants
+    if allow_child_process || allow_filesystem {
+        emit_warn!(Prism, PRISM_SCRIPT_INFO,
+            "[SECURITY WARNING] High-privilege script sandbox permissions granted: filesystem={allow_filesystem}, child_process={allow_child_process}, network={allow_network}, workers={allow_workers}"
+        );
+    } else {
+        emit_info!(Prism, PRISM_SCRIPT_INFO,
+            "[SECURITY] Script sandbox config changed: network={allow_network}, filesystem={allow_filesystem}, child_process={allow_child_process}, workers={allow_workers}"
+        );
+    }
     Ok(())
 }
 
@@ -180,7 +196,45 @@ pub fn script_get_limits(state: State<PrismState>) -> Result<serde_json::Value, 
     }))
 }
 
-/// Set the script resource limits.
+/// Validate script limits boundaries.
+pub(crate) fn validate_script_limits(
+    max_execution_time_ms: Option<u64>,
+    max_memory_bytes: Option<usize>,
+    max_loop_iterations: Option<u64>,
+    max_recursion_depth: Option<u32>,
+) -> Result<(), String> {
+    if let Some(v) = max_execution_time_ms {
+        if !(MIN_EXECUTION_TIME_MS..=MAX_EXECUTION_TIME_MS).contains(&v) {
+            return Err(format!(
+                "max_execution_time_ms must be between {MIN_EXECUTION_TIME_MS}ms and {MAX_EXECUTION_TIME_MS}ms (got {v})"
+            ));
+        }
+    }
+    if let Some(v) = max_memory_bytes {
+        if !(MIN_MEMORY_BYTES..=MAX_MEMORY_BYTES).contains(&v) {
+            return Err(format!(
+                "max_memory_bytes must be between {MIN_MEMORY_BYTES} bytes (1MB) and {MAX_MEMORY_BYTES} bytes (512MB) (got {v})"
+            ));
+        }
+    }
+    if let Some(v) = max_loop_iterations {
+        if !(MIN_LOOP_ITERATIONS..=MAX_LOOP_ITERATIONS).contains(&v) {
+            return Err(format!(
+                "max_loop_iterations must be between {MIN_LOOP_ITERATIONS} and {MAX_LOOP_ITERATIONS} (got {v})"
+            ));
+        }
+    }
+    if let Some(v) = max_recursion_depth {
+        if !(MIN_RECURSION_DEPTH..=MAX_RECURSION_DEPTH).contains(&v) {
+            return Err(format!(
+                "max_recursion_depth must be between {MIN_RECURSION_DEPTH} and {MAX_RECURSION_DEPTH} (got {v})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Set the script resource limits with strict boundary validation.
 #[tauri::command]
 pub fn script_set_limits(
     state: State<PrismState>,
@@ -189,6 +243,13 @@ pub fn script_set_limits(
     max_loop_iterations: Option<u64>,
     max_recursion_depth: Option<u32>,
 ) -> Result<(), String> {
+    validate_script_limits(
+        max_execution_time_ms,
+        max_memory_bytes,
+        max_loop_iterations,
+        max_recursion_depth,
+    )?;
+
     let mut lock = state.lock_inner()?;
     if let Some(v) = max_execution_time_ms {
         lock.script_limits.max_execution_time_ms = v;
@@ -255,4 +316,42 @@ pub fn script_check_plugin_permission(
 pub fn script_is_sandbox_safe(state: State<PrismState>) -> Result<bool, String> {
     let lock = state.lock_inner()?;
     Ok(lock.sandbox_config.is_safe())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_script_limits_valid() {
+        assert!(validate_script_limits(Some(5000), Some(52428800), Some(100000), Some(32)).is_ok());
+        assert!(validate_script_limits(Some(MIN_EXECUTION_TIME_MS), None, None, None).is_ok());
+        assert!(validate_script_limits(Some(MAX_EXECUTION_TIME_MS), None, None, None).is_ok());
+        assert!(validate_script_limits(None, Some(MIN_MEMORY_BYTES), None, None).is_ok());
+        assert!(validate_script_limits(None, Some(MAX_MEMORY_BYTES), None, None).is_ok());
+        assert!(validate_script_limits(None, None, Some(MIN_LOOP_ITERATIONS), None).is_ok());
+        assert!(validate_script_limits(None, None, Some(MAX_LOOP_ITERATIONS), None).is_ok());
+        assert!(validate_script_limits(None, None, None, Some(MIN_RECURSION_DEPTH)).is_ok());
+        assert!(validate_script_limits(None, None, None, Some(MAX_RECURSION_DEPTH)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_script_limits_zero_or_underflow() {
+        assert!(validate_script_limits(Some(0), None, None, None).is_err());
+        assert!(validate_script_limits(Some(99), None, None, None).is_err());
+        assert!(validate_script_limits(None, Some(0), None, None).is_err());
+        assert!(validate_script_limits(None, Some(1024 * 1024 - 1), None, None).is_err());
+        assert!(validate_script_limits(None, None, Some(0), None).is_err());
+        assert!(validate_script_limits(None, None, Some(999), None).is_err());
+        assert!(validate_script_limits(None, None, None, Some(0)).is_err());
+        assert!(validate_script_limits(None, None, None, Some(7)).is_err());
+    }
+
+    #[test]
+    fn test_validate_script_limits_overflow() {
+        assert!(validate_script_limits(Some(MAX_EXECUTION_TIME_MS + 1), None, None, None).is_err());
+        assert!(validate_script_limits(None, Some(MAX_MEMORY_BYTES + 1), None, None).is_err());
+        assert!(validate_script_limits(None, None, Some(MAX_LOOP_ITERATIONS + 1), None).is_err());
+        assert!(validate_script_limits(None, None, None, Some(MAX_RECURSION_DEPTH + 1)).is_err());
+    }
 }

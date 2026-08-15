@@ -33,7 +33,7 @@ import { stopSmartAutoTest, startSmartAutoTest, renderProxies } from './proxies.
 import { t } from '../i18n.js';
 import { showNotification, showModal } from './notifications.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
-import { escapeAttr } from '../utils/sanitize.js';
+import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
 import { EditorView, StateEffect } from '../cm6.bundle.js';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1062,10 +1062,10 @@ function buildOverrideCard(item) {
         summaryClass = 'text-[var(--text-muted)]';
     }
 
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() and escapeAttr() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     card.innerHTML = `
         <div class="flex items-center gap-4 flex-1 min-w-0">
-            <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${summaryText}"></div>
+            <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${escapeAttr(summaryText)}"></div>
             <div class="flex flex-col gap-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(item.name ?? '')}</span>
@@ -1074,21 +1074,21 @@ function buildOverrideCard(item) {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
-                    <span class="text-xs ${summaryClass}" data-override-status>${summaryText}</span>
+                    <span class="text-xs ${summaryClass}" data-override-status>${escapeHtml(summaryText)}</span>
                 </div>
             </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-            <button type="button" class="override-toggle-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" aria-label="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${item.id}" data-enabled="${item.enabled}">
+            <button type="button" class="override-toggle-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" aria-label="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${escapeAttr(String(item.id ?? ''))}" data-enabled="${item.enabled}">
                 ${item.enabled
                     ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
                     : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
                 }
             </button>
-            <button type="button" class="override-up-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" aria-label="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${item.id}">
+            <button type="button" class="override-up-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" aria-label="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${escapeAttr(String(item.id ?? ''))}">
                 ${SVG_ICONS.arrowUp}
             </button>
-            <button type="button" class="override-down-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" aria-label="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${item.id}">
+            <button type="button" class="override-down-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" aria-label="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${escapeAttr(String(item.id ?? ''))}">
                 ${SVG_ICONS.arrowDown}
             </button>
             <button type="button" class="btn-delete-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-sm" title="${escapeAttr(t('pluginUnload') || '删除')}" aria-label="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
@@ -1803,14 +1803,3 @@ function initResizer() {
 //  Utilities
 // ═══════════════════════════════════════════════════════════════════════
 
-/**
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
