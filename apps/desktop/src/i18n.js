@@ -31,6 +31,8 @@ export function isRTL(lang) {
 
 export const translations = {
     en: {
+        sandboxSecurityWarningTitle: "Security Warning",
+        sandboxSecurityWarningDesc: "Enabling Child Process or Filesystem access significantly weakens script sandbox isolation. Only enable these permissions for scripts you completely trust. Do you want to continue?",
         home: "Home",
         proxies: "Proxies",
         settings: "Settings",
@@ -809,6 +811,8 @@ export const translations = {
     },
 
     zh: {
+        sandboxSecurityWarningTitle: "安全警告",
+        sandboxSecurityWarningDesc: "启用子进程或文件系统访问将显著降低脚本沙箱的隔离保护。请仅为您完全信任的脚本开启此权限。是否继续？",
         home: "首页",
         proxies: "代理节点",
         settings: "系统设置",
@@ -1587,6 +1591,8 @@ export const translations = {
     },
 
     ja: {
+        sandboxSecurityWarningTitle: "セキュリティ警告",
+        sandboxSecurityWarningDesc: "子プロセスまたはファイルシステムへのアクセスを有効にすると、スクリプトサンドボックスの分離が大幅に低下します。完全に信頼できるスクリプトに対してのみ有効にしてください。続行しますか？",
         actionName: "アクション名",
         activeConn: "アクティブ",
         activeTab: "アクティブ",
@@ -2320,6 +2326,8 @@ export const translations = {
     },
 
     ko: {
+        sandboxSecurityWarningTitle: "보안 경고",
+        sandboxSecurityWarningDesc: "자식 프로세스 또는 파일 시스템 접근을 활성화하면 스크립트 샌드박스 격리가 크게 약화됩니다. 완전히 신뢰할 수 있는 스크립트에 대해서만 활성화하세요. 계속하시겠습니까?",
         actionName: "동작 이름",
         activeConn: "활성",
         activeTab: "활성",
@@ -3052,6 +3060,8 @@ export const translations = {
         virtualAdapter: "가상 어댑터",
     },
     ru: {
+        sandboxSecurityWarningTitle: "Предупреждение безопасности",
+        sandboxSecurityWarningDesc: "Включение доступа к дочерним процессам или файловой системе значительно снижает изоляцию песочницы скриптов. Включайте эти разрешения только для полностью доверенных скриптов. Продолжить?",
         home: "Главная",
         proxies: "Прокси",
         settings: "Настройки",
@@ -3780,6 +3790,8 @@ export const translations = {
         consoleSubDaysAgo: "@@d@@ дн. назад",
     },
     es: {
+        sandboxSecurityWarningTitle: "Advertencia de seguridad",
+        sandboxSecurityWarningDesc: "Habilitar el acceso a procesos secundarios o al sistema de archivos debilita significativamente el aislamiento de la sandbox de scripts. Habilite estos permisos solo para scripts de total confianza. ¿Desea continuar?",
         home: "Inicio",
         proxies: "Proxies",
         settings: "Ajustes",
@@ -4508,6 +4520,8 @@ export const translations = {
         consoleSubDaysAgo: "hace @@d@@d",
     },
     fa: {
+        sandboxSecurityWarningTitle: "هشدار امنیتی",
+        sandboxSecurityWarningDesc: "فعال کردن دسترسی به فرآیندهای فرزند یا سیستم فایل به طور قابل توجهی ایزولاسیون سندباکس اسکریپت را کاهش می‌دهد. این مجوزها را فقط برای اسکریپت‌های کاملاً مورد اعتماد فعال کنید. آیا مایل به ادامه هستید؟",
         home: "خانه",
         proxies: "پروکسی‌ها",
         settings: "تنظیمات",
@@ -5236,6 +5250,8 @@ export const translations = {
         consoleSubDaysAgo: "@@d@@ روز پیش",
     },
     tk: {
+        sandboxSecurityWarningTitle: "Howpsuzlyk duýduryşy",
+        sandboxSecurityWarningDesc: "Çaga proseslerine ýa-da faýl ulgamyna girmegi işletmek skript sandbaksynyň goragyny ep-esli gowşadýar. Bu ygtyýarnamalary diňe doly ynanýan skriptleriňiz üçin işlediň. Dowam etmek isleýärsiňizmi?",
         home: "Baş sahypa",
         proxies: "Proksiler",
         settings: "Sazlamalar",
@@ -5964,6 +5980,8 @@ export const translations = {
         consoleSubDaysAgo: "@@d@@ gün öň",
     },
     my: {
+        sandboxSecurityWarningTitle: "လုံခြုံရေး သတိပေးချက်",
+        sandboxSecurityWarningDesc: "Child Process သို့မဟုတ် Filesystem သုံးစွဲခွင့်ကို ဖွင့်ခြင်းသည် script sandbox သီးခြားခွဲထားမှုကို သိသိသာသာ လျော့ကျစေသည်။ အပြည့်အဝ ယုံကြည်ရသော script များအတွက်သာ ဤခွင့်ပြုချက်များကို ဖွင့်ပါ။ ဆက်လုပ်လိုပါသလား။",
         actionName: "လုပ်ဆောင်ချက် အမည်",
         activeConn: "သုံးနေ",
         activeTab: "သုံးနေ",
@@ -6692,6 +6710,8 @@ export const translations = {
         virtualAdapter: "ပုံဆောင် အဒပ်တာ",
     },
     ar: {
+        sandboxSecurityWarningTitle: "تحذير أمني",
+        sandboxSecurityWarningDesc: "يؤدي تمكين الوصول إلى العمليات الفرعية أو نظام الملفات إلى إضعاف عزل بيئة وضع الحماية للبرامج النصية بشكل كبير. لا تقم بتمكين هذه الأذونات إلا للبرامج النصية الموثوقة تمامًا. هل ترغب في المتابعة؟",
         home: "الصفحة الرئيسية",
         proxies: "الوكلاء",
         settings: "الإعدادات",
@@ -7420,6 +7440,8 @@ export const translations = {
         consoleSubDaysAgo: "قبل @@d@@ يوم",
     },
     ur: {
+        sandboxSecurityWarningTitle: "سیکیورٹی وارننگ",
+        sandboxSecurityWarningDesc: "چائلڈ پروسیس یا فائل سسٹم تک رسائی کو فعال کرنے سے اسکرپٹ سینڈ باکس کی حفاظت نمایاں طور پر کمزور ہو جاتی ہے۔ ان اجازتوں کو صرف ان اسکرپٹس کے لیے فعال کریں جن پر آپ کو مکمل اعتماد ہو۔ کیا آپ جاری رکھنا چاہتے ہیں؟",
         home: "صفحہ اول",
         proxies: "پراکسیاں",
         settings: "ترتیبات",
@@ -8149,6 +8171,8 @@ export const translations = {
     },
 
     sw: {
+        sandboxSecurityWarningTitle: "Onyo la Usalama",
+        sandboxSecurityWarningDesc: "Kuwezesha ufikiaji wa mchakato wa mtoto au mfumo wa faili kunapunguza kwa kiasi kikubwa utengaji wa sandbox ya hati. Wezesha ruhusa hizi kwa hati unazoziamini kikamilifu tu. Je, unataka kuendelea?",
         home: "Nyumbani",
         proxies: "Proksi",
         settings: "Mipangilio",
@@ -8927,6 +8951,8 @@ export const translations = {
     },
 
     tr: {
+        sandboxSecurityWarningTitle: "Güvenlik Uyarısı",
+        sandboxSecurityWarningDesc: "Alt işlem veya dosya sistemi erişimini etkinleştirmek, komut dosyası korumalı alan yalıtımını önemli ölçüde zayıflatır. Bu izinleri yalnızca tamamen güvendiğiniz komut dosyaları için etkinleştirin. Devam etmek istiyor musunuz?",
         home: "Ana Sayfa",
         proxies: "Vekil Sunucular",
         settings: "Ayarlar",
@@ -9705,6 +9731,8 @@ export const translations = {
     },
 
     vi: {
+        sandboxSecurityWarningTitle: "Cảnh báo bảo mật",
+        sandboxSecurityWarningDesc: "Bật quyền truy cập tiến trình con hoặc hệ thống tệp sẽ làm giảm đáng kể khả năng cô lập của hộp cát tập lệnh. Chỉ bật các quyền này cho các tập lệnh mà bạn hoàn toàn tin cậy. Bạn có muốn tiếp tục không?",
         home: "Trang chủ",
         proxies: "Proxy",
         settings: "Cài đặt",
