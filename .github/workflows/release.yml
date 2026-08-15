@@ -54,16 +54,20 @@ jobs:
           cat > /tmp/download-bundled.sh << 'SCRIPT_EOF'
           #!/bin/bash
           # Unified script to download mihomo core and geo data with SHA256 verification
-          # Usage: download-bundled.sh <platform> <mihomo_version> <github_token> <arch>
-          set -e
+          # Usage: download-bundled.sh <platform> <mihomo_version> <arch>
+          set -euo pipefail
           PLATFORM="$1"
           MIHOMO_VERSION="$2"
-          GITHUB_TOKEN="$3"
-          
-          mkdir -p apps/desktop/src-tauri/bundled
-          
-          # Determine mihomo asset name based on platform and arch
-          ARCH="$4"
+          ARCH="$3"
+          # Read GITHUB_TOKEN directly from environment and pass to curl via temporary config file (avoids leaking in argv)
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+          CURL_CFG=$(mktemp)
+          chmod 600 "$CURL_CFG"
+          trap 'rm -f "$CURL_CFG"' EXIT
+          if [ -n "$GITHUB_TOKEN" ]; then
+            printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$CURL_CFG"
+          fi
+
           case "$PLATFORM" in
             windows-latest)
               if [ "$ARCH" = "arm64" ]; then
@@ -97,9 +101,10 @@ jobs:
           
           # Download mihomo with SHA256 verification
           echo "Downloading mihomo: $MIHOMO_ASSET"
-          curl -sL --proto =https -o "mihomo.${MIHOMO_EXT}" "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/${MIHOMO_ASSET}"
+          mkdir -p apps/desktop/src-tauri/bundled
+          curl -fsSL --proto =https -o "mihomo.${MIHOMO_EXT}" "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/${MIHOMO_ASSET}"
           
-          ASSET_DIGEST=$(curl -sL --proto =https -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+          ASSET_DIGEST=$(curl -fsSL --proto =https --config "$CURL_CFG" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r ".assets[] | select(.name == \"${MIHOMO_ASSET}\") | .digest // empty")
           
@@ -135,8 +140,8 @@ jobs:
           # Download geo data with SHA256 verification
           echo "Downloading geo data..."
           for file in geoip.dat geosite.dat Country.mmdb; do
-            curl -sL --proto =https -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
-            curl -sL --proto =https -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
+            curl -fsSL --proto =https -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
+            curl -fsSL --proto =https -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
           done
           
           for file in geoip.dat geosite.dat Country.mmdb; do
@@ -237,49 +242,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MIHOMO_VERSION=$(curl -sL --proto =https -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          CURL_CFG=$(mktemp)
+          chmod 600 "$CURL_CFG"
+          trap 'rm -f "$CURL_CFG"' EXIT
+          if [ -n "$GITHUB_TOKEN" ]; then
+            printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$CURL_CFG"
+          fi
+          MIHOMO_VERSION=$(curl -fsSL --proto =https --config "$CURL_CFG" "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || true)
+          if [ -z "$MIHOMO_VERSION" ]; then
+            echo "ERROR: Failed to fetch latest mihomo version"
+            exit 1
+          fi
           echo "VERSION=$MIHOMO_VERSION" >> $GITHUB_OUTPUT
           echo "Latest mihomo version: $MIHOMO_VERSION"
         shell: bash
 
       # ── Download bundled resources using unified script ──
       - name: Download bundled resources (Full)
-        if: matrix.platform != 'macos-latest' || matrix.arch == 'arm64'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
-        shell: bash
-
-      # macOS x64 uses different arch naming in mihomo releases
-      - name: Download bundled resources (macOS x64)
-        if: matrix.platform == 'macos-latest' && matrix.arch == 'x64'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Override arch for script
-          mkdir -p apps/desktop/src-tauri/bundled
-          MIHOMO_VERSION="${{ steps.mihomo_version.outputs.VERSION }}"
-          curl -sL --proto =https -o mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-darwin-amd64-compatible-${MIHOMO_VERSION}.gz"
-          ASSET_DIGEST=$(curl -sL --proto =https -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
-            | jq -r '.assets[] | select(.name == "mihomo-darwin-amd64-compatible-'${MIHOMO_VERSION}'.gz") | .digest // empty')
-          if [ -n "$ASSET_DIGEST" ]; then
-            EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
-            ACTUAL_HASH=$(sha256sum mihomo.gz | awk '{print $1}')
-            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then exit 1; fi
-          else
-            exit 1
-          fi
-          gunzip -f mihomo.gz && chmod +x mihomo && mv mihomo apps/desktop/src-tauri/bundled/zephyr-mihomo
-          # Geo data (same as script)
-          for file in geoip.dat geosite.dat Country.mmdb; do
-            curl -sL --proto =https -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
-            curl -sL --proto =https -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
-            EXPECTED=$(cat "apps/desktop/src-tauri/bundled/${file}.sha256sum" | cut -d' ' -f1)
-            ACTUAL=$(sha256sum "apps/desktop/src-tauri/bundled/${file}" | cut -d' ' -f1)
-            if [ "$EXPECTED" != "$ACTUAL" ]; then exit 1; fi
-            rm "apps/desktop/src-tauri/bundled/${file}.sha256sum"
-          done
+          PLATFORM: ${{ matrix.platform }}
+          MIHOMO_VERSION: ${{ steps.mihomo_version.outputs.VERSION }}
+          ARCH: ${{ matrix.arch }}
+        run: /tmp/download-bundled.sh "$PLATFORM" "$MIHOMO_VERSION" "$ARCH"
         shell: bash
 
       - name: Create artifacts directory
@@ -398,6 +383,9 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLATFORM: ${{ matrix.platform }}
+          MIHOMO_VERSION: ${{ steps.mihomo_version.outputs.VERSION }}
+          ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p portable/core portable/profiles portable/prism/plugins
           # Use the Full build AppImage (same binary, avoids a 3rd full compile)
@@ -410,10 +398,10 @@ jobs:
           fi
           cp -- "${matches[0]}" portable/Zephyr.AppImage
           # Restore bundled resources (were removed before Lite build)
-          /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
+          /tmp/download-bundled.sh "$PLATFORM" "$MIHOMO_VERSION" "$ARCH"
           cp apps/desktop/src-tauri/bundled/* portable/core/
           touch portable/.portable
-          ARCH_SUFFIX="${{ matrix.arch }}"
+          ARCH_SUFFIX="$ARCH"
           cd portable && tar czf ../dist-artifacts/Zephyr-linux-${ARCH_SUFFIX}-portable.tar.gz . && cd ..
         shell: bash
 
@@ -512,17 +500,20 @@ jobs:
         if: matrix.platform == 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLATFORM: ${{ matrix.platform }}
+          MIHOMO_VERSION: ${{ steps.mihomo_version.outputs.VERSION }}
+          ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p portable/core portable/profiles portable/prism/plugins
           # Use the Authenticode-signed exe from dist-artifacts
-          cp dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe portable/Zephyr.exe
+          cp dist-artifacts/Zephyr_*_${ARCH}-portable.exe portable/Zephyr.exe
           # Restore bundled resources (were removed before Lite build)
-          /tmp/download-bundled.sh "${{ matrix.platform }}" "${{ steps.mihomo_version.outputs.VERSION }}" "$GITHUB_TOKEN" "${{ matrix.arch }}"
+          /tmp/download-bundled.sh "$PLATFORM" "$MIHOMO_VERSION" "$ARCH"
           cp apps/desktop/src-tauri/bundled/* portable/core/
           touch portable/.portable
-          cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr_${{ matrix.arch }}-portable.zip . && cd ..
+          cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr_${ARCH}-portable.zip . && cd ..
           # Remove the standalone portable exe (now inside the ZIP)
-          rm -f dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe
+          rm -f dist-artifacts/Zephyr_*_${ARCH}-portable.exe
         shell: bash
 
       # ── Minisign: sign all release artifacts ──

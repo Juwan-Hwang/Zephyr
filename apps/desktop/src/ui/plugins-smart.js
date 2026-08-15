@@ -7,7 +7,7 @@
  */
 
 import * as prism from './prism.js';
-import { showNotification } from './notifications.js';
+import { showNotification, showConfirmModal } from './notifications.js';
 import { t } from '../i18n.js';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -352,18 +352,47 @@ function initScriptsSection() {
 
     // Sandbox config
     const sandboxSaveBtn = document.getElementById('sandbox-save-btn');
+    let sandboxSaveInFlight = false;
     if (sandboxSaveBtn) {
         sandboxSaveBtn.addEventListener('click', async () => {
+            if (sandboxSaveInFlight) return;
+            sandboxSaveInFlight = true;
             try {
+                // Fetch fresh server state before evaluating elevation
+                const freshConfig = await prism.scriptGetSandbox();
+
+                const allowNetwork = getCheckboxValue('sandbox-allow-network');
+                const allowFilesystem = getCheckboxValue('sandbox-allow-filesystem');
+                const allowChildProcess = getCheckboxValue('sandbox-allow-child-process');
+                const allowWorkers = getCheckboxValue('sandbox-allow-workers');
+
+                const isElevatingFs = Boolean(allowFilesystem && !freshConfig?.allowFilesystem);
+                const isElevatingCp = Boolean(allowChildProcess && !freshConfig?.allowChildProcess);
+
+                if (isElevatingFs || isElevatingCp) {
+                    const confirmed = await showConfirmModal(
+                        t('sandboxSecurityWarningTitle'),
+                        t('sandboxSecurityWarningDesc')
+                    );
+                    if (!confirmed) {
+                        await loadSandboxConfig();
+                        return;
+                    }
+                }
+
                 await prism.scriptSetSandbox({
-                    allowNetwork: getCheckboxValue('sandbox-allow-network'),
-                    allowFilesystem: getCheckboxValue('sandbox-allow-filesystem'),
-                    allowChildProcess: getCheckboxValue('sandbox-allow-child-process'),
-                    allowWorkers: getCheckboxValue('sandbox-allow-workers'),
+                    allowNetwork,
+                    allowFilesystem,
+                    allowChildProcess,
+                    allowWorkers,
                 });
                 showNotification('Sandbox config saved', 'success');
-                loadSandboxConfig();
-            } catch (e) { showNotification(String(e), 'error'); }
+                await loadSandboxConfig();
+            } catch (e) {
+                showNotification(String(e), 'error');
+            } finally {
+                sandboxSaveInFlight = false;
+            }
         });
     }
     loadSandboxConfig();

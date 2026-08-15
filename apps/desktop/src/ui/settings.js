@@ -26,6 +26,7 @@ import {
 } from '../api.js';
 import { setWsSecret, setWsBaseUrl, forceReconnect } from '../websocket.js';
 import { translations, setLanguage } from '../i18n.js';
+import { escapeHtml } from '../utils/sanitize.js';
 import { debounce } from '../utils/debounce.js';
 import { settingsLogger } from '../utils/logger.js';
 import { showNotification, showConfirmModal, showUpdateNotesModal } from './notifications.js';
@@ -215,11 +216,11 @@ function initCopyEnvSettings() {
         const modal = document.createElement('div');
         modal.id = 'copy-env-format-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[360px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.copyEnvFormat || 'Shell Format'}</h3>
+                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
                     <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -227,7 +228,7 @@ function initCopyEnvSettings() {
                 <div class="space-y-1">
                     ${formats.map(f => `
                         <button type="button" class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-start transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}" aria-pressed="${f.key === currentFormat ? 'true' : 'false'}">
-                            <span class="text-xs text-[var(--text-primary)]">${f.label}</span>
+                            <span class="text-xs text-[var(--text-primary)]">${escapeHtml(f.label)}</span>
                             ${f.key === currentFormat ? '<svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
                         </button>
                     `).join('')}
@@ -356,19 +357,21 @@ function initLogSettingsModal() {
         document.getElementById('log-settings-modal')?.remove();
 
         const t = getT();
-        const logAppEnabled = appStore.get('logAppEnabled') || false;
-        const logCoreEnabled = appStore.get('logCoreEnabled') || false;
-        const retentionDays = appStore.get('logRetentionDays') ?? 3;
-        const maxFileMb = appStore.get('logMaxFileMb') ?? 50;
+        const logAppEnabled = Boolean(appStore.get('logAppEnabled'));
+        const logCoreEnabled = Boolean(appStore.get('logCoreEnabled'));
+        const rawRetention = Number(appStore.get('logRetentionDays'));
+        const retentionDays = Number.isInteger(rawRetention) && rawRetention >= 1 && rawRetention <= 30 ? rawRetention : 3;
+        const rawMaxFileMb = Number(appStore.get('logMaxFileMb'));
+        const maxFileMb = Number.isInteger(rawMaxFileMb) && rawMaxFileMb >= 1 && rawMaxFileMb <= 500 ? rawMaxFileMb : 50;
 
         const modal = document.createElement('div');
         modal.id = 'log-settings-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[400px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.logSettings || 'Log Settings'}</h3>
+                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
                     <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -376,14 +379,14 @@ function initLogSettingsModal() {
 
                 <!-- Tab switcher -->
                 <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-1">
-                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logAppTab || 'App Logs'}</button>
-                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${t.logCoreTab || 'Core Logs'}</button>
+                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logAppTab || 'App Logs')}</button>
+                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
                 </div>
 
                 <!-- App Logs Tab -->
                 <div id="log-panel-app" class="log-tab-panel space-y-3">
                     <div class="flex items-center justify-between">
-                        <span class="text-xs text-[var(--text-primary)]">${t.logAppEnabled || 'Persist App Logs'}</span>
+                        <span class="text-xs text-[var(--text-primary)]">${escapeHtml(t.logAppEnabled || 'Persist App Logs')}</span>
                         <label class="ios-switch">
                             <input type="checkbox" id="log-app-toggle" ${logAppEnabled ? 'checked' : ''}>
                             <span class="switch-slider"></span>
@@ -391,17 +394,17 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
+                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
+                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
                             </div>
                         </div>
                     </div>
@@ -410,7 +413,7 @@ function initLogSettingsModal() {
                 <!-- Core Logs Tab -->
                 <div id="log-panel-core" class="log-tab-panel space-y-3" style="display:none">
                     <div class="flex items-center justify-between">
-                        <span class="text-xs text-[var(--text-primary)]">${t.logCoreEnabled || 'Persist Core Logs'}</span>
+                        <span class="text-xs text-[var(--text-primary)]">${escapeHtml(t.logCoreEnabled || 'Persist Core Logs')}</span>
                         <label class="ios-switch">
                             <input type="checkbox" id="log-core-toggle" ${logCoreEnabled ? 'checked' : ''}>
                             <span class="switch-slider"></span>
@@ -418,24 +421,24 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logRetentionDays || 'Retention Days'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${t.logDaysUnit || 'days'}</span>
+                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.logMaxFileMb || 'Max File Size'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${t.logMbUnit || 'MB'}</span>
+                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex justify-end pt-1">
-                    <button id="log-modal-done" class="btn-ghost text-xs px-4 py-2">${t.done || 'Done'}</button>
+                    <button id="log-modal-done" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.done || 'Done')}</button>
                 </div>
             </div>
         `;
@@ -562,11 +565,11 @@ function initLogSettingsModal() {
         const modal = document.createElement('div');
         modal.id = 'log-export-modal';
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
             <div class="glass-card w-[480px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.logExportTitle || 'Export Logs'}</h3>
+                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
                     <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -574,17 +577,17 @@ function initLogSettingsModal() {
 
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex flex-col gap-1">
-                        <label class="text-2xs text-[var(--text-muted)]">${t.logExportFrom || 'From'}</label>
+                        <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportFrom || 'From')}</label>
                         <input id="log-export-from" type="date" value="${threeDaysAgo}" class="form-control form-control-md form-control-mono">
                     </div>
                     <div class="flex flex-col gap-1">
-                        <label class="text-2xs text-[var(--text-muted)]">${t.logExportTo || 'To'}</label>
+                        <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportTo || 'To')}</label>
                         <input id="log-export-to" type="date" value="${today}" class="form-control form-control-md form-control-mono">
                     </div>
                 </div>
 
                 <div class="flex flex-col gap-1">
-                    <label class="text-2xs text-[var(--text-muted)]">${t.logExportLevel || 'Severity Level'}</label>
+                    <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportLevel || 'Severity Level')}</label>
                     <div id="log-level-wrap" class="relative w-full">
                         <button id="log-level-trigger" type="button" class="select-common w-full flex items-center justify-between">
                             <span id="log-level-label">INFO</span>
@@ -614,11 +617,11 @@ function initLogSettingsModal() {
                 </div>
 
                 <div class="flex flex-col gap-2">
-                    <button id="log-export-app" class="btn-ghost w-full">${t.logExportApp || 'Export App Logs'}</button>
-                    <button id="log-export-core" class="btn-ghost w-full">${t.logExportCore || 'Export Core Logs'}</button>
-                    <button id="log-export-all" class="btn-ghost w-full">${t.logExportAll || 'Export All'}</button>
+                    <button id="log-export-app" class="btn-ghost w-full">${escapeHtml(t.logExportApp || 'Export App Logs')}</button>
+                    <button id="log-export-core" class="btn-ghost w-full">${escapeHtml(t.logExportCore || 'Export Core Logs')}</button>
+                    <button id="log-export-all" class="btn-ghost w-full">${escapeHtml(t.logExportAll || 'Export All')}</button>
                 </div>
-                <button id="log-open-folder" class="btn-ghost w-full">${t.logOpenFolder || 'Open Log Folder'}</button>
+                <button id="log-open-folder" class="btn-ghost w-full">${escapeHtml(t.logOpenFolder || 'Open Log Folder')}</button>
             </div>
         `;
 
@@ -2227,43 +2230,43 @@ appStore.set('isNetworkUpdating', false);
             // They are NOT user-controlled strings and cannot contain HTML — they are
             // guaranteed to be numbers by the Rust type system.  Do not add HTML escaping
             // here; it would produce visible "&amp;" artifacts in the number inputs.
-            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+            // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-bold text-[var(--text-primary)]">${t.smartProxyConfigTitle || 'Smart Proxy Settings'}</h3>
+                        <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
                         <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightLatency || 'Latency Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
                             <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightSuccess || 'Success Rate Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
                             <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyWeightStability || 'Stability Weight'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
                             <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyHalfLife || 'Half-life (hours)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
                             <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMinInterval || 'Min Test Interval (s)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
                             <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${t.smartProxyMaxInterval || 'Max Test Interval (s)'}</label>
+                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
                             <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono">
                         </div>
                     </div>
                     <div class="flex justify-end pt-1">
-                        <button id="smart-modal-done" class="btn-ghost text-xs px-4 py-2">${t.done || 'Done'}</button>
+                        <button id="smart-modal-done" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.done || 'Done')}</button>
                     </div>
                 </div>
             `;
