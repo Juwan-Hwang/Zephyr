@@ -136,6 +136,7 @@ export const translations = {
         autoCheckUpdateDesc: "Automatically check for core updates on startup",
         confirm: "Confirm",
         cancel: "Cancel",
+        paste: "Paste",
 
         // Network & Routing
         networkRouting: "Network & Routing",
@@ -916,6 +917,7 @@ export const translations = {
         autoCheckUpdateDesc: "启动时自动检查核心更新",
         confirm: "确定",
         cancel: "取消",
+        paste: "粘贴",
 
         // Network & Routing
         networkRouting: "网络与路由",
@@ -1630,6 +1632,7 @@ export const translations = {
         backupRestoreDesc: "設定のエクスポートまたはインポート",
         bothUpdateAvailable: "コアとクライアントの両方に更新があります",
         cancel: "キャンセル",
+        paste: "貼り付け",
         cannotDeleteActive: "アクティブな設定ファイルは削除できません",
         chainsCol: "チェーン",
         checkUpdate: "更新を確認",
@@ -2365,6 +2368,7 @@ export const translations = {
         backupRestoreDesc: "구성 내보내기 또는 가져오기",
         bothUpdateAvailable: "코어와 클라이언트 모두 업데이트가 있습니다",
         cancel: "취소",
+        paste: "붙여넣기",
         cannotDeleteActive: "활성 구성 파일은 삭제할 수 없습니다",
         chainsCol: "체인",
         checkUpdate: "업데이트 확인",
@@ -3164,6 +3168,7 @@ export const translations = {
         autoCheckUpdateDesc: "Автоматически проверять обновления ядра при запуске",
         confirm: "Подтвердить",
         cancel: "Отмена",
+        paste: "Вставить",
         networkRouting: "Сеть и маршрутизация",
         unifiedDelay: "Единая задержка",
         unifiedDelayDesc: "Использовать единую стратегию тестирования задержки",
@@ -3894,6 +3899,7 @@ export const translations = {
         autoCheckUpdateDesc: "Comprobar actualizaciones del núcleo automáticamente al iniciar",
         confirm: "Confirmar",
         cancel: "Cancelar",
+        paste: "Pegar",
         networkRouting: "Red y enrutamiento",
         unifiedDelay: "Latencia unificada",
         unifiedDelayDesc: "Usar estrategia uniforme de prueba de latencia",
@@ -4624,6 +4630,7 @@ export const translations = {
         autoCheckUpdateDesc: "بررسی خودکار به‌روزرسانی‌های هسته هنگام راه‌اندازی",
         confirm: "تأیید",
         cancel: "لغو",
+        paste: "جای‌گذاری",
         networkRouting: "شبکه و مسیریابی",
         unifiedDelay: "تأخیر یکپارچه",
         unifiedDelayDesc: "استفاده از استراتژی یکنواخت آزمایش تأخیر",
@@ -5354,6 +5361,7 @@ export const translations = {
         autoCheckUpdateDesc: "Başlatylanda öýük täzelenmelerini awtomatik barla",
         confirm: "Tassykla",
         cancel: "Ýatyr",
+        paste: "Ýelme",
         networkRouting: "Ulgam we marşrutizasiýa",
         unifiedDelay: "Birleşdirilen geçikme",
         unifiedDelayDesc: "Birmeňzeş geçikme barlag strategiýasyny ulan",
@@ -6019,6 +6027,7 @@ export const translations = {
         backupRestoreDesc: "သင့် ပြင်ဆင်မှုကို တင်ပို့ သို့မဟုတ် တင်သွင်းရန်",
         bothUpdateAvailable: "ပင်မနှင့် ကလိုင်း နှစ်ခုလုံးတွင် အပ်ဒိတ် ရှိ",
         cancel: "ပယ်ဖျက်ရန်",
+        paste: "ကူးထည့်ပါ",
         cannotDeleteActive: "လက်ရှိ အသုံးပြုနေသော ပြင်ဆင်မှုကို ပယ်ဖျက်၍ မရ",
         chainsCol: "ကွင်းဆက်များ",
         checkUpdate: "အပ်ဒိတ်များ စစ်ဆေးရန်",
@@ -6814,6 +6823,7 @@ export const translations = {
         autoCheckUpdateDesc: "فحص تحديثات النواة تلقائيًا عند التشغيل",
         confirm: "تأكيد",
         cancel: "إلغاء",
+        paste: "لصق",
         networkRouting: "الشبكة والتوجيه",
         unifiedDelay: "تأخير موحّد",
         unifiedDelayDesc: "استخدام استراتيجية موحّدة لاختبار التأخير",
@@ -7544,6 +7554,7 @@ export const translations = {
         autoCheckUpdateDesc: "شروع ہونے پر کور اپڈیٹس کا خودکار فحص",
         confirm: "تصدیق",
         cancel: "منسوخ",
+        paste: "پیسٹ کریں",
         networkRouting: "نیٹ ورک اور روٹنگ",
         unifiedDelay: "متحد تاخیر",
         unifiedDelayDesc: "تاخیر ٹیسٹ کے لیے یکساں حکمت عملی استعمال کریں",
@@ -8276,6 +8287,7 @@ export const translations = {
         autoCheckUpdateDesc: "Kagua masasisho ya kiini otomatiki unapoanza",
         confirm: "Thibitisha",
         cancel: "Ghairi",
+        paste: "Bandika",
 
         // Network & Routing
         networkRouting: "Mtandao & Uelekezaji",
@@ -9056,6 +9068,7 @@ export const translations = {
         autoCheckUpdateDesc: "Başlangıçta çekirdek güncellemelerini otomatik kontrol et",
         confirm: "Onayla",
         cancel: "İptal",
+        paste: "Yapıştır",
 
         // Network & Routing
         networkRouting: "Ağ ve Yönlendirme",
@@ -9836,6 +9849,7 @@ export const translations = {
         autoCheckUpdateDesc: "Tự động kiểm tra cập nhật lõi khi khởi động",
         confirm: "Xác nhận",
         cancel: "Hủy",
+        paste: "Dán",
 
         // Network & Routing
         networkRouting: "Mạng và định tuyến",
@@ -10798,6 +10812,24 @@ export function applyTranslations() {
         const translated = t(key);
         if (translated !== key || _qaMode) {
             inputEl.placeholder = translated;
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        const key = el.getAttribute('data-i18n-title');
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            el.setAttribute('title', translated);
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+        const key = el.getAttribute('data-i18n-aria-label');
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            el.setAttribute('aria-label', translated);
         }
     });
 

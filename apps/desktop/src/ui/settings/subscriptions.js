@@ -26,6 +26,7 @@ import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
 import { generateDomId } from '../../utils/dom-id.js';
 import { SVG_ICONS } from '../icons.js';
+import { pasteToElement } from '../../utils/clipboard.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
 
@@ -188,7 +189,10 @@ async function showEditPanel(configInfo) {
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
-                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
+                    <div class="input-paste-wrapper">
+                        <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
+                        <button type="button" id="edit-url-paste-btn" class="btn-input-paste" title="${escapeAttr(t.paste || 'Paste')}" aria-label="${escapeAttr(t.paste || 'Paste')}" data-i18n-title="paste" data-i18n-aria-label="paste">${SVG_ICONS.clipboard}</button>
+                    </div>
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
@@ -293,6 +297,12 @@ async function showEditPanel(configInfo) {
     document.getElementById('edit-modal-close')?.addEventListener('click', closeModal);
     document.getElementById('edit-modal-cancel')?.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    modal.querySelector('#edit-url-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const editUrlInput = /** @type {HTMLInputElement | null} */ (modal.querySelector('#edit-url'));
+        if (editUrlInput) pasteToElement(editUrlInput);
+    });
 
     // Save handler
     document.getElementById('edit-modal-save')?.addEventListener('click', async () => {

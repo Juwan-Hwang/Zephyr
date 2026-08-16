@@ -266,7 +266,7 @@ function loadTranslations(content) {
  */
 function extractDataI18nKeys(srcDir) {
     const keys = new Set();
-    const attrRegex = /data-i18n(?:-placeholder)?="(\w+)"/g;
+    const attrRegex = /data-i18n(?:-placeholder|-title|-aria-label)?="(\w+)"/g;
 
     function walk(dir) {
         const entries = readdirSync(dir, { withFileTypes: true });

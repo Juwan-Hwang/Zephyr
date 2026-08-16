@@ -11,7 +11,9 @@
 import { appStore } from '../state.js';
 import { showModal, showNotification } from '../notifications.js';
 import { SVG_ICONS } from '../icons.js';
+import { pasteToElement } from '../../utils/clipboard.js';
 import { translations } from '../../i18n.js';
+import { escapeAttr } from '../../utils/sanitize.js';
 
 /**
  * Validate an address string (IPv4:port, [IPv6]:port, hostname:port).
@@ -141,11 +143,17 @@ export function initTunnelSettings({
                 </div>
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
-                    <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="form-control form-control-md form-control-mono">
+                    <div class="input-paste-wrapper">
+                        <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="form-control form-control-md form-control-mono">
+                        <button type="button" id="tunnel-address-paste-btn" class="btn-input-paste" title="${escapeAttr(t.paste || 'Paste')}" aria-label="${escapeAttr(t.paste || 'Paste')}" data-i18n-title="paste" data-i18n-aria-label="paste">${SVG_ICONS.clipboard}</button>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
-                    <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="form-control form-control-md form-control-mono">
+                    <div class="input-paste-wrapper">
+                        <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="form-control form-control-md form-control-mono">
+                        <button type="button" id="tunnel-target-paste-btn" class="btn-input-paste" title="${escapeAttr(t.paste || 'Paste')}" aria-label="${escapeAttr(t.paste || 'Paste')}" data-i18n-title="paste" data-i18n-aria-label="paste">${SVG_ICONS.clipboard}</button>
+                    </div>
                 </div>
                 <div class="flex gap-3 justify-end pt-2">
                     <button id="tunnel-cancel-btn" class="btn-ghost">${cancelText}</button>
@@ -163,6 +171,15 @@ export function initTunnelSettings({
                 const targetInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-target-input'));
                 const cancelBtn = contentArea.querySelector('#tunnel-cancel-btn');
                 const confirmBtn = /** @type {HTMLButtonElement} */ (contentArea.querySelector('#tunnel-confirm-btn'));
+
+                contentArea.querySelector('#tunnel-address-paste-btn')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (addressInput) pasteToElement(addressInput);
+                });
+                contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (targetInput) pasteToElement(targetInput);
+                });
 
                 cancelBtn?.addEventListener('click', () => closeModal(null));
 

@@ -10,6 +10,8 @@ import { sanitizeHtml } from '../utils/sanitize.js';
 import { translations } from '../i18n.js';
 import { appStore } from './state.js';
 import { forwardToBackend } from '../utils/frontend-log.js';
+import { SVG_ICONS } from './icons.js';
+import { pasteToElement } from '../utils/clipboard.js';
 
 /**
  * Show a toast notification.
@@ -160,15 +162,40 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
             contentArea.replaceChildren();
             contentArea.insertAdjacentHTML('beforeend', sanitizeHtml(customHtml));
         } else {
-             
             contentArea.replaceChildren();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'input-paste-wrapper';
+
             const input = document.createElement('input');
             input.type = 'text';
             input.id = 'modal-input';
             input.placeholder = placeholder;
             input.className = 'form-control form-control-lg';
             input.value = defaultValue;
-            contentArea.appendChild(input);
+
+            const pasteBtn = document.createElement('button');
+            pasteBtn.type = 'button';
+            pasteBtn.className = 'btn-input-paste';
+            const currentLang = appStore.get('currentLang') || 'en';
+            /** @type {any} */
+            const tObj = /** @type {any} */ (translations)[currentLang] || translations.en;
+            const pasteLabel = tObj?.paste || 'Paste';
+
+            pasteBtn.title = pasteLabel;
+            pasteBtn.setAttribute('aria-label', pasteLabel);
+            pasteBtn.setAttribute('data-i18n-title', 'paste');
+            pasteBtn.setAttribute('data-i18n-aria-label', 'paste');
+            // eslint-disable-next-line no-unsanitized/property -- static SVG icon
+            pasteBtn.innerHTML = SVG_ICONS.clipboard;
+            pasteBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                pasteToElement(input);
+            };
+
+            wrapper.appendChild(input);
+            wrapper.appendChild(pasteBtn);
+            contentArea.appendChild(wrapper);
         }
 
         // Focus trap: Tab cycles inside modal, Escape closes

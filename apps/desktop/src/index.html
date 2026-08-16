@@ -986,7 +986,10 @@
                                         </div>
                                         <div id="fake-client-custom-container" class="hidden">
                                             <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Custom User-Agent</label>
-                                            <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="form-control form-control-md">
+                                            <div class="input-paste-wrapper">
+                                                <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="form-control form-control-md">
+                                                <button type="button" id="fake-client-custom-paste-btn" class="btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
+                                            </div>
                                         </div>
                                     </div>
                                     <svg id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin mx-auto mt-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -1314,7 +1317,13 @@
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider" data-i18n="customArgs">Custom Startup Arguments</h3>
-                                <p class="text-2xs text-[var(--text-tertiary)] italic" data-i18n="customArgsDesc">Extra CLI flags for Mihomo (one per line)</p>
+                                <div class="flex items-center gap-2">
+                                    <p class="text-2xs text-[var(--text-tertiary)] italic" data-i18n="customArgsDesc">Extra CLI flags for Mihomo (one per line)</p>
+                                    <button type="button" id="custom-args-paste-btn" class="btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                        <span data-i18n="paste">Paste</span>
+                                    </button>
+                                </div>
                             </div>
                             <textarea id="custom-args-input" class="form-control form-control-mono w-full h-24 p-3 text-xs" aria-label="Custom Startup Arguments" placeholder="--ext-ui ui&#10;--another-flag"></textarea>
                             <button id="apply-args-btn" class="btn-accent" data-i18n="applyAndRestart">Apply & Restart Core</button>
@@ -1342,7 +1351,10 @@
             <div class="space-y-6">
                 <div id="modal-content-area">
                     <!-- Default Input -->
-                    <input type="text" id="modal-input" placeholder="Name..." data-i18n-placeholder="modalInputPlaceholder" class="form-control form-control-lg">
+                    <div class="input-paste-wrapper">
+                        <input type="text" id="modal-input" placeholder="Name..." data-i18n-placeholder="modalInputPlaceholder" class="form-control form-control-lg">
+                        <button type="button" id="modal-input-paste-btn" class="btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
+                    </div>
                 </div>
 <div class="flex gap-3 justify-end">
 <button id="modal-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
@@ -1360,13 +1372,25 @@
             
             <div class="space-y-4">
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dnsNameservers">Nameservers (DoH)</label>
+                        <button type="button" id="dns-nameservers-paste-btn" class="btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            <span data-i18n="paste">Paste</span>
+                        </button>
+                    </div>
                     <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
                 </div>
                 
                 <div>
-                    <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
+                        <button type="button" id="dns-fallbacks-paste-btn" class="btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            <span data-i18n="paste">Paste</span>
+                        </button>
+                    </div>
                     <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
                 </div>
