@@ -266,7 +266,7 @@ function loadTranslations(content) {
  */
 function extractDataI18nKeys(srcDir) {
     const keys = new Set();
-    const attrRegex = /data-i18n(?:-placeholder)?="(\w+)"/g;
+    const attrRegex = /(?:data-i18n(?:-placeholder|-title|-aria-label)?=["'](\w+)["']|dataset\.i18n(?:Title|AriaLabel|Placeholder)?\s*=\s*['"](\w+)['"])/g;
 
     function walk(dir) {
         const entries = readdirSync(dir, { withFileTypes: true });
@@ -282,7 +282,8 @@ function extractDataI18nKeys(srcDir) {
                     const content = readFileSync(full, 'utf-8');
                     let m;
                     while ((m = attrRegex.exec(content)) !== null) {
-                        keys.add(m[1]);
+                        const matchedKey = m[1] || m[2];
+                        if (matchedKey) keys.add(matchedKey);
                     }
                     attrRegex.lastIndex = 0;
                 } catch { /* skip unreadable files */ }
