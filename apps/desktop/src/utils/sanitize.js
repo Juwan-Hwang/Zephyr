@@ -63,10 +63,10 @@ const DEFAULT_ALLOWED_TAGS = new Set([
 
 /** Default per-tag attribute whitelist */
 const DEFAULT_ALLOWED_ATTRS = {
-    a:      new Set(['href', 'class', 'target', 'rel']),
+    a:      new Set(['href', 'class', 'target', 'rel', 'title']),
     img:    new Set(['src', 'alt', 'width', 'height']),
-    span:   new Set(['style', 'class']),
-    div:    new Set(['class', 'id', 'style']),
+    span:   new Set(['style', 'class', 'title']),
+    div:    new Set(['class', 'id', 'style', 'title']),
     p:      new Set(['class']),
     h1:     new Set(['class']),
     h2:     new Set(['class']),
@@ -85,14 +85,14 @@ const DEFAULT_ALLOWED_ATTRS = {
     tr:     new Set(['class']),
     td:     new Set(['colspan', 'rowspan', 'class']),
     th:     new Set(['colspan', 'rowspan', 'class']),
-    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step', 'spellcheck']),
-    label:  new Set(['for', 'class']),
-    button: new Set(['type', 'id', 'class', 'disabled']),
-    textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols', 'spellcheck']),
-    select: new Set(['id', 'name', 'class', 'disabled', 'multiple']),
+    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step', 'spellcheck', 'title']),
+    label:  new Set(['for', 'class', 'title']),
+    button: new Set(['type', 'id', 'class', 'disabled', 'title']),
+    textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols', 'spellcheck', 'title']),
+    select: new Set(['id', 'name', 'class', 'disabled', 'multiple', 'title']),
     option: new Set(['value', 'selected', 'disabled']),
     // SVG attributes
-    svg:    new Set(['class', 'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'xmlns', 'style']),
+    svg:    new Set(['class', 'width', 'height', 'viewbox', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'xmlns', 'style']),
     path:   new Set(['d', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin']),
     circle: new Set(['cx', 'cy', 'r', 'fill', 'stroke', 'stroke-width']),
     line:   new Set(['x1', 'y1', 'x2', 'y2', 'stroke', 'stroke-width', 'stroke-linecap']),
@@ -180,12 +180,10 @@ export function sanitizeHtml(input, options = {}) {
         : new Set(options.allowedTags ?? DEFAULT_ALLOWED_TAGS);
 
     const rawAttrs = /** @type {Record<string, Set<string>|string[]>} */ (options.allowedAttributes ?? DEFAULT_ALLOWED_ATTRS);
-    /** @type {Record<string, Set<string>|string[]>} */
+    /** @type {Record<string, Set<string>>} */
     const allowedAttributes = {};
-    for (const tag of Object.keys(rawAttrs)) {
-        allowedAttributes[tag] = rawAttrs[tag] instanceof Set
-            ? rawAttrs[tag]
-            : new Set(rawAttrs[tag]);
+    for (const [tagKey, attrs] of Object.entries(rawAttrs)) {
+        allowedAttributes[tagKey.toLowerCase()] = new Set(Array.from(attrs || []).map(a => a.toLowerCase()));
     }
 
     const keepChildren = options.keepChildrenWhenRemovingParent !== false;
@@ -193,10 +191,6 @@ export function sanitizeHtml(input, options = {}) {
     const allowDataImg = !!options.allowDataImages;
 
     // Parse with <template> element to preserve table fragments
-    // (DOMParser.parseFromString with 'text/html' wraps content in <body>,
-    //  causing the parser to discard orphan <tr>/<td>/<th>/<li> elements
-    //  that lack their required parent context. <template>.content is a
-    //  DocumentFragment that accepts any HTML without structural correction.)
     const template = document.createElement('template');
     // eslint-disable-next-line no-unsanitized/property -- sanitizer core: <template> is inert, no script execution
     template.innerHTML = normalized; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
@@ -219,18 +213,14 @@ export function sanitizeHtml(input, options = {}) {
             return;
         }
 
-        const el = /** @type {Element} */ (node);
+        const el = /** @type {HTMLElement} */ (node);
         const tag = el.tagName.toLowerCase();
 
         // If tag is not whitelisted, remove it (optionally keeping children)
         if (!allowedTags.has(tag)) {
             // Security-sensitive tags: always discard content entirely
-            // (e.g., <script> source code must not leak as visible text)
             const stripContent = STRIP_CONTENT_TAGS.has(tag);
             if (keepChildren && !stripContent) {
-                // Move children up before removing the node AND sanitize them.
-                // The parent's child loop uses a static snapshot, so moved children
-                // would otherwise be skipped — a security bypass vector.
                 const parent = el.parentNode;
                 if (parent) {
                     while (el.firstChild) {
@@ -245,8 +235,7 @@ export function sanitizeHtml(input, options = {}) {
         }
 
         // Sanitize attributes
-        const rawTagAttr = allowedAttributes[tag];
-        const tagAttrWhitelist = rawTagAttr instanceof Set ? rawTagAttr : new Set(rawTagAttr);
+        const tagAttrWhitelist = allowedAttributes[tag];
         const attrsToRemove = [];
 
         for (const attr of Array.from(el.attributes)) {
@@ -264,7 +253,7 @@ export function sanitizeHtml(input, options = {}) {
             }
 
             // If attribute not in whitelist for this tag, remove it
-            if (!tagAttrWhitelist.has(name)) {
+            if (!tagAttrWhitelist || !tagAttrWhitelist.has(name)) {
                 attrsToRemove.push(attr.name);
                 continue;
             }
