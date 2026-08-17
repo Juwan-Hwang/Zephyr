@@ -80,8 +80,19 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          success=0
+          for i in 1 2 3; do
+            if sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf; then
+              success=1
+              break
+            elif [ "$i" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Failed to install system dependencies after 3 attempts"
+            exit 1
+          fi
 
       - name: Run clippy with security lints
         # Lint 规则统一由 workspace 根 Cargo.toml 的 [workspace.lints] 定义，
