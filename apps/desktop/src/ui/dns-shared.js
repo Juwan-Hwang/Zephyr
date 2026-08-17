@@ -17,6 +17,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { Bus, Events } from './events.js';
 import { getSetting, saveSetting } from './settings-helpers.js';
+import { pasteToElement } from '../utils/clipboard.js';
 
 // ---------------------------------------------------------------------------
 //  DNS bootstrap constants
@@ -356,6 +357,16 @@ export async function initDnsRewriteToggle() {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', closeModal);
     }
+
+    document.getElementById('dns-nameservers-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (nameserversInput) pasteToElement(nameserversInput);
+    });
+
+    document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (fallbacksInput) pasteToElement(fallbacksInput);
+    });
 
     // Click outside to close
     if (modal) {

@@ -33,6 +33,8 @@ import { showNotification, showConfirmModal, showUpdateNotesModal } from './noti
 import { applyTheme } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
+import { pasteToElement } from '../utils/clipboard.js';
+import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { saveSetting, saveSettings } from './settings-helpers.js';
@@ -854,6 +856,11 @@ function initFakeClient() {
         debouncedSyncUA();
     });
 
+    document.getElementById('fake-client-custom-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        pasteToElement(customInput);
+    });
+
     if (savedEnabled) {
         optionsContainer.style.transition = 'none';
         updateVisibility();
@@ -955,13 +962,18 @@ export async function initSettings() {
     }
 
     // ---- Custom args ----
+    document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (customArgsInput) pasteToElement(customArgsInput);
+    });
+
     if (applyArgsBtn) {
         applyArgsBtn.onclick = async () => {
             const argsStr = customArgsInput.value.trim();
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
             const configPath = settings.last_config || 'config.yaml';
-            const customArgs = argsStr.split('\n').filter(a => a.trim() !== '');
+            const customArgs = argsStr.split('\n').map(a => a.trim()).filter(Boolean);
 
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
@@ -1114,6 +1126,9 @@ export async function initSettings() {
                 await invoke(COMMANDS.PATCH_SETTINGS, { patch: { home_page_mode: mode } });
                 invalidateSettingsCache();
                 Bus.emit(Events.HOME_PAGE_MODE_CHANGED, { mode, previous });
+                if (mode === 'console') {
+                    checkConsoleWidthNotification();
+                }
             } catch (err) {
                 settingsLogger.error('Failed to save home_page_mode', err);
                 setHomeModeUI(previous);
@@ -1354,7 +1369,7 @@ export async function initSettings() {
             if (failoverToggle) currentSettings.failover_enabled = failoverToggle.checked;
             if (encryptConfigsToggle) currentSettings.encrypt_configs = encryptConfigsToggle.checked;
             currentSettings.theme = appStore.get('currentTheme');
-            if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').filter(a => a.trim() !== '');
+            if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').map(a => a.trim()).filter(Boolean);
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
             invalidateSettingsCache();
         } catch (err) {
