@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('./api.js', () => ({
+    invoke: vi.fn().mockResolvedValue({}),
+}));
 import {
     translations,
     isRTL,
@@ -10,6 +14,8 @@ import {
     getRTLSign,
     setHTMLAttributes,
     mapStatusMessage,
+    applyTranslations,
+    setLanguage,
 } from './i18n.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -360,4 +366,54 @@ describe('i18n exports', () => {
     it('exports mapStatusMessage', () => {
         expect(typeof mapStatusMessage).toBe('function');
     });
+
+    it('exports applyTranslations', () => {
+        expect(typeof applyTranslations).toBe('function');
+    });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  applyTranslations DOM updater
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('applyTranslations', () => {
+    beforeEach(() => {
+        setLanguage('en');
+        document.body.innerHTML = `
+            <span id="text-el" data-i18n="save">Save</span>
+            <input id="input-el" type="text" data-i18n-placeholder="overrideSearchPlaceholder" placeholder="Search overrides..." />
+            <button id="btn-el" data-i18n-title="paste" data-i18n-aria-label="paste" title="Paste" aria-label="Paste"></button>
+        `;
+    });
+
+    afterEach(() => {
+        setLanguage('en');
+        document.body.innerHTML = '';
+    });
+
+    it('updates textContent, placeholder, title, and aria-label attributes when language changes', () => {
+        setLanguage('zh');
+        applyTranslations();
+
+        const textEl = document.getElementById('text-el');
+        const inputEl = /** @type {HTMLInputElement | null} */ (document.getElementById('input-el'));
+        const btnEl = document.getElementById('btn-el');
+
+        expect(textEl?.textContent).toBe('保存');
+        expect(inputEl?.placeholder).toBe('搜索覆写...');
+        expect(btnEl?.getAttribute('title')).toBe('粘贴');
+        expect(btnEl?.getAttribute('aria-label')).toBe('粘贴');
+    });
+
+    it('updates title and aria-label attributes when switched back to English', () => {
+        setLanguage('zh');
+        applyTranslations();
+        setLanguage('en');
+        applyTranslations();
+
+        const btnEl = document.getElementById('btn-el');
+        expect(btnEl?.getAttribute('title')).toBe('Paste');
+        expect(btnEl?.getAttribute('aria-label')).toBe('Paste');
+    });
+});
+
