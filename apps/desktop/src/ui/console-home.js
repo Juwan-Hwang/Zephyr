@@ -1882,3 +1882,9 @@ async function fetchCoreUptime() {
         renderUptime();
     }
 }
+
+export {
+    CONSOLE_EXPAND_BREAKPOINT,
+    isConsoleFullyExpanded,
+    checkConsoleWidthNotification
+} from './console-width.js';
