@@ -48,6 +48,7 @@ import {
     initDnsRewriteToggle,
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
+import { checkConsoleWidthNotification } from './console-home.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { normalizeVersion, isRemoteNewer } from '../utils/version-utils.js';
@@ -1125,6 +1126,9 @@ export async function initSettings() {
                 await invoke(COMMANDS.PATCH_SETTINGS, { patch: { home_page_mode: mode } });
                 invalidateSettingsCache();
                 Bus.emit(Events.HOME_PAGE_MODE_CHANGED, { mode, previous });
+                if (mode === 'console') {
+                    checkConsoleWidthNotification();
+                }
             } catch (err) {
                 settingsLogger.error('Failed to save home_page_mode', err);
                 setHomeModeUI(previous);
