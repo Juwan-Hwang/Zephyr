@@ -80,8 +80,10 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          for i in 1 2 3; do
+            sudo apt-get update -y && \
+            sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf && break || sleep 5
+          done
 
       - name: Run clippy with security lints
         # Lint 规则统一由 workspace 根 Cargo.toml 的 [workspace.lints] 定义，
