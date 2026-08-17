@@ -266,7 +266,7 @@ function loadTranslations(content) {
  */
 function extractDataI18nKeys(srcDir) {
     const keys = new Set();
-    const attrRegex = /data-i18n(?:-placeholder)?="(\w+)"/g;
+    const attrRegex = /data-i18n(?:-[a-zA-Z0-9_-]+)?="(\w+)"/g;
 
     function walk(dir) {
         const entries = readdirSync(dir, { withFileTypes: true });
@@ -278,6 +278,7 @@ function extractDataI18nKeys(srcDir) {
             } else if (entry.isFile()) {
                 const ext = extname(entry.name);
                 if (ext !== '.html' && ext !== '.js') continue;
+                if (entry.name.endsWith('.test.js') || entry.name.endsWith('.spec.js')) continue;
                 try {
                     const content = readFileSync(full, 'utf-8');
                     let m;

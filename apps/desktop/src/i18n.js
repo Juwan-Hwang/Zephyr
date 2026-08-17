@@ -797,6 +797,9 @@ export const translations = {
         consoleSubUpdateNow: "Update Now",
         consoleSubUpdateOk: "Subscription updated successfully",
         consoleSubUpdateFail: "Subscription update failed",
+        consoleWidthTip: "Widen the window to fully expand the console dashboard for a better experience.",
+        paste: "Paste",
+        pasteFailed: "Failed to paste from clipboard",
         consoleSubUpdateBusy: "Update in progress, please wait",
         consoleInitFail: "Failed to initialize console. Please try again.",
         consoleSubManage: "Manage",
@@ -1577,6 +1580,9 @@ export const translations = {
         consoleSubUpdateNow: "立即更新",
         consoleSubUpdateOk: "订阅更新成功",
         consoleSubUpdateFail: "订阅更新失败",
+        consoleWidthTip: "建议拉宽窗口以完全展开控制台，获得更佳的使用体验。",
+        paste: "粘贴",
+        pasteFailed: "从剪贴板粘贴失败",
         consoleSubUpdateBusy: "更新中，请稍候",
         consoleInitFail: "控制台初始化失败，请重试。",
         consoleSubManage: "管理订阅",
@@ -1727,6 +1733,9 @@ export const translations = {
         },
         consoleSubUpdateBusy: "更新中です。お待ちください",
         consoleSubUpdateFail: "サブスクリプションの更新に失敗しました",
+        consoleWidthTip: "コンソールを完全に展開してより快適にご利用いただくために、ウィンドウを広げることをお勧めします。",
+        paste: "貼り付け",
+        pasteFailed: "クリップボードからの貼り付けに失敗しました",
         consoleSubUpdateNow: "今すぐ更新",
         consoleSubUpdateOk: "サブスクリプションの更新に成功しました",
         consoleSubUpdating: "更新中…",
@@ -2462,6 +2471,9 @@ export const translations = {
         },
         consoleSubUpdateBusy: "업데이트 중입니다. 잠시만 기다려 주세요",
         consoleSubUpdateFail: "구독 업데이트 실패",
+        consoleWidthTip: "콘솔을 완전히 확장하여 더 나은 경험을 누리려면 창 너비를 넓혀주세요.",
+        paste: "붙여넣기",
+        pasteFailed: "클립보드에서 붙여넣기 실패",
         consoleSubUpdateNow: "지금 업데이트",
         consoleSubUpdateOk: "구독 업데이트 성공",
         consoleSubUpdating: "업데이트 중…",
@@ -3777,6 +3789,9 @@ export const translations = {
         consoleSubUpdateNow: "Обновить сейчас",
         consoleSubUpdateOk: "Подписка успешно обновлена",
         consoleSubUpdateFail: "Ошибка обновления подписки",
+        consoleWidthTip: "Расширьте окно, чтобы полностью развернуть консоль и улучшить взаимодействие.",
+        paste: "Вставить",
+        pasteFailed: "Не удалось вставить из буфера обмена",
         consoleSubUpdateBusy: "Обновление в процессе, подождите",
         consoleInitFail: "Не удалось инициализировать консоль. Повторите попытку.",
         consoleSubManage: "Управлять",
@@ -4507,6 +4522,9 @@ export const translations = {
         consoleSubUpdateNow: "Actualizar ahora",
         consoleSubUpdateOk: "Suscripción actualizada correctamente",
         consoleSubUpdateFail: "Error al actualizar suscripción",
+        consoleWidthTip: "Amplíe la ventana para expandir completamente la consola y obtener una mejor experiencia.",
+        paste: "Pegar",
+        pasteFailed: "Falha ao colar da área de transferência",
         consoleSubUpdateBusy: "Actualización en progreso, espere",
         consoleInitFail: "Error al inicializar la consola. Inténtelo de nuevo.",
         consoleSubManage: "Gestionar",
@@ -5237,6 +5255,9 @@ export const translations = {
         consoleSubUpdateNow: "به‌روزرسانی اکنون",
         consoleSubUpdateOk: "اشتراک با موفقیت به‌روزرسانی شد",
         consoleSubUpdateFail: "به‌روزرسانی اشتراک ناموفق بود",
+        consoleWidthTip: "برای باز شدن کامل کنسول و تجربه کاربری بهتر، عرض پنجره را افزایش دهید.",
+        paste: "جای‌گذاری",
+        pasteFailed: "جای‌گذاری از کلیپ‌بورد ناموفق بود",
         consoleSubUpdateBusy: "به‌روزرسانی در حال انجام است، لطفاً صبر کنید",
         consoleInitFail: "راه‌اندازی کنسول ناموفق بود. دوباره تلاش کنید.",
         consoleSubManage: "مدیریت",
@@ -5967,6 +5988,9 @@ export const translations = {
         consoleSubUpdateNow: "Şu wagt täzele",
         consoleSubUpdateOk: "Abuna üstünlikli täzelendi",
         consoleSubUpdateFail: "Abuna täzelenmegi şowsuz",
+        consoleWidthTip: "Konsoly doly giňeltmek we has gowy tejribe almak üçin penjiräni giňeldiň.",
+        paste: "Ýelme",
+        pasteFailed: "Panodan ýelme wagşy başaranyl",
         consoleSubUpdateBusy: "Täzelenme barlagy dowam edýär, haýyş, garaşyň",
         consoleInitFail: "Konsoly başlatmak şowsuz. Täzeden synanyşyň.",
         consoleSubManage: "Dolan",
@@ -6112,6 +6136,9 @@ export const translations = {
         consoleSubNodes: { one: "@@count@@ နုတ်", other: "@@count@@ နုတ်" },
         consoleSubUpdateBusy: "အပ်ဒိတ်လုပ်နေသည်၊ ခဏ စောင့်ပါ",
         consoleSubUpdateFail: "စာရင်းသွင်းမှု အပ်ဒိတ် မအောင်မြင်",
+        consoleWidthTip: "Console ကို အပြည့်အစုံ ချဲ့ထွင်ပြီး ပိုမိုကောင်းမွန်သော အတွေ့အကြုံ ရရှိရန် window ကို ချဲ့ပေးပါ။",
+        paste: "ကူးထည့်ရန်",
+        pasteFailed: "ကလစ်ဘုတ်မှ ကူးထည့်၍ မရပါ",
         consoleSubUpdateNow: "ယခုပင် အပ်ဒိတ်လုပ်",
         consoleSubUpdateOk: "စာရင်းသွင်းမှု အောင်မြင်စွာ အပ်ဒိတ်ပြီးပြီ",
         consoleSubUpdating: "အပ်ဒိတ်လုပ်နေ…",
@@ -7427,6 +7454,9 @@ export const translations = {
         consoleSubUpdateNow: "تحديث الآن",
         consoleSubUpdateOk: "تم تحديث الاشتراك بنجاح",
         consoleSubUpdateFail: "فشل تحديث الاشتراك",
+        consoleWidthTip: "قم بتوسيع النافذة لعرض لوحة التحكم بالكامل للحصول على تجربة أفضل.",
+        paste: "لصق",
+        pasteFailed: "فشل اللصق من الحافظة",
         consoleSubUpdateBusy: "التحديث قيد التنفيذ، يرجى الانتظار",
         consoleInitFail: "فشل تهيئة لوحة التحكم. أعد المحاولة.",
         consoleSubManage: "إدارة",
@@ -8157,6 +8187,9 @@ export const translations = {
         consoleSubUpdateNow: "ابھی اپڈیٹ",
         consoleSubUpdateOk: "سبسکرپشن کامیابی سے اپڈیٹ ہو گئی",
         consoleSubUpdateFail: "سبسکرپشن اپڈیٹ ناکام ہوئی",
+        consoleWidthTip: "بہتر تجربے کے لیے کنسول کو مکمل طور پر پھیلانے کے واسطے ونڈو کو چوڑا کریں۔",
+        paste: "پیسٹ کریں",
+        pasteFailed: "کلپ بورڈ سے پیسٹ کرنے میں ناکامی",
         consoleSubUpdateBusy: "اپڈیٹ جاری ہے، براہ کرم انتظار کریں",
         consoleInitFail: "کنسول initialization ناکام ہوئی۔ دوبارہ کوشش کریں۔",
         consoleSubManage: "انتظام",
@@ -8937,6 +8970,9 @@ export const translations = {
         consoleSubUpdateNow: "Sasisha Sasa",
         consoleSubUpdateOk: "Usajili umesasishwa kwa mafanikio",
         consoleSubUpdateFail: "Sasisho la usajili umeshindwa",
+        consoleWidthTip: "Panua dirisha ili kupanua dashibodi kikamilifu kwa matumizi bora.",
+        paste: "Bandika",
+        pasteFailed: "Imeshindwa kubandika kutoka kwenye clipboard",
         consoleSubUpdateBusy: "Sasisho laendelea, tafadhali subiri",
         consoleInitFail: "Imeshindwa kuanzisha konsoli. Tafadhali jaribu tena.",
         consoleSubManage: "Simamisha",
@@ -9717,6 +9753,9 @@ export const translations = {
         consoleSubUpdateNow: "Şimdi Güncelle",
         consoleSubUpdateOk: "Abonelik başarıyla güncellendi",
         consoleSubUpdateFail: "Abonelik güncellemesi başarısız",
+        consoleWidthTip: "Daha iyi bir deneyim için konsol panelini tam olarak genişletmek üzere pencereyi genişletin.",
+        paste: "Yapıştır",
+        pasteFailed: "Panodan yapıştırma başarısız",
         consoleSubUpdateBusy: "Güncelleme devam ediyor, lütfen bekleyin",
         consoleInitFail: "Konsol başlatılamadı. Lütfen tekrar deneyin.",
         consoleSubManage: "Yönet",
@@ -10497,6 +10536,9 @@ export const translations = {
         consoleSubUpdateNow: "Cập nhật ngay",
         consoleSubUpdateOk: "Đã cập nhật đăng ký thành công",
         consoleSubUpdateFail: "Cập nhật đăng ký thất bại",
+        consoleWidthTip: "Hãy mở rộng cửa sổ để mở rộng hoàn toàn bảng điều khiển nhằm có trải nghiệm tốt hơn.",
+        paste: "Dán",
+        pasteFailed: "Không thể dán từ khay nhớ tạm",
         consoleSubUpdateBusy: "Đang cập nhật, vui lòng đợi",
         consoleInitFail: "Không thể khởi tạo bảng điều khiển. Vui lòng thử lại.",
         consoleSubManage: "Quản lý",
@@ -10798,6 +10840,24 @@ export function applyTranslations() {
         const translated = t(key);
         if (translated !== key || _qaMode) {
             inputEl.placeholder = translated;
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        const key = /** @type {HTMLElement} */ (el).dataset.i18nTitle;
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            el.setAttribute('title', translated);
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+        const key = /** @type {HTMLElement} */ (el).dataset.i18nAriaLabel;
+        if (!key) return;
+        const translated = t(key);
+        if (translated !== key || _qaMode) {
+            el.setAttribute('aria-label', translated);
         }
     });
 

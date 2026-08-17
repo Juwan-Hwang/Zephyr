@@ -26,6 +26,7 @@ import { escapeHtml, escapeAttr } from '../../utils/sanitize.js';
 import { removeContextMenu, createContextMenuContainer, attachContextMenuCloseHandlers } from '../../utils/context-menu.js';
 import { generateDomId } from '../../utils/dom-id.js';
 import { SVG_ICONS } from '../icons.js';
+import { pasteToElement, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
 
@@ -183,12 +184,15 @@ async function showEditPanel(configInfo) {
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
+                    <label for="edit-name" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="form-control form-control-md">
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
-                    <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
+                    <label for="edit-url" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <div class="input-paste-wrapper">
+                        <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
+                        ${renderPasteButtonHtml('edit-url-paste-btn', t.paste || 'Paste')}
+                    </div>
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
@@ -293,6 +297,16 @@ async function showEditPanel(configInfo) {
     document.getElementById('edit-modal-close')?.addEventListener('click', closeModal);
     document.getElementById('edit-modal-cancel')?.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    modal.querySelector('#edit-url-paste-btn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const editUrlInput = /** @type {HTMLInputElement | null} */ (modal.querySelector('#edit-url'));
+        if (editUrlInput) {
+            const lang = appStore.get('currentLang') || 'en';
+            const failMsg = /** @type {any} */ (translations)[lang]?.pasteFailed || translations.en.pasteFailed;
+            pasteToElement(editUrlInput, true, () => showNotification(failMsg, 'warning'));
+        }
+    });
 
     // Save handler
     document.getElementById('edit-modal-save')?.addEventListener('click', async () => {
