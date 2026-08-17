@@ -10,6 +10,7 @@ import { sanitizeHtml } from '../utils/sanitize.js';
 import { translations } from '../i18n.js';
 import { appStore } from './state.js';
 import { forwardToBackend } from '../utils/frontend-log.js';
+import { pasteWithFeedback, renderPasteButtonHtml } from '../utils/clipboard.js';
 
 /**
  * Show a toast notification.
@@ -160,15 +161,32 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
             contentArea.replaceChildren();
             contentArea.insertAdjacentHTML('beforeend', sanitizeHtml(customHtml));
         } else {
-             
             contentArea.replaceChildren();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'input-paste-wrapper';
+
             const input = document.createElement('input');
             input.type = 'text';
             input.id = 'modal-input';
             input.placeholder = placeholder;
             input.className = 'form-control form-control-lg';
             input.value = defaultValue;
-            contentArea.appendChild(input);
+            input.setAttribute('aria-labelledby', 'modal-title');
+
+            const currentLang = appStore.get('currentLang') || 'en';
+            /** @type {any} */
+            const tObj = /** @type {any} */ (translations)[currentLang] || translations.en;
+            const pasteLabel = tObj?.paste || 'Paste';
+
+            wrapper.appendChild(input);
+            wrapper.insertAdjacentHTML('beforeend', sanitizeHtml(renderPasteButtonHtml('modal-input-paste-btn', pasteLabel)));
+            wrapper.querySelector('#modal-input-paste-btn')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const lang = appStore.get('currentLang') || 'en';
+                pasteWithFeedback(input, showNotification, translations, lang);
+            });
+            contentArea.appendChild(wrapper);
         }
 
         // Focus trap: Tab cycles inside modal, Escape closes
