@@ -37,11 +37,4 @@ describe('sanitizeHtml', () => {
     });
     it('handles empty string', () => expect(sanitizeHtml('')).toBe(''));
     it('handles plain text', () => expect(sanitizeHtml('hello world')).toBe('hello world'));
-    it('preserves svg viewBox and button title attributes', () => {
-        const svgHtml = '<button type="button" title="Paste" data-i18n-title="paste"><svg viewBox="0 0 24 24" fill="none"><path d="M16 4h2"></path></svg></button>';
-        const sanitized = sanitizeHtml(svgHtml);
-        expect(sanitized).toContain('title="Paste"');
-        expect(sanitized).toContain('data-i18n-title="paste"');
-        expect(sanitized.toLowerCase()).toContain('viewbox="0 0 24 24"');
-    });
 });

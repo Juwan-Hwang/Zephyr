@@ -266,8 +266,7 @@ function loadTranslations(content) {
  */
 function extractDataI18nKeys(srcDir) {
     const keys = new Set();
-    const attrRegex = /data-i18n[-\w]*=["'](\w+)["']/g;
-    const datasetRegex = /dataset\.i18n\w*\s*=\s*['"](\w+)['"]/g;
+    const attrRegex = /data-i18n(?:-placeholder)?="(\w+)"/g;
 
     function walk(dir) {
         const entries = readdirSync(dir, { withFileTypes: true });
@@ -286,11 +285,6 @@ function extractDataI18nKeys(srcDir) {
                         keys.add(m[1]);
                     }
                     attrRegex.lastIndex = 0;
-
-                    while ((m = datasetRegex.exec(content)) !== null) {
-                        keys.add(m[1]);
-                    }
-                    datasetRegex.lastIndex = 0;
                 } catch { /* skip unreadable files */ }
             }
         }

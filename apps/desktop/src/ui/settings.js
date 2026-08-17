@@ -33,7 +33,6 @@ import { showNotification, showConfirmModal, showUpdateNotesModal } from './noti
 import { applyTheme } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
-import { pasteToElement } from '../utils/clipboard.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { saveSetting, saveSettings } from './settings-helpers.js';
@@ -855,11 +854,6 @@ function initFakeClient() {
         debouncedSyncUA();
     });
 
-    document.getElementById('fake-client-custom-paste-btn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        pasteToElement(customInput);
-    });
-
     if (savedEnabled) {
         optionsContainer.style.transition = 'none';
         updateVisibility();
@@ -961,11 +955,6 @@ export async function initSettings() {
     }
 
     // ---- Custom args ----
-    document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (customArgsInput) pasteToElement(customArgsInput, false);
-    });
-
     if (applyArgsBtn) {
         applyArgsBtn.onclick = async () => {
             const argsStr = customArgsInput.value.trim();
