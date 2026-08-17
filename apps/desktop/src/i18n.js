@@ -748,7 +748,6 @@ export const translations = {
 
         // ── Console Dashboard ──
         consoleTitle: "Console",
-        consoleWidthTip: "Widen the window to fully expand the console dashboard for a better experience.",
         consoleUptimeRunning: "Core running —",
         consoleUptimeStopped: "Core stopped —",
         consoleUptimeFmt: "Uptime @@days@@d @@time@@",
@@ -1530,7 +1529,6 @@ export const translations = {
 
         // ── 控制台仪表盘 ──
         consoleTitle: "控制台",
-        consoleWidthTip: "建议拉宽窗口以完全展开控制台，获得更佳的使用体验。",
         consoleUptimeRunning: "核心已运行 —",
         consoleUptimeStopped: "核心已停止 —",
         consoleUptimeFmt: "核心已运行 @@days@@ 天 @@time@@",
@@ -1742,7 +1740,6 @@ export const translations = {
         consoleSystem: "システム",
         consoleTestLatency: "テスト",
         consoleTitle: "コンソール",
-        consoleWidthTip: "コンソールを完全に展開して最適な表示にするには、ウィンドウ幅を広げてください。",
         consoleTotalTraffic: "総トラフィック",
         consoleTunAdapter: "TUN アダプター",
         consoleUpSpeed: "アップロード速度",
@@ -2479,7 +2476,6 @@ export const translations = {
         consoleSystem: "시스템",
         consoleTestLatency: "테스트",
         consoleTitle: "콘솔",
-        consoleWidthTip: "더 나은 사용 환경을 위해 창 너비를 넓혀 콘솔을 완전히 펼쳐보세요.",
         consoleTotalTraffic: "총 트래픽",
         consoleTunAdapter: "TUN 어댑터",
         consoleUpSpeed: "업로드 속도",
@@ -3736,7 +3732,6 @@ export const translations = {
         networkOptimApplyFailed: "Не удалось применить оптимизацию сети",
         networkOptimRevertFailed: "Не удалось откатить оптимизацию сети",
         consoleTitle: "Консоль",
-        consoleWidthTip: "Расширьте окно, чтобы полностью развернуть панель консоли для лучшего отображения.",
         consoleUptimeRunning: "Ядро работает —",
         consoleUptimeStopped: "Ядро остановлено —",
         consoleUptimeFmt: "Аптайм @@days@@д @@time@@",
@@ -4468,7 +4463,6 @@ export const translations = {
         networkOptimApplyFailed: "Error al aplicar optimizaciones de red",
         networkOptimRevertFailed: "Error al revertir optimizaciones de red",
         consoleTitle: "Consola",
-        consoleWidthTip: "Amplíe la ventana para expandir completamente el panel de consola y obtener una mejor experiencia.",
         consoleUptimeRunning: "Núcleo en ejecución —",
         consoleUptimeStopped: "Núcleo detenido —",
         consoleUptimeFmt: "Tiempo activo @@days@@d @@time@@",
@@ -5200,7 +5194,6 @@ export const translations = {
         networkOptimApplyFailed: "اعمال بهینه‌سازی شبکه ناموفق بود",
         networkOptimRevertFailed: "بازگردانی بهینه‌سازی شبکه ناموفق بود",
         consoleTitle: "کنسول",
-        consoleWidthTip: "برای تجربه بهتر و نمایش کامل داشبورد کنسول، عرض پنجره را افزایش دهید.",
         consoleUptimeRunning: "هسته در حال اجرا —",
         consoleUptimeStopped: "هسته متوقف شد —",
         consoleUptimeFmt: "آپ‌تایم @@days@@ روز @@time@@",
@@ -5932,7 +5925,6 @@ export const translations = {
         networkOptimApplyFailed: "Ulgam optimizasiýasyny ýygnamak şowsuz",
         networkOptimRevertFailed: "Ulgam optimizasiýasyny yzyna almak şowsuz",
         consoleTitle: "Konsol",
-        consoleWidthTip: "Has gowy tejribe üçin konsol panelini doly açmak maksady bilen penjiräni giňeldiň.",
         consoleUptimeRunning: "Öýük işleýär —",
         consoleUptimeStopped: "Öýük beslendi —",
         consoleUptimeFmt: "Işläp durmuş wagty @@days@@g @@time@@",
@@ -6139,7 +6131,6 @@ export const translations = {
         consoleSystem: "စနစ်",
         consoleTestLatency: "စမ်း",
         consoleTitle: "ကွန်ဆိုး",
-        consoleWidthTip: "ပိုမိုကောင်းမွန်သော အတွေ့အကြုံအတွက် ကွန်ဆိုးလ်ဒက်ရှ်ဘုတ်ကို အပြည့်အဝချဲ့ထွင်ရန် ဝင်းဒိုးကို ကျယ်အောင်ချဲ့ပါ။",
         consoleTotalTraffic: "စုစုပေါင်း အချက်အလက်",
         consoleTunAdapter: "TUN အဒပ်တာ",
         consoleUpSpeed: "အပ်လုတ် အမြန်နှုန်း",
@@ -7396,7 +7387,6 @@ export const translations = {
         networkOptimApplyFailed: "فشل تطبيق تحسينات الشبكة",
         networkOptimRevertFailed: "فشل استعادة تحسينات الشبكة",
         consoleTitle: "لوحة التحكم",
-        consoleWidthTip: "قم بتوسيع النافذة لتوسيع لوحة تحكم وحدة التحكم بالكامل للحصول على تجربة أفضل.",
         consoleUptimeRunning: "النواة قيد التشغيل —",
         consoleUptimeStopped: "النواة متوقفة —",
         consoleUptimeFmt: "وقت التشغيل @@days@@ يوم @@time@@",
@@ -8128,7 +8118,6 @@ export const translations = {
         networkOptimApplyFailed: "نیٹ ورک optimization لاگو ناکام ہوئی",
         networkOptimRevertFailed: "نیٹ ورک optimization بحال ناکام ہوئی",
         consoleTitle: "کنسول",
-        consoleWidthTip: "بہتر تجربے کے لیے کنسول ڈیش بورڈ کو مکمل طور پر پھیلانے کے لیے ونڈو کو چوڑا کریں۔",
         consoleUptimeRunning: "کور run ہو رہا ہے —",
         consoleUptimeStopped: "کور بند ہو گیا —",
         consoleUptimeFmt: "اپ ٹائم @@days@@ دن @@time@@",
@@ -8910,7 +8899,6 @@ export const translations = {
 
         // ── Console Dashboard ──
         consoleTitle: "Konsoli",
-        consoleWidthTip: "Panua dirisha ili kueneza dashibodi ya kiweko kikamilifu kwa matumizi bora zaidi.",
         consoleUptimeRunning: "Kiini kinatumika —",
         consoleUptimeStopped: "Kiini kimesimama —",
         consoleUptimeFmt: "Muda wa kuendeshwa @@days@@d @@time@@",
@@ -9692,7 +9680,6 @@ export const translations = {
 
         // ── Console Dashboard ──
         consoleTitle: "Konsol",
-        consoleWidthTip: "Daha iyi bir deneyim için konsol panelini tamamen genişletmek üzere pencereyi genişletin.",
         consoleUptimeRunning: "Çekirdek çalışıyor —",
         consoleUptimeStopped: "Çekirdek durdu —",
         consoleUptimeFmt: "Çalışma süresi @@days@@g @@time@@",
@@ -10474,7 +10461,6 @@ export const translations = {
 
         // ── Console Dashboard ──
         consoleTitle: "Bảng điều khiển",
-        consoleWidthTip: "Hãy mở rộng cửa sổ để hiển thị đầy đủ bảng điều khiển nhằm có trải nghiệm tốt hơn.",
         consoleUptimeRunning: "Lõi đang chạy —",
         consoleUptimeStopped: "Lõi đã dừng —",
         consoleUptimeFmt: "Thời gian chạy @@days@@ ngày @@time@@",
