@@ -24,6 +24,7 @@ import { SVG_ICONS } from './icons.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
 import { parseRulesFromYaml, rebuildYamlWithRules, wrapRulesAsPrismYaml } from './rule-library/yaml-utils.js';
+import { pasteWithFeedback, renderPasteButtonHtml } from '../utils/clipboard.js';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Internal state
@@ -1518,14 +1519,20 @@ async function handleImportRules() {
                     ${escapeHtml(t.ruleLibraryImportUrl || 'Import from URL')}
                 </button>
             </div>
-            <div id="rl-import-paste" class="space-y-3">
-                <textarea id="rl-import-text" class="form-control form-control-mono w-full h-32 rounded-xl p-3 text-xs resize-none custom-scrollbar" placeholder="${escapeHtml(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
+            <div id="rl-import-paste" class="space-y-2">
+                <div class="textarea-paste-wrapper">
+                    <textarea id="rl-import-text" aria-label="${escapeAttr(t.ruleLibraryImportPaste || 'Rule Text')}" class="form-control form-control-mono w-full h-32 rounded-xl p-3 text-xs resize-none custom-scrollbar" placeholder="${escapeAttr(t.ruleLibraryImportPaste || '')}" spellcheck="false"></textarea>
+                    ${renderPasteButtonHtml('rl-import-paste-btn', t.paste || 'Paste', true)}
+                </div>
             </div>
             <div id="rl-import-file" class="hidden space-y-3">
-                <input id="rl-import-file-path" type="text" class="form-control form-control-lg" placeholder="${escapeHtml(t.ruleLibraryImportFile || '')}" />
+                <input id="rl-import-file-path" aria-label="${escapeAttr(t.ruleLibraryImportFile || 'File Path')}" type="text" class="form-control form-control-lg" placeholder="${escapeAttr(t.ruleLibraryImportFile || '')}" />
             </div>
             <div id="rl-import-url" class="hidden space-y-3">
-                <input id="rl-import-url-input" type="text" class="form-control form-control-lg" placeholder="https://..." />
+                <div class="input-paste-wrapper">
+                    <input id="rl-import-url-input" aria-label="${escapeAttr(t.ruleLibraryImportUrl || 'Import from URL')}" type="text" class="form-control form-control-lg" placeholder="https://..." />
+                    ${renderPasteButtonHtml('rl-import-url-paste-btn', t.paste || 'Paste', false)}
+                </div>
             </div>
             <div class="space-y-2">
                 <label class="text-xs text-[var(--text-muted)]">${escapeHtml(t.ruleLibraryGroupName || 'Name')}</label>
@@ -1546,6 +1553,16 @@ async function handleImportRules() {
         true,
         importHtml,
         (contentArea, close) => {
+            // Wire up paste buttons
+contentArea.querySelector('#rl-import-paste-btn')?.addEventListener('click', () => {
+    const textarea = /** @type {HTMLTextAreaElement | null} */ (contentArea.querySelector('#rl-import-text'));
+    if (textarea) pasteWithFeedback(textarea, showNotification, translations, currentLang);
+});
+contentArea.querySelector('#rl-import-url-paste-btn')?.addEventListener('click', () => {
+    const urlInput = /** @type {HTMLInputElement | null} */ (contentArea.querySelector('#rl-import-url-input'));
+    if (urlInput) pasteWithFeedback(urlInput, showNotification, translations, currentLang);
+});
+
             // Wire up import tab switching
             const importTabs = contentArea.querySelectorAll('.rl-import-tab');
             const pastePanel = contentArea.querySelector('#rl-import-paste');
