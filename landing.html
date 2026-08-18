@@ -238,6 +238,7 @@
         <a href="#features" data-i18n="nav.features">特性</a>
         <a href="#architecture" data-i18n="nav.architecture">架构</a>
         <a href="#performance" data-i18n="nav.performance">性能</a>
+        <a href="#installation" data-i18n="nav.installation">安装</a>
         <a href="#demo" data-i18n="nav.demo">在线体验</a>
       </div>
     </div>
@@ -284,6 +285,7 @@
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="10" height="10" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
             </button>
             <div class="version-dropdown-menu" id="versionDropdownMenu" role="menu">
+              <div class="dropdown-group-label">Windows</div>
               <button type="button" class="dropdown-item active" data-os="windows" data-cmd="winget install Juwan.Zephyr" data-label="winget (Windows)" role="menuitem">
                 <div class="item-header">
                   <span class="item-title">Windows</span>
@@ -296,28 +298,67 @@
                   <span class="item-title">Windows</span>
                   <span class="item-badge">Scoop</span>
                 </div>
-                <code>scoop bucket add zephyr ... &amp;&amp; scoop install zephyr</code>
+                <code>scoop install zephyr</code>
               </button>
+              <button type="button" class="dropdown-item" data-os="choco" data-cmd="choco install zephyr" data-label="Chocolatey (Windows)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Windows</span>
+                  <span class="item-badge">Chocolatey</span>
+                </div>
+                <code>choco install zephyr</code>
+              </button>
+
+              <div class="dropdown-group-label">macOS</div>
+              <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install --cask zephyr" data-label="Homebrew Cask (macOS)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">macOS</span>
+                  <span class="item-badge">Homebrew</span>
+                </div>
+                <code>brew install --cask zephyr</code>
+              </button>
+
+              <div class="dropdown-group-label">Linux 发行版</div>
               <button type="button" class="dropdown-item" data-os="arch-yay" data-cmd="yay -S zephyr-clash-bin" data-label="yay (Arch Linux)" role="menuitem">
                 <div class="item-header">
                   <span class="item-title">Arch Linux</span>
-                  <span class="item-badge">yay / AUR</span>
+                  <span class="item-badge">AUR</span>
                 </div>
                 <code>yay -S zephyr-clash-bin</code>
               </button>
-              <button type="button" class="dropdown-item" data-os="arch-paru" data-cmd="paru -S zephyr-clash-bin" data-label="paru (Arch Linux)" role="menuitem">
+              <button type="button" class="dropdown-item" data-os="ppa" data-cmd="sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr" data-label="Ubuntu / Debian (PPA)" role="menuitem">
                 <div class="item-header">
-                  <span class="item-title">Arch Linux</span>
-                  <span class="item-badge">paru / AUR</span>
+                  <span class="item-title">Ubuntu / Debian</span>
+                  <span class="item-badge">PPA</span>
                 </div>
-                <code>paru -S zephyr-clash-bin</code>
+                <code>sudo add-apt-repository ppa:juwanhwang/zephyr</code>
               </button>
-              <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install juwan-hwang/tap/zephyr" data-label="Homebrew (macOS/Linux)" role="menuitem">
+              <button type="button" class="dropdown-item" data-os="copr" data-cmd="sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr" data-label="Fedora / RHEL (COPR)" role="menuitem">
                 <div class="item-header">
-                  <span class="item-title">macOS / Linux</span>
-                  <span class="item-badge">Homebrew</span>
+                  <span class="item-title">Fedora / RHEL</span>
+                  <span class="item-badge">COPR</span>
                 </div>
-                <code>brew install juwan-hwang/tap/zephyr</code>
+                <code>sudo dnf copr enable juwan/zephyr</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="snap" data-cmd="sudo snap install zephyr" data-label="Snap Store (Linux)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Universal Linux</span>
+                  <span class="item-badge">Snap</span>
+                </div>
+                <code>sudo snap install zephyr</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="nix" data-cmd="nix-env -iA nixpkgs.zephyr" data-label="Nix / NixOS" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">NixOS / Nix</span>
+                  <span class="item-badge">Nixpkgs</span>
+                </div>
+                <code>nix-env -iA nixpkgs.zephyr</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="void" data-cmd="xbps-install zephyr" data-label="Void Linux" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Void Linux</span>
+                  <span class="item-badge">XBPS</span>
+                </div>
+                <code>xbps-install zephyr</code>
               </button>
             </div>
           </div>
@@ -733,6 +774,234 @@
       </div>
     </section>
 
+    <!-- ═══ INSTALLATION / PACKAGE MANAGERS ═══ -->
+    <section class="section" id="installation" data-section="installation" aria-labelledby="install-heading">
+      <div class="section-inner">
+        <div class="section-header">
+          <span class="section-label" data-i18n="install.label">包管理器与一键安装</span>
+          <h2 class="section-title reveal" id="install-heading" data-i18n="install.title">全生态原生支持 · 丝滑更新</h2>
+          <p class="section-desc reveal" data-i18n="install.desc">选择您的操作系统，通过官方软件源享受极速安装与自动升级。</p>
+        </div>
+
+        <div class="install-tabs-nav reveal" role="tablist" aria-label="Operating System Selection">
+          <button class="install-tab-btn active" data-tab="windows" role="tab" aria-selected="true" aria-controls="panel-windows">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M0 2.222L6.5 1.3v6.278H0V2.222zm0 11.556l6.5.922V8.422H0v5.356zM7.5 1.155L16 0v7.578H7.5V1.155zm8.5 7.267v7.578l-8.5-1.155V8.422H16z"/></svg>
+            <span>Windows</span>
+          </button>
+          <button class="install-tab-btn" data-tab="macos" role="tab" aria-selected="false" aria-controls="panel-macos">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M11.182.008C11.148-.03 9.923.023 8.857 1.18c-1.066 1.156-.902 2.482-.873 2.534.036.039 1.257.065 2.302-1.106C11.33 1.437 11.21.047 11.182.008zM12.59 12.35c-.443.918-.737 1.488-1.39 2.404-.79 1.107-1.782 2.213-3.13 2.246-1.144.028-1.558-.707-3.056-.707-1.498 0-1.954.685-3.076.729-1.282.05-2.296-1.162-3.086-2.27-2.146-3.013-2.5-6.525-1.14-8.627 1.046-1.616 2.766-2.497 4.298-2.497 1.413 0 2.275.767 3.376.767 1.077 0 1.69-.767 3.32-.767 1.344 0 2.887.697 3.904 2.016-3.412 1.636-2.86 6.37.584 7.708z"/></svg>
+            <span>macOS</span>
+          </button>
+          <button class="install-tab-btn" data-tab="linux" role="tab" aria-selected="false" aria-controls="panel-linux">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0c-2.2 0-3.5 1.5-3.5 3.5 0 .5.1 1 .3 1.5C3.3 5.4 2 7 2 9c0 2.2 1.8 4 4 4h.5c.3.6.8 1 1.5 1s1.2-.4 1.5-1H10c2.2 0 4-1.8 4-4 0-2-1.3-3.6-2.8-4-.2-.5-.3-1-.3-1.5C11.5 1.5 10.2 0 8 0z"/></svg>
+            <span>Linux</span>
+          </button>
+        </div>
+
+        <!-- Windows Panel -->
+        <div class="install-panel active" id="panel-windows" role="tabpanel">
+          <div class="install-cards-grid">
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge winget">winget</span>
+                  <h3>Windows Package Manager</h3>
+                </div>
+                <span class="install-card-sub" data-i18n="install.win.winget.sub">官方推荐 · Win 10/11 原生自带</span>
+              </div>
+              <p class="install-card-desc" data-i18n="install.win.winget.desc">微软官方软件包仓库直连，经 SignPath 机构签名校验。</p>
+              <div class="install-cmd-box">
+                <code>winget install Juwan.Zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="winget install Juwan.Zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge scoop">Scoop</span>
+                  <h3>Scoop 极客包管理器</h3>
+                </div>
+                <span class="install-card-sub" data-i18n="install.win.scoop.sub">便携安装 · 零系统污染</span>
+              </div>
+              <p class="install-card-desc" data-i18n="install.win.scoop.desc">数据与配置隔离持久化，自动处理依赖与便携快捷方式。</p>
+              <div class="install-cmd-box">
+                <code>scoop bucket add zephyr https://github.com/Juwan-Hwang/scoop-bucket ; scoop install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="scoop bucket add zephyr https://github.com/Juwan-Hwang/scoop-bucket ; scoop install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge choco">Chocolatey</span>
+                  <h3>Chocolatey 社区源</h3>
+                </div>
+                <span class="install-card-sub" data-i18n="install.win.choco.sub">经典 Windows 命令行源</span>
+              </div>
+              <p class="install-card-desc" data-i18n="install.win.choco.desc">企业级脚本与自动化安装，标准 NSIS 静默部署。</p>
+              <div class="install-cmd-box">
+                <code>choco install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="choco install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- macOS Panel -->
+        <div class="install-panel" id="panel-macos" role="tabpanel">
+          <div class="install-cards-grid">
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge brew">Homebrew</span>
+                  <h3>Homebrew Cask</h3>
+                </div>
+                <span class="install-card-sub" data-i18n="install.mac.cask.sub">macOS 官方推荐</span>
+              </div>
+              <p class="install-card-desc" data-i18n="install.mac.cask.desc">自动适配 Apple Silicon (M1/M2/M3/M4) 与 Intel 架构。</p>
+              <div class="install-cmd-box">
+                <code>brew install --cask zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="brew install --cask zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge brew">Tap</span>
+                  <h3>Zephyr 官方 Tap</h3>
+                </div>
+                <span class="install-card-sub" data-i18n="install.mac.tap.sub">官方第一手快速通道</span>
+              </div>
+              <p class="install-card-desc" data-i18n="install.mac.tap.desc">作者官方维护的 Homebrew 源，发版即时极速推送。</p>
+              <div class="install-cmd-box">
+                <code>brew install juwan-hwang/tap/zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="brew install juwan-hwang/tap/zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Linux Panel -->
+        <div class="install-panel" id="panel-linux" role="tabpanel">
+          <div class="install-cards-grid install-cards-grid-linux">
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge aur">AUR</span>
+                  <h3>Arch Linux / Manjaro</h3>
+                </div>
+                <span class="install-card-sub">Arch Linux 官方用户软件库</span>
+              </div>
+              <p class="install-card-desc">通过 yay 或 paru 一键安装并托管系统依赖与升级。</p>
+              <div class="install-cmd-box">
+                <code>yay -S zephyr-clash-bin</code>
+                <button type="button" class="install-copy-btn" data-cmd="yay -S zephyr-clash-bin" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge ppa">PPA</span>
+                  <h3>Ubuntu / Debian / Mint</h3>
+                </div>
+                <span class="install-card-sub">Launchpad 官方 PPA 源</span>
+              </div>
+              <p class="install-card-desc">完全兼容 apt 包管理生态，经个人硬件 GPG 严格校验。</p>
+              <div class="install-cmd-box">
+                <code>sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge copr">COPR</span>
+                  <h3>Fedora / RHEL / openSUSE</h3>
+                </div>
+                <span class="install-card-sub">Fedora 官方云构建源</span>
+              </div>
+              <p class="install-card-desc">规范 RPM 打包，原生支持 dnf / dnf5 / zypper 自动升级。</p>
+              <div class="install-cmd-box">
+                <code>sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge snap">Snap</span>
+                  <h3>Canonical Snap Store</h3>
+                </div>
+                <span class="install-card-sub">Ubuntu 官方商店收录</span>
+              </div>
+              <p class="install-card-desc">严格沙箱权限隔离，全 Linux 发行版通用运行。</p>
+              <div class="install-cmd-box">
+                <code>sudo snap install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="sudo snap install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge nix">Nixpkgs</span>
+                  <h3>Nix / NixOS</h3>
+                </div>
+                <span class="install-card-sub">声明式极客包管理</span>
+              </div>
+              <p class="install-card-desc">纯函数式环境，支持跨 Linux 与 macOS 无依赖污染运行。</p>
+              <div class="install-cmd-box">
+                <code>nix-env -iA nixpkgs.zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="nix-env -iA nixpkgs.zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="install-card reveal">
+              <div class="install-card-header">
+                <div class="install-card-title-group">
+                  <span class="install-badge void">Void</span>
+                  <h3>Void Linux (XBPS)</h3>
+                </div>
+                <span class="install-card-sub">独立极客系统官方收录</span>
+              </div>
+              <p class="install-card-desc">轻量 runit 极速系统原生适配，零额外运行时负担。</p>
+              <div class="install-cmd-box">
+                <code>xbps-install zephyr</code>
+                <button type="button" class="install-copy-btn" data-cmd="xbps-install zephyr" aria-label="复制命令" title="复制">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ FAQ ═══ -->
     <section class="section" id="faq" data-section="faq" aria-labelledby="faq-heading">
       <div class="section-inner">
@@ -814,6 +1083,7 @@
     <a href="#features" data-i18n="nav.features">特性</a>
     <a href="#architecture" data-i18n="nav.architecture">架构</a>
     <a href="#performance" data-i18n="nav.performance">性能</a>
+    <a href="#installation" data-i18n="nav.installation">安装</a>
     <a href="#demo" data-i18n="nav.demo">在线体验</a>
     <a href="#faq" data-i18n="nav.faq">常见问题</a>
     <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" data-i18n="nav.download">下载</a>

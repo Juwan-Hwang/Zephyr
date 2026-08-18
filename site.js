@@ -20,10 +20,26 @@
         'nav.features': '特性',
         'nav.architecture': '架构',
         'nav.performance': '性能',
+        'nav.installation': '安装',
         'nav.demo': '在线体验',
         'nav.faq': '常见问题',
         'nav.download': '下载',
         'nav.github': 'View source on GitHub',
+
+        // Installation
+        'install.label': '包管理器与一键安装',
+        'install.title': '全生态原生支持 · 丝滑更新',
+        'install.desc': '选择您的操作系统，通过官方软件源享受极速安装与自动升级。',
+        'install.win.winget.sub': '官方推荐 · Win 10/11 原生自带',
+        'install.win.winget.desc': '微软官方软件包仓库直连，经 SignPath 机构签名校验。',
+        'install.win.scoop.sub': '便携安装 · 零系统污染',
+        'install.win.scoop.desc': '数据与配置隔离持久化，自动处理依赖与便携快捷方式。',
+        'install.win.choco.sub': '经典 Windows 命令行源',
+        'install.win.choco.desc': '企业级脚本与自动化安装，标准 NSIS 静默部署。',
+        'install.mac.cask.sub': 'macOS 官方推荐',
+        'install.mac.cask.desc': '自动适配 Apple Silicon (M1/M2/M3/M4) 与 Intel 架构。',
+        'install.mac.tap.sub': '官方第一手快速通道',
+        'install.mac.tap.desc': '作者官方维护的 Homebrew 源，发版即时极速推送。',
 
         // Hero
         'hero.subtitle': '安全与颜值并重的 Mihomo 客户端',
@@ -186,10 +202,26 @@
         'nav.features': 'Features',
         'nav.architecture': 'Architecture',
         'nav.performance': 'Performance',
+        'nav.installation': 'Install',
         'nav.demo': 'Live Demo',
         'nav.faq': 'FAQ',
         'nav.download': 'Download',
         'nav.github': 'View source on GitHub',
+
+        // Installation
+        'install.label': 'Package Managers & Install',
+        'install.title': 'Native Support for All Ecosystems',
+        'install.desc': 'Choose your operating system and enjoy instant installation and automated updates via official package managers.',
+        'install.win.winget.sub': 'Official Recommended · Built-in Windows 10/11',
+        'install.win.winget.desc': 'Direct from Microsoft Official Repository, verified with SignPath code signing.',
+        'install.win.scoop.sub': 'Portable Install · Zero System Pollution',
+        'install.win.scoop.desc': 'Isolated data persistence, automatic dependency management and shims.',
+        'install.win.choco.sub': 'Classic Windows Community Repo',
+        'install.win.choco.desc': 'Enterprise automation ready, standard NSIS silent installation.',
+        'install.mac.cask.sub': 'macOS Official Standard',
+        'install.mac.cask.desc': 'Auto-adapts to Apple Silicon (M-series) and Intel architectures.',
+        'install.mac.tap.sub': 'Official Fast-Track Tap',
+        'install.mac.tap.desc': 'Maintained directly by author for instant release updates.',
 
         // Hero
         'hero.subtitle': 'A Mihomo client that\'s secure and beautiful',
@@ -1350,6 +1382,69 @@
     btn.addEventListener('click', () => i18n.toggle());
   }
 
+  // ── 安装区域与标签页切换 ───────────────────────────────────────
+
+  function setupInstallTabs() {
+    const tabBtns = document.querySelectorAll('.install-tab-btn');
+    const panels = document.querySelectorAll('.install-panel');
+    if (!tabBtns.length || !panels.length) return;
+
+    // Detect client OS on init to open corresponding tab
+    const ua = navigator.userAgent || '';
+    let defaultTab = 'windows';
+    if (/Macintosh|Mac OS X/i.test(ua)) {
+      defaultTab = 'macos';
+    } else if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+      defaultTab = 'linux';
+    }
+
+    function selectTab(targetTab) {
+      tabBtns.forEach(btn => {
+        const isMatch = btn.getAttribute('data-tab') === targetTab;
+        btn.classList.toggle('active', isMatch);
+        btn.setAttribute('aria-selected', String(isMatch));
+      });
+      panels.forEach(panel => {
+        const isMatch = panel.id === `panel-${targetTab}`;
+        panel.classList.toggle('active', isMatch);
+      });
+    }
+
+    selectTab(defaultTab);
+
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const tab = btn.getAttribute('data-tab');
+        if (tab) selectTab(tab);
+      });
+    });
+  }
+
+  function setupInstallCopy() {
+    const copyBtns = document.querySelectorAll('.install-copy-btn');
+    copyBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const cmd = btn.getAttribute('data-cmd');
+        if (!cmd) return;
+
+        try {
+          await navigator.clipboard.writeText(cmd);
+          btn.classList.add('copied');
+          const origTitle = btn.getAttribute('title');
+          btn.setAttribute('title', '已复制 / Copied!');
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            if (origTitle) btn.setAttribute('title', origTitle);
+          }, 2000);
+        } catch {
+          // fallback
+        }
+      });
+    });
+  }
+
   // ── 初始化 ────────────────────────────────────────────────────
 
   function init() {
@@ -1369,6 +1464,8 @@
     initChartPreview();
     initHeroChart();
     setupHamburgerMenu();
+    setupInstallTabs();
+    setupInstallCopy();
     setupFAQ();
     setupBackToTop();
   }

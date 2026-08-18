@@ -468,6 +468,15 @@ a:hover {
   width: 100%;
 }
 
+.dropdown-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  padding: 6px 10px 2px;
+}
+
 .item-title {
   font-size: 11px;
   font-weight: 600;
@@ -2224,4 +2233,192 @@ a:hover {
 
 .security-group-label:first-child {
   padding-top: 0;
+}
+
+/* ═══════════════════════════════════════
+   Installation / Package Managers Section
+   ═══════════════════════════════════════ */
+.install-tabs-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 36px auto 32px;
+  background: var(--depth-1-canvas);
+  border: 0.5px solid var(--border-subtle);
+  padding: 4px;
+  border-radius: var(--radius-full);
+  max-width: max-content;
+}
+
+.install-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.install-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+}
+
+.install-tab-btn.active {
+  background: var(--depth-3-surface);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border: 0.5px solid var(--border-medium);
+}
+
+.install-panel {
+  display: none;
+  animation: panel-fade 240ms ease;
+}
+
+.install-panel.active {
+  display: block;
+}
+
+@keyframes panel-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.install-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.install-cards-grid-linux {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.install-card {
+  background: var(--depth-1-canvas);
+  border: 0.5px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  transition: transform var(--duration-normal), border-color var(--duration-normal), box-shadow var(--duration-normal);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.install-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-medium);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.install-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.install-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.install-card-title-group h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.install-card-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.install-card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.install-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--depth-2-deep);
+  border: 0.5px solid var(--border-subtle);
+}
+
+.install-badge.winget { color: #60a5fa; border-color: rgba(96, 165, 250, 0.3); background: rgba(96, 165, 250, 0.08); }
+.install-badge.scoop  { color: #f97316; border-color: rgba(249, 115, 22, 0.3); background: rgba(249, 115, 22, 0.08); }
+.install-badge.choco  { color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); background: rgba(56, 189, 248, 0.08); }
+.install-badge.brew   { color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.08); }
+.install-badge.aur    { color: #34d399; border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.08); }
+.install-badge.ppa    { color: #a78bfa; border-color: rgba(167, 139, 250, 0.3); background: rgba(167, 139, 250, 0.08); }
+.install-badge.copr   { color: #818cf8; border-color: rgba(129, 140, 248, 0.3); background: rgba(129, 140, 248, 0.08); }
+.install-badge.snap   { color: #2dd4bf; border-color: rgba(45, 212, 191, 0.3); background: rgba(45, 212, 191, 0.08); }
+.install-badge.nix    { color: #93c5fd; border-color: rgba(147, 197, 253, 0.3); background: rgba(147, 197, 253, 0.08); }
+.install-badge.void   { color: #4ade80; border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.08); }
+
+.install-cmd-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--depth-0-void);
+  border: 0.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-family: var(--font-data);
+}
+
+.install-cmd-box code {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--accent);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.install-cmd-box code::-webkit-scrollbar {
+  display: none;
+}
+
+.install-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast), background var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.install-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+}
+
+.install-copy-btn.copied {
+  color: var(--color-success, #34d399);
 }
