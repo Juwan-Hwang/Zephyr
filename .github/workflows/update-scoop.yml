@@ -42,9 +42,12 @@ jobs:
           cat > bucket/zephyr.json << EOF
           {
             "version": "${VERSION}",
-            "description": "A modern, lightweight Mihomo GUI client built with Rust and Tauri v2",
+            "description": "Modern, lightweight Mihomo GUI client built with Rust and Tauri v2",
             "homepage": "https://github.com/Juwan-Hwang/Zephyr",
             "license": "MIT",
+            "suggest": {
+              "Microsoft Edge WebView2": "extras/webview2"
+            },
             "architecture": {
               "64bit": {
                 "url": "https://github.com/Juwan-Hwang/Zephyr/releases/download/v${VERSION}/Zephyr_x64-portable.zip",
@@ -62,11 +65,6 @@ jobs:
                 "Zephyr"
               ]
             ],
-            "persist": [
-              "core",
-              "profiles",
-              "prism"
-            ],
             "checkver": "github",
             "autoupdate": {
               "architecture": {
@@ -81,9 +79,9 @@ jobs:
           }
           EOF
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "Juwan"
+          git config user.email "juwan.hwang@proton.me"
           git add bucket/zephyr.json
           git diff --cached --quiet && exit 0
-          git commit -m "Update Zephyr to v${VERSION}"
+          git commit -m "zephyr: Update to version ${VERSION}"
           git push

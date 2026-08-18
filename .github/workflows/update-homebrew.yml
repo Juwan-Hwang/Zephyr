@@ -54,7 +54,7 @@ jobs:
 
           cat > Formula/zephyr.rb << EOF
           class Zephyr < Formula
-            desc "A modern, lightweight Mihomo GUI client"
+            desc "Modern, lightweight Mihomo GUI client"
             homepage "https://github.com/Juwan-Hwang/Zephyr"
             version "${VERSION}"
             license "MIT"
@@ -102,14 +102,15 @@ jobs:
             end
 
             test do
-              assert_predicate bin/"zephyr", :exist?
+              assert_predicate prefix/"Zephyr.app", :exist? if OS.mac?
+              assert_predicate bin/"zephyr", :exist? if OS.linux?
             end
           end
           EOF
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "Juwan"
+          git config user.email "juwan.hwang@proton.me"
           git add Formula/zephyr.rb
           git diff --cached --quiet && exit 0
-          git commit -m "Update Zephyr to v${VERSION}"
+          git commit -m "zephyr: update to ${VERSION}"
           git push

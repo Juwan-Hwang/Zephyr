@@ -40,7 +40,7 @@ jobs:
           TAB=$'\t'
           cat > .SRCINFO << EOF
           pkgbase = zephyr-clash-bin
-          ${TAB}pkgdesc = A modern Mihomo GUI client
+          ${TAB}pkgdesc = Modern, lightweight Mihomo GUI client
           ${TAB}pkgver = ${VERSION}
           ${TAB}pkgrel = 1
           ${TAB}url = https://github.com/Juwan-Hwang/Zephyr

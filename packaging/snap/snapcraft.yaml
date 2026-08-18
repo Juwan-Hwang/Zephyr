@@ -1,7 +1,7 @@
 name: zephyr
 base: core22
 version: '2.4.3'
-summary: A modern, lightweight Mihomo GUI client
+summary: Modern, lightweight Mihomo GUI client
 description: |
   Zephyr is a state-of-the-art cross-platform GUI client for Mihomo, combining modern desktop aesthetics, high performance with Rust and Tauri v2, and a 13-layer security defense architecture.
 
@@ -10,8 +10,8 @@ confinement: strict
 
 apps:
   zephyr:
-    command: usr/bin/zephyr
-    desktop: usr/share/applications/zephyr.desktop
+    command: usr/bin/Zephyr
+    desktop: usr/share/applications/Zephyr.desktop
     extensions: [gnome]
     plugs:
       - network
