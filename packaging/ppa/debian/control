@@ -1,0 +1,15 @@
+Source: zephyr
+Section: net
+Priority: optional
+Maintainer: Juwan Hwang <juwan.hwang@proton.me>
+Build-Depends: debhelper-compat (= 13), curl
+Standards-Version: 4.6.2
+Homepage: https://github.com/Juwan-Hwang/Zephyr
+
+Package: zephyr
+Architecture: amd64
+Depends: ${misc:Depends}, ${shlibs:Depends}, libwebkit2gtk-4.1-0, libayatana-appindicator3-1, libsoup-3.0-0, libgtk-3-0
+Description: Modern, lightweight Mihomo GUI client
+ Zephyr is a state-of-the-art cross-platform GUI client for Mihomo,
+ combining modern desktop aesthetics, high performance with Rust and Tauri v2,
+ and a 13-layer security defense architecture.
