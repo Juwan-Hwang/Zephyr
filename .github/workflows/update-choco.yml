@@ -1,0 +1,65 @@
+name: Update Chocolatey Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 2.4.3)'
+        required: false
+        default: '2.4.3'
+
+permissions:
+  contents: read
+
+jobs:
+  update-choco:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute SHA256 and generate Chocolatey files
+        id: compute
+        shell: pwsh
+        run: |
+          $ver = "${{ github.event.release.tag_name || github.event.inputs.version }}".TrimStart('v')
+          $setupUrl = "https://github.com/Juwan-Hwang/Zephyr/releases/download/v$ver/Zephyr_${ver}_x64-setup-full.exe"
+          
+          Invoke-WebRequest -Uri $setupUrl -OutFile "setup.exe"
+          $sha = (Get-FileHash setup.exe -Algorithm SHA256).Hash.ToLower()
+          
+          # Update nuspec version
+          (Get-Content packaging/chocolatey/zephyr.nuspec) -replace '<version>.*</version>', "<version>$ver</version>" | Set-Content packaging/chocolatey/zephyr.nuspec
+          
+          # Update install script
+          $installScript = @"
+          `$ErrorActionPreference = 'Stop'
+          `$packageArgs = @{
+            packageName   = 'zephyr'
+            fileType      = 'exe'
+            url           = '$setupUrl'
+            checksum      = '$sha'
+            checksumType  = 'sha256'
+            url64bit      = '$setupUrl'
+            checksum64    = '$sha'
+            checksumType64= 'sha256'
+            silentArgs    = '/S'
+            validExitCodes= @(0)
+          }
+          Install-ChocolateyPackage @packageArgs
+"@
+          Set-Content -Path packaging/chocolatey/tools/chocolateyinstall.ps1 -Value $installScript
+          
+          cd packaging/chocolatey
+          choco pack
+          
+      - name: Publish to Chocolatey
+        if: env.CHOCO_API_KEY != ''
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+        shell: pwsh
+        run: |
+          $ver = "${{ github.event.release.tag_name || github.event.inputs.version }}".TrimStart('v')
+          choco push "packaging/chocolatey/zephyr.$ver.nupkg" --api-key "${{ secrets.CHOCOLATEY_API_KEY }}" --source https://push.chocolatey.org/

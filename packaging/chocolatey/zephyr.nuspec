@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>zephyr</id>
+    <version>2.4.3</version>
+    <packageSourceUrl>https://github.com/Juwan-Hwang/Zephyr</packageSourceUrl>
+    <owners>Juwan</owners>
+    <title>Zephyr</title>
+    <authors>Juwan Hwang</authors>
+    <projectUrl>https://github.com/Juwan-Hwang/Zephyr</projectUrl>
+    <iconUrl>https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/apps/desktop/src-tauri/icons/128x128.png</iconUrl>
+    <copyright>2026 Juwan Hwang</copyright>
+    <licenseUrl>https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/Juwan-Hwang/Zephyr</projectSourceUrl>
+    <docsUrl>https://github.com/Juwan-Hwang/Zephyr/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/Juwan-Hwang/Zephyr/issues</bugTrackerUrl>
+    <tags>zephyr mihomo clash proxy vpn network tauri rust gui</tags>
+    <summary>Modern, lightweight Mihomo GUI client built with Rust and Tauri v2</summary>
+    <description><![CDATA[
+Zephyr is a state-of-the-art cross-platform GUI client for Mihomo, combining modern desktop aesthetics, high performance with Rust and Tauri v2, and a 13-layer security defense architecture.
+]]></description>
+    <releaseNotes>https://github.com/Juwan-Hwang/Zephyr/releases/tag/v2.4.3</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
