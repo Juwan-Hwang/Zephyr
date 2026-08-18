@@ -1,0 +1,7 @@
+Contact: https://github.com/Juwan-Hwang/Zephyr/security/advisories/new
+Contact: mailto:juwan.hwang@proton.me
+Preferred-Languages: en, zh
+Policy: https://github.com/Juwan-Hwang/Zephyr/blob/main/SECURITY.md
+Acknowledgments: https://github.com/Juwan-Hwang/Zephyr/blob/main/SECURITY.md#security-hall-of-fame
+Canonical: https://raw.githubusercontent.com/Juwan-Hwang/Zephyr/main/.github/security.txt
+Expires: 2027-12-31T23:59:59.000Z
