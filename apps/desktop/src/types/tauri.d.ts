@@ -48,6 +48,10 @@ interface TauriTransformCallback {
     ): number;
 }
 
+interface TauriUnregisterCallback {
+    (callbackId: number): void;
+}
+
 interface TauriMetadata {
     currentWindow?: {
         label: string;
@@ -59,6 +63,7 @@ interface TauriInternals {
     convertFileSrc: TauriConvertFileSrc;
     open: TauriOpenUrl;
     transformCallback: TauriTransformCallback;
+    unregisterCallback: TauriUnregisterCallback;
     metadata: TauriMetadata;
     window: {
         getCurrentWindow(): TauriWindow;

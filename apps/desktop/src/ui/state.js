@@ -426,7 +426,17 @@ export const appStore = createStore('zephyr.app', {
     currentConfigName: null,
     currentCoreVersion: '',
 }, {
-    transientKeys: ['uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName'],
+    transientKeys: [
+        // Proxy group resolver state — re-resolved each session.
+        'uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName',
+        // Locks — must never survive a page reload. If the WebView is
+        // refreshed while one of these is true (e.g. during a config switch
+        // or latency test), the flag would be persisted to localStorage
+        // and restored as true on the next init, permanently locking out
+        // every operation that checks it (switchConfig, TUN toggle, mode
+        // selector, etc.).
+        'isNetworkUpdating', 'isTestingLatency',
+    ],
 });
 
 /** Tray state (replaces the old sealed TrayState) */
