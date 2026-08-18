@@ -412,13 +412,15 @@ a:hover {
 .version-dropdown-menu {
   position: absolute;
   top: calc(100% + 8px);
+  left: 0;
   right: 0;
-  width: min(540px, calc(100vw - 32px));
+  width: 100%;
+  box-sizing: border-box;
   background: var(--depth-2-deep);
   border: 0.5px solid var(--border-medium);
   border-radius: var(--radius-md);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  padding: 8px;
+  padding: 10px;
   display: none;
   z-index: 9999;
   backdrop-filter: blur(24px);
@@ -433,7 +435,7 @@ a:hover {
 .dropdown-columns-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 
 .dropdown-column {
@@ -442,14 +444,17 @@ a:hover {
   gap: 3px;
 }
 
-@media (max-width: 580px) {
-  .version-dropdown-menu {
-    width: min(310px, calc(100vw - 32px));
-    max-height: 75vh;
-    overflow-y: auto;
+/* Mobile: hide command copy button & dropdown completely */
+@media (max-width: 768px) {
+  .version-cmd-wrapper {
+    display: none !important;
   }
-  .dropdown-columns-grid {
-    grid-template-columns: 1fr;
+  .version-dropdown-menu {
+    display: none !important;
+  }
+  .version-badge-link {
+    border-radius: var(--radius-full) !important;
+    padding: 6px 16px !important;
   }
 }
 

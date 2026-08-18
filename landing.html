@@ -284,89 +284,90 @@
             <button type="button" class="version-dropdown-trigger" id="versionDropdownTrigger" title="选择其他系统安装命令" aria-label="选择其他系统安装命令" aria-expanded="false" aria-haspopup="true">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="10" height="10" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
             </button>
-            <div class="version-dropdown-menu" id="versionDropdownMenu" role="menu">
-              <div class="dropdown-columns-grid">
-                <div class="dropdown-column">
-                  <div class="dropdown-group-label">Windows</div>
-                  <button type="button" class="dropdown-item active" data-os="windows" data-cmd="winget install Juwan.Zephyr" data-label="winget (Windows)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Windows</span>
-                      <span class="item-badge">winget</span>
-                    </div>
-                    <code>winget install Juwan.Zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="scoop" data-cmd="scoop bucket add zephyr https://github.com/Juwan-Hwang/scoop-bucket &amp;&amp; scoop install zephyr" data-label="Scoop (Windows)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Windows</span>
-                      <span class="item-badge">Scoop</span>
-                    </div>
-                    <code>scoop install zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="choco" data-cmd="choco install zephyr" data-label="Chocolatey (Windows)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Windows</span>
-                      <span class="item-badge">Chocolatey</span>
-                    </div>
-                    <code>choco install zephyr</code>
-                  </button>
+          </div>
+          <div class="version-dropdown-menu" id="versionDropdownMenu" role="menu">
+            <div class="dropdown-columns-grid">
+              <div class="dropdown-column">
+                <div class="dropdown-group-label">Windows</div>
+                <button type="button" class="dropdown-item active" data-os="windows" data-cmd="winget install Juwan.Zephyr" data-label="winget (Windows)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Windows</span>
+                    <span class="item-badge">winget</span>
+                  </div>
+                  <code>winget install Juwan.Zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="scoop" data-cmd="scoop bucket add zephyr https://github.com/Juwan-Hwang/scoop-bucket &amp;&amp; scoop install zephyr" data-label="Scoop (Windows)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Windows</span>
+                    <span class="item-badge">Scoop</span>
+                  </div>
+                  <code>scoop install zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="choco" data-cmd="choco install zephyr" data-label="Chocolatey (Windows)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Windows</span>
+                    <span class="item-badge">Chocolatey</span>
+                  </div>
+                  <code>choco install zephyr</code>
+                </button>
 
-                  <div class="dropdown-group-label" style="margin-top: 6px;">macOS</div>
-                  <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install --cask zephyr" data-label="Homebrew Cask (macOS)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">macOS</span>
-                      <span class="item-badge">Homebrew</span>
-                    </div>
-                    <code>brew install --cask zephyr</code>
-                  </button>
-                </div>
+                <div class="dropdown-group-label" style="margin-top: 6px;">macOS</div>
+                <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install --cask zephyr" data-label="Homebrew Cask (macOS)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">macOS</span>
+                    <span class="item-badge">Homebrew</span>
+                  </div>
+                  <code>brew install --cask zephyr</code>
+                </button>
+              </div>
 
-                <div class="dropdown-column">
-                  <div class="dropdown-group-label">Linux 发行版</div>
-                  <button type="button" class="dropdown-item" data-os="arch-yay" data-cmd="yay -S zephyr-clash-bin" data-label="yay (Arch Linux)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Arch Linux</span>
-                      <span class="item-badge">AUR</span>
-                    </div>
-                    <code>yay -S zephyr-clash-bin</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="ppa" data-cmd="sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr" data-label="Ubuntu / Debian (PPA)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Ubuntu / Debian</span>
-                      <span class="item-badge">PPA</span>
-                    </div>
-                    <code>sudo add-apt-repository ppa:juwanhwang/zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="copr" data-cmd="sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr" data-label="Fedora / RHEL (COPR)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Fedora / RHEL</span>
-                      <span class="item-badge">COPR</span>
-                    </div>
-                    <code>sudo dnf copr enable juwan/zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="snap" data-cmd="sudo snap install zephyr" data-label="Snap Store (Linux)" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Universal Linux</span>
-                      <span class="item-badge">Snap</span>
-                    </div>
-                    <code>sudo snap install zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="nix" data-cmd="nix-env -iA nixpkgs.zephyr" data-label="Nix / NixOS" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">NixOS / Nix</span>
-                      <span class="item-badge">Nixpkgs</span>
-                    </div>
-                    <code>nix-env -iA nixpkgs.zephyr</code>
-                  </button>
-                  <button type="button" class="dropdown-item" data-os="void" data-cmd="xbps-install zephyr" data-label="Void Linux" role="menuitem">
-                    <div class="item-header">
-                      <span class="item-title">Void Linux</span>
-                      <span class="item-badge">XBPS</span>
-                    </div>
-                    <code>xbps-install zephyr</code>
-                  </button>
-                </div>
+              <div class="dropdown-column">
+                <div class="dropdown-group-label">Linux 发行版</div>
+                <button type="button" class="dropdown-item" data-os="arch-yay" data-cmd="yay -S zephyr-clash-bin" data-label="yay (Arch Linux)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Arch Linux</span>
+                    <span class="item-badge">AUR</span>
+                  </div>
+                  <code>yay -S zephyr-clash-bin</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="ppa" data-cmd="sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr" data-label="Ubuntu / Debian (PPA)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Ubuntu / Debian</span>
+                    <span class="item-badge">PPA</span>
+                  </div>
+                  <code>sudo add-apt-repository ppa:juwanhwang/zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="copr" data-cmd="sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr" data-label="Fedora / RHEL (COPR)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Fedora / RHEL</span>
+                    <span class="item-badge">COPR</span>
+                  </div>
+                  <code>sudo dnf copr enable juwan/zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="snap" data-cmd="sudo snap install zephyr" data-label="Snap Store (Linux)" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Universal Linux</span>
+                    <span class="item-badge">Snap</span>
+                  </div>
+                  <code>sudo snap install zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="nix" data-cmd="nix-env -iA nixpkgs.zephyr" data-label="Nix / NixOS" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">NixOS / Nix</span>
+                    <span class="item-badge">Nixpkgs</span>
+                  </div>
+                  <code>nix-env -iA nixpkgs.zephyr</code>
+                </button>
+                <button type="button" class="dropdown-item" data-os="void" data-cmd="xbps-install zephyr" data-label="Void Linux" role="menuitem">
+                  <div class="item-header">
+                    <span class="item-title">Void Linux</span>
+                    <span class="item-badge">XBPS</span>
+                  </div>
+                  <code>xbps-install zephyr</code>
+                </button>
               </div>
             </div>
+          </div>
           </div>
         </div>
         <div class="hero-cta">
