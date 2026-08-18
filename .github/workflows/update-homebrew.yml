@@ -46,7 +46,7 @@ jobs:
       - name: Push updated Formula to homebrew-tap
         if: env.MAC_ARM_SHA != '' && env.LINUX_X64_SHA != ''
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN || secrets.TAP_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git clone https://x-access-token:${TAP_TOKEN}@github.com/Juwan-Hwang/homebrew-tap.git tap-repo || exit 0
           cd tap-repo

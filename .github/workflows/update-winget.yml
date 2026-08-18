@@ -1,0 +1,25 @@
+name: Update Winget Package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  update-winget:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Zephyr
+        uses: actions/checkout@v4
+
+      - name: Submit Winget Package Update
+        uses: vedantmgoyal2009/winget-releaser@v2
+        if: env.WINGET_TOKEN != ''
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN }}
+        with:
+          identifier: Juwan.Zephyr
+          version: ${{ github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN }}
