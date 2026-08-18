@@ -193,14 +193,22 @@ async function listen(event, handler) {
     // delete `obj[event][eventId]`, leaving a stale entry. This causes
     // emit_to_main to falsely believe a listener still exists and dispatch
     // events to a dead callback (which silently fails, losing the event).
-    const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
-    if (obj?.[event]) {
-      delete obj[event][eventId];
-      // If no listeners remain for this event, clean up the event key too
-      // so emit_to_main correctly detects "no listeners" and buffers the event.
-      if (Object.getOwnPropertyNames(obj[event]).length === 0) {
-        delete obj[event];
+    //
+    // The `delete` may throw TypeError if the property is non-configurable
+    // (sealed/frozen internal object). We wrap it so that the backend unlisten
+    // IPC — which is the critical cleanup — always executes regardless.
+    try {
+      const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
+      if (obj?.[event]) {
+        delete obj[event][eventId];
+        // If no listeners remain for this event, clean up the event key too
+        // so emit_to_main correctly detects "no listeners" and buffers the event.
+        if (Object.getOwnPropertyNames(obj[event]).length === 0) {
+          delete obj[event];
+        }
       }
+    } catch {
+      // Best-effort: the backend unlisten below is what truly matters.
     }
     await invoke('plugin:event|unlisten', { event, eventId });
   };

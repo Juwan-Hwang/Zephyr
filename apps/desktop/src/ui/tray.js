@@ -40,13 +40,18 @@ const tr = (/** @type {string} */ key, /** @type {string} */ fallback) => {
 /** @type {Array<() => void>} */
 let _trayEventUnlisteners = [];
 
-export function cleanupTrayEventListeners() {
-    _trayEventUnlisteners.forEach(unlisten => {
-        if (typeof unlisten === 'function') {
-            unlisten();
-        }
-    });
+export async function cleanupTrayEventListeners() {
+    const unlisteners = _trayEventUnlisteners;
     _trayEventUnlisteners = [];
+    await Promise.all(unlisteners.map(async (unlisten) => {
+        if (typeof unlisten === 'function') {
+            try {
+                await unlisten();
+            } catch {
+                // Best-effort — each unlisten already wraps its own errors.
+            }
+        }
+    }));
 }
 
 // --- Tray status ---
