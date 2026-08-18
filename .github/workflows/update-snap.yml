@@ -1,0 +1,46 @@
+name: Build and Publish Snap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 2.4.3)'
+        required: false
+        default: '2.4.3'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare snapcraft.yaml with release version
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.version }}"
+          VERSION="${VERSION#v}"
+          echo "Building Snap for version: ${VERSION}"
+          
+          sed -i "s/version: .*/version: '${VERSION}'/" packaging/snap/snapcraft.yaml
+          sed -i "s|source: https://github.com/Juwan-Hwang/Zephyr/releases/download/.*|source: https://github.com/Juwan-Hwang/Zephyr/releases/download/v${VERSION}/Zephyr_${VERSION}_amd64-full.deb|" packaging/snap/snapcraft.yaml
+          cat packaging/snap/snapcraft.yaml
+
+      - name: Build Snap
+        uses: snapcore/action-build@v1
+        id: snapcraft
+        with:
+          path: packaging/snap
+
+      - name: Publish Snap to Snap Store
+        uses: snapcore/action-publish@v1
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.snapcraft.outputs.snap }}
+          release: stable
