@@ -141,6 +141,14 @@ def copy_demo_files(app_dir: Path, demo_dir: Path):
             shutil.copy2(src, demo_target / filename)
             print(f"Copied {filename} to app/demo/")
 
+    # Ensure all UnoCSS and Design Token stylesheets are copied
+    css_files = ['uno-generated.css', 'tokens-variables.css', 'tokens-theme.css']
+    for filename in css_files:
+        src = demo_dir / filename
+        if src.exists():
+            shutil.copy2(src, app_dir / filename)
+            print(f"Copied {filename} to app/")
+
     return True
 
 def main():

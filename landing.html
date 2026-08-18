@@ -288,7 +288,7 @@
           <div class="version-dropdown-menu" id="versionDropdownMenu" role="menu">
             <div class="dropdown-columns-grid">
               <div class="dropdown-column">
-                <div class="dropdown-group-label">Windows</div>
+                <div class="dropdown-group-label" data-i18n="dropdown.group.windows">Windows</div>
                 <button type="button" class="dropdown-item active" data-os="windows" data-cmd="winget install Juwan.Zephyr" data-label="winget (Windows)" role="menuitem">
                   <div class="item-header">
                     <span class="item-title">Windows</span>
@@ -311,7 +311,7 @@
                   <code>choco install zephyr</code>
                 </button>
 
-                <div class="dropdown-group-label" style="margin-top: 6px;">macOS</div>
+                <div class="dropdown-group-label" data-i18n="dropdown.group.macos" style="margin-top: 6px;">macOS</div>
                 <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install --cask zephyr" data-label="Homebrew Cask (macOS)" role="menuitem">
                   <div class="item-header">
                     <span class="item-title">macOS</span>
@@ -322,7 +322,7 @@
               </div>
 
               <div class="dropdown-column">
-                <div class="dropdown-group-label">Linux 发行版</div>
+                <div class="dropdown-group-label" data-i18n="dropdown.group.linux">Linux 发行版</div>
                 <button type="button" class="dropdown-item" data-os="arch-yay" data-cmd="yay -S zephyr-clash-bin" data-label="yay (Arch Linux)" role="menuitem">
                   <div class="item-header">
                     <span class="item-title">Arch Linux</span>
@@ -829,7 +829,7 @@
               <div class="install-card-header">
                 <div class="install-card-title-group">
                   <span class="install-badge scoop">Scoop</span>
-                  <h3>Scoop 极客包管理器</h3>
+                  <h3 data-i18n="install.win.scoop.title">Scoop 极客包管理器</h3>
                 </div>
                 <span class="install-card-sub" data-i18n="install.win.scoop.sub">便携安装 · 零系统污染</span>
               </div>
@@ -846,7 +846,7 @@
               <div class="install-card-header">
                 <div class="install-card-title-group">
                   <span class="install-badge choco">Chocolatey</span>
-                  <h3>Chocolatey 社区源</h3>
+                  <h3 data-i18n="install.win.choco.title">Chocolatey 社区源</h3>
                 </div>
                 <span class="install-card-sub" data-i18n="install.win.choco.sub">经典 Windows 命令行源</span>
               </div>
@@ -885,7 +885,7 @@
               <div class="install-card-header">
                 <div class="install-card-title-group">
                   <span class="install-badge brew">Tap</span>
-                  <h3>Zephyr 官方 Tap</h3>
+                  <h3 data-i18n="install.mac.tap.title">Zephyr 官方 Tap</h3>
                 </div>
                 <span class="install-card-sub" data-i18n="install.mac.tap.sub">官方第一手快速通道</span>
               </div>
@@ -909,9 +909,9 @@
                   <span class="install-badge aur">AUR</span>
                   <h3>Arch Linux / Manjaro</h3>
                 </div>
-                <span class="install-card-sub">Arch Linux 官方用户软件库</span>
+                <span class="install-card-sub" data-i18n="install.linux.aur.sub">Arch Linux 官方用户软件库</span>
               </div>
-              <p class="install-card-desc">通过 yay 或 paru 一键安装并托管系统依赖与升级。</p>
+              <p class="install-card-desc" data-i18n="install.linux.aur.desc">通过 yay 或 paru 一键安装并托管系统依赖与升级。</p>
               <div class="install-cmd-box">
                 <code>yay -S zephyr-clash-bin</code>
                 <button type="button" class="install-copy-btn" data-cmd="yay -S zephyr-clash-bin" aria-label="复制命令" title="复制">
@@ -926,9 +926,9 @@
                   <span class="install-badge ppa">PPA</span>
                   <h3>Ubuntu / Debian / Mint</h3>
                 </div>
-                <span class="install-card-sub">Launchpad 官方 PPA 源</span>
+                <span class="install-card-sub" data-i18n="install.linux.ppa.sub">Launchpad 官方 PPA 源</span>
               </div>
-              <p class="install-card-desc">完全兼容 apt 包管理生态，经个人硬件 GPG 严格校验。</p>
+              <p class="install-card-desc" data-i18n="install.linux.ppa.desc">完全兼容 apt 包管理生态，经个人硬件 GPG 严格校验。</p>
               <div class="install-cmd-box">
                 <code>sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr</code>
                 <button type="button" class="install-copy-btn" data-cmd="sudo add-apt-repository ppa:juwanhwang/zephyr &amp;&amp; sudo apt install zephyr" aria-label="复制命令" title="复制">
@@ -943,9 +943,9 @@
                   <span class="install-badge copr">COPR</span>
                   <h3>Fedora / RHEL / openSUSE</h3>
                 </div>
-                <span class="install-card-sub">Fedora 官方云构建源</span>
+                <span class="install-card-sub" data-i18n="install.linux.copr.sub">Fedora 官方云构建源</span>
               </div>
-              <p class="install-card-desc">规范 RPM 打包，原生支持 dnf / dnf5 / zypper 自动升级。</p>
+              <p class="install-card-desc" data-i18n="install.linux.copr.desc">规范 RPM 打包，原生支持 dnf / dnf5 / zypper 自动升级。</p>
               <div class="install-cmd-box">
                 <code>sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr</code>
                 <button type="button" class="install-copy-btn" data-cmd="sudo dnf copr enable juwan/zephyr &amp;&amp; sudo dnf install zephyr" aria-label="复制命令" title="复制">
@@ -960,9 +960,9 @@
                   <span class="install-badge snap">Snap</span>
                   <h3>Canonical Snap Store</h3>
                 </div>
-                <span class="install-card-sub">Ubuntu 官方商店收录</span>
+                <span class="install-card-sub" data-i18n="install.linux.snap.sub">Ubuntu 官方商店收录</span>
               </div>
-              <p class="install-card-desc">严格沙箱权限隔离，全 Linux 发行版通用运行。</p>
+              <p class="install-card-desc" data-i18n="install.linux.snap.desc">严格沙箱权限隔离，全 Linux 发行版通用运行。</p>
               <div class="install-cmd-box">
                 <code>sudo snap install zephyr</code>
                 <button type="button" class="install-copy-btn" data-cmd="sudo snap install zephyr" aria-label="复制命令" title="复制">
@@ -977,9 +977,9 @@
                   <span class="install-badge nix">Nixpkgs</span>
                   <h3>Nix / NixOS</h3>
                 </div>
-                <span class="install-card-sub">声明式极客包管理</span>
+                <span class="install-card-sub" data-i18n="install.linux.nix.sub">声明式极客包管理</span>
               </div>
-              <p class="install-card-desc">纯函数式环境，支持跨 Linux 与 macOS 无依赖污染运行。</p>
+              <p class="install-card-desc" data-i18n="install.linux.nix.desc">纯函数式环境，支持跨 Linux 与 macOS 无依赖污染运行。</p>
               <div class="install-cmd-box">
                 <code>nix-env -iA nixpkgs.zephyr</code>
                 <button type="button" class="install-copy-btn" data-cmd="nix-env -iA nixpkgs.zephyr" aria-label="复制命令" title="复制">
@@ -994,9 +994,9 @@
                   <span class="install-badge void">Void</span>
                   <h3>Void Linux (XBPS)</h3>
                 </div>
-                <span class="install-card-sub">独立极客系统官方收录</span>
+                <span class="install-card-sub" data-i18n="install.linux.void.sub">独立极客系统官方收录</span>
               </div>
-              <p class="install-card-desc">轻量 runit 极速系统原生适配，零额外运行时负担。</p>
+              <p class="install-card-desc" data-i18n="install.linux.void.desc">轻量 runit 极速系统原生适配，零额外运行时负担。</p>
               <div class="install-cmd-box">
                 <code>xbps-install zephyr</code>
                 <button type="button" class="install-copy-btn" data-cmd="xbps-install zephyr" aria-label="复制命令" title="复制">
