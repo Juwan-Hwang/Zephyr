@@ -6,7 +6,8 @@ on:
     paths:
       - 'apps/desktop/src/**'
       - 'packages/shared/**'
-      - 'tailwind.config.js'
+      - 'packages/tokens/**'
+      - 'uno.config.js'
   workflow_dispatch:
 
 permissions:
@@ -36,22 +37,35 @@ jobs:
           ref: demo
           path: demo-branch
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'main/pnpm-lock.yaml'
+
+      - name: Build CSS and shared assets in main
+        run: |
+          cd main
+          pnpm install --frozen-lockfile
+          pnpm run build:css
+          cd ..
+
       - name: Assemble demo site
         run: |
           mkdir -p dist
 
-          # 1. Copy Zephyr frontend source to dist/app/
+          # 1. Copy Zephyr frontend source (with generated CSS & _shared) to dist/app/
           mkdir -p dist/app
           cp -r main/apps/desktop/src/* dist/app/
 
-          # 2. Copy @zephyr/shared (import map target) to dist/app/_shared/
-          mkdir -p dist/app/_shared
-          cp main/packages/shared/src/index.js dist/app/_shared/index.js
+          # 2. Inject demo bootstrap and mock-api loader using Python
+          python3 demo-branch/inject-demo.py dist/app demo-branch
 
-          # 3. Inject demo bootstrap and mock-api loader using Python
-          python3 demo-branch/inject-demo.py dist/app/index.html dist/app/main.js
-
-          # 4. Copy demo-specific files to dist/
+          # 3. Copy demo-specific files to dist/
           cp demo-branch/landing.html dist/index.html
           cp demo-branch/site.js dist/site.js
           cp demo-branch/site.css dist/site.css

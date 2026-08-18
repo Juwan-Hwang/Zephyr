@@ -164,26 +164,26 @@
   --depth-5-float:    #FFFFFF;
   --depth-6-peak:     #E8E5DE;
   --text-primary:     #1C1B19;
-  --text-secondary:   #6B6860;
-  --text-tertiary:    #9D9A91;
-  --text-ghost:       #C8C5BC;
+  --text-secondary:   #5A5750;
+  --text-tertiary:    #8C8880;
+  --text-ghost:       #B8B4AA;
   --text-inverse:     #F5F3EC;
-  --accent:           #5A6A80;
-  --accent-hover:     #4A5A70;
-  --accent-active:    #3A4A60;
-  --accent-dim:       rgba(90, 106, 128, 0.10);
-  --accent-glow:      rgba(90, 106, 128, 0.15);
-  --accent-subtle:    rgba(90, 106, 128, 0.05);
-  --border-subtle:    rgba(0, 0, 0, 0.04);
-  --border-default:   rgba(0, 0, 0, 0.08);
-  --border-medium:    rgba(0, 0, 0, 0.12);
-  --border-strong:    rgba(0, 0, 0, 0.18);
-  --border-accent:    rgba(90, 106, 128, 0.30);
-  --shadow-depth-2:  0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-depth-3:  0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-depth-4:  0 12px 48px rgba(0, 0, 0, 0.10), 0 4px 12px rgba(0, 0, 0, 0.06);
-  --shadow-depth-5:  0 16px 64px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-depth-6:  0 24px 80px rgba(0, 0, 0, 0.15), 0 12px 32px rgba(0, 0, 0, 0.10);
+  --accent:           #4A5A72;
+  --accent-hover:     #3B4A60;
+  --accent-active:    #2C3A4E;
+  --accent-dim:       rgba(74, 90, 114, 0.12);
+  --accent-glow:      rgba(74, 90, 114, 0.22);
+  --accent-subtle:    rgba(74, 90, 114, 0.07);
+  --border-subtle:    rgba(0, 0, 0, 0.06);
+  --border-default:   rgba(0, 0, 0, 0.10);
+  --border-medium:    rgba(0, 0, 0, 0.15);
+  --border-strong:    rgba(0, 0, 0, 0.22);
+  --border-accent:    rgba(74, 90, 114, 0.35);
+  --shadow-depth-2:  0 2px 8px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-depth-3:  0 8px 24px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-depth-4:  0 12px 36px rgba(0, 0, 0, 0.09), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-depth-5:  0 16px 48px rgba(0, 0, 0, 0.11), 0 8px 20px rgba(0, 0, 0, 0.06);
+  --shadow-depth-6:  0 24px 64px rgba(0, 0, 0, 0.14), 0 12px 28px rgba(0, 0, 0, 0.08);
 }
 
 /* ═══════════════════════════════════════

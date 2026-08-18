@@ -162,6 +162,7 @@ const INVOKE_HANDLERS = {
   'plugin:window|close': () => { window.parent?.postMessage?.({ type: 'zephyr-close' }, '*'); return null; },
   'plugin:window|minimize': () => { window.parent?.postMessage?.({ type: 'zephyr-minimize' }, '*'); return null; },
   'plugin:window|maximize': () => { window.parent?.postMessage?.({ type: 'zephyr-maximize' }, '*'); return null; },
+  'plugin:window|is_maximized': () => false,
   'plugin:window|set_title': () => null,
   'plugin:window|set_visible': () => null,
   'plugin:window|is_visible': () => true,
@@ -244,6 +245,7 @@ proxy-groups:
   },
   'stop_core': () => { coreRunning = false; return null; },
   'get_core_version': () => MOCK_VERSION.version,
+  'get_core_uptime': () => ({ uptime_secs: 3600 }),
   'update_core': () => null,
   'get_latest_version': () => ({ version: '1.19.0', name: 'Meta' }),
   'get_latest_client_version': () => ({ version: '0.5.0', download_url: '', notes: '' }),
@@ -256,6 +258,8 @@ proxy-groups:
   'enable_sysproxy': () => { sysProxyEnabled = true; emitTauriEvent('tray-sysproxy-changed', { enabled: true }); return null; },
   'disable_sysproxy': () => { sysProxyEnabled = false; emitTauriEvent('tray-sysproxy-changed', { enabled: false }); return null; },
   'get_sys_proxy': () => sysProxyEnabled,
+  'has_sysproxy_ownership': () => sysProxyEnabled,
+  'restore_sys_proxy': () => { sysProxyEnabled = true; emitTauriEvent('tray-sysproxy-changed', { enabled: true }); return null; },
 
   // ─── Tray ──────────────────────────────────────────────────────────
   'get_tray_status': () => ({ sysProxy: sysProxyEnabled, tun: tunEnabled, mode: currentMode }),
@@ -272,6 +276,8 @@ proxy-groups:
   'release_tun_toggle': () => null,
   'restart_core_as_root_cmd': () => null,
   'kill_all_mihomo_as_root_cmd': () => null,
+  'grant_linux_tun_permission': () => ({ success: true }),
+  'apply_windows_tcp_optimizations': () => ({ success: true }),
   'get_configs': () => ({ tun: tunEnabled, mixed_port: 7890, mode: currentMode }),
 
   // ─── Autostart ─────────────────────────────────────────────────────
@@ -400,7 +406,7 @@ proxy-groups:
   'open_prism_folder': () => getOSPaths(currentOS).config_dir,
 
   // ─── Override System ───────────────────────────────────────────────
-  'override_list': () => ({ overrides }),
+  'override_list': () => [...overrides],
   'override_create': (args) => {
     const ov = {
       id: `ov-${Date.now()}`,
@@ -460,8 +466,12 @@ proxy-groups:
     return { success: true };
   },
   'override_apply_all': () => {
-    const applied = overrides.filter(o => o.enabled).length;
-    return { success: true, applied };
+    return overrides.filter(o => o.enabled).map(o => ({
+      item_id: o.id,
+      item_name: o.name,
+      success: true,
+      error: null
+    }));
   },
   'override_export': () => {
     const data = overrides.map(o => ({ name: o.name, ext: o.ext, type: o.type, enabled: o.enabled, content: o.content }));
@@ -579,6 +589,11 @@ proxy-groups:
 
   // ─── Updater ───────────────────────────────────────────────────────
   'update_subscription_user_agent': () => null,
+  'update_subscription_ua': (args) => {
+    const item = MOCK_CONFIG_LIST.find(c => c.name === args?.name);
+    if (item && args?.ua) item.user_agent = args.ua;
+    return null;
+  },
 
   // ─── Misc ──────────────────────────────────────────────────────────
   'smart_config': () => smartConfigData,
@@ -638,6 +653,17 @@ proxy-groups:
   'script_revoke_plugin': () => null,
   'script_check_plugin_permission': () => true,
   'script_is_sandbox_safe': () => true,
+
+  // ─── Network Optimization ──────────────────────────────────────────
+  'check_network_optimizations_status': () => ({ applied: false }),
+  'apply_network_optimizations': () => ({ success: true }),
+  'revert_network_optimizations': () => ({ success: true }),
+
+  // ─── Misc / Logging / Heartbeat / Backup ───────────────────────────
+  'heartbeat': () => null,
+  'write_frontend_log': () => null,
+  'export_backup': () => ({ success: true, count: 1 }),
+  'import_backup': () => ({ success: true, count: 1 }),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

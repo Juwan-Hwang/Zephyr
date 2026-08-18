@@ -151,7 +151,11 @@ def main():
         sys.exit(1)
 
     app_dir = Path(sys.argv[1]).resolve()
+    if app_dir.is_file():
+        app_dir = app_dir.parent
     demo_dir = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else Path(__file__).parent
+    if demo_dir.is_file():
+        demo_dir = demo_dir.parent
 
     if not app_dir.exists():
         print(f"Error: App directory {app_dir} does not exist")

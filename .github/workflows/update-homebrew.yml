@@ -1,0 +1,115 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Zephyr
+        uses: actions/checkout@v4
+
+      - name: Compute SHA256 and generate Formula
+        id: compute
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          ARM64_DMG_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_${VERSION}_aarch64-full.dmg"
+          X64_DMG_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_${VERSION}_x64-full.dmg"
+          LINUX_X64_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr-linux-x64-portable.tar.gz"
+          LINUX_ARM64_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr-linux-arm64-portable.tar.gz"
+
+          curl -sL -o mac_arm.dmg "$ARM64_DMG_URL"
+          MAC_ARM_SHA=$(sha256sum mac_arm.dmg | cut -d' ' -f1)
+
+          curl -sL -o mac_x64.dmg "$X64_DMG_URL"
+          MAC_X64_SHA=$(sha256sum mac_x64.dmg | cut -d' ' -f1)
+
+          curl -sL -o linux_x64.tar.gz "$LINUX_X64_URL"
+          LINUX_X64_SHA=$(sha256sum linux_x64.tar.gz | cut -d' ' -f1)
+
+          curl -sL -o linux_arm.tar.gz "$LINUX_ARM64_URL"
+          LINUX_ARM_SHA=$(sha256sum linux_arm.tar.gz | cut -d' ' -f1)
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MAC_ARM_SHA=$MAC_ARM_SHA" >> "$GITHUB_ENV"
+          echo "MAC_X64_SHA=$MAC_X64_SHA" >> "$GITHUB_ENV"
+          echo "LINUX_X64_SHA=$LINUX_X64_SHA" >> "$GITHUB_ENV"
+          echo "LINUX_ARM_SHA=$LINUX_ARM_SHA" >> "$GITHUB_ENV"
+
+      - name: Push updated Formula to homebrew-tap
+        if: env.MAC_ARM_SHA != '' && env.LINUX_X64_SHA != ''
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/Juwan-Hwang/homebrew-tap.git tap-repo || exit 0
+          cd tap-repo
+          mkdir -p Formula
+
+          cat > Formula/zephyr.rb << EOF
+          class Zephyr < Formula
+            desc "A modern, lightweight Mihomo GUI client"
+            homepage "https://github.com/Juwan-Hwang/Zephyr"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/Juwan-Hwang/Zephyr/releases/download/v#{version}/Zephyr_#{version}_aarch64-full.dmg"
+                sha256 "${MAC_ARM_SHA}"
+
+                def install
+                  app = "Zephyr.app"
+                  prefix.install app
+                  bin.write_exec_script "#{prefix}/#{app}/Contents/MacOS/Zephyr"
+                end
+              else
+                url "https://github.com/Juwan-Hwang/Zephyr/releases/download/v#{version}/Zephyr_#{version}_x64-full.dmg"
+                sha256 "${MAC_X64_SHA}"
+
+                def install
+                  app = "Zephyr.app"
+                  prefix.install app
+                  bin.write_exec_script "#{prefix}/#{app}/Contents/MacOS/Zephyr"
+                end
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+                url "https://github.com/Juwan-Hwang/Zephyr/releases/download/v#{version}/Zephyr-linux-arm64-portable.tar.gz"
+                sha256 "${LINUX_ARM_SHA}"
+
+                def install
+                  bin.install "Zephyr" => "zephyr"
+                  pkgshare.install Dir["core/*"] if Dir.exist?("core")
+                end
+              else
+                url "https://github.com/Juwan-Hwang/Zephyr/releases/download/v#{version}/Zephyr-linux-x64-portable.tar.gz"
+                sha256 "${LINUX_X64_SHA}"
+
+                def install
+                  bin.install "Zephyr" => "zephyr"
+                  pkgshare.install Dir["core/*"] if Dir.exist?("core")
+                end
+              end
+            end
+
+            test do
+              assert_predicate bin/"zephyr", :exist?
+            end
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/zephyr.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "Update Zephyr to v${VERSION}"
+          git push

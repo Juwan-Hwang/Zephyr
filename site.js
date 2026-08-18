@@ -28,6 +28,8 @@
         // Hero
         'hero.subtitle': '安全与颜值并重的 Mihomo 客户端',
         'hero.philosophy': '13 层纵深防御 · 零前端框架 · Lite 版仅 8MB',
+        'hero.copyCmd': '复制命令',
+        'hero.copied': '已复制命令!',
         'hero.cta.demo': '在线体验',
         'hero.cta.download': '下载',
         'hero.cta.downloadFull': '下载 Zephyr',
@@ -39,7 +41,7 @@
         'philosophy.author': '— Zephyr 设计哲学',
         'philosophy.body': 'Zephyr 诞生于对现有 Mihomo GUI 的不满：要么臃肿如 Electron 套壳，要么简陋如功能原型。我们选择了第三条路——用 Rust 的安全基因和原生 JavaScript 的极致性能，构建一个既安全又好看的代理客户端。',
         'philosophy.zeroframework.title': '零前端框架',
-        'philosophy.zeroframework.desc': '原生 JavaScript + Tailwind CSS v4，无虚拟 DOM，无运行时开销。',
+        'philosophy.zeroframework.desc': '原生 JavaScript + UnoCSS + Style Dictionary 设计令牌，无虚拟 DOM，无运行时开销。',
         'philosophy.security.title': '安全优先',
         'philosophy.security.desc': '13 层纵深防御，从 CSP 到 TUN，每一层都经过深思熟虑。',
         'philosophy.lightweight.title': '轻量高效',
@@ -55,7 +57,7 @@
         'security.subscription.title': '订阅链接安全',
         'security.subscription.desc': 'SSRF 防护，禁止访问私有 IP，禁止跟随重定向到私有 IP。',
         'security.update.title': '更新包可信验证',
-        'security.update.desc': 'SHA256 完整性校验，仅从 GitHub Releases 可信域名下载。',
+        'security.update.desc': 'SHA256 完整性校验 + Minisign Ed25519 签名验证，仅从可信域名下载。Windows 发布版本经 SignPath 权威机构数字签名。',
         'security.encryption.title': '元数据加密存储',
         'security.encryption.desc': 'AES-256-GCM 加密订阅 URL 和流量信息，密钥与设备指纹绑定。',
         'security.filename.title': '文件名安全处理',
@@ -70,29 +72,29 @@
         'features.traffic.desc': '零图表库依赖，原生 Canvas 2D 贝塞尔曲线面积图，60fps 流畅渲染，支持 DPR 高清适配。',
         'features.nodes.title': '智能节点选择',
         'features.nodes.desc': '3D 悬浮效果，延迟颜色编码，一键延迟测试，批量测速排序，超时节点自动隐藏。',
-        'features.tun.title': 'TUN 虚拟网卡',
-        'features.tun.desc': '系统级透明代理，macOS osascript 提权，Windows UWP 豁免，无缝接管全局流量。',
+        'features.tun.title': 'TUN 与网络优化',
+        'features.tun.desc': '三层网络优化（TCP Fast Open、ECN、MTU 调优），TUN 虚拟网卡接管系统流量，Windows UWP 豁免。',
         'features.subscription.title': '订阅管理',
         'features.subscription.desc': '多格式兼容（Clash/Mihomo/Surge），客户端 UA 伪装，三重下载策略，自动更新订阅，拖拽排序。',
         'features.mode.title': '多运行模式',
         'features.mode.desc': 'Rule / Global / Direct 三种模式一键切换，支持快捷键全局操作。',
-        'features.rules.title': '规则引擎',
-        'features.rules.desc': 'Prism 扩展规则系统，支持规则分组、导入、提取、自动应用。内置代码编辑器，实时预览。',
+        'features.rules.title': '规则引擎与覆盖',
+        'features.rules.desc': 'Prism 扩展规则系统与 JS/YAML 配置覆写，支持规则分组、导入提取、SSID 场景分流，内置代码编辑器。',
         'features.crossplatform.title': '跨平台原生体验',
-        'features.crossplatform.desc': 'Windows / macOS / Linux 统一代码库。Tauri v2 原生窗口，系统托盘，全局快捷键，开机自启。',
+        'features.crossplatform.desc': 'Windows / macOS (10.13+) / Linux 统一代码库。支持 14 种语言（含完整 RTL 布局支持）、便携免安装模式、系统托盘与全局快捷键。',
 
         // Architecture
         'architecture.label': '技术架构',
         'architecture.title': '四层架构，层层分明',
         'architecture.desc': '每一层只做一件事，每一层都做到极致。',
         'architecture.ui.title': '用户界面层',
-        'architecture.ui.tech': '原生 JavaScript + Tailwind CSS v4 + Canvas 2D',
+        'architecture.ui.tech': '原生 JavaScript + UnoCSS presetWind4 + Style Dictionary + Canvas 2D',
         'architecture.ui.userdesc': '你看到和操作的每一个像素',
         'architecture.ipc.title': 'Tauri IPC 层',
-        'architecture.ipc.tech': '100+ Commands · 双向异步通信 · Capability 权限模型',
+        'architecture.ipc.tech': '160+ Commands · 21 个功能模块 · 双向异步通信 · Capability 权限模型',
         'architecture.ipc.userdesc': '前端与后端的安全通信桥梁',
         'architecture.rust.title': 'Rust 后端层',
-        'architecture.rust.tech': 'Tauri v2 · reqwest · aes-gcm · SSRF 防护 · 内存安全',
+        'architecture.rust.tech': 'Tauri v2 + Rust 1.92+ · reqwest · aes-gcm · SSRF 防护 · 内存安全',
         'architecture.rust.userdesc': '零成本抽象，编译期消除 bug',
         'architecture.mihomo.title': 'Mihomo 内核层',
         'architecture.mihomo.tech': 'RESTful API · HTTP Streaming · TUN · 规则引擎',
@@ -148,13 +150,13 @@
         'faq.q2': 'Zephyr 如何保护我的订阅链接安全？',
         'faq.a2': '订阅 URL 和流量信息使用 AES-256-GCM 加密存储在 metadata.json 中，密钥与你的设备指纹绑定。即使元数据文件被复制到其他设备，攻击者也无法解密。此外，SSRF 防护确保订阅服务器无法通过重定向攻击你的内网。',
         'faq.q3': 'Zephyr 支持哪些平台？',
-        'faq.a3': 'Windows（x64）、macOS（Apple Silicon 和 Intel）以及 Linux（deb、RPM、AppImage）。提供 Full 版和 Lite 版两种安装包，Lite 版体积仅约 8MB。',
-        'faq.q4': 'Full 版和 Lite 版有什么区别？',
-        'faq.a4': 'Lite 版仅包含核心功能和必要的 WebView 运行时，体积约 8MB。Full 版包含完整的 Tauri 运行时和所有系统依赖，体积约 28MB，适合没有系统 WebView 的环境。',
+        'faq.a3': 'Windows（x64 / ARM64）、macOS（Apple Silicon 和 Intel，支持 macOS 10.13+）以及 Linux（x64 / ARM64，deb、RPM、AppImage）。提供 Full 版、Lite 版以及解压即用的 Portable 便携版。',
+        'faq.q4': 'Full 版、Lite 版与 Portable 版有什么区别？',
+        'faq.a4': 'Full 版包含完整的 Mihomo 核心及离线 GeoIP / GeoSite 数据；Lite 版体积仅约 8MB，适合已有本地核心的用户；Portable 便携版解压即用且数据独立保存在程序目录。',
         'faq.q5': 'Zephyr 会收集我的数据吗？',
         'faq.a5': '不会。Zephyr 是开源软件，所有代码公开可审计。应用没有遥测、没有数据分析、不会上传任何用户数据。',
         'faq.q6': '如何确保 Zephyr 的更新是安全的？',
-        'faq.a6': '每次更新都经过 SHA256 完整性校验，且仅从 GitHub Releases 的可信域名下载。CI/CD 流程使用 cargo audit、npm audit 和 Semgrep 持续扫描依赖漏洞。',
+        'faq.a6': '每次更新都经过 SHA256 完整性校验与 Minisign Ed25519 签名验证，且仅从 GitHub Releases 可信域名下载。Windows 发布版本均经 SignPath Foundation 证书数字签名，CI/CD 流程使用 cargo audit、npm audit 和 Semgrep 持续扫描依赖漏洞。',
 
         // CTA
         'cta.title': '准备好体验更安全美观的代理了吗？',
@@ -192,6 +194,8 @@
         // Hero
         'hero.subtitle': 'A Mihomo client that\'s secure and beautiful',
         'hero.philosophy': '13-layer defense · Zero frontend framework · Lite version only 8MB',
+        'hero.copyCmd': 'Copy Command',
+        'hero.copied': 'Copied command!',
         'hero.cta.demo': 'Live Demo',
         'hero.cta.download': 'Download',
         'hero.cta.downloadFull': 'Download Zephyr',
@@ -203,7 +207,7 @@
         'philosophy.author': '— Zephyr Design Philosophy',
         'philosophy.body': 'Zephyr was born from frustration with existing Mihomo GUIs: either bloated like Electron wrappers, or crude like feature prototypes. We chose a third path—using Rust\'s safety DNA and vanilla JavaScript\'s ultimate performance to build a proxy client that\'s both secure and beautiful.',
         'philosophy.zeroframework.title': 'Zero Frontend Framework',
-        'philosophy.zeroframework.desc': 'Vanilla JavaScript + Tailwind CSS v4. No virtual DOM, no runtime overhead.',
+        'philosophy.zeroframework.desc': 'Vanilla JavaScript + UnoCSS + Style Dictionary design tokens. No virtual DOM, no runtime overhead.',
         'philosophy.security.title': 'Security First',
         'philosophy.security.desc': '13-layer defense in depth. From CSP to TUN, every layer is carefully designed.',
         'philosophy.lightweight.title': 'Lightweight & Efficient',
@@ -219,7 +223,7 @@
         'security.subscription.title': 'Subscription URL Security',
         'security.subscription.desc': 'SSRF protection. Private IP access blocked. No redirects to private IPs.',
         'security.update.title': 'Update Package Verification',
-        'security.update.desc': 'SHA256 integrity check. Downloads only from trusted GitHub Releases domain.',
+        'security.update.desc': 'SHA256 integrity check + Minisign Ed25519 signature verification. Windows releases are digitally signed by SignPath Foundation.',
         'security.encryption.title': 'Encrypted Metadata Storage',
         'security.encryption.desc': 'AES-256-GCM encrypts subscription URLs and traffic info. Key bound to device fingerprint.',
         'security.filename.title': 'Safe Filename Handling',
@@ -234,29 +238,29 @@
         'features.traffic.desc': 'Zero chart library dependency. Native Canvas 2D Bézier area charts. 60fps smooth rendering. DPR-aware.',
         'features.nodes.title': 'Smart Node Selection',
         'features.nodes.desc': '3D hover effect. Latency color coding. One-click latency test. Batch sorting. Auto-hide timeout nodes.',
-        'features.tun.title': 'TUN Virtual Network',
-        'features.tun.desc': 'System-level transparent proxy. macOS osascript elevation. Windows UWP bypass. Seamless global traffic capture.',
+        'features.tun.title': 'TUN & Network Optimization',
+        'features.tun.desc': 'Three-tier network optimization (TCP Fast Open, ECN, MTU tuning), TUN virtual network interface, Windows UWP loopback exempt.',
         'features.subscription.title': 'Subscription Management',
         'features.subscription.desc': 'Multi-format compatible (Clash/Mihomo/Surge). Client UA spoofing. Triple download strategy. Auto-update. Drag to reorder.',
         'features.mode.title': 'Multiple Operation Modes',
         'features.mode.desc': 'Rule / Global / Direct modes. One-click switch. Global hotkey support.',
-        'features.rules.title': 'Rule Engine',
-        'features.rules.desc': 'Prism extended rule system. Rule grouping, import, extraction, auto-apply. Built-in code editor with live preview.',
+        'features.rules.title': 'Rule Engine & Overrides',
+        'features.rules.desc': 'Prism extended rules and JS/YAML override system. Supports rule grouping, extraction, SSID auto-switching, and live preview.',
         'features.crossplatform.title': 'Cross-Platform Native Experience',
-        'features.crossplatform.desc': 'Windows / macOS / Linux unified codebase. Tauri v2 native windows, system tray, global hotkeys, auto-start.',
+        'features.crossplatform.desc': 'Windows / macOS (10.13+) / Linux unified codebase. Supports 14 languages (with full RTL layout support), portable mode, and global hotkeys.',
 
         // Architecture
         'architecture.label': 'Architecture',
         'architecture.title': 'Four Layers, Clearly Defined',
         'architecture.desc': 'Each layer does one thing. Each layer does it perfectly.',
         'architecture.ui.title': 'User Interface Layer',
-        'architecture.ui.tech': 'Vanilla JavaScript + Tailwind CSS v4 + Canvas 2D',
+        'architecture.ui.tech': 'Vanilla JavaScript + UnoCSS presetWind4 + Style Dictionary + Canvas 2D',
         'architecture.ui.userdesc': 'Every pixel you see and interact with',
         'architecture.ipc.title': 'Tauri IPC Layer',
-        'architecture.ipc.tech': '100+ Commands · Bidirectional async · Capability model',
+        'architecture.ipc.tech': '160+ Commands · 21 Feature Modules · Bidirectional Async · Capability Model',
         'architecture.ipc.userdesc': 'Secure bridge between frontend and backend',
         'architecture.rust.title': 'Rust Backend Layer',
-        'architecture.rust.tech': 'Tauri v2 · reqwest · aes-gcm · SSRF protection · Memory safe',
+        'architecture.rust.tech': 'Tauri v2 + Rust 1.92+ · reqwest · aes-gcm · SSRF Protection · Memory Safe',
         'architecture.rust.userdesc': 'Zero-cost abstraction, bugs eliminated at compile time',
         'architecture.mihomo.title': 'Mihomo Core Layer',
         'architecture.mihomo.tech': 'RESTful API · HTTP Streaming · TUN · Rule engine',
@@ -312,13 +316,13 @@
         'faq.q2': 'How does Zephyr protect my subscription URLs?',
         'faq.a2': 'Subscription URLs and traffic info are encrypted with AES-256-GCM and stored in metadata.json. The encryption key is bound to your device fingerprint. Even if the metadata file is copied to another device, attackers cannot decrypt it. SSRF protection ensures subscription servers cannot redirect to attack your internal network.',
         'faq.q3': 'Which platforms does Zephyr support?',
-        'faq.a3': 'Windows (x64), macOS (Apple Silicon and Intel), and Linux (deb, RPM, AppImage). Both Full and Lite versions are available, with the Lite version at only ~8MB.',
-        'faq.q4': 'What\'s the difference between Full and Lite versions?',
-        'faq.a4': 'The Lite version includes only core features and the necessary WebView runtime, at about 8MB. The Full version includes the complete Tauri runtime and all system dependencies, at about 28MB, suitable for environments without a system WebView.',
+        'faq.a3': 'Windows (x64 / ARM64), macOS (Apple Silicon & Intel, macOS 10.13+), and Linux (x64 / ARM64, deb, RPM, AppImage). Available in Full, Lite, and zero-install Portable versions.',
+        'faq.q4': 'What\'s the difference between Full, Lite, and Portable versions?',
+        'faq.a4': 'Full includes complete Mihomo core and offline GeoIP/GeoSite data. Lite is only ~8MB for users with local cores. Portable is self-contained and stores all data in the app folder.',
         'faq.q5': 'Does Zephyr collect my data?',
         'faq.a5': 'No. Zephyr is open-source software with all code publicly auditable. The app has no telemetry, no analytics, and never uploads any user data.',
         'faq.q6': 'How can I trust Zephyr updates?',
-        'faq.a6': 'Every update is verified with SHA256 integrity check and only downloaded from the trusted GitHub Releases domain. The CI/CD pipeline uses cargo audit, npm audit, and Semgrep to continuously scan for dependency vulnerabilities.',
+        'faq.a6': 'Every update is verified with SHA256 integrity check and Minisign Ed25519 signature. Windows releases are signed by SignPath Foundation. The CI/CD pipeline continuously scans dependencies with cargo audit, npm audit, and Semgrep.',
 
         // CTA
         'cta.title': 'Ready for a more secure and beautiful proxy?',
@@ -819,9 +823,11 @@
     let w, h;
 
     function resize() {
+      if (!canvas.parentElement) return;
       const rect = canvas.parentElement.getBoundingClientRect();
       w = rect.width;
       h = rect.height;
+      if (w === 0 || h === 0) return;
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       canvas.style.width = w + 'px';
@@ -830,6 +836,10 @@
     }
     resize();
     window.addEventListener('resize', resize);
+    if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
+      const ro = new ResizeObserver(() => resize());
+      ro.observe(canvas.parentElement);
+    }
 
     const POINTS = isHero ? 40 : 60;
     const accentData = [];
@@ -842,6 +852,55 @@
     const accentColor = { r: 139, g: 92, b: 246 };
     const secondaryColor = { r: 59, g: 130, b: 246 };
 
+    // Interactive hover state for Hero Showcase
+    let hoverSpeed = 1.0;
+    let targetSpeed = 1.0;
+    const mouseHover = { active: false, x: -1, y: -1 };
+
+    if (isHero && canvas.parentElement) {
+      const showcaseContainer = canvas.closest('.hero-showcase') || canvas.parentElement;
+      const menuItems = showcaseContainer.querySelectorAll('.hero-showcase-menu-item');
+      let isInsideShowcase = false;
+
+      showcaseContainer.addEventListener('mouseenter', () => {
+        isInsideShowcase = true;
+      });
+
+      showcaseContainer.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        mouseHover.active = true;
+        mouseHover.x = e.clientX - rect.left;
+        mouseHover.y = e.clientY - rect.top;
+        targetSpeed = 2.4;
+      }, { passive: true });
+
+      showcaseContainer.addEventListener('mouseleave', () => {
+        isInsideShowcase = false;
+        mouseHover.active = false;
+        targetSpeed = 1.0;
+      });
+
+      // Global page vertical tracking: updates menu items based on whole-page cursor Y
+      window.addEventListener('mousemove', (e) => {
+        if (!menuItems.length) return;
+        if (isInsideShowcase) {
+          const containerRect = showcaseContainer.getBoundingClientRect();
+          const relY = Math.max(0, Math.min(containerRect.height - 1, e.clientY - containerRect.top));
+          const activeIdx = Math.floor((relY / containerRect.height) * menuItems.length);
+          menuItems.forEach((item, idx) => {
+            item.classList.toggle('active', idx === activeIdx);
+          });
+        } else {
+          const vh = window.innerHeight || 800;
+          const normY = Math.max(0, Math.min(0.999, e.clientY / vh));
+          const activeIdx = Math.floor(normY * menuItems.length);
+          menuItems.forEach((item, idx) => {
+            item.classList.toggle('active', idx === activeIdx);
+          });
+        }
+      }, { passive: true });
+    }
+
     function rgba(c, a) { return `rgba(${c.r},${c.g},${c.b},${a})`; }
 
     function drawWave(data, color) {
@@ -849,14 +908,25 @@
       const getY = (v) => h - v * (h - 16) - 8;
 
       ctx.beginPath();
-      ctx.moveTo(getX(0), getY(data[0]));
-      for (let i = 1; i < data.length; i++) {
-        const x1 = getX(i - 1), y1 = getY(data[i - 1]);
-        const x2 = getX(i), y2 = getY(data[i]);
-        ctx.quadraticCurveTo(x1, y1, (x1 + x2) / 2, (y1 + y2) / 2);
+      ctx.moveTo(0, getY(data[0]));
+
+      for (let i = 0; i < data.length - 1; i++) {
+        const p0x = getX(i);
+        const p0y = getY(data[i]);
+        const p1x = getX(i + 1);
+        const p1y = getY(data[i + 1]);
+
+        if (i === data.length - 2) {
+          // Last segment curves all the way to the full right boundary (w, p1y)
+          ctx.quadraticCurveTo(p0x, p0y, p1x, p1y);
+        } else {
+          const midX = (p0x + p1x) / 2;
+          const midY = (p0y + p1y) / 2;
+          ctx.quadraticCurveTo(p0x, p0y, midX, midY);
+        }
       }
 
-      ctx.strokeStyle = rgba(color, 0.8);
+      ctx.strokeStyle = rgba(color, 0.85);
       ctx.lineWidth = isHero ? 1.5 : 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -865,8 +935,8 @@
       const grad = ctx.createLinearGradient(0, 0, 0, h);
       grad.addColorStop(0, rgba(color, isHero ? 0.15 : 0.25));
       grad.addColorStop(1, rgba(color, 0));
-      ctx.lineTo(getX(data.length - 1), h);
-      ctx.lineTo(getX(0), h);
+      ctx.lineTo(w, h);
+      ctx.lineTo(0, h);
       ctx.closePath();
       ctx.fillStyle = grad;
       ctx.fill();
@@ -890,7 +960,8 @@
 
     let offset = 0;
     function animate() {
-      offset += isHero ? 0.005 : 0.008;
+      hoverSpeed += (targetSpeed - hoverSpeed) * 0.08;
+      offset += (isHero ? 0.005 : 0.008) * hoverSpeed;
       ctx.clearRect(0, 0, w, h);
       drawGrid();
 
@@ -899,6 +970,41 @@
 
       drawWave(sD, secondaryColor);
       drawWave(aD, accentColor);
+
+      // Interactive cursor & measurement pulse for Hero Showcase
+      if (isHero && mouseHover.active && mouseHover.x >= 0 && mouseHover.x <= w) {
+        const getY = (v) => h - v * (h - 16) - 8;
+        const normX = Math.max(0, Math.min(1, mouseHover.x / w));
+        const idx = normX * (POINTS - 1);
+        const i0 = Math.floor(idx);
+        const i1 = Math.min(POINTS - 1, i0 + 1);
+        const t = idx - i0;
+        const val = aD[i0] * (1 - t) + aD[i1] * t;
+        const py = getY(val);
+
+        // Vertical measurement line
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(mouseHover.x, 0);
+        ctx.lineTo(mouseHover.x, h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Pulsating node dot
+        ctx.beginPath();
+        ctx.arc(mouseHover.x, py, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#A78BFA';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(mouseHover.x, py, 7 + Math.sin(offset * 8) * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(167, 139, 250, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
       requestAnimationFrame(animate);
     }
     animate();
@@ -970,7 +1076,7 @@
   // ── 卡片光晕追踪（Apple 风格聚光灯）─────────────────────────
 
   function setupCardGlow() {
-    const cards = document.querySelectorAll('.feature-card, .security-card, .philosophy-card');
+    const cards = document.querySelectorAll('.feature-card, .security-card, .philosophy-card, .perf-card');
     if (!cards.length) return;
 
     cards.forEach(card => {
@@ -983,6 +1089,138 @@
         card.style.removeProperty('--mouse-x');
         card.style.removeProperty('--mouse-y');
       });
+    });
+  }
+
+  // ── Version Badge 点击复制命令 & 智能系统识别 ──────────────────
+
+  async function fetchLatestRelease() {
+    const textEl = document.getElementById('versionBadgeText');
+    const linkEl = document.getElementById('versionBadgeLink');
+    try {
+      const resp = await fetch('https://api.github.com/repos/Juwan-Hwang/Zephyr/releases/latest');
+      if (resp.ok) {
+        const data = await resp.json();
+        const tag = data.tag_name;
+        if (tag && textEl) {
+          textEl.textContent = `Latest: ${tag} · macOS / Windows / Linux`;
+        }
+        if (linkEl && data.html_url) {
+          linkEl.href = data.html_url;
+          linkEl.title = `前往 GitHub Releases 查看 ${tag} 发行说明`;
+        }
+      } else {
+        if (textEl) textEl.textContent = 'GitHub Releases · macOS / Windows / Linux';
+      }
+    } catch {
+      if (textEl) textEl.textContent = 'GitHub Releases · macOS / Windows / Linux';
+    }
+  }
+
+  function setupVersionBadge() {
+    const copyBtn = document.getElementById('versionCopyBtn');
+    const copyLabel = document.getElementById('versionCopyLabel');
+    const trigger = document.getElementById('versionDropdownTrigger');
+    const menu = document.getElementById('versionDropdownMenu');
+    const items = menu ? menu.querySelectorAll('.dropdown-item') : [];
+    if (!copyBtn || !copyLabel) return;
+
+    let resetTimer = null;
+
+    // Detect client OS on init
+    const ua = navigator.userAgent || '';
+    let defaultOs = 'windows';
+    if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+      defaultOs = 'arch-yay';
+    }
+
+    items.forEach(item => {
+      if (item.getAttribute('data-os') === defaultOs) {
+        items.forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        copyBtn.setAttribute('data-cmd', item.getAttribute('data-cmd'));
+        copyLabel.textContent = item.getAttribute('data-label');
+      }
+    });
+
+    // Toggle dropdown
+    if (trigger && menu) {
+      trigger.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isOpen = menu.classList.toggle('open');
+        trigger.setAttribute('aria-expanded', String(isOpen));
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target !== trigger) {
+          menu.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu.classList.contains('open')) {
+          menu.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        }
+      });
+
+      // Item click: Select platform + Copy immediately
+      items.forEach(item => {
+        item.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          items.forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+
+          const cmd = item.getAttribute('data-cmd');
+          const label = item.getAttribute('data-label');
+          copyBtn.setAttribute('data-cmd', cmd);
+          copyLabel.textContent = label;
+
+          menu.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+
+          // Immediately copy the selected command
+          await doCopy(cmd);
+        });
+      });
+    }
+
+    async function doCopy(cmd) {
+      try {
+        await navigator.clipboard.writeText(cmd);
+      } catch {
+        const textarea = document.createElement('textarea');
+        textarea.value = cmd;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      copyBtn.classList.add('copied');
+      const prevText = copyLabel.textContent;
+      const currentLang = i18n.currentLang || 'zh-CN';
+      copyLabel.textContent = i18n.t('hero.copied') || (currentLang === 'zh-CN' ? '已复制!' : 'Copied!');
+
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        copyBtn.classList.remove('copied');
+        copyLabel.textContent = prevText;
+      }, 2500);
+    }
+
+    copyBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cmd = copyBtn.getAttribute('data-cmd') || 'winget install Juwan.Zephyr';
+      await doCopy(cmd);
     });
   }
 
@@ -1123,6 +1361,8 @@
     setupThemeToggle();
     setupLangToggle();
     setupHeroParallax();
+    setupVersionBadge();
+    fetchLatestRelease();
     initLaunchOverlay();
     setupCardGlow();
     setupDemoExpand();

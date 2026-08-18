@@ -270,6 +270,58 @@
         <h1 class="hero-title" id="hero-heading">Zephyr</h1>
         <p class="hero-subtitle" data-i18n="hero.subtitle">安全与颜值并重的 Mihomo 客户端</p>
         <p class="hero-philosophy reveal" data-i18n="hero.philosophy">13 层纵深防御 · 零前端框架 · Lite 版仅 8MB</p>
+        <div class="hero-version-badge reveal" id="versionBadge">
+          <a href="https://github.com/Juwan-Hwang/Zephyr/releases" target="_blank" rel="noopener noreferrer" class="version-badge-link" id="versionBadgeLink" title="前往 GitHub Releases 查看最新发行说明">
+            <span class="version-dot"></span>
+            <span class="version-text" id="versionBadgeText">Latest Releases · macOS / Windows / Linux</span>
+          </a>
+          <div class="version-cmd-wrapper" id="versionCmdWrapper">
+            <button type="button" class="version-copy-btn" id="versionCopyBtn" title="点击复制安装命令" data-cmd="winget install Juwan.Zephyr" aria-label="复制安装命令">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/></svg>
+              <span class="copy-label" id="versionCopyLabel">winget (Windows)</span>
+            </button>
+            <button type="button" class="version-dropdown-trigger" id="versionDropdownTrigger" title="选择其他系统安装命令" aria-label="选择其他系统安装命令" aria-expanded="false" aria-haspopup="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="10" height="10" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+            </button>
+            <div class="version-dropdown-menu" id="versionDropdownMenu" role="menu">
+              <button type="button" class="dropdown-item active" data-os="windows" data-cmd="winget install Juwan.Zephyr" data-label="winget (Windows)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Windows</span>
+                  <span class="item-badge">winget</span>
+                </div>
+                <code>winget install Juwan.Zephyr</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="arch-yay" data-cmd="yay -S zephyr-clash-bin" data-label="yay (Arch Linux)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Arch Linux</span>
+                  <span class="item-badge">yay / AUR</span>
+                </div>
+                <code>yay -S zephyr-clash-bin</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="arch-paru" data-cmd="paru -S zephyr-clash-bin" data-label="paru (Arch Linux)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Arch Linux</span>
+                  <span class="item-badge">paru / AUR</span>
+                </div>
+                <code>paru -S zephyr-clash-bin</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="brew" data-cmd="brew install juwan-hwang/tap/zephyr" data-label="Homebrew (macOS/Linux)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">macOS / Linux</span>
+                  <span class="item-badge">Homebrew</span>
+                </div>
+                <code>brew install juwan-hwang/tap/zephyr</code>
+              </button>
+              <button type="button" class="dropdown-item" data-os="flatpak" data-cmd="flatpak install flathub io.github.juwan_hwang.Zephyr" data-label="Flatpak (Flathub)" role="menuitem">
+                <div class="item-header">
+                  <span class="item-title">Universal Linux</span>
+                  <span class="item-badge">Flathub</span>
+                </div>
+                <code>flatpak install flathub io.github.juwan_hwang.Zephyr</code>
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="hero-cta">
           <a href="#demo" class="btn-primary hero-cta-desktop">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M5.5 14h5M8 12v2"/></svg>
@@ -332,7 +384,7 @@
                 </svg>
               </div>
               <h4 data-i18n="philosophy.zeroframework.title">零前端框架</h4>
-              <p data-i18n="philosophy.zeroframework.desc">不依赖 React、Vue 或任何前端框架。原生 JavaScript，零虚拟 DOM 开销，零供应链攻击面。</p>
+              <p data-i18n="philosophy.zeroframework.desc">原生 JavaScript + UnoCSS + Style Dictionary 设计令牌，零虚拟 DOM 开销，零供应链攻击面。</p>
             </div>
             <div class="philosophy-card reveal" data-delay="2">
               <div class="feature-icon">
@@ -411,7 +463,7 @@
               </svg>
             </div>
             <h3 data-i18n="security.update.title">更新包可信验证</h3>
-            <p data-i18n="security.update.desc">自动更新时，每个安装包都经过 SHA256 完整性校验和可信域名验证。即使更新服务器被入侵，篡改的安装包也会被拒绝，防止供应链攻击植入后门。</p>
+            <p data-i18n="security.update.desc">自动更新时，每个安装包都经过 SHA256 完整性校验与 Minisign Ed25519 签名验证。Windows 发布版本经 SignPath 权威机构数字签名，杜绝供应链篡改。</p>
           </div>
 
           <div class="security-card reveal" data-delay="1">
@@ -488,8 +540,8 @@
                 <path d="M10 2v4M10 14v4"/>
               </svg>
             </div>
-            <h3 data-i18n="features.tun.title">TUN 虚拟网卡</h3>
-            <p data-i18n="features.tun.desc">系统级透明代理，macOS osascript 提权，Windows UWP 豁免，无缝接管全局流量。</p>
+            <h3 data-i18n="features.tun.title">TUN 与网络优化</h3>
+            <p data-i18n="features.tun.desc">三层网络优化（TCP Fast Open、ECN、MTU 调优），TUN 虚拟网卡接管系统流量，Windows UWP 豁免与 Linux sysctl 持久化。</p>
           </div>
 
           <div class="feature-card wide reveal" data-delay="1">
@@ -521,8 +573,8 @@
                 <path d="M7 4v12M13 4v12"/>
               </svg>
             </div>
-            <h3 data-i18n="features.rules.title">规则引擎</h3>
-            <p data-i18n="features.rules.desc">Prism 扩展规则系统，支持规则分组、导入、提取、自动应用。内置代码编辑器，实时预览。</p>
+            <h3 data-i18n="features.rules.title">规则引擎与覆盖</h3>
+            <p data-i18n="features.rules.desc">Prism 扩展规则系统与 JS/YAML 配置覆写，支持规则分组、导入提取、SSID 场景分流，内置代码编辑器。</p>
           </div>
 
           <div class="feature-card wide reveal" data-delay="1">
@@ -533,7 +585,7 @@
               </svg>
             </div>
             <h3 data-i18n="features.crossplatform.title">跨平台原生体验</h3>
-            <p data-i18n="features.crossplatform.desc">Windows / macOS / Linux 统一代码库。Tauri v2 原生窗口，系统托盘，全局快捷键，开机自启。</p>
+            <p data-i18n="features.crossplatform.desc">Windows / macOS (10.13+) / Linux 统一代码库。支持 14 种语言（含完整 RTL 布局支持）、便携免安装模式、系统托盘与全局快捷键。</p>
           </div>
         </div>
       </div>
@@ -552,7 +604,7 @@
           <div class="arch-layer">
             <div class="arch-layer-label" data-i18n="architecture.ui.title">用户界面</div>
             <div class="arch-layer-desc">
-              <span data-i18n="architecture.ui.tech">原生 JavaScript + Tailwind CSS v4 + Canvas 2D</span>
+              <span data-i18n="architecture.ui.tech">原生 JavaScript + UnoCSS presetWind4 + Style Dictionary + Canvas 2D</span>
               <span class="arch-layer-user-desc" data-i18n="architecture.ui.userdesc">你看到和操作的每一个像素</span>
             </div>
           </div>
@@ -562,7 +614,7 @@
           <div class="arch-layer">
             <div class="arch-layer-label" data-i18n="architecture.ipc.title">Tauri IPC</div>
             <div class="arch-layer-desc">
-              <span data-i18n="architecture.ipc.tech">100+ Commands · 双向异步通信 · Capability 权限模型</span>
+              <span data-i18n="architecture.ipc.tech">160+ Commands · 21 个功能模块 · 双向异步通信 · Capability 权限模型</span>
               <span class="arch-layer-user-desc" data-i18n="architecture.ipc.userdesc">前端与后端的安全通信桥梁</span>
             </div>
           </div>
@@ -572,7 +624,7 @@
           <div class="arch-layer">
             <div class="arch-layer-label" data-i18n="architecture.rust.title">Rust 后端</div>
             <div class="arch-layer-desc">
-              <span data-i18n="architecture.rust.tech">Tauri v2 · reqwest · aes-gcm · SSRF 防护 · 内存安全</span>
+              <span data-i18n="architecture.rust.tech">Tauri v2 + Rust 1.92+ · reqwest · aes-gcm · SSRF 防护 · 内存安全</span>
               <span class="arch-layer-user-desc" data-i18n="architecture.rust.userdesc">零成本抽象，编译期消除 bug</span>
             </div>
           </div>
@@ -591,12 +643,13 @@
         <div class="arch-tags reveal" data-delay="2">
           <span class="arch-tag">Rust</span>
           <span class="arch-tag">JavaScript</span>
-          <span class="arch-tag">Tailwind CSS v4</span>
+          <span class="arch-tag">UnoCSS</span>
+          <span class="arch-tag">Style Dictionary</span>
           <span class="arch-tag">Canvas 2D</span>
           <span class="arch-tag">Tauri v2</span>
           <span class="arch-tag">Mihomo</span>
           <span class="arch-tag" data-i18n="arch.tag.encryption">元数据加密</span>
-          <span class="arch-tag">PBKDF2</span>
+          <span class="arch-tag">14 Languages &amp; RTL</span>
         </div>
       </div>
     </section>
@@ -668,7 +721,7 @@
               <div class="demo-loading-spinner"></div>
               <p data-i18n="demo.loading">正在加载 Zephyr...</p>
             </div>
-            <iframe id="zephyrFrame" class="demo-frame" src="about:blank" sandbox="allow-scripts allow-same-origin allow-popups" title="Zephyr Interactive Demo"></iframe>
+            <iframe id="zephyrFrame" class="demo-frame" src="about:blank" title="Zephyr Interactive Demo"></iframe>
           </div>
         </div>
 
@@ -785,7 +838,8 @@
         <h4 data-i18n="footer.tech">技术</h4>
         <a href="https://github.com/MetaCubeX/mihomo" target="_blank" rel="noopener noreferrer">Mihomo</a>
         <a href="https://tauri.app" target="_blank" rel="noopener noreferrer">Tauri</a>
-        <a href="https://tailwindcss.com" target="_blank" rel="noopener noreferrer">Tailwind CSS</a>
+        <a href="https://unocss.dev" target="_blank" rel="noopener noreferrer">UnoCSS</a>
+        <a href="https://styledictionary.com/" target="_blank" rel="noopener noreferrer">Style Dictionary</a>
         <a href="https://codemirror.net" target="_blank" rel="noopener noreferrer">CodeMirror</a>
         <a href="https://github.com/Juwan-Hwang/Clash-Prism-Engine" target="_blank" rel="noopener noreferrer">Prism Engine</a>
       </div>
