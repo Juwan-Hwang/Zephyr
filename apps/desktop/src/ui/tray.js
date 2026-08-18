@@ -37,16 +37,21 @@ const tr = (/** @type {string} */ key, /** @type {string} */ fallback) => {
 
 // --- Tray event listener cleanup ---
 
-/** @type {Array<() => void>} */
+/** @type {Array<() => void | Promise<void>>} */
 let _trayEventUnlisteners = [];
 
-export function cleanupTrayEventListeners() {
-    _trayEventUnlisteners.forEach(unlisten => {
-        if (typeof unlisten === 'function') {
-            unlisten();
-        }
-    });
+export async function cleanupTrayEventListeners() {
+    const unlisteners = _trayEventUnlisteners;
     _trayEventUnlisteners = [];
+    await Promise.all(unlisteners.map(async (unlisten) => {
+        if (typeof unlisten === 'function') {
+            try {
+                await unlisten();
+            } catch (err) {
+                trayLogger.warn('[tray] unlisten failed during cleanup:', err);
+            }
+        }
+    }));
 }
 
 // --- Tray status ---

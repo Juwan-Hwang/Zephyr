@@ -394,6 +394,13 @@ async function initApp() {
 
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
+  // 0a. Reset transient locks that may have been persisted to localStorage
+  // by a prior session that crashed or was refreshed mid-operation.
+  // While the transientKeys array in state.js prevents future persistence,
+  // we also reset here to clean up any stale values from older builds.
+  appStore.set('isNetworkUpdating', false);
+  appStore.set('isTestingLatency', false);
+
   // 1. Disable context menu globally (except on draggable titlebar)
   document.addEventListener('contextmenu', (e) => {
     const target = /** @type {Element} */ (e.target);
@@ -601,7 +608,7 @@ async function initApp() {
   });
   registerCleanup(() => { cleanupChart(); });
   registerCleanup(() => { stopUnifiedSync(); });
-  registerCleanup(() => { cleanupTrayEventListeners(); });
+  registerCleanup(cleanupTrayEventListeners);
 
   window.addEventListener('beforeunload', () => runCleanup());
 
