@@ -71,6 +71,11 @@ jobs:
           cp demo-branch/site.css dist/site.css
           cp demo-branch/os.css dist/os.css
 
+          # Copy pre-generated CSS files as fail-safe fallback
+          cp demo-branch/tokens-variables.css dist/app/tokens-variables.css 2>/dev/null || true
+          cp demo-branch/tokens-theme.css dist/app/tokens-theme.css 2>/dev/null || true
+          cp demo-branch/uno-generated.css dist/app/uno-generated.css 2>/dev/null || true
+
           # Mock layer
           mkdir -p dist/app/demo
           cp demo-branch/mock-api.js dist/app/demo/mock-api.js
