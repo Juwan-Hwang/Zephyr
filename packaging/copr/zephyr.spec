@@ -23,12 +23,16 @@ Zephyr is a state-of-the-art cross-platform GUI client for Mihomo, combining mod
 
 %install
 mkdir -p %{buildroot}
-rpm2cpio %{SOURCE0} | cpio -idmv -D %{buildroot}
+cd %{buildroot}
+rpm2cpio %{SOURCE0} | cpio -idmv
+ln -sf Zephyr %{buildroot}%{_bindir}/zephyr
 
 %files
-/usr/bin/zephyr
-/usr/share/applications/zephyr.desktop
-/usr/share/icons/hicolor/*/apps/zephyr.png
+%{_bindir}/Zephyr
+%{_bindir}/zephyr
+%{_prefix}/lib/Zephyr/
+%{_datadir}/applications/Zephyr.desktop
+%{_datadir}/icons/hicolor/*/apps/Zephyr.png
 
 %changelog
 * Sat Aug 08 2026 Juwan <juwan.hwang@proton.me> - 2.4.3-1
