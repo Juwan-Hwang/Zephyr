@@ -7,6 +7,9 @@ URL:            https://github.com/Juwan-Hwang/Zephyr
 Source0:        https://github.com/Juwan-Hwang/Zephyr/releases/download/v%{version}/Zephyr-%{version}-1.x86_64-full.rpm
 
 BuildArch:      x86_64
+BuildRequires:  cpio
+BuildRequires:  rpm
+
 Requires:       gtk3
 Requires:       webkit2gtk4.1
 Requires:       libayatana-appindicator

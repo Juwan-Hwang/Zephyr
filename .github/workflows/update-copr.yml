@@ -1,0 +1,46 @@
+name: Trigger Fedora COPR Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 2.4.3)'
+        required: false
+        default: '2.4.3'
+
+permissions:
+  contents: read
+
+jobs:
+  build-copr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up copr-cli
+        if: env.COPR_CONFIG != ''
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-pip
+          pip3 install --break-system-packages copr-cli
+          mkdir -p ~/.config
+          echo "${{ secrets.COPR_CONFIG }}" > ~/.config/copr
+
+      - name: Prepare zephyr.spec with release version
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.version }}"
+          VERSION="${VERSION#v}"
+          echo "Triggering COPR build for version: ${VERSION}"
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" packaging/copr/zephyr.spec
+          cat packaging/copr/zephyr.spec
+
+      - name: Submit build to Fedora COPR
+        if: env.COPR_CONFIG != ''
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          copr-cli build zephyr packaging/copr/zephyr.spec --nowait
