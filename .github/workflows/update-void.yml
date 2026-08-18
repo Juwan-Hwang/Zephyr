@@ -1,0 +1,98 @@
+name: Update Void Linux Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update'
+        required: false
+        default: '2.4.3'
+
+permissions:
+  contents: read
+
+jobs:
+  update-void:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute SHA256 and update template
+        id: compute
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.version }}"
+          VERSION="${TAG#v}"
+
+          X64_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/v${VERSION}/Zephyr-linux-x64-portable.tar.gz"
+          ARM64_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/v${VERSION}/Zephyr-linux-arm64-portable.tar.gz"
+
+          curl -sL -o x64.tar.gz "$X64_URL"
+          X64_SHA=$(sha256sum x64.tar.gz | cut -d' ' -f1)
+
+          curl -sL -o arm64.tar.gz "$ARM64_URL"
+          ARM64_SHA=$(sha256sum arm64.tar.gz | cut -d' ' -f1)
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "X64_SHA=$X64_SHA" >> "$GITHUB_ENV"
+          echo "ARM64_SHA=$ARM64_SHA" >> "$GITHUB_ENV"
+
+      - name: Create or update PR to void-packages
+        if: env.X64_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git clone https://x-access-token:${GH_TOKEN}@github.com/Juwan-Hwang/void-packages.git void-repo || exit 0
+          cd void-repo
+
+          git remote add upstream https://github.com/void-linux/void-packages.git
+          git fetch upstream master
+          git checkout -B "zephyr-${VERSION}" upstream/master
+
+          mkdir -p srcpkgs/zephyr
+          cat > srcpkgs/zephyr/template << EOF
+          # Template file for 'zephyr'
+          pkgname=zephyr
+          version=${VERSION}
+          revision=1
+          archs="x86_64 aarch64"
+          create_wrksrc=yes
+          depends="gtk+3 webkit2gtk-4.1 libayatana-appindicator libsoup3"
+          short_desc="Modern, lightweight Mihomo GUI client"
+          maintainer="Juwan Hwang <juwan.hwang@proton.me>"
+          license="MIT"
+          homepage="https://github.com/Juwan-Hwang/Zephyr"
+
+          case "\$XBPS_TARGET_MACHINE" in
+          	x86_64*)
+          		distfiles="https://github.com/Juwan-Hwang/Zephyr/releases/download/v\${version}/Zephyr-linux-x64-portable.tar.gz"
+          		checksum=${X64_SHA}
+          		;;
+          	aarch64*)
+          		distfiles="https://github.com/Juwan-Hwang/Zephyr/releases/download/v\${version}/Zephyr-linux-arm64-portable.tar.gz"
+          		checksum=${ARM64_SHA}
+          		;;
+          esac
+
+          do_install() {
+          	vbin Zephyr zephyr
+          	vinstall usr/share/applications/Zephyr.desktop 644 usr/share/applications
+          	vinstall usr/share/icons/hicolor/128x128/apps/Zephyr.png 644 usr/share/icons/hicolor/128x128/apps
+          	vlicense LICENSE
+          }
+          EOF
+
+          git config user.name "Juwan"
+          git config user.email "juwan.hwang@proton.me"
+          git add srcpkgs/zephyr/template
+          git commit -m "zephyr: update to ${VERSION}."
+          git push -f origin "zephyr-${VERSION}"
+
+          gh pr create --repo void-linux/void-packages \
+            --head "Juwan-Hwang:zephyr-${VERSION}" \
+            --base master \
+            --title "zephyr: update to ${VERSION}." \
+            --body "#### Testing the changes
+          - I tested the changes in this PR: **YES**" || true
