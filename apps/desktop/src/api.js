@@ -183,23 +183,53 @@ async function listen(event, handler) {
       handler: callbackId,
     });
   } catch (e) {
-    _t.transformCallback(undefined, false, callbackId);
+    if (typeof _t.unregisterCallback === 'function') {
+      _t.unregisterCallback(callbackId);
+    } else {
+      _t.transformCallback(undefined, false, callbackId);
+    }
     throw e;
   }
   return async () => {
-    _t.transformCallback(undefined, false, callbackId);
+    // Deregister the JS callback. Tauri v2 exposes `unregisterCallback(id)`
+    // for this purpose; `transformCallback(undefined, …)` does NOT
+    // deregister an existing callback — the third argument is ignored.
+    // Fall back to transformCallback for older Tauri versions that lack
+    // unregisterCallback.
+    try {
+      if (typeof _t.unregisterCallback === 'function') {
+        _t.unregisterCallback(callbackId);
+      } else {
+        _t.transformCallback(undefined, false, callbackId);
+      }
+    } catch (err) {
+      apiLogger.warn(`[API] unregisterCallback(${callbackId}) failed:`, err);
+    }
     // Clean up the listener entry from the internal listeners object.
     // Tauri's unlisten_js_script only calls unregisterCallback but does NOT
     // delete `obj[event][eventId]`, leaving a stale entry. This causes
     // emit_to_main to falsely believe a listener still exists and dispatch
     // events to a dead callback (which silently fails, losing the event).
-    const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
-    if (obj?.[event]) {
-      delete obj[event][eventId];
-      // If no listeners remain for this event, clean up the event key too
-      // so emit_to_main correctly detects "no listeners" and buffers the event.
-      if (Object.getOwnPropertyNames(obj[event]).length === 0) {
-        delete obj[event];
+    //
+    // The `delete` may throw TypeError if the property is non-configurable
+    // (sealed/frozen internal object). We only catch TypeError so that other
+    // unexpected failures are not silently masked.
+    try {
+      const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
+      if (obj?.[event]) {
+        delete obj[event][eventId];
+        // If no listeners remain for this event, clean up the event key too
+        // so emit_to_main correctly detects "no listeners" and buffers the event.
+        if (Object.getOwnPropertyNames(obj[event]).length === 0) {
+          delete obj[event];
+        }
+      }
+    } catch (err) {
+      if (err instanceof TypeError) {
+        // Non-configurable property — expected on sealed/frozen internal objects.
+        apiLogger.warn(`[API] listener-map cleanup for event "${event}" skipped (non-configurable)`);
+      } else {
+        throw err;
       }
     }
     await invoke('plugin:event|unlisten', { event, eventId });
