@@ -36,6 +36,7 @@ if (typeof Element.prototype.replaceChildren !== 'function') {
 
 import {
   invoke,
+  listen,
   setBaseUrl,
   setSecret,
   setCoreReachable,
@@ -492,6 +493,31 @@ async function initApp() {
 
   registerDefaultShortcuts().catch((err) => {
     apiLogger.warn('Failed to register default shortcuts', err);
+  });
+
+  // 7c. Network online & state change listener
+  const onOnline = () => {
+    invoke(COMMANDS.NOTIFY_NETWORK_CHANGE, { source: 'browser_online' }).catch(() => {});
+  };
+  const onOffline = () => {
+    invoke(COMMANDS.NOTIFY_NETWORK_CHANGE, { source: 'browser_offline' }).catch(() => {});
+  };
+  window.addEventListener('online', onOnline);
+  window.addEventListener('offline', onOffline);
+  registerCleanup(() => {
+    window.removeEventListener('online', onOnline);
+    window.removeEventListener('offline', onOffline);
+  });
+  listen('network-state-changed', (event) => {
+    const payload = event?.payload;
+    apiLogger.info(
+      `[Zephyr] Network state changed: reason=${payload?.reason} ` +
+      `type=${payload?.new_state?.interface_type} connected=${payload?.new_state?.is_connected}`
+    );
+  }).then((unlisten) => {
+    registerCleanup(() => { unlisten(); });
+  }).catch((err) => {
+    apiLogger.warn('Failed to init network state change listener', err);
   });
 
   apiLogger.info(`[Zephyr] UI modules: +${(performance.now() - tUI).toFixed(0)}ms`);
