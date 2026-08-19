@@ -27,7 +27,7 @@ use crate::core_manager::ensure_app_storage;
 
 mod commands_core;
 mod failover_commands;
-mod host;
+pub(crate) mod host;
 mod kv_commands;
 pub mod overrides;
 pub mod pipeline;
@@ -186,6 +186,72 @@ impl PrismState {
         let result = f(ext);
         drop(lock);
         result
+    }
+
+    /// Internal apply method executed on a blocking thread to avoid starving async command threads.
+    pub async fn apply_internal(
+        &self,
+        options: Option<clash_prism_extension::ApplyOptions>,
+    ) -> Result<
+        (
+            crate::network_coordinator::CoreApplyResult,
+            serde_json::Value,
+        ),
+        String,
+    > {
+        let opts = options.unwrap_or_default();
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            // RAII Scope Guard: Guarantees TLS is cleared before execution and on early exit/Drop
+            let guard = host::HttpStatusGuard::enter();
+
+            let mut lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
+            let ext = lock
+                .extension
+                .as_ref()
+                .ok_or_else(|| "Prism not initialized".to_owned())?;
+            let result = ext.apply(opts)?;
+            if let Ok(val) = serde_json::to_value(&result.trace) {
+                lock.last_trace = val.as_array().cloned().unwrap_or_default();
+            }
+            drop(lock);
+
+            // Extract strictly thread-confined transport status code via RAII guard.
+            // The thread-local bridge is set by ZephyrPrismHost::apply_config, which
+            // derives hot_reload_success from the HTTP status code.  We use that
+            // directly because ApplyResult (returned by ext.apply) does not contain
+            // the ApplyStatus struct — only output_config, stats, trace, and annotations.
+            let http_status = guard.take();
+            // Map http_status to hot_reload_success:
+            // - Some(2xx) → Some(true)  (core acknowledged the reload)
+            // - Some(non-2xx) → Some(false)  (core rejected the reload)
+            // - None → None  (no response, unknown — not a negative ack)
+            let hot_reload_success = http_status.map(crate::network_coordinator::is_http_success);
+
+            let core_result = crate::network_coordinator::CoreApplyResult {
+                http_status,
+                hot_reload_success,
+            };
+
+            // Enrich the serialized JSON with the status fields so downstream
+            // consumers (e.g. prism_apply command response) can access them.
+            let mut val =
+                serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))?;
+            if let Some(obj) = val.as_object_mut() {
+                let mut status_obj = serde_json::Map::new();
+                status_obj.insert(
+                    "hot_reload_success".to_owned(),
+                    serde_json::json!(hot_reload_success),
+                );
+                if let Some(code) = http_status {
+                    status_obj.insert("http_status".to_owned(), serde_json::json!(code));
+                }
+                obj.insert("status".to_owned(), serde_json::Value::Object(status_obj));
+            }
+            Ok((core_result, val))
+        })
+        .await
+        .map_err(|e| format!("Task join failed: {e}"))?
     }
 
     pub(crate) fn get_prism_workspace(&self) -> Result<std::path::PathBuf, String> {

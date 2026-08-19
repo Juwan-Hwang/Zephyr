@@ -36,6 +36,7 @@ describe('Backend ↔ Frontend IPC command contract', () => {
         'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
         'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
         'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED', 'OVERRIDE', 'NETWORK_OPTIM',
+        'NETWORK_COORDINATOR',
     ]);
     const backendCommands = Object.values(COMMANDS).filter(
         v => typeof v === 'string' && v.length > 0
@@ -192,6 +193,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
             'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
             'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
             'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED', 'OVERRIDE', 'NETWORK_OPTIM',
+            'NETWORK_COORDINATOR',
         ]);
         for (const [key, value] of Object.entries(COMMANDS)) {
             if (NAMESPACE_REFS.has(key)) continue; // namespace refs, not strings
