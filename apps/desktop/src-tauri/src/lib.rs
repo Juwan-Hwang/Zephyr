@@ -21,6 +21,7 @@ pub mod core_manager;
 pub mod deep_link;
 pub mod global_shortcut;
 pub mod minisign_verify;
+pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
 pub mod sys_proxy;
@@ -1484,6 +1485,10 @@ pub fn run() {
             let scheduler_state = start_scheduler(app.handle().clone());
             app.manage(scheduler_state);
 
+            // Start Network Change Coordinator (SSID/interface monitoring & single-flight auto-apply)
+            let coordinator_handle = network_coordinator::start_coordinator(app.handle());
+            app.manage(coordinator_handle);
+
             // Init Tray using the new tray module
             init_tray(app.handle())?;
 
@@ -1784,6 +1789,9 @@ write_frontend_log,
             prism::script_revoke_plugin,
             prism::script_check_plugin_permission,
             prism::script_is_sandbox_safe,
+            // Network Coordinator commands
+            network_coordinator::get_network_state,
+            network_coordinator::notify_network_change,
         ]);
 
     #[allow(clippy::expect_used)]
@@ -1872,6 +1880,13 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         SYS_RESUMED_HEALTH_CHECK,
         "System resumed from sleep — checking core health"
     );
+
+    // Notify Network Change Coordinator that system woke from sleep.
+    // Use try_notify (non-blocking) so a full channel cannot delay the
+    // subsequent resume health check.
+    if let Some(coordinator) = app.try_state::<network_coordinator::NetworkCoordinatorHandle>() {
+        coordinator.try_notify(network_coordinator::NetworkChangeReason::Resume);
+    }
 
     // Read the last-known core port + config from MihomoState.
     let (port, config_path, custom_args) = {
@@ -1970,6 +1985,15 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
             SYS_RESUMED_CORE_RESTART,
             "Failed to restart core after resume: {e}"
         );
+    } else {
+        // Core restarted successfully — the fresh process has no rules applied.
+        // Notify the coordinator to re-apply rules for the current network state.
+        // The earlier Resume notification may have already applied rules to the
+        // old (now-replaced) core instance, leaving applied_state stale.
+        if let Some(coordinator) = app.try_state::<network_coordinator::NetworkCoordinatorHandle>()
+        {
+            coordinator.try_notify(network_coordinator::NetworkChangeReason::Manual);
+        }
     }
 }
 
