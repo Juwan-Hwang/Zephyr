@@ -272,7 +272,10 @@ jobs:
         shell: bash
 
       - name: Build Tauri app (Full)
-        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+        run: |
+          if [[ "${{ matrix.platform }}" == ubuntu-* ]]; then umask 0022; fi
+          pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+        shell: bash
 
       - name: Collect Windows Full artifacts
         if: matrix.platform == 'windows-latest'
@@ -328,7 +331,10 @@ jobs:
         shell: bash
 
       - name: Build Tauri app (Lite)
-        run: pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+        run: |
+          if [[ "${{ matrix.platform }}" == ubuntu-* ]]; then umask 0022; fi
+          pnpm --filter @zephyr/desktop tauri build ${{ matrix.args }}
+        shell: bash
 
       - name: Collect Windows Lite artifacts
         if: matrix.platform == 'windows-latest'
