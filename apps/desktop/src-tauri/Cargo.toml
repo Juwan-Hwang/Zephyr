@@ -47,7 +47,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 regex = "1"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "test-util"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 aes-gcm = "0.11"
