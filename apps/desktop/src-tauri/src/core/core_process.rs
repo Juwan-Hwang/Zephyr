@@ -1455,6 +1455,21 @@ pub async fn start_core_inner(
         }
         // For TUN mode, use the config_path as-is to match the frontend's requested name.
         // Do NOT strip extension here, as normal mode returns full filename with extension.
+        // Notify the network coordinator that a fresh core instance was started.
+        // The new process has no rules applied, so the coordinator's applied_state
+        // is now stale and must be re-evaluated.
+        if let Some(coordinator) =
+            app.try_state::<crate::network_coordinator::NetworkCoordinatorHandle>()
+        {
+            // Manual is the only reason that clears applied_state — it must
+            // not be silently dropped by a full channel.  Bound the wait so
+            // a stalled coordinator actor cannot block core startup.
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                coordinator.notify(crate::network_coordinator::NetworkChangeReason::Manual),
+            )
+            .await;
+        }
         return Ok(CoreStartResult {
             secret,
             port: DEFAULT_API_PORT,
@@ -1650,23 +1665,41 @@ pub async fn start_core_inner(
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
 
-    let mut lock = match lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED) {
-        Ok(l) => l,
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(e);
-        }
-    };
-    lock.set_process(Some(child));
-    lock.set_last_secret(resolved_secret.clone());
-    lock.set_last_config_path(active_config_name.clone());
-    lock.set_last_custom_args(Some(safe_custom_args));
-    lock.set_last_port(Some(port));
-    lock.set_last_proxy_port(Some(proxy_port));
-    lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
-    lock.set_started_at(Some(started_at));
-    drop(lock);
+    {
+        let mut lock = match lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED) {
+            Ok(l) => l,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
+        };
+        lock.set_process(Some(child));
+        lock.set_last_secret(resolved_secret.clone());
+        lock.set_last_config_path(active_config_name.clone());
+        lock.set_last_custom_args(Some(safe_custom_args));
+        lock.set_last_port(Some(port));
+        lock.set_last_proxy_port(Some(proxy_port));
+        lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
+        lock.set_started_at(Some(started_at));
+    }
+    // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
+
+    // Notify the network coordinator that a fresh core instance was started.
+    // The new process has no rules applied, so the coordinator's applied_state
+    // is now stale and must be re-evaluated.
+    if let Some(coordinator) =
+        app.try_state::<crate::network_coordinator::NetworkCoordinatorHandle>()
+    {
+        // Manual is the only reason that clears applied_state — it must
+        // not be silently dropped by a full channel.  Bound the wait so
+        // a stalled coordinator actor cannot block core startup.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            coordinator.notify(crate::network_coordinator::NetworkChangeReason::Manual),
+        )
+        .await;
+    }
 
     Ok(CoreStartResult {
         secret: resolved_secret,
