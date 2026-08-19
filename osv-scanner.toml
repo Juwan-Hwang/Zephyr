@@ -113,3 +113,10 @@ ignoreUntil = 2027-12-31
 reason = "rand 0.8 unsound; transitive via tauri ecosystem, our code pins rand 0.10.1"
 
 # RUSTSEC-2026-0098 / RUSTSEC-2026-0099: RESOLVED — rustls-webpki 0.103.13 (>=0.103.12)
+
+# ── Rust: upstream-blocked vulnerability fixes (transitive deps) ──
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0258"
+ignoreUntil = 2027-12-31
+reason = "h2 unbounded empty DATA frames; transitive via hyper/h2 (Tauri reqwest stack), upgrade blocked"
