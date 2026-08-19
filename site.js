@@ -53,9 +53,6 @@
         'install.linux.snap.desc': '严格沙箱权限隔离，全 Linux 发行版通用运行。',
         'install.linux.nix.sub': '声明式极客包管理',
         'install.linux.nix.desc': '纯函数式环境，支持跨 Linux 与 macOS 无依赖污染运行。',
-        'install.linux.void.sub': '独立极客系统官方收录',
-        'install.linux.void.desc': '轻量 runit 极速系统原生适配，零额外运行时负担。',
-
         // Dropdown Groups
         'dropdown.group.windows': 'Windows',
         'dropdown.group.macos': 'macOS',
@@ -255,9 +252,6 @@
         'install.linux.snap.desc': 'Strict sandbox permission isolation with universal Linux compatibility.',
         'install.linux.nix.sub': 'Declarative Package Manager',
         'install.linux.nix.desc': 'Purely functional ecosystem with zero dependency pollution across Linux and macOS.',
-        'install.linux.void.sub': 'Void Linux Official Repo',
-        'install.linux.void.desc': 'Native XBPS template for lightweight, blazing-fast runit system.',
-
         // Dropdown Groups
         'dropdown.group.windows': 'Windows',
         'dropdown.group.macos': 'macOS',
