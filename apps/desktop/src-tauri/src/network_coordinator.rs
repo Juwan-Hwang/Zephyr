@@ -1,0 +1,54 @@
+//! Network change coordinator and state management.
+
+#![allow(clippy::needless_pass_by_value)]
+
+pub mod coordinator;
+pub mod detector;
+pub mod platform;
+pub mod types;
+
+#[cfg(test)]
+mod tests;
+
+pub use coordinator::{start_coordinator, NetworkCoordinatorHandle};
+pub use detector::{
+    detect_network_state, detect_network_state_uncached, detect_ssid, invalidate_ssid_cache,
+};
+pub use types::{
+    CoordinatorMetrics, CoreApplyResult, InterfaceType, NetworkChangeReason, NetworkState,
+};
+
+use tauri::{AppHandle, Manager as _};
+
+/// Tauri command: Query the current network connectivity snapshot.
+#[tauri::command]
+pub fn get_network_state(app: AppHandle) -> Result<NetworkState, String> {
+    if let Some(coordinator) = app.try_state::<NetworkCoordinatorHandle>() {
+        Ok(coordinator.get_current_state())
+    } else {
+        Ok(detect_network_state())
+    }
+}
+
+/// Tauri command: Trigger a manual network change re-evaluation (e.g. from frontend online event or resume).
+#[tauri::command]
+pub async fn notify_network_change(app: AppHandle, source: Option<String>) -> Result<(), String> {
+    if let Some(coordinator) = app.try_state::<NetworkCoordinatorHandle>() {
+        /// Maximum length of a caller-supplied source string to prevent unbounded log writes.
+        const MAX_SOURCE_LEN: usize = 64;
+        let reason = match source.as_deref() {
+            Some("browser_online" | "online") => NetworkChangeReason::OnlineEvent,
+            Some("resume" | "wake") => NetworkChangeReason::Resume,
+            Some("manual") | None => NetworkChangeReason::Manual,
+            Some(other) => {
+                let mut end = other.len().min(MAX_SOURCE_LEN);
+                while !other.is_char_boundary(end) {
+                    end -= 1;
+                }
+                NetworkChangeReason::NativeEvent(other[..end].to_owned())
+            }
+        };
+        coordinator.notify(reason).await;
+    }
+    Ok(())
+}

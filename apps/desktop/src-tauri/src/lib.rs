@@ -21,6 +21,7 @@ pub mod core_manager;
 pub mod deep_link;
 pub mod global_shortcut;
 pub mod minisign_verify;
+pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
 pub mod sys_proxy;
@@ -1484,6 +1485,10 @@ pub fn run() {
             let scheduler_state = start_scheduler(app.handle().clone());
             app.manage(scheduler_state);
 
+            // Start Network Change Coordinator (SSID/interface monitoring & single-flight auto-apply)
+            let coordinator_handle = network_coordinator::start_coordinator(app.handle());
+            app.manage(coordinator_handle);
+
             // Init Tray using the new tray module
             init_tray(app.handle())?;
 
@@ -1784,6 +1789,9 @@ write_frontend_log,
             prism::script_revoke_plugin,
             prism::script_check_plugin_permission,
             prism::script_is_sandbox_safe,
+            // Network Coordinator commands
+            network_coordinator::get_network_state,
+            network_coordinator::notify_network_change,
         ]);
 
     #[allow(clippy::expect_used)]
@@ -1872,6 +1880,13 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         SYS_RESUMED_HEALTH_CHECK,
         "System resumed from sleep — checking core health"
     );
+
+    // Notify Network Change Coordinator that system woke from sleep
+    if let Some(coordinator) = app.try_state::<network_coordinator::NetworkCoordinatorHandle>() {
+        coordinator
+            .notify(network_coordinator::NetworkChangeReason::Resume)
+            .await;
+    }
 
     // Read the last-known core port + config from MihomoState.
     let (port, config_path, custom_args) = {

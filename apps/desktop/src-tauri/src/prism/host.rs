@@ -12,158 +12,60 @@ use zephyr_core::config::sanitizer::validate_path_within_dir;
 use super::prism_data_dir;
 use super::types::sanitize_filename;
 
-// ── WiFi SSID detection (for `__when__.ssid` condition) ──────────────────
+// ── Thread-confined HTTP status bridge for ext.apply() ───────────────────
+// (WiFi SSID detection now lives in network_coordinator)
 
-/// SSID cache TTL — avoids spawning a subprocess on every patch compilation.
-const SSID_CACHE_TTL_SECS: u64 = 5;
+use std::cell::Cell;
 
-/// Cached SSID result (including `None`) with the instant it was observed.
-/// Caching `None` avoids re-spawning subprocesses when `WiFi` is disconnected.
-static SSID_CACHE: std::sync::Mutex<Option<(Option<String>, std::time::Instant)>> =
-    std::sync::Mutex::new(None);
+thread_local! {
+    static CURRENT_APPLY_HTTP_STATUS: Cell<Option<u16>> = const { Cell::new(None) };
+}
 
-/// Detect the current `WiFi` SSID via platform-specific commands.
+pub(crate) fn set_current_apply_http_status(status: Option<u16>) {
+    CURRENT_APPLY_HTTP_STATUS.with(|c| c.set(status));
+}
+
+#[must_use]
+pub(crate) fn take_current_apply_http_status() -> Option<u16> {
+    CURRENT_APPLY_HTTP_STATUS.with(Cell::take)
+}
+
+/// RAII Scope Guard for thread-confined HTTP status bridge during `ext.apply()`.
 ///
-/// Results are cached for `SSID_CACHE_TTL_SECS` to avoid excessive subprocess
-/// spawning during frequent recompilations (e.g. rapid rule edits).
-fn detect_ssid() -> Option<String> {
-    // Fast path: return cached value if still fresh.
-    if let Ok(cache) = SSID_CACHE.lock() {
-        if let Some((cached, instant)) = cache.as_ref() {
-            if instant.elapsed().as_secs() < SSID_CACHE_TTL_SECS {
-                return cached.clone();
-            }
-        }
-    }
-
-    let ssid = detect_ssid_uncached();
-
-    // Update cache (best-effort; lock failure is non-fatal).
-    if let Ok(mut cache) = SSID_CACHE.lock() {
-        *cache = Some((ssid.clone(), std::time::Instant::now()));
-    }
-
-    ssid
+/// ### Hard Architectural Invariants:
+/// 1. **Same-Thread Synchronous Execution**: `clash_prism_extension::Apply` and
+///    `ZephyrPrismHost::apply_config` MUST execute synchronously on the exact same OS thread
+///    as `HttpStatusGuard::enter()`. The thread-local bridge assumes no internal thread hopping
+///    occurs inside `ext.apply()`.
+/// 2. **Single-Flight Concurrency**: Mihomo `PUT /configs` is serialized by the Coordinator's
+///    single-flight state machine, preventing concurrent overlapping rule applications.
+/// 3. **Guaranteed RAII Cleanup**: Whether `ext.apply()` completes normally, returns `Err(?)`
+///    via early return, or unwinds, `Drop` unconditionally clears the thread-local storage,
+///    preventing Tokio worker thread reuse pollution.
+pub(crate) struct HttpStatusGuard {
+    taken: bool,
 }
 
-/// Platform-specific SSID detection without caching.
-#[cfg(target_os = "windows")]
-fn detect_ssid_uncached() -> Option<String> {
-    use std::os::windows::process::CommandExt as _;
-    let output = std::process::Command::new("netsh")
-        .args(["wlan", "show", "interfaces"])
-        .creation_flags(crate::core_manager::CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+impl HttpStatusGuard {
+    #[must_use]
+    pub fn enter() -> Self {
+        CURRENT_APPLY_HTTP_STATUS.with(|c| c.set(None));
+        Self { taken: false }
     }
-    // Parse: "    SSID                   : MyWiFi"
-    // Skip:  "    BSSID                  : aa:bb:cc:dd:ee:ff"
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("SSID") && !line.starts_with("BSSID"))
-        .and_then(|line| line.split_once(':').map(|(_, v)| v.trim().to_owned()))
-        .filter(|s| !s.is_empty())
+
+    #[must_use]
+    pub fn take(mut self) -> Option<u16> {
+        self.taken = true;
+        take_current_apply_http_status()
+    }
 }
 
-/// Platform-specific SSID detection without caching.
-#[cfg(target_os = "macos")]
-fn detect_ssid_uncached() -> Option<String> {
-    // Resolve the Wi-Fi interface name (not always en0).
-    let iface = detect_macos_wifi_iface().unwrap_or_else(|| "en0".to_string());
-    let output = std::process::Command::new("networksetup")
-        .args(["-getairportnetwork", &iface])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    // Output: "Current Wi-Fi Network: MyWiFi"
-    String::from_utf8_lossy(&output.stdout)
-        .strip_prefix("Current Wi-Fi Network: ")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-}
-
-/// Find the macOS Wi-Fi interface via `networksetup -listallhardwareports`.
-#[cfg(target_os = "macos")]
-fn detect_macos_wifi_iface() -> Option<String> {
-    let output = std::process::Command::new("networksetup")
-        .args(["-listallhardwareports"])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut found_wifi = false;
-    for line in text.lines().map(str::trim) {
-        if found_wifi {
-            // The line after "Wi-Fi" contains "Device: enX"
-            if let Some(dev) = line.strip_prefix("Device: ") {
-                return Some(dev.trim().to_owned());
-            }
-        }
-        if line.starts_with("Hardware Port:") && line.contains("Wi-Fi") {
-            found_wifi = true;
+impl Drop for HttpStatusGuard {
+    fn drop(&mut self) {
+        if !self.taken {
+            let _ = take_current_apply_http_status();
         }
     }
-    None
-}
-
-/// Platform-specific SSID detection without caching.
-#[cfg(target_os = "linux")]
-fn detect_ssid_uncached() -> Option<String> {
-    // Try nmcli first (most common on modern Linux desktops).
-    // `-t -f active,ssid` produces terse output: "yes:MyWiFi\n:OtherNet"
-    // `-e no` disables escaping so SSIDs containing `:` or `\` are preserved.
-    if let Ok(output) = std::process::Command::new("nmcli")
-        .args(["-t", "-e", "no", "-f", "active,ssid", "dev", "wifi"])
-        .output()
-    {
-        if output.status.success() {
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                // Active row starts with "yes:" — split on first ':' to get SSID
-                let (active, ssid) = line.split_once(':').unwrap_or((line, ""));
-                if active.trim() == "yes" {
-                    let ssid_trimmed = ssid.trim();
-                    if !ssid_trimmed.is_empty() {
-                        return Some(ssid_trimmed.to_owned());
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: iwconfig (prints to stdout on some systems, stderr on others).
-    if let Ok(output) = std::process::Command::new("iwconfig").output() {
-        let combined = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        for line in combined.lines() {
-            // Parse: '    ESSID:"MyWiFi"'
-            if let Some(rest) = line.split("ESSID:").nth(1) {
-                let trimmed = rest.trim();
-                if let Some(stripped) = trimmed.strip_prefix('"') {
-                    if let Some(end) = stripped.find('"') {
-                        let ssid = &stripped[..end];
-                        if !ssid.is_empty() {
-                            return Some(ssid.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Platform-specific SSID detection without caching.
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn detect_ssid_uncached() -> Option<String> {
-    None
 }
 
 pub(crate) struct ZephyrPrismHost {
@@ -177,13 +79,13 @@ impl ZephyrPrismHost {
 
     /// Synchronous HTTP PUT to localhost --- no tokio dependency.
     /// Used by `apply_config` which is a sync trait method callable from any thread.
-    fn http_put(url: &str, body: &str, bearer: &str) -> bool {
+    fn http_put(url: &str, body: &str, bearer: &str) -> Option<u16> {
         use std::io::{Read as _, Write as _};
         use std::net::TcpStream;
 
         let parsed = match url::Url::parse(url) {
             Ok(u) => u,
-            Err(_) => return false,
+            Err(_) => return None,
         };
 
         let host = parsed.host_str().unwrap_or("127.0.0.1");
@@ -198,7 +100,7 @@ impl ZephyrPrismHost {
             std::time::Duration::from_secs(2),
         ) {
             Ok(s) => s,
-            Err(_) => return false,
+            Err(_) => return None,
         };
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -226,7 +128,7 @@ impl ZephyrPrismHost {
         );
 
         if stream.write_all(request.as_bytes()).is_err() {
-            return false;
+            return None;
         }
 
         // Read response status line (first line only)
@@ -243,12 +145,18 @@ impl ZephyrPrismHost {
             }
         }
 
-        // Check for HTTP 2xx status (200-299). Require 3 ASCII digits to avoid
-        // treating truncated or malformed responses as success.
-        response.starts_with(b"HTTP/")
-            && response
-                .get(9..12)
-                .is_some_and(|s| s.first() == Some(&b'2') && s.iter().all(u8::is_ascii_digit))
+        // Parse 3-digit HTTP status code (e.g. "HTTP/1.1 204 No Content" -> 204)
+        if response.starts_with(b"HTTP/") {
+            if let Some(status_bytes) = response.get(9..12) {
+                if status_bytes.iter().all(u8::is_ascii_digit) {
+                    if let Ok(code_str) = std::str::from_utf8(status_bytes) {
+                        return code_str.parse::<u16>().ok();
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -286,15 +194,22 @@ impl PrismHost for ZephyrPrismHost {
         // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
-        let hot_reload_success = Self::http_put(&url, &body, &secret);
+        let http_status_code = Self::http_put(&url, &body, &secret);
+        set_current_apply_http_status(http_status_code);
+        let hot_reload_success = http_status_code.is_some_and(|code| (200..=299).contains(&code));
 
         Ok(ApplyStatus {
             files_saved: true,
             hot_reload_success,
-            message: if hot_reload_success {
-                "Config applied and reloaded".to_owned()
-            } else {
-                "Config saved. Restart core to apply.".to_owned()
+            message: match http_status_code {
+                Some(code) if (200..=299).contains(&code) => {
+                    format!("Config applied and reloaded (HTTP {code})")
+                }
+                Some(code) => {
+                    format!("Core rejected reload with HTTP {code}. Restart core to apply.")
+                }
+                None => "Config saved. Failed to connect to core REST API. Restart core to apply."
+                    .to_owned(),
             },
             restarted: false,
         })
@@ -459,6 +374,6 @@ impl PrismHost for ZephyrPrismHost {
     }
 
     fn get_ssid(&self) -> Option<String> {
-        detect_ssid()
+        crate::network_coordinator::detect_ssid()
     }
 }

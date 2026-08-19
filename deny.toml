@@ -27,6 +27,13 @@ ignore = [
   # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
   # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
   "RUSTSEC-2024-0429",
+  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
+  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
+  # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
+  "RUSTSEC-2026-0258",
+  # event-listener unsound StackSlot (RUSTSEC-2026-0221)
+  # Transitive via async-channel (Tauri); fix requires event-listener >=5.5.0
+  "RUSTSEC-2026-0221",
   # Unmaintained-only advisories (bincode, proc-macro-error, paste, unic-*)
   # are NOT listed here — `unmaintained = "workspace"` below handles them:
   # transitive unmaintained deps are allowed (non-failing) automatically.
@@ -54,6 +61,15 @@ ignore = [
 #
 # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
 #   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)
+#
+# RUSTSEC-2026-0258: h2 unbounded empty DATA frames
+#   Transitive via hyper/h2 (Tauri's reqwest stack); upgrade to h2 >=0.4.16 blocked
+#   by current hyper/reqwest versions. Tracked until upstream stack updates.
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
+#
+# RUSTSEC-2026-0221: event-listener unsound StackSlot (Send/Soundness)
+#   Transitive via async-channel (Tauri); fix requires event-listener >=5.5.0
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0221.html
 #
 # gtk-rs (0411-0420) and glib (0429) are intentionally suppressed from cargo-deny
 # output.  They are visible only in this config file, not in tool reports.

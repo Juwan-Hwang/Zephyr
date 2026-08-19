@@ -27,7 +27,7 @@ use crate::core_manager::ensure_app_storage;
 
 mod commands_core;
 mod failover_commands;
-mod host;
+pub(crate) mod host;
 mod kv_commands;
 pub mod overrides;
 pub mod pipeline;
@@ -186,6 +186,60 @@ impl PrismState {
         let result = f(ext);
         drop(lock);
         result
+    }
+
+    /// Internal apply method executed on a blocking thread to avoid starving async command threads.
+    pub async fn apply_internal(
+        &self,
+        options: Option<clash_prism_extension::ApplyOptions>,
+    ) -> Result<
+        (
+            crate::network_coordinator::CoreApplyResult,
+            serde_json::Value,
+        ),
+        String,
+    > {
+        let opts = options.unwrap_or_default();
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            // RAII Scope Guard: Guarantees TLS is cleared before execution and on early exit/Drop
+            let guard = host::HttpStatusGuard::enter();
+
+            let mut lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
+            let ext = lock
+                .extension
+                .as_ref()
+                .ok_or_else(|| "Prism not initialized".to_owned())?;
+            let result = ext.apply(opts)?;
+            if let Ok(val) = serde_json::to_value(&result.trace) {
+                lock.last_trace = val.as_array().cloned().unwrap_or_default();
+            }
+            drop(lock);
+
+            // Extract strictly thread-confined transport status code via RAII guard
+            let http_status = guard.take();
+            let mut val =
+                serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))?;
+            let hot_reload_success =
+                crate::network_coordinator::coordinator::verify_hot_reload_ack(&val);
+
+            let core_result = crate::network_coordinator::CoreApplyResult {
+                http_status,
+                hot_reload_success,
+            };
+
+            if let Some(status_obj) = val
+                .get_mut("status")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                if let Some(code) = http_status {
+                    status_obj.insert("http_status".to_owned(), serde_json::json!(code));
+                }
+            }
+            Ok((core_result, val))
+        })
+        .await
+        .map_err(|e| format!("Task join failed: {e}"))?
     }
 
     pub(crate) fn get_prism_workspace(&self) -> Result<std::path::PathBuf, String> {
