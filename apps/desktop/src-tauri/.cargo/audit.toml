@@ -31,4 +31,10 @@ ignore = [
   "RUSTSEC-2025-0081",  # unic-char-property unmaintained
   "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
   "RUSTSEC-2025-0100",  # unic-ucd-ident unmaintained
+  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
+  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
+  "RUSTSEC-2026-0258",
+  # event-listener unsound StackSlot (RUSTSEC-2026-0221)
+  # Transitive via async-channel (Tauri); fix requires event-listener >=5.4.2
+  "RUSTSEC-2026-0221",
 ]
