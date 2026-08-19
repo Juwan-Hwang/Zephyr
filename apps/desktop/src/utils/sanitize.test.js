@@ -37,4 +37,39 @@ describe('sanitizeHtml', () => {
     });
     it('handles empty string', () => expect(sanitizeHtml('')).toBe(''));
     it('handles plain text', () => expect(sanitizeHtml('hello world')).toBe('hello world'));
+    it('preserves svg viewBox and button title attributes', () => {
+        const svgHtml = '<button type="button" title="Paste" data-i18n-title="paste"><svg viewBox="0 0 24 24" fill="none"><path d="M16 4h2"></path></svg></button>';
+        const sanitized = sanitizeHtml(svgHtml);
+        expect(sanitized).toContain('title="Paste"');
+        expect(sanitized).toContain('data-i18n-title="paste"');
+        expect(sanitized).toContain('viewBox="0 0 24 24"');
+    });
+    it('safely strips attributes from allowed tags without configured attribute whitelist', () => {
+        const input = '<em class="highlight" id="test-em" onclick="alert(1)">emphasized</em> and <strong style="color:red">strong</strong>';
+        const sanitized = sanitizeHtml(input);
+        expect(sanitized).toBe('<em>emphasized</em> and <strong>strong</strong>');
+    });
+    it('normalizes caller-supplied allowedAttributes keys to lowercase', () => {
+        const sanitized = sanitizeHtml('<SPAN TITLE="hi" class="x">t</SPAN>', {
+            allowedTags: ['span'],
+            allowedAttributes: { SPAN: ['TITLE'] },
+        });
+        expect(sanitized).toContain('title="hi"');
+        expect(sanitized).not.toContain('class');
+    });
+    it('forces rel="noopener noreferrer" on anchors with target="_blank"', () => {
+        const sanitized = sanitizeHtml('<a href="https://example.com" target="_blank">link</a>');
+        expect(sanitized).toContain('rel="noopener noreferrer"');
+        expect(sanitized).toContain('target="_blank"');
+    });
+    it('overwrites existing rel with noopener noreferrer when target is present', () => {
+        const sanitized = sanitizeHtml('<a href="https://example.com" target="_blank" rel="opener">link</a>');
+        expect(sanitized).toContain('rel="noopener noreferrer"');
+        // The old rel="opener" should be replaced — verify no standalone rel="opener" remains
+        expect(sanitized).not.toMatch(/rel="opener"/);
+    });
+    it('does not add rel when anchor has no target attribute', () => {
+        const sanitized = sanitizeHtml('<a href="https://example.com">link</a>');
+        expect(sanitized).not.toContain('rel=');
+    });
 });
