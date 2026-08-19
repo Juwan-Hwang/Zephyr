@@ -7,9 +7,10 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows
 [advisories]
 # cargo-deny does not support ignoreUntil/expiry fields (unlike osv-scanner.toml).
 # Review-by dates below mirror the OSV ignoreUntil = 2027-12-31 for periodic
-# re-evaluation.  Ignored advisories are fully suppressed from cargo-deny
-# output — they are NOT surfaced as warnings.  See osv-scanner.toml for the
-# time-bounded suppressions of the same advisory IDs.
+# re-evaluation.  Ignored advisories are NOT fully suppressed from cargo-deny
+# output — cargo-deny still emits an advisory-ignored note when encountering
+# them.  See osv-scanner.toml for the time-bounded suppressions of the same
+# advisory IDs.
 # Review by: 2027-12-31
 ignore = [
   "RUSTSEC-2026-0097",
@@ -27,6 +28,10 @@ ignore = [
   # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
   # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
   "RUSTSEC-2024-0429",
+  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
+  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
+  # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
+  "RUSTSEC-2026-0258",
   # Unmaintained-only advisories (bincode, proc-macro-error, paste, unic-*)
   # are NOT listed here — `unmaintained = "workspace"` below handles them:
   # transitive unmaintained deps are allowed (non-failing) automatically.
@@ -55,8 +60,18 @@ ignore = [
 # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
 #   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)
 #
-# gtk-rs (0411-0420) and glib (0429) are intentionally suppressed from cargo-deny
-# output.  They are visible only in this config file, not in tool reports.
+# RUSTSEC-2026-0258: h2 unbounded empty DATA frames
+#   Transitive via hyper/h2 (Tauri's reqwest stack); upgrade to h2 >=0.4.16 blocked
+#   by current hyper/reqwest versions. Tracked until upstream stack updates.
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
+#
+# RUSTSEC-2026-0221: event-listener unsound StackSlot (Send/Soundness)
+#   RESOLVED: upgraded event-listener to 5.4.2 (fixed version) in both lockfiles.
+#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0221.html
+#
+# gtk-rs (0411-0420) and glib (0429) appear in cargo-deny output as
+# advisory-ignored notes, but do not trigger failures.  They are fully
+# suppressed in osv-scanner.toml (ignoredVulns with ignoreUntil dates).
 # Re-evaluate by 2027-12-31 (aligned with osv-scanner.toml ignoreUntil dates).
 # Only fail on actual security vulnerabilities, warn for unmaintained crates
 unmaintained = "workspace"
