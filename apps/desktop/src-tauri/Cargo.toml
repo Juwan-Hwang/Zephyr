@@ -109,6 +109,7 @@ arboard = { version = "3.3", features = ["wayland-data-control"] }
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 mockall = "0.15"
 tempfile = "3.14"
 insta = { version = "1", features = ["filters"] }
