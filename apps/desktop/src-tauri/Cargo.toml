@@ -47,7 +47,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 regex = "1"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 aes-gcm = "0.11"
@@ -74,6 +74,9 @@ libc = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_IO",
     "Win32_System_Registry",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinInet",
@@ -109,6 +112,7 @@ arboard = { version = "3.3", features = ["wayland-data-control"] }
 # Note: System proxy uses gsettings for GNOME and kwriteconfig5/6 for KDE
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 mockall = "0.15"
 tempfile = "3.14"
 insta = { version = "1", features = ["filters"] }

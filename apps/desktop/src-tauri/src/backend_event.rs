@@ -318,6 +318,12 @@ pub mod codes {
     pub const SYS_RESUMED_CORE_RESTART: u16 = 6020;
     /// System resumed from sleep — core health check passed, no action needed.
     pub const SYS_RESUMED_CORE_HEALTHY: u16 = 6021;
+    /// Network state change detected and debounce initiated.
+    pub const SYS_NETWORK_STATE_CHANGED: u16 = 6022;
+    /// Prism rules re-applied automatically after network change.
+    pub const SYS_NETWORK_COORDINATOR_APPLIED: u16 = 6023;
+    /// Error during network coordinator auto-apply.
+    pub const SYS_NETWORK_COORDINATOR_ERROR: u16 = 6024;
 
     // Updater: 7000-7999
     pub const UPDATE_CHECK_FAILED: u16 = 7001;
