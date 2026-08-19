@@ -7,7 +7,10 @@
  * `close_requested` or `window.unload`), call `runCleanup()` to drain
  * all registered functions concurrently.
  *
- * ES module with a singleton registry.
+ * If `runCleanup()` has already been called, any subsequently registered
+ * cleanup function is invoked immediately rather than silently dropped.
+ * This prevents late-arriving listeners (e.g. async `listen()` promises
+ * that resolve after `beforeunload`) from leaking backend subscriptions.
  *
  * @module utils/cleanup-registry
  */
@@ -15,12 +18,18 @@
 /** @private @type {Set<Function>} */
 const registry = new Set();
 
+/** @private @type {boolean} Whether `runCleanup()` has already been called. */
+let cleanedUp = false;
+
+/** @private @type {Promise<void> | null} In-flight cleanup promise for concurrent callers. */
+let cleanupPromise = null;
+
 /**
  * Register an async cleanup function.
  *
  * The function will be invoked (with no arguments) when `runCleanup()` is
- * called. If the same function reference is registered multiple times it
- * is only stored once (Set semantics).
+ * called. If `runCleanup()` has already been called, `fn` is invoked
+ * immediately (best-effort, errors swallowed).
  *
  * @param {() => void | Promise<void>} fn - Cleanup callback (sync or async).
  * @returns {() => void} Unregister function — call to remove `fn` from the registry.
@@ -34,6 +43,14 @@ const registry = new Set();
  * unsub();
  */
 export function registerCleanup(fn) {
+    if (cleanedUp) {
+        // Cleanup already ran — invoke immediately so the resource is not leaked.
+        // Catch both sync throws and async rejections (best-effort).
+        try {
+            Promise.resolve(fn()).catch(() => {});
+        } catch { /* best-effort */ }
+        return () => {};
+    }
     registry.add(fn);
     return () => { registry.delete(fn); };
 }
@@ -45,6 +62,9 @@ export function registerCleanup(fn) {
  * prevent the others from running. Errors are silently swallowed to
  * ensure best-effort cleanup.
  *
+ * After this call, any future `registerCleanup()` call will invoke its
+ * callback immediately.
+ *
  * @returns {Promise<void>} Resolves when all cleanup functions have settled.
  *
  * @example
@@ -52,13 +72,46 @@ export function registerCleanup(fn) {
  *     runCleanup();
  * });
  */
-export async function runCleanup() {
+export function runCleanup() {
+    if (cleanedUp) return cleanupPromise ?? Promise.resolve();
+    cleanedUp = true;
     const fns = [...registry];
-    await Promise.all(fns.map(async (fn) => {
-        try {
-            await fn();
-        } catch {
-            // Best-effort — do not let one failure block others.
-        }
-    }));
+    registry.clear();
+    // Create and assign the shared promise BEFORE invoking any callback.
+    // A callback may synchronously call runCleanup() — at that point
+    // cleanedUp is true and cleanupPromise must already be set so the
+    // nested call receives the same in-flight promise.
+    //
+    // Note: a callback that *awaits* runCleanup() will deadlock because
+    // it waits for cleanupPromise which in turn waits for the callback
+    // via Promise.all. This is an intentional limitation — callbacks
+    // should not recursively await their own cleanup.
+    let resolvePromise;
+    cleanupPromise = new Promise((resolve) => { resolvePromise = resolve; });
+    (async () => {
+        await Promise.all(fns.map(async (fn) => {
+            try {
+                await fn();
+            } catch {
+                // Best-effort — do not let one failure block others.
+            }
+        }));
+        resolvePromise();
+    })();
+    return cleanupPromise;
+}
+
+/**
+ * Reset the cleanup state back to its initial (pre-run) configuration.
+ *
+ * This is intended **only for tests** that share the module instance and
+ * need to verify `registerCleanup` / `runCleanup` behaviour in isolation.
+ * Calling it in production would mask leaked listeners.
+ *
+ * @internal
+ */
+export function _resetCleanupStateForTests() {
+    registry.clear();
+    cleanedUp = false;
+    cleanupPromise = null;
 }

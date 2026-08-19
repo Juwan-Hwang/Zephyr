@@ -332,6 +332,15 @@ export const NETWORK_OPTIM = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Network Coordinator
+// ---------------------------------------------------------------------------
+
+export const NETWORK_COORDINATOR = Object.freeze({
+    GET_NETWORK_STATE: "get_network_state",
+    NOTIFY_NETWORK_CHANGE: "notify_network_change",
+});
+
+// ---------------------------------------------------------------------------
 // Convenience: all command names in one flat object
 // ---------------------------------------------------------------------------
 
@@ -358,9 +367,11 @@ export const COMMANDS = Object.freeze({
     ...TRACE_ADVANCED,
     ...OVERRIDE,
     ...NETWORK_OPTIM,
+    ...NETWORK_COORDINATOR,
     // Preserve namespace access for code that uses COMMANDS.NAMESPACE.X
     CORE, CONFIG_FILES, SYS_PROXY, TUN, TRAY,
     UPDATER, SHORTCUTS, SCHEDULER, SETTINGS, MISC, CRYPTO,
     SUBSCRIPTION, PRISM, RULE, PLUGIN, SCRIPT, SMART,
     FAILOVER, KV, TRACE_ADVANCED, OVERRIDE, NETWORK_OPTIM,
+    NETWORK_COORDINATOR,
 });
