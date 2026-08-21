@@ -9,7 +9,7 @@ Source0:        https://github.com/Juwan-Hwang/Zephyr/releases/download/v%{versi
 BuildArch:      x86_64
 Requires:       gtk3
 Requires:       webkit2gtk4.1
-Requires:       libayatana-appindicator
+Requires:       libayatana-appindicator-gtk3
 
 %description
 Zephyr is a state-of-the-art cross-platform GUI client for Mihomo, combining modern desktop aesthetics, high performance with Rust and Tauri v2, and a 13-layer security defense architecture.
