@@ -47,4 +47,7 @@ ignore = [
   "RUSTSEC-2025-0081",
   "RUSTSEC-2025-0098",
   "RUSTSEC-2025-0100",
+  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
+  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
+  "RUSTSEC-2026-0258",
 ]
