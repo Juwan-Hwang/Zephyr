@@ -1308,6 +1308,30 @@ pub fn run() {
                 std::env::set_var("GDK_BACKEND", "wayland,x11");
             }
         }
+
+        // WebKitGTK helper process discovery (WebKitNetworkProcess,
+        // WebKitWebProcess, WebKitGPUProcess) is handled at packaging time,
+        // not at runtime.  Four load-bearing steps, none removable:
+        //
+        //   1. Bundle helpers inside AppDir at PKGLIBEXECDIR path
+        //      (scripts/linuxdeploy-plugin-gtk.sh)
+        //   2. Binary-patch libwebkit2gtk-4.1.so: absolute PKGLIBEXECDIR →
+        //      equal-length relative path (././/lib/...)
+        //   3. An apprun-hooks script enforces cd "$APPDIR/usr" before
+        //      AppRun.wrapped executes (linuxdeploy's shell wrapper does
+        //      not guarantee chdir on its own)
+        //   4. Relative path resolves from cwd=$APPDIR/usr to
+        //      $APPDIR/usr/lib/.../webkit2gtk-4.1/ inside the bundle
+        //
+        // The patched path is intentionally relative to the cwd established
+        // by the bundled AppRun, NOT to $APPDIR or any generic mount root.
+        //
+        // - deb/rpm: the distro package manager installs helpers at the native
+        //   PKGLIBEXECDIR, which is correct by construction.
+        //
+        // WEBKIT_EXEC_PATH is NOT set because it is gated behind
+        // ENABLE(DEVELOPER_MODE) in ProcessExecutablePathGLib.cpp and has no
+        // effect on release builds (which Ubuntu/Fedora packages use).
     }
 
     // Setup panic hook to cleanup child processes
