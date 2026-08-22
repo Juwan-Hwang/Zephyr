@@ -25,6 +25,9 @@
 - **AUR Auto-Update** — Automatic Arch User Repository package update on release publish
 - **Connection Management** — Real-time connection list with details and close capability
 - **Traffic Statistics** — Real-time upload/download speed and historical trends
+- **Network Change Coordinator** — Auto-detect Wi-Fi/network transitions and apply correct Prism config without user interaction; Windows `NotifyAddrChange` + cross-platform fallback polling; 2s debounce; single-flight state machine; fail-closed protocol verification (HTTP 2xx + ACK dual check); thread-confined RAII `HttpStatusGuard`
+- **Inline Paste Buttons** — One-click clipboard paste buttons on input fields and textareas; single-line/multi-line normalization; XSS-safe via `escapeAttr`/`escapeHtml`
+- **Console Width Hint** — Window width check on console dashboard switch, notifies if viewport < 1080px breakpoint may cause layout collapse
 - **Portable Mode** — Extract-and-run, data stored in program directory, `.portable` marker file; ARM64 portable for Windows and Linux; portable exe reuses SignPath-signed Full build binary
 - **Lightweight Mode** — Destroy WebView on window close to free memory, keep only system tray; auto-disable when "minimize to tray" is off
 - **Silent Start** — Launch with main window hidden, only tray icon visible; toggle via Settings → General
@@ -50,7 +53,7 @@
 - **Rule Library** — CRUD for `.prism.yaml` rule files, groups, import (text/file/URL), auto-apply, file watching
 - **Smart Proxy Selector** — EMA scoring (latency/success rate/stability), adaptive scheduler, auto-select best node, observed group/node tracking with special group exclusion
 - **Failover** — Automatic node switching on failure, configurable thresholds, cooldown, and fallback groups
-- **Script Engine** — JavaScript sandbox with 9 resource limits (time, memory, string length, loop iterations, recursion depth, etc.) and 4 permission controls (network, filesystem, child process, workers)
+- **Script Engine** — JavaScript sandbox with 9 resource limits (time, memory, string length, loop iterations, recursion depth, etc.) and 4 permission controls (network, filesystem, child process, workers); strict boundary validation on `script_set_limits` (execution time 100ms–300s, memory 1MB–512MB, loop 1K–10M, recursion 8–512); `PRISM_SANDBOX_CHANGED` (event 3007) audit logging with WARN on privilege elevation, INFO on revocation; UI fresh-state elevation confirmation, in-flight guard, and cancellation rollback
 - **Plugin System** — Discovery, loading, lifecycle hooks, fine-grained permission checks
 - **KV Store** — Persistent key-value storage (`kv_store.db`)
 - **Override System** — Prism DSL + JavaScript dual-engine config overrides, scope management (global/per-profile), drag-reorder, import/export, remote override support, failure status indicator
@@ -73,7 +76,7 @@
 - **Clippy** — 170 deny rules (workspace-level `[workspace.lints.clippy]`, 4-tier classification), including `unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`
 - **Release Hardening** — LTO, single codegen unit, strip symbols, panic=unwind (with catch_unwind guards)
 - **URL Leakage Prevention** — `get_config_url` demoted to internal function (not exposed to frontend)
-- **Backend Event System** — Structured logging with 4 levels (Fatal/Error/Warn/Info), 10 modules, 83 error codes; automatic path redaction; frontend event bus with Toast notifications for Fatal/Error
+- **Backend Event System** — Structured logging with 4 levels (Fatal/Error/Warn/Info), 10 modules, 85 error codes; automatic path redaction; frontend event bus with Toast notifications for Fatal/Error
 - **CI Security Pipeline** — 12-job security workflow: cargo-audit, cargo-deny (AGPL-3.0 deny), Clippy (170 rules), Semgrep SAST + SARIF upload, Trufflehog (SHA-pinned) + custom grep, OSSF Scorecard (SARIF + artifact), Tauri audit, build verification, macOS cross-compile check
 - **SBOM Generation** — CycloneDX format (Rust via `cargo cyclonedx` + frontend via `npm sbom`), merged via `scripts/merge-sboms.py`, published as Release asset
 - **SignPath Code Signing** — Windows Authenticode signing (NSIS + MSI + Portable exe) via SignPath Foundation, x64 + ARM64, 4-step flow with partial-signing prevention
@@ -113,7 +116,7 @@
 
 ```
 apps/desktop/src-tauri/src/
-  lib.rs                    — App entry, command registration (166 IPC), state management, rate limiting, resume handler
+  lib.rs                    — App entry, command registration (166 IPC), state management, rate limiting, resume handler, network change coordinator
   backend_event.rs          — Structured event system, 85 error codes, path redaction, frontend dispatch
   config_manager.rs         — Tauri commands for runtime config read/update (delegates logic to zephyr_core)
   core_manager.rs           — Core state management, profile file I/O, app storage helpers
@@ -122,6 +125,7 @@ apps/desktop/src-tauri/src/
   prism.rs                  — Prism Engine Tauri command layer (95 commands, thin wrappers around clash-prism crates)
   backup.rs                 — Transactional config export/import: ZIP + manifest + SHA-256 + 3-phase commit + rollback
   webview_recovery.rs       — WebView2 crash recovery: ProcessFailed → reload/recreate, heartbeat
+  network_coordinator.rs    — Network change detection and Prism config auto-application (detector + coordinator + types + tests + platform, ~2160 lines)
   minisign_verify.rs        — Minisign Ed25519 signature verification (hardcoded public key)
   sys_proxy.rs              — System proxy: Windows/macOS/Linux native, ownership guard, env var copy
   tray.rs                   — System tray management, proxy env var formatting (5 shell formats)
