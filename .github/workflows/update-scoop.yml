@@ -20,10 +20,10 @@ jobs:
           X64_ZIP_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_x64-portable.zip"
           ARM64_ZIP_URL="https://github.com/Juwan-Hwang/Zephyr/releases/download/${TAG}/Zephyr_arm64-portable.zip"
 
-          curl -sL -o win_x64.zip "$X64_ZIP_URL"
+          curl -fsSL --proto =https --proto-redir =https -o win_x64.zip "$X64_ZIP_URL"
           WIN_X64_SHA=$(sha256sum win_x64.zip | cut -d' ' -f1)
 
-          curl -sL -o win_arm64.zip "$ARM64_ZIP_URL"
+          curl -fsSL --proto =https --proto-redir =https -o win_arm64.zip "$ARM64_ZIP_URL"
           WIN_ARM64_SHA=$(sha256sum win_arm64.zip | cut -d' ' -f1)
 
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
