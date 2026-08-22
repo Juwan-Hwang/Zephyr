@@ -135,7 +135,7 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later
-          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
+          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog, pkg:githubactions/vedantmgoyal2009/winget-releaser
 
   # ============================================================
   # Job 6: PR 依赖审查（仅 PR 触发）
@@ -152,7 +152,7 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           deny-licenses: GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later
-          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
+          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog, pkg:githubactions/vedantmgoyal2009/winget-releaser
           fail-on-severity: high
 
   # ============================================================

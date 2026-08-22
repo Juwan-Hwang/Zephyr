@@ -12,10 +12,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout Zephyr
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Submit Winget Package Update
-        uses: vedantmgoyal2009/winget-releaser@v2
+        uses: vedantmgoyal2009/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         if: env.WINGET_TOKEN != ''
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN }}
