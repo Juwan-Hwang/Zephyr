@@ -33,7 +33,7 @@ jobs:
       - name: Push updated Manifest to scoop-bucket
         if: env.WIN_X64_SHA != ''
         env:
-          SCOOP_TOKEN: ${{ secrets.GH_PAT || secrets.RELEASE_TOKEN || secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+          SCOOP_TOKEN: ${{ secrets.GH_PAT || secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git clone https://x-access-token:${SCOOP_TOKEN}@github.com/Juwan-Hwang/scoop-bucket.git scoop-repo || exit 0
           cd scoop-repo
