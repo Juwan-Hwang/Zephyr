@@ -29,7 +29,7 @@
     "style-dictionary": "^5.5.2",
     "typescript": "^7.0.2",
     "unocss": "^66.8.1",
-    "vite": "8.2.2",
+"vite": "8.2.1",
     "vitest": "4.1.11",
     "@cyclonedx/cdxgen": "12.8.4"
   }
