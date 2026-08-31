@@ -189,7 +189,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Semgrep SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         if: always() && hashFiles('semgrep.sarif') != ''
         continue-on-error: true
         with:
@@ -208,7 +208,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: trufflesecurity/trufflehog@bcfcf73aaf4759d4dadc2783177c245a02792318 # v3.97.0
+      - uses: trufflesecurity/trufflehog@20652fbbdefffcdaa493a5bf57ab2ac6b1db715b # v3.97.1
         with:
           extra_args: --only-verified
           path: .
@@ -283,7 +283,7 @@ jobs:
           publish_results: false # Free tier 只有 30 天存储；我们只要 artifact。
 
       - name: Upload Scorecard SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: scorecard.sarif
 
