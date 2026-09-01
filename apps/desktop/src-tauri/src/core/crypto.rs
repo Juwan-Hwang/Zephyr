@@ -909,7 +909,8 @@ mod tests {
     #[test]
     fn test_decrypt_wrong_key_fails() {
         let key1 = random_test_key();
-        let key2 = random_test_key();
+        let mut key2 = key1;
+        key2[0] ^= 0xFF;
         let plaintext = "secret data";
         let encrypted = obfuscate_with_key(plaintext, &key1);
         let decrypted = deobfuscate_with_key(&encrypted, &key2);
@@ -919,7 +920,8 @@ mod tests {
     #[test]
     fn test_decrypt_wrong_key_returns_empty() {
         let key1 = random_test_key();
-        let key2 = random_test_key();
+        let mut key2 = key1;
+        key2[0] ^= 0xFF;
         let plaintext = "secret data";
         let encrypted = obfuscate_with_key(plaintext, &key1);
         let decrypted = deobfuscate_with_key(&encrypted, &key2);
@@ -989,13 +991,12 @@ mod tests {
 
     #[test]
     fn test_encrypt_with_derived_key_different_from_zero_key() {
-        let zero_key = [0u8; 32];
         let machine_id: String = rand::rng()
             .sample_iter(rand::distr::Alphanumeric)
             .take(16)
             .map(char::from)
             .collect();
         let derived = derive_key(&machine_id);
-        assert_ne!(zero_key, derived);
+        assert!(derived.iter().any(|&b| b != 0));
     }
 }
