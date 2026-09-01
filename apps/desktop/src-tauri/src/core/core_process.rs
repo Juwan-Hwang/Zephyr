@@ -2480,7 +2480,7 @@ mod tests {
         assert_eq!(secret.len(), 32, "secret must be exactly 32 characters");
         assert!(
             secret.chars().all(|c| c.is_ascii_alphanumeric()),
-            "secret must be alphanumeric: {secret}"
+            "secret must be alphanumeric"
         );
     }
 }
