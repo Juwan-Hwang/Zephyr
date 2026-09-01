@@ -30,6 +30,6 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "eslint": "10.9.0"
+    "eslint": "10.9.1"
   }
 }

@@ -22,14 +22,14 @@
     "@tauri-apps/cli": "2.11.4",
     "@unocss/cli": "^66.8.1",
     "@unocss/preset-wind4": "^66.8.1",
-    "eslint": "10.9.0",
+    "eslint": "10.9.1",
     "globals": "^17.11.0",
-    "happy-dom": "^20.11.6",
+    "happy-dom": "^20.11.13",
     "husky": "^9.1.7",
     "style-dictionary": "^5.5.2",
     "typescript": "^7.0.2",
     "unocss": "^66.8.1",
-"vite": "8.2.1",
+"vite": "8.2.2",
     "vitest": "4.1.11",
     "@cyclonedx/cdxgen": "12.8.4"
   }
