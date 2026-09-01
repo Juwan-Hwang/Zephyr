@@ -990,12 +990,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_with_derived_key_different_from_zero_key() {
-        let machine_id: String = rand::rng()
-            .sample_iter(rand::distr::Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-        let derived = derive_key(&machine_id);
+        let machine_id = "test-machine-id";
+        let derived = derive_key(machine_id);
         assert!(derived.iter().any(|&b| b != 0));
     }
 }
