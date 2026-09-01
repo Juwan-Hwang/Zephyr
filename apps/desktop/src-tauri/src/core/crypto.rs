@@ -765,9 +765,8 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
 pub mod test_helpers {
     use super::*;
 
-    /// Encrypt a string using AES-256-GCM with an explicit key (test-only).
-    /// This mirrors the production `obfuscate_string` but accepts a caller-supplied key
-    /// so that tests are deterministic and do not depend on machine state.
+    /// Encrypt a string with AES-256-GCM using an explicit key (test-only)
+    /// so that tests do not depend on machine state.
     #[must_use]
     pub fn obfuscate_with_key(plaintext: &str, key: &[u8]) -> String {
         use aes_gcm::{
@@ -854,10 +853,15 @@ pub mod test_helpers {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::test_helpers::*;
+    use rand::RngExt as _;
+
+    fn random_test_key() -> [u8; 32] {
+        rand::rng().random()
+    }
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let plaintext = "Hello, World!";
         let encrypted = obfuscate_with_key(plaintext, &key);
         assert_ne!(encrypted, plaintext);
@@ -867,7 +871,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_empty_string() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let encrypted = obfuscate_with_key("", &key);
         let decrypted = deobfuscate_with_key(&encrypted, &key);
         assert_eq!(decrypted, "");
@@ -875,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_long_string() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let plaintext = "a".repeat(10000);
         let encrypted = obfuscate_with_key(&plaintext, &key);
         let decrypted = deobfuscate_with_key(&encrypted, &key);
@@ -884,7 +888,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_unicode() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let plaintext =
             "\u{4f60}\u{597d}\u{4e16}\u{754c} \u{1f30d} \u{3053}\u{3093}\u{306b}\u{3061}\u{306f}";
         let encrypted = obfuscate_with_key(plaintext, &key);
@@ -894,7 +898,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_produces_different_ciphertexts() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let plaintext = "same input";
         let e1 = obfuscate_with_key(plaintext, &key);
         let e2 = obfuscate_with_key(plaintext, &key);
@@ -903,8 +907,9 @@ mod tests {
 
     #[test]
     fn test_decrypt_wrong_key_fails() {
-        let key1 = [1u8; 32];
-        let key2 = [2u8; 32];
+        let key1 = random_test_key();
+        let mut key2 = key1;
+        key2[0] ^= 0xFF;
         let plaintext = "secret data";
         let encrypted = obfuscate_with_key(plaintext, &key1);
         let decrypted = deobfuscate_with_key(&encrypted, &key2);
@@ -913,8 +918,9 @@ mod tests {
 
     #[test]
     fn test_decrypt_wrong_key_returns_empty() {
-        let key1 = [1u8; 32];
-        let key2 = [2u8; 32];
+        let key1 = random_test_key();
+        let mut key2 = key1;
+        key2[0] ^= 0xFF;
         let plaintext = "secret data";
         let encrypted = obfuscate_with_key(plaintext, &key1);
         let decrypted = deobfuscate_with_key(&encrypted, &key2);
@@ -923,29 +929,40 @@ mod tests {
 
     #[test]
     fn test_decrypt_invalid_base64() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let decrypted = deobfuscate_with_key("not-valid-base64!!!", &key);
         assert_eq!(decrypted, "");
     }
 
     #[test]
     fn test_decrypt_garbage_input() {
-        let key = [0u8; 32];
+        let key = random_test_key();
         let decrypted = deobfuscate_with_key("", &key);
         assert_eq!(decrypted, "");
     }
 
     #[test]
     fn test_derive_key_deterministic() {
-        let k1 = derive_key("test-machine-id");
-        let k2 = derive_key("test-machine-id");
+        let machine_id: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let k1 = derive_key(&machine_id);
+        let k2 = derive_key(&machine_id);
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn test_derive_key_different_inputs() {
-        let k1 = derive_key("machine-a");
-        let k2 = derive_key("machine-b");
+        let m1: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let m2: String = format!("{m1}_different");
+        let k1 = derive_key(&m1);
+        let k2 = derive_key(&m2);
         assert_ne!(k1, k2);
     }
 
@@ -959,7 +976,12 @@ mod tests {
 
     #[test]
     fn test_derive_key_roundtrip() {
-        let key = derive_key("roundtrip-test");
+        let machine_id: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let key = derive_key(&machine_id);
         let plaintext = "derived key integration test";
         let encrypted = obfuscate_with_key(plaintext, &key);
         let decrypted = deobfuscate_with_key(&encrypted, &key);
@@ -968,8 +990,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_with_derived_key_different_from_zero_key() {
-        let zero_key = [0u8; 32];
-        let derived = derive_key("non-zero");
-        assert_ne!(zero_key, derived);
+        let machine_id = "test-machine-id";
+        let derived = derive_key(machine_id);
+        assert!(derived.iter().any(|&b| b != 0));
     }
 }

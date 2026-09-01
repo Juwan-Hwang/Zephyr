@@ -357,6 +357,9 @@ function getRequiredPluralCategories(locale) {
 function resolvePath(root, path) {
     let cur = /** @type {unknown} */ (root);
     for (const part of path.split('.')) {
+        if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+            return undefined;
+        }
         if (cur && typeof cur === 'object' && Object.hasOwn(cur, part)) {
             cur = cur[part];
         } else {
