@@ -765,9 +765,8 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
 pub mod test_helpers {
     use super::*;
 
-    /// Encrypt a string using AES-256-GCM with an explicit key (test-only).
-    /// This mirrors the production `obfuscate_string` but accepts a caller-supplied key
-    /// so that tests are deterministic and do not depend on machine state.
+    /// Encrypt a string with AES-256-GCM using an explicit key (test-only)
+    /// so that tests do not depend on machine state.
     #[must_use]
     pub fn obfuscate_with_key(plaintext: &str, key: &[u8]) -> String {
         use aes_gcm::{
@@ -991,7 +990,12 @@ mod tests {
 
     #[test]
     fn test_encrypt_with_derived_key_different_from_zero_key() {
-        let derived = derive_key("");
+        let machine_id: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let derived = derive_key(&machine_id);
         assert!(derived.iter().any(|&b| b != 0));
     }
 }
