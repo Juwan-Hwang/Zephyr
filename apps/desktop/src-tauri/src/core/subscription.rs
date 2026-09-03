@@ -333,21 +333,21 @@ async fn download_sub_inner_raw(
 
     // For user-entered private addresses, skip DNS pinning (proxy/system handles resolution).
     // For public addresses, resolve and pin DNS to prevent DNS rebinding for direct connections.
-    // If DNS resolution fails (e.g. host is blocked by GFW or DNS poisoned to private IP),
-    // record the error and bypass direct connection, falling through to proxy.
+    // If DNS resolution fails (e.g. host is blocked by GFW or DNS poisoned to private IP)
+    // or times out (unresponsive DNS / packet drop), record the error and bypass direct connection,
+    // falling through to proxy.
     let mut direct_dns_error = None;
     let resolve_pin = if user_entered_private {
         None
     } else {
         let host_clone = host.clone();
-        let resolve_res = tokio::task::spawn_blocking(move || {
+        let resolve_task = tokio::task::spawn_blocking(move || {
             std::net::ToSocketAddrs::to_socket_addrs(&format!("{host_clone}:{port}"))
                 .map(std::iter::Iterator::collect::<Vec<_>>)
-        })
-        .await;
+        });
 
-        match resolve_res {
-            Ok(Ok(addrs)) => {
+        match tokio::time::timeout(Duration::from_secs(3), resolve_task).await {
+            Ok(Ok(Ok(addrs))) => {
                 match zephyr_core::config::subscription::validate_public_host_addrs(&host, &addrs) {
                     Ok((_, Some(addr), _)) => Some((host.clone(), addr)),
                     Ok((_, None, _)) => {
@@ -361,12 +361,16 @@ async fn download_sub_inner_raw(
                     }
                 }
             }
-            Ok(Err(e)) => {
+            Ok(Ok(Err(e))) => {
                 direct_dns_error = Some(format!("DNS resolution failed for '{host}': {e}"));
                 None
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 direct_dns_error = Some(format!("DNS resolution task join error: {e}"));
+                None
+            }
+            Err(_) => {
+                direct_dns_error = Some(format!("DNS resolution timed out for '{host}' (3s)"));
                 None
             }
         }
@@ -477,6 +481,14 @@ async fn download_sub_inner_raw(
                         .or_else(|_| std::env::var("http_proxy"))
                         .ok()
                         .filter(|s| !s.trim().is_empty())
+                        .map(|s| {
+                            let trimmed = s.trim();
+                            if trimmed.contains("://") {
+                                trimmed.to_owned()
+                            } else {
+                                format!("http://{trimmed}")
+                            }
+                        })
                 });
                 (external, false)
             }
@@ -525,28 +537,10 @@ async fn download_sub_inner_raw(
             if result.is_none() && is_mihomo_proxy {
                 if let Some(orig_mode) = get_mihomo_mode(app).await {
                     if orig_mode != "global" && set_mihomo_mode(app, "global").await.is_some() {
-                        // 尝试将 GLOBAL 组指向当前活跃的代理节点
-                        let orig_global_now = if let Some((active_node, global_now)) =
-                            get_mihomo_active_node_and_global_now(app).await
-                        {
-                            if global_now.as_deref() != Some(&active_node) {
-                                if set_mihomo_proxy_group(app, "GLOBAL", &active_node)
-                                    .await
-                                    .is_some()
-                                {
-                                    global_now
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        // Drop guard: 即使 task 在 sleep/download 期间被 cancel，
-                        // 也能在 drop 时 spawn 恢复任务，避免 core 永久停留在 global 模式。
+                        // Drop guard: 立即在 mode 切换成功后构造 guard。
+                        // 即使后续的 get_mihomo_active_node_and_global_now、set_mihomo_proxy_group、
+                        // sleep 或 download 任务被超时取消（Cancel），
+                        // 也能在 drop 时恢复 core 的原模式和原节点选择，杜绝 core 永久停留在 global 模式。
                         struct ModeRestoreGuard {
                             app: tauri::AppHandle,
                             orig_mode: Option<String>,
@@ -580,9 +574,22 @@ async fn download_sub_inner_raw(
 
                         let mut restore_guard = ModeRestoreGuard {
                             app: app.clone(),
-                            orig_mode: Some(orig_mode.clone()),
-                            orig_global_now,
+                            orig_mode: Some(orig_mode),
+                            orig_global_now: None,
                         };
+
+                        // 尝试将 GLOBAL 组指向当前活跃的代理节点
+                        if let Some((active_node, global_now)) =
+                            get_mihomo_active_node_and_global_now(app).await
+                        {
+                            if global_now.as_deref() != Some(&active_node)
+                                && set_mihomo_proxy_group(app, "GLOBAL", &active_node)
+                                    .await
+                                    .is_some()
+                            {
+                                restore_guard.orig_global_now = global_now;
+                            }
+                        }
 
                         // 切换后短暂等待 mihomo 生效
                         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -636,10 +643,10 @@ async fn download_sub_inner_raw(
         }
     }
 
-    // Two-tier download strategy: direct → Mihomo proxy.
-    // System proxy fallback is intentionally removed to reduce SSRF attack surface.
-    // The Mihomo proxy path is trusted (user-configured), while system proxy
-    // could be set by any application/malware on the system.
+    // Multi-tier download strategy:
+    // Tier 1: Direct connection with DNS pinning (SSRF protection).
+    // Tier 2: Proxy connection (Mihomo mixed-port, or system/environment proxy fallback).
+    // Tier 3: Mihomo global mode with active proxy node selection and auto-restoration.
     let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
         if !last_error.is_empty() {
             last_error
