@@ -265,11 +265,9 @@ pub fn validate_public_host_addrs(
     Ok((host.to_owned(), resolved_addr, false))
 }
 
-/// Validate URL and its resolved IPs for SSRF protection.
-/// Returns `(host, resolved_addr, user_entered_private)`.
-pub fn validate_subscription_url_with_ip(
-    url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+/// Validate URL scheme, host, and port without DNS resolution.
+/// Returns `(host, port, user_entered_private)`.
+pub fn validate_subscription_url_basic(url: &str) -> Result<(String, u16, bool), String> {
     let parsed_url = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     let scheme = parsed_url.scheme();
@@ -281,17 +279,60 @@ pub fn validate_subscription_url_with_ip(
 
     let user_entered_private = is_private_host(host);
 
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let port = parsed_url.port().unwrap_or(default_port);
+
+    Ok((host.to_owned(), port, user_entered_private))
+}
+
+/// Validate an ambient environment or system proxy URL.
+/// Security: Only permit local loopback proxies (`127.0.0.1` / `localhost` / `::1`)
+/// and reject cleartext credentialed `http://` proxies to prevent SSRF and credential leaks.
+#[must_use]
+pub fn validate_ambient_proxy_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_owned()
+    } else {
+        format!("http://{trimmed}")
+    };
+    if let Ok(parsed) = url::Url::parse(&candidate) {
+        let is_loopback = parsed.host_str().is_some_and(|h| {
+            h.eq_ignore_ascii_case("localhost") || h == "127.0.0.1" || h == "::1" || h == "[::1]"
+        });
+        if !is_loopback {
+            return None;
+        }
+        let has_credentials = !parsed.username().is_empty() || parsed.password().is_some();
+        if has_credentials && parsed.scheme() == "http" {
+            return None;
+        }
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Validate URL and its resolved IPs for SSRF protection.
+/// Returns `(host, resolved_addr, user_entered_private)`.
+pub fn validate_subscription_url_with_ip(
+    url: &str,
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+    let (host, port, user_entered_private) = validate_subscription_url_basic(url)?;
+
     if user_entered_private {
-        return Ok((host.to_owned(), None, true));
+        return Ok((host, None, true));
     }
 
-    let default_port = if scheme == "https" { 443 } else { 80 };
     let addrs: Vec<std::net::SocketAddr> =
-        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{port}"))
             .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
-    validate_public_host_addrs(host, &addrs)
+    validate_public_host_addrs(&host, &addrs)
 }
 
 /// Determine the appropriate error code based on the error message content.
@@ -516,6 +557,81 @@ mod tests {
     fn test_validate_invalid_schemes_rejected() {
         assert!(validate_subscription_url_with_ip("ftp://192.168.1.1/sub").is_err());
         assert!(validate_subscription_url_with_ip("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("ftp://192.168.1.1/sub").is_err());
+        assert!(validate_subscription_url_basic("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_subscription_url_basic_success() {
+        let (host, port, private) =
+            validate_subscription_url_basic("https://blocked-domain.example.com/sub?token=123")
+                .unwrap();
+        assert_eq!(host, "blocked-domain.example.com");
+        assert_eq!(port, 443);
+        assert!(!private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://192.168.1.100:8080/sub").unwrap();
+        assert_eq!(host, "192.168.1.100");
+        assert_eq!(port, 8080);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://localhost:9090/sub").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9090);
+        assert!(private);
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url() {
+        // Valid loopback proxies
+        assert_eq!(
+            validate_ambient_proxy_url("http://127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://localhost:7890"),
+            Some("http://localhost:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://[::1]:7890"),
+            Some("http://[::1]:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://user:pass@127.0.0.1:1080"),
+            Some("socks5://user:pass@127.0.0.1:1080".to_owned())
+        );
+
+        // Disallowed: Non-loopback IP or external host
+        assert_eq!(validate_ambient_proxy_url("http://192.168.1.1:7890"), None);
+        assert_eq!(validate_ambient_proxy_url("http://10.0.0.1:7890"), None);
+        assert_eq!(
+            validate_ambient_proxy_url("http://proxy.example.com:7890"),
+            None
+        );
+
+        // Disallowed: Cleartext credentials over http://
+        assert_eq!(
+            validate_ambient_proxy_url("http://user:pass@127.0.0.1:7890"),
+            None
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://user@localhost:7890"),
+            None
+        );
+
+        // Disallowed: Empty / whitespace
+        assert_eq!(validate_ambient_proxy_url(""), None);
+        assert_eq!(validate_ambient_proxy_url("   "), None);
     }
 
     #[test]
