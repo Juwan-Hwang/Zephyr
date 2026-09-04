@@ -217,6 +217,10 @@ pub mod codes {
     pub const CORE_MODE_RESTORE_DROPPED: u16 = 1010;
     /// Panic was caught by `catch_unwind` in a core operation.
     pub const CORE_PANIC_GUARD: u16 = 1011;
+    /// Mihomo GLOBAL group restore after subscription update failed.
+    pub const CORE_GLOBAL_RESTORE_FAILED: u16 = 1012;
+    /// Mihomo GLOBAL group restore failed in Drop guard (deferred path).
+    pub const CORE_GLOBAL_RESTORE_DROPPED: u16 = 1013;
 
     // Subscription: 2000-2999
     pub const SUB_UPDATE_FAILED: u16 = 2001;
