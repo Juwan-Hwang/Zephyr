@@ -38,105 +38,33 @@ pub fn is_tun_toggling() -> bool {
     TUN_TOGGLING.load(Ordering::SeqCst)
 }
 
-/// Extract secret from YAML config content using the YAML parser.
-/// This avoids issues with line-by-line parsing (multi-line strings, comments, etc.).
 #[cfg(target_os = "macos")]
-fn extract_secret_from_yaml(content: &str) -> Option<String> {
-    let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
-    yaml.get("secret")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-}
+use zephyr_core::config::tun::extract_secret_from_yaml;
+use zephyr_core::config::tun::{
+    extract_tun_enabled_from_yaml, update_tun_in_yaml as core_update_tun_in_yaml,
+};
 
-use serde_yaml::Value as YamlValue;
-
-/// Ensure dns-hijack list contains both UDP (`any:53`) and TCP (`tcp://any:53`) entries.
-/// This prevents DNS leaks by hijacking all DNS traffic to mihomo.
-fn ensure_dns_hijack_entries(tun_map: &mut serde_yaml::Mapping) {
-    const ANY_UDP: &str = "any:53";
-    const ANY_TCP: &str = "tcp://any:53";
-
-    let dns_hijack_key = YamlValue::String("dns-hijack".to_owned());
-    let any_udp_val = YamlValue::String(ANY_UDP.to_owned());
-    let any_tcp_val = YamlValue::String(ANY_TCP.to_owned());
-
-    match tun_map.entry(dns_hijack_key) {
-        serde_yaml::mapping::Entry::Occupied(mut entry) => {
-            // Existing dns-hijack entry - ensure it contains both entries
-            match entry.get_mut() {
-                YamlValue::Sequence(seq) => {
-                    if !seq.contains(&any_udp_val) {
-                        seq.push(any_udp_val);
-                    }
-                    if !seq.contains(&any_tcp_val) {
-                        seq.push(any_tcp_val);
-                    }
-                }
-                // If it's not a sequence (e.g., a string or other type), replace it
-                YamlValue::Null
-                | YamlValue::Bool(_)
-                | YamlValue::Number(_)
-                | YamlValue::String(_)
-                | YamlValue::Mapping(_)
-                | YamlValue::Tagged(_) => {
-                    entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
-                }
-            }
-        }
-        serde_yaml::mapping::Entry::Vacant(entry) => {
-            // No dns-hijack entry - create new sequence
-            entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
-        }
-    }
-}
-
-/// Update TUN enable setting in YAML config content using `serde_yaml`.
+/// Update TUN enable setting in YAML config content using `zephyr_core`.
 /// Returns updated content with TUN block modified or appended.
 fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, String> {
-    let mut yaml = serde_yaml::from_str::<YamlValue>(content)
-        .map_err(|e| format!("Failed to parse YAML config: {e}"))?;
-
-    if let Some(mapping) = yaml.as_mapping_mut() {
-        let tun = mapping
-            .entry(YamlValue::String("tun".to_owned()))
-            .or_insert_with(|| YamlValue::Mapping(serde_yaml::Mapping::new()));
-        if let Some(tun_map) = tun.as_mapping_mut() {
-            tun_map.insert(
-                YamlValue::String("enable".to_owned()),
-                YamlValue::Bool(enable),
-            );
-            // Preserve sensible defaults when enabling TUN
-            if enable {
-                tun_map
-                    .entry(YamlValue::String("stack".to_owned()))
-                    .or_insert_with(|| YamlValue::String("system".to_owned()));
-                tun_map
-                    .entry(YamlValue::String("auto-route".to_owned()))
-                    .or_insert_with(|| YamlValue::Bool(true));
-                tun_map
-                    .entry(YamlValue::String("auto-detect-interface".to_owned()))
-                    .or_insert_with(|| YamlValue::Bool(true));
-                // Hijack all DNS traffic to prevent leaks (UDP + TCP)
-                ensure_dns_hijack_entries(tun_map);
-            }
-        }
-    }
-
-    serde_yaml::to_string(&yaml)
-        .map_err(|e| format!("Failed to serialize YAML after TUN toggle: {e}"))
+    core_update_tun_in_yaml(content, enable).map_err(|e| e.to_string())
 }
 
-/// Extract TUN enable status from YAML config content using `serde_yaml`.
-fn extract_tun_enabled_from_yaml(content: &str) -> bool {
-    let yaml = match serde_yaml::from_str::<YamlValue>(content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
+/// Returns the log file path for mihomo running in root TUN mode on macOS.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    "/Library/Logs/Zephyr/tun.log".to_string()
+}
 
-    yaml.get("tun")
-        .and_then(|t| t.get("enable"))
-        .and_then(YamlValue::as_bool)
-        .unwrap_or(false)
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    let temp = std::env::temp_dir();
+    temp.join(format!("mihomo-tun-{}.log", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Restart mihomo core with root privileges on macOS for TUN mode
@@ -153,10 +81,13 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
     let mut secret = String::new();
+    let mut api_port = 9090;
 
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {e}"))?;
+
+        api_port = zephyr_core::process::parse_external_controller_port(content.clone());
 
         // Extract current secret from config or generate new one
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
@@ -194,26 +125,14 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    // Use user-specific Logs directory (~/Library/Logs/) - secure and predictable for debugging
-    let log_path = std::env::var("HOME")
-        .map(|h| {
-            // macOS: ~/Library/Logs/ - user-specific, other users cannot access
-            let path = format!("{h}/Library/Logs");
-            // Create directory if it doesn't exist
-            if let Err(e) = std::fs::create_dir_all(&path) {
-                emit_warn!(
-                    System,
-                    SYS_TUN_FAILED,
-                    "Failed to create log directory: {e}"
-                );
-            }
-            format!("{path}/mihomo-tun.log")
-        })
-        .unwrap_or_else(|_| {
-            // Fallback to user temp directory with fixed name
-            let temp = std::env::temp_dir();
-            temp.join("mihomo-tun.log").to_string_lossy().into_owned()
-        });
+    let log_path = get_tun_log_path();
+
+    // Security: Unlink if log_path is a pre-existing symlink to prevent privilege escalation via root redirection.
+    if let Ok(meta) = std::fs::symlink_metadata(&log_path) {
+        if meta.file_type().is_symlink() {
+            let _ = std::fs::remove_file(&log_path);
+        }
+    }
 
     // CRITICAL: Escape paths in two phases — shell first, then AppleScript
     // 1. Shell-escape: replace ' with '\'' for single-quote context (end quote, escaped quote, start quote)
@@ -236,17 +155,19 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         .replace("'", "'\\''")
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    let uid = unsafe { libc::getuid() };
     // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
     // where a root-owned legacy process might still be running
     let script = format!(
         // nosemgrep: rust-osascript-privilege-escalation — paths are shell-escaped via replace("'", "'\\''")
         // nosemgrep: rust-osascript-command-pattern — escaped values prevent injection
-        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; [ -L '/Library/Logs/Zephyr' ] && rm -f '/Library/Logs/Zephyr'; mkdir -p -m 0755 '/Library/Logs/Zephyr'; chown root:wheel '/Library/Logs/Zephyr' 2>/dev/null; chmod 0755 '/Library/Logs/Zephyr'; rm -f '{escaped_log_path}'; : > '{escaped_log_path}'; chown {uid} '{escaped_log_path}'; chmod 600 '{escaped_log_path}'; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' >> '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
     // The & at the end of the shell command makes mihomo run in background
     // but osascript might still wait, so we use spawn() instead of output()
+    let initial_root_pids = get_root_mihomo_pids();
     let mut child = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -282,41 +203,124 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         Err(_) => {}
     }
 
-    // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
+    // Wait for osascript to finish and root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
+    let mut script_finished = false;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Check if user canceled (osascript exited with failure)
-        if let Ok(Some(status)) = child.try_wait() {
-            if !status.success() {
-                return Err("canceled".to_owned());
+        if !script_finished {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        let stderr = child.stderr.take();
+                        if let Some(mut stderr) = stderr {
+                            let mut err = String::new();
+                            let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
+                            if err.contains("canceled") || err.contains("User canceled") {
+                                return Err("canceled".to_owned());
+                            }
+                            return Err(format!("osascript failed: {err}"));
+                        }
+                        return Err("osascript failed".to_owned());
+                    }
+                    script_finished = true;
+                }
+                Ok(None) => {
+                    // Password dialog is still showing or script is still executing,
+                    // but child may already have started mihomo in background.
+                }
+                Err(_) => {}
             }
         }
 
-        if has_root_mihomo() {
+        let is_ready = if api_port > 0 {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                tokio::net::TcpStream::connect(format!("127.0.0.1:{api_port}")),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false)
+        } else {
+            true
+        };
+        let current_root_pids = get_root_mihomo_pids();
+        let new_root_running = current_root_pids
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+        let ready_now = new_root_running && is_ready;
+        if ready_now {
             started = true;
             break;
         }
     }
 
-    if !started {
-        // Kill osascript if still running
-        let _ = child.kill();
-        return Err("Root mihomo failed to start within 30 seconds".to_owned());
+    if started {
+        if !script_finished {
+            tokio::task::spawn_blocking(move || {
+                let _ = child.wait();
+            });
+        }
+    } else {
+        // Kill osascript if still running and reap child on a blocking thread
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+        })
+        .await;
+
+        // Brief grace wait to check if root core appeared just as timeout hit
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let current_root_pids = get_root_mihomo_pids();
+        let new_root_present = current_root_pids
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+
+        if new_root_present {
+            // New root mihomo started right at the deadline; proceed to verify port
+        } else if script_finished {
+            let kill_res = tokio::task::spawn_blocking(smart_kill_all_mihomo_as_root).await;
+            if kill_res.ok().and_then(Result::ok).is_some() {
+                set_tun_mode(false);
+            }
+            return Err("Root mihomo failed to start within 30 seconds".to_owned());
+        } else {
+            // Only pre-existing root PIDs (if any) remain; the privileged script did not run.
+            return Err("osascript timed out: script did not run".to_owned());
+        }
     }
 
-    // Wait for port to be bound
+    // Wait for port to be bound (or verify root daemon liveness if controller is disabled)
     let mut bound = false;
-    for _ in 0..10 {
+    if api_port == 0 {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
-            bound = true;
-            break;
+        bound = get_root_mihomo_pids()
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+    } else {
+        let target_addr = format!("127.0.0.1:{api_port}");
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let connected = tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                tokio::net::TcpStream::connect(&target_addr),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+            if connected {
+                bound = true;
+                break;
+            }
         }
     }
 
     if !bound {
+        let kill_res = tokio::task::spawn_blocking(smart_kill_all_mihomo_as_root).await;
+        if kill_res.ok().and_then(Result::ok).is_some() {
+            set_tun_mode(false);
+        }
         return Err("root_start_failed".to_owned());
     }
 
@@ -341,6 +345,8 @@ pub const fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use serde_yaml::Value as YamlValue;
+    use zephyr_core::config::tun::ensure_dns_hijack_entries;
 
     // Helper to extract dns-hijack values from YAML string
     fn extract_dns_hijack(content: &str) -> Option<Vec<String>> {
@@ -478,10 +484,47 @@ mod tests {
     }
 }
 
+/// Retrieve PIDs of any root-owned mihomo processes
+#[cfg(target_os = "macos")]
+pub(crate) fn get_root_mihomo_pids() -> Vec<u32> {
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "pid,user,comm"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                let (pid_str, rest) = trimmed.split_once(char::is_whitespace)?;
+                let pid = pid_str.parse::<u32>().ok()?;
+                let (user, comm) = rest.trim_start().split_once(char::is_whitespace)?;
+                let comm = comm.trim();
+                let basename = std::path::Path::new(comm)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(comm);
+                if user == "root" && (basename == "zephyr-mihomo" || basename == "mihomo") {
+                    Some(pid)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+pub(crate) const fn get_root_mihomo_pids() -> Vec<u32> {
+    Vec::new()
+}
+
 /// Check if there's a root-owned mihomo process running
 /// Checks for both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
 #[cfg(target_os = "macos")]
-fn has_root_mihomo() -> bool {
+pub(crate) fn has_root_mihomo() -> bool {
     if let Ok(output) = std::process::Command::new("ps")
         .args(["-axo", "user,comm"])
         .output()
@@ -489,8 +532,15 @@ fn has_root_mihomo() -> bool {
         let text = String::from_utf8_lossy(&output.stdout);
         text.lines().any(|line| {
             let trimmed = line.trim_start();
-            trimmed.starts_with("root ")
-                && (trimmed.contains("zephyr-mihomo") || trimmed.contains("mihomo"))
+            let Some((user, comm)) = trimmed.split_once(char::is_whitespace) else {
+                return false;
+            };
+            let comm = comm.trim();
+            let basename = std::path::Path::new(comm)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(comm);
+            user == "root" && (basename == "zephyr-mihomo" || basename == "mihomo")
         })
     } else {
         false
@@ -499,7 +549,7 @@ fn has_root_mihomo() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-const fn has_root_mihomo() -> bool {
+pub(crate) const fn has_root_mihomo() -> bool {
     false
 }
 
@@ -512,15 +562,41 @@ pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     // nosemgrep: rust-osascript-privilege-escalation — static string, no interpolation
     // nosemgrep: rust-osascript-command-pattern — static string, no injection vector
     let script = r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
-    let status = std::process::Command::new("osascript")
+    let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
-        .status()
-        .map_err(|e| format!("Failed to run osascript: {e}"))?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn osascript: {e}"))?;
 
-    if !status.success() {
-        return Err(format!("osascript exit code: {status}"));
+    let timeout = std::time::Duration::from_secs(30);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(format!("osascript exit code: {status}"));
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(
+                        "osascript timed out waiting for administrator privileges".to_owned()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed waiting for osascript: {e}"));
+            }
+        }
     }
-    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -553,25 +629,26 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 /// Only available on macOS - TUN requires root on macOS
 #[tauri::command]
 #[cfg(target_os = "macos")]
-pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
-    set_tun_mode(false);
-    kill_all_mihomo_as_root()?;
+pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    tokio::task::spawn_blocking(|| -> Result<(), String> {
+        kill_all_mihomo_as_root()?;
 
-    // Wait for ALL root processes (including osascript shell) to die
-    let mut waited = 0;
-    loop {
-        let has_root_process = std::process::Command::new("sh")
-            .args(["-c", "ps aux | grep -E 'mihomo|osascript.*mihomo|sleep.*mihomo' | grep root | grep -v grep"])
-            .output()
-            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-            .unwrap_or(false);
-
-        if !has_root_process || waited > 8000 {
-            break;
+        let mut waited = 0;
+        while has_root_mihomo() {
+            if waited > 8000 {
+                return Err("Root mihomo still running after termination".to_owned());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            waited += 200;
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        waited += 200;
-    }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    set_tun_mode(false);
+    set_tun_enabled_internal(&app, false)?;
 
     Ok(())
 }
