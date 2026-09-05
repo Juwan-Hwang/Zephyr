@@ -47,10 +47,17 @@ pub struct UrlValidationResult {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn format_host_port(host: String, port: u16) -> String {
-    if host.contains(':') {
-        format!("[{host}]:{port}")
+    let host_str = host.as_str();
+    let unbracketed = if host_str.starts_with('[') && host_str.ends_with(']') && host_str.len() >= 2
+    {
+        &host_str[1..host_str.len() - 1]
     } else {
-        format!("{host}:{port}")
+        host_str
+    };
+    if unbracketed.contains(':') {
+        format!("[{unbracketed}]:{port}")
+    } else {
+        format!("{unbracketed}:{port}")
     }
 }
 
@@ -83,7 +90,8 @@ pub fn validate_url_basic(url: String) -> Result<UrlValidationResult, AppError> 
         .port()
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
-    // Check if user explicitly entered a private/local host
+    // Explicit private IPs, localhost, and private-suffix hostnames (.local, .lan, etc.)
+    // are classified as user-entered private destinations.
     let user_entered_private = is_private_host(&host);
 
     Ok(UrlValidationResult {
@@ -139,8 +147,13 @@ mod tests {
             "example.com:443"
         );
         assert_eq!(format_host_port("::1".to_owned(), 80), "[::1]:80");
+        assert_eq!(format_host_port("[::1]".to_owned(), 80), "[::1]:80");
         assert_eq!(
             format_host_port("2001:db8::1".to_owned(), 443),
+            "[2001:db8::1]:443"
+        );
+        assert_eq!(
+            format_host_port("[2001:db8::1]".to_owned(), 443),
             "[2001:db8::1]:443"
         );
     }
