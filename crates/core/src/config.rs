@@ -29,9 +29,9 @@ pub use sanitizer::{
 pub use subscription::{
     classify_sub_error, extract_name_from_rules, is_private_host, is_private_ip,
     parse_content_disposition_filename, percent_decode, quote_short_id_values,
-    redact_url_in_string, try_decode_base64_content, validate_public_host_addrs,
-    validate_subscription_name, validate_subscription_url_with_ip, BatchUpdateItem,
-    BatchUpdateResult, MAX_RESPONSE_SIZE,
+    redact_url_in_string, try_decode_base64_content, validate_ambient_proxy_url,
+    validate_public_host_addrs, validate_subscription_name, validate_subscription_url_basic,
+    validate_subscription_url_with_ip, BatchUpdateItem, BatchUpdateResult, MAX_RESPONSE_SIZE,
 };
 pub use types::{
     AppPaths, ConfigInfo, ConfigMetadata, NetworkOptimStatus, ProfilesMetadata, ReadLogResult,
