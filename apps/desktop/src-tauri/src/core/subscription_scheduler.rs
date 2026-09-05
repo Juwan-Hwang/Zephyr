@@ -91,6 +91,9 @@ pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
 
 /// Main scheduler loop - checks each subscription individually.
 async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
+    // Reconcile and restore any un-restored global mode or GLOBAL selection marker left from an abrupt shutdown
+    let _ = super::subscription::reconcile_global_mode_restore(&app).await;
+
     let mut check_interval = interval(Duration::from_secs(60)); // Check every minute
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -154,6 +157,11 @@ async fn check_and_update_subscriptions(
     app: &AppHandle,
     state: &Arc<SchedulerState>,
 ) -> Result<usize, String> {
+    // Reconcile any un-restored global mode marker before triggering new subscription downloads.
+    // Reconciliation is best-effort here. `download_sub_inner` reconciles the marker again
+    // per subscription, so lock contention must not cancel the whole pass.
+    let _ = super::subscription::reconcile_global_mode_restore(app).await;
+
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
