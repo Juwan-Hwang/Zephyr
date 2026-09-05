@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use super::MAX_RESPONSE_SIZE;
-use zephyr_core::config::subscription::{is_private_host, is_private_ip};
+use zephyr_core::config::subscription::{is_literal_private_host, is_private_host, is_private_ip};
 
 /// Configuration for HTTP client building.
 #[derive(Debug, Clone)]
@@ -214,7 +214,7 @@ fn validate_url_basic(url: &str) -> Result<(String, u16, bool), String> {
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
     // Check if user explicitly entered a private/local host
-    let user_entered_private = is_private_host(&host);
+    let user_entered_private = is_literal_private_host(&host);
 
     Ok((host, port, user_entered_private))
 }
