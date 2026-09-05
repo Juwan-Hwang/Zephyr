@@ -26,7 +26,7 @@ const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
 const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
 const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
-use super::tun_manager::{is_tun_mode, restart_core_as_root};
+use super::tun_manager::{is_tun_mode, kill_all_mihomo_as_root, restart_core_as_root};
 use super::{AppPaths, CoreData, CoreStartResult, MihomoState, CORE_STARTING};
 
 #[cfg(target_os = "windows")]
@@ -1491,7 +1491,27 @@ pub async fn start_core_inner(
         // Notify the network coordinator that a fresh core instance was started.
         // The new process has no rules applied, so the coordinator's applied_state
         // is now stale and must be re-evaluated.
+        if let Err(e) = health_check(DEFAULT_API_PORT).await {
+            #[cfg(target_os = "macos")]
+            {
+                let kill_res = tokio::task::spawn_blocking(kill_all_mihomo_as_root).await;
+                if let Ok(Err(err)) = kill_res {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to clean up root mihomo process after health check failure: {err}"
+                    );
+                }
+            }
+            if let Ok(mut lock) =
+                lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+            {
+                clear_stopped_core_state(&mut lock);
+            }
+            return Err(e);
+        }
         notify_core_started(&app).await;
+        let _ = super::subscription::reconcile_global_mode_restore(&app).await;
         return Ok(CoreStartResult {
             secret,
             port: DEFAULT_API_PORT,
@@ -1708,6 +1728,7 @@ pub async fn start_core_inner(
     // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
 
     notify_core_started(&app).await;
+    let _ = super::subscription::reconcile_global_mode_restore(&app).await;
 
     Ok(CoreStartResult {
         secret: resolved_secret,
