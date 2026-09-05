@@ -220,7 +220,12 @@ pub fn is_private_host(host: &str) -> bool {
         return true;
     }
 
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    let unbracketed = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
         return is_private_ip(ip);
     }
 
@@ -265,11 +270,9 @@ pub fn validate_public_host_addrs(
     Ok((host.to_owned(), resolved_addr, false))
 }
 
-/// Validate URL and its resolved IPs for SSRF protection.
-/// Returns `(host, resolved_addr, user_entered_private)`.
-pub fn validate_subscription_url_with_ip(
-    url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+/// Validate URL scheme, host, and port without DNS resolution.
+/// Returns `(host, port, user_entered_private)`.
+pub fn validate_subscription_url_basic(url: &str) -> Result<(String, u16, bool), String> {
     let parsed_url = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     let scheme = parsed_url.scheme();
@@ -281,17 +284,101 @@ pub fn validate_subscription_url_with_ip(
 
     let user_entered_private = is_private_host(host);
 
-    if user_entered_private {
-        return Ok((host.to_owned(), None, true));
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let port = parsed_url.port().unwrap_or(default_port);
+
+    Ok((host.to_owned(), port, user_entered_private))
+}
+
+/// Validate an ambient environment or system proxy URL.
+/// Security: Only permit local loopback proxies (`127.0.0.1` / `localhost` / `::1`)
+/// and reject cleartext credentialed `http://` proxies to prevent SSRF and credential leaks.
+/// Also supports semicolon/whitespace-separated entries and scheme-prefixed entries
+/// commonly found in Windows/macOS/Linux system proxy configurations (e.g. `http=127.0.0.1:7890;https=...`).
+#[must_use]
+pub fn validate_ambient_proxy_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
     }
 
-    let default_port = if scheme == "https" { 443 } else { 80 };
+    for segment in trimmed.split([';', ' ', '\n', '\r']) {
+        let mut seg = segment.trim();
+        if seg.is_empty() {
+            continue;
+        }
+
+        // Strip extraneous "http://" or "https://" prefix if followed by a scheme prefix (e.g. "http://http=127.0.0.1:7890")
+        if let Some(rest) = seg
+            .strip_prefix("http://")
+            .or_else(|| seg.strip_prefix("https://"))
+        {
+            if rest.contains('=') {
+                seg = rest;
+            }
+        }
+
+        // Handle potential scheme prefixes like "http=host:port", "https=host:port", "socks=..."
+        let (default_scheme, inner) = if let Some((prefix, rest)) = seg.split_once('=') {
+            let p_lower = prefix.trim().to_ascii_lowercase();
+            if p_lower == "socks" {
+                ("socks5", rest.trim())
+            } else if matches!(p_lower.as_str(), "https" | "http" | "all") {
+                ("http", rest.trim())
+            } else {
+                ("http", seg)
+            }
+        } else {
+            ("http", seg)
+        };
+
+        let candidate = if inner.contains("://") {
+            inner.to_owned()
+        } else {
+            format!("{default_scheme}://{inner}")
+        };
+
+        if let Ok(parsed) = url::Url::parse(&candidate) {
+            if !matches!(
+                parsed.scheme(),
+                "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h"
+            ) {
+                continue;
+            }
+            let is_loopback = parsed.host_str().is_some_and(|h| {
+                h.eq_ignore_ascii_case("localhost") || h == "127.0.0.1" || h == "[::1]"
+            });
+            if !is_loopback {
+                continue;
+            }
+            let has_credentials = !parsed.username().is_empty() || parsed.password().is_some();
+            if has_credentials && parsed.scheme() == "http" {
+                continue;
+            }
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// Validate URL and its resolved IPs for SSRF protection.
+/// Returns `(host, resolved_addr, user_entered_private)`.
+pub fn validate_subscription_url_with_ip(
+    url: &str,
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+    let (host, port, user_entered_private) = validate_subscription_url_basic(url)?;
+
+    if user_entered_private {
+        return Ok((host, None, true));
+    }
+
     let addrs: Vec<std::net::SocketAddr> =
-        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{port}"))
             .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
-    validate_public_host_addrs(host, &addrs)
+    validate_public_host_addrs(&host, &addrs)
 }
 
 /// Determine the appropriate error code based on the error message content.
@@ -456,9 +543,16 @@ mod tests {
         assert!(is_private_host("127.0.0.1"));
         assert!(is_private_host("10.0.0.1"));
         assert!(is_private_host("192.168.1.1"));
+        assert!(is_private_host("172.16.0.1"));
+        assert!(is_private_host("::1"));
+        assert!(is_private_host("[::1]"));
+        assert!(is_private_host("[fd00::1]"));
+        assert!(is_private_host("[fe80::1]"));
         assert!(!is_private_host("my.test"));
         assert!(!is_private_host("example.com"));
+        assert!(!is_private_host("1.1.1.1"));
         assert!(!is_private_host("8.8.8.8"));
+        assert!(!is_private_host("[2606:4700:4700::1111]"));
     }
 
     #[test]
@@ -516,6 +610,112 @@ mod tests {
     fn test_validate_invalid_schemes_rejected() {
         assert!(validate_subscription_url_with_ip("ftp://192.168.1.1/sub").is_err());
         assert!(validate_subscription_url_with_ip("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("ftp://192.168.1.1/sub").is_err());
+        assert!(validate_subscription_url_basic("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_subscription_url_basic_success() {
+        let (host, port, private) =
+            validate_subscription_url_basic("https://blocked-domain.example.com/sub?token=123")
+                .unwrap();
+        assert_eq!(host, "blocked-domain.example.com");
+        assert_eq!(port, 443);
+        assert!(!private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://192.168.1.100:8080/sub").unwrap();
+        assert_eq!(host, "192.168.1.100");
+        assert_eq!(port, 8080);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://localhost:9090/sub").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9090);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://[::1]:8080/sub").unwrap();
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 8080);
+        assert!(private);
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url() {
+        // Valid loopback proxies
+        assert_eq!(
+            validate_ambient_proxy_url("http://127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://localhost:7890"),
+            Some("http://localhost:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://[::1]:7890"),
+            Some("http://[::1]:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://user:pass@127.0.0.1:1080"),
+            Some("socks5://user:pass@127.0.0.1:1080".to_owned())
+        );
+
+        // Multi-scheme and semicolon-separated (common Windows/GNOME proxy formats)
+        assert_eq!(
+            validate_ambient_proxy_url("http=127.0.0.1:7890;https=127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http=proxy.corp.com:8080;socks=127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks=127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://http=127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+
+        // Disallowed: Non-loopback IP or external host
+        assert_eq!(validate_ambient_proxy_url("http://192.168.1.1:7890"), None);
+        assert_eq!(validate_ambient_proxy_url("http://10.0.0.1:7890"), None);
+        assert_eq!(
+            validate_ambient_proxy_url("http://proxy.example.com:7890"),
+            None
+        );
+
+        // Disallowed: Cleartext credentials over http://
+        assert_eq!(
+            validate_ambient_proxy_url("http://user:pass@127.0.0.1:7890"),
+            None
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://user@localhost:7890"),
+            None
+        );
+
+        // Disallowed: Unsupported schemes (e.g. ftp://)
+        assert_eq!(validate_ambient_proxy_url("ftp://127.0.0.1:21"), None);
+        assert_eq!(
+            validate_ambient_proxy_url("ftp://127.0.0.1:21;http://127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+
+        // Disallowed: Empty / whitespace
+        assert_eq!(validate_ambient_proxy_url(""), None);
+        assert_eq!(validate_ambient_proxy_url("   "), None);
     }
 
     #[test]
