@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use super::MAX_RESPONSE_SIZE;
-use zephyr_core::config::subscription::{is_private_host, is_private_ip};
+use zephyr_core::config::subscription::{is_literal_private_host, is_private_host, is_private_ip};
 
 /// Configuration for HTTP client building.
 #[derive(Debug, Clone)]
@@ -173,16 +173,40 @@ pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<Str
                 "Direct download failed: {direct_err}"
             );
 
-            // Try proxy fallback if available
-            if let Some(port) = proxy_port.filter(|&p| p > 0) {
-                crate::emit_info!(
-                    Subscription,
-                    SUB_PROXY_RETRY,
-                    "Retrying with proxy on port {port}..."
-                );
-                match try_proxy_download(url, port).await {
-                    Ok(content) => Ok(content),
-                    Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+            // SSRF rejection is a security policy decision, not a transient transport failure.
+            // Reject immediately instead of retrying through proxy.
+            if direct_err.contains("SSRF protection")
+                || direct_err.contains("Redirect to private host blocked")
+                || direct_err.contains("Redirect to private IP blocked")
+            {
+                return Err(direct_err);
+            }
+
+            // Exclude single-label non-IP hostnames from proxy fallback (matches subscription downloader)
+            let is_single_label = {
+                let trimmed = host.trim();
+                let normalized = trimmed.strip_suffix('.').unwrap_or(trimmed);
+                let unbracketed = normalized
+                    .strip_prefix('[')
+                    .and_then(|h| h.strip_suffix(']'))
+                    .unwrap_or(normalized);
+                !unbracketed.contains('.') && unbracketed.parse::<std::net::IpAddr>().is_err()
+            };
+
+            // Try proxy fallback if available and destination is not private or single-label
+            if !user_entered_private && !is_private_host(&host) && !is_single_label {
+                if let Some(port) = proxy_port.filter(|&p| p > 0) {
+                    crate::emit_info!(
+                        Subscription,
+                        SUB_PROXY_RETRY,
+                        "Retrying with proxy on port {port}..."
+                    );
+                    match try_proxy_download(url, port).await {
+                        Ok(content) => Ok(content),
+                        Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+                    }
+                } else {
+                    Err(direct_err)
                 }
             } else {
                 Err(direct_err)
@@ -214,7 +238,7 @@ fn validate_url_basic(url: &str) -> Result<(String, u16, bool), String> {
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
     // Check if user explicitly entered a private/local host
-    let user_entered_private = is_private_host(&host);
+    let user_entered_private = is_literal_private_host(&host);
 
     Ok((host, port, user_entered_private))
 }
@@ -300,13 +324,27 @@ async fn try_proxy_download(url: &str, proxy_port: u16) -> Result<String, String
     fetch_body(&client, url).await
 }
 
+/// Format an error and its source chain into a combined string.
+fn format_error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut messages = Vec::new();
+    let mut current = Some(e);
+    while let Some(error) = current {
+        let msg = error.to_string();
+        if !messages.contains(&msg) {
+            messages.push(msg);
+        }
+        current = error.source();
+    }
+    messages.join(": ")
+}
+
 /// Fetch body from a response with size limiting.
 async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String, String> {
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("Download failed: {e}"))?;
+        .map_err(|e| format!("Download failed: {}", format_error_chain(&e)))?;
 
     if !response.status().is_success() {
         return Err(format!("Download returned {}", response.status()));
