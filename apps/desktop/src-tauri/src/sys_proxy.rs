@@ -767,7 +767,7 @@ pub fn get_sys_proxy_address() -> Option<String> {
             if enable == 1 {
                 if let Ok(server) = key.get_value::<String, _>("ProxyServer") {
                     if !server.is_empty() {
-                        if server.contains("://") {
+                        if server.contains("://") || server.contains('=') {
                             return Some(server);
                         }
                         return Some(format!("http://{server}"));
