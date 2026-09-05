@@ -217,6 +217,12 @@ pub mod codes {
     pub const CORE_MODE_RESTORE_DROPPED: u16 = 1010;
     /// Panic was caught by `catch_unwind` in a core operation.
     pub const CORE_PANIC_GUARD: u16 = 1011;
+    /// Mihomo GLOBAL group restore after subscription update failed.
+    pub const CORE_GLOBAL_RESTORE_FAILED: u16 = 1012;
+    /// Mihomo GLOBAL group restore failed in Drop guard (deferred path).
+    pub const CORE_GLOBAL_RESTORE_DROPPED: u16 = 1013;
+    /// Mihomo GLOBAL group switch before subscription update failed.
+    pub const CORE_GLOBAL_SWITCH_FAILED: u16 = 1014;
 
     // Subscription: 2000-2999
     pub const SUB_UPDATE_FAILED: u16 = 2001;
@@ -274,6 +280,8 @@ pub mod codes {
     pub const CONFIG_DANGLING_REF_CLEANED: u16 = 4013;
     /// Panic was caught by `catch_unwind` during config I/O.
     pub const CONFIG_PANIC_GUARD: u16 = 4014;
+    /// Failed to write config content to disk.
+    pub const CONFIG_WRITE_FAILED: u16 = 4015;
 
     // Plugin: 5000-5999
     pub const PLUGIN_LOAD_FAILED: u16 = 5001;
