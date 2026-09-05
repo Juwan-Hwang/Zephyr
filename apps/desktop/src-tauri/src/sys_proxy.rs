@@ -767,7 +767,7 @@ pub fn get_sys_proxy_address() -> Option<String> {
             if enable == 1 {
                 if let Ok(server) = key.get_value::<String, _>("ProxyServer") {
                     if !server.is_empty() {
-                        if server.contains("://") {
+                        if server.contains("://") || server.contains('=') {
                             return Some(server);
                         }
                         return Some(format!("http://{server}"));
@@ -781,10 +781,11 @@ pub fn get_sys_proxy_address() -> Option<String> {
     {
         let services = get_network_services();
         for service in services {
-            if let Ok(output) = Command::new("networksetup")
-                .args(["-getwebproxy", &service])
-                .output()
-            {
+            let parse_proxy = |proto: &str| -> Option<(String, String)> {
+                let output = Command::new("networksetup")
+                    .args([proto, &service])
+                    .output()
+                    .ok()?;
                 let text = String::from_utf8_lossy(&output.stdout);
                 let mut enabled = false;
                 let mut host = String::new();
@@ -792,18 +793,43 @@ pub fn get_sys_proxy_address() -> Option<String> {
 
                 for line in text.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("Enabled:") {
-                        enabled = trimmed.contains("Yes");
-                    } else if trimmed.starts_with("Server:") {
-                        host = trimmed.split(':').nth(1).unwrap_or("").trim().to_owned();
-                    } else if trimmed.starts_with("Port:") {
-                        port = trimmed.split(':').nth(1).unwrap_or("").trim().to_owned();
+                    if let Some((key, val)) = trimmed.split_once(':') {
+                        let k = key.trim();
+                        let v = val.trim();
+                        if k.eq_ignore_ascii_case("Enabled") {
+                            enabled = v.contains("Yes");
+                        } else if k.eq_ignore_ascii_case("Server") {
+                            if v.parse::<std::net::Ipv6Addr>().is_ok() {
+                                host = format!("[{v}]");
+                            } else {
+                                host = v.to_owned();
+                            }
+                        } else if k.eq_ignore_ascii_case("Port") {
+                            port = v.to_owned();
+                        }
                     }
                 }
 
                 if enabled && !host.is_empty() && !port.is_empty() {
-                    return Some(format!("http://{host}:{port}"));
+                    Some((host, port))
+                } else {
+                    None
                 }
+            };
+
+            let mut parts = Vec::new();
+            if let Some((h, p)) = parse_proxy("-getwebproxy") {
+                parts.push(format!("http={h}:{p}"));
+            }
+            if let Some((h, p)) = parse_proxy("-getsecurewebproxy") {
+                parts.push(format!("https={h}:{p}"));
+            }
+            if let Some((h, p)) = parse_proxy("-getsocksfirewallproxy") {
+                parts.push(format!("socks={h}:{p}"));
+            }
+
+            if !parts.is_empty() {
+                return Some(parts.join(";"));
             }
         }
         None
@@ -817,28 +843,44 @@ pub fn get_sys_proxy_address() -> Option<String> {
             {
                 let mode = String::from_utf8_lossy(&output.stdout).trim().to_owned();
                 if mode == "'manual'" {
-                    if let Ok(host_output) = Command::new("gsettings")
-                        .args(["get", "org.gnome.system.proxy.http", "host"])
-                        .output()
-                    {
-                        let host = String::from_utf8_lossy(&host_output.stdout)
-                            .trim()
-                            .trim_matches('\'')
-                            .to_owned();
-                        if !host.is_empty() {
-                            if let Ok(port_output) = Command::new("gsettings")
-                                .args(["get", "org.gnome.system.proxy.http", "port"])
-                                .output()
-                            {
-                                let port = String::from_utf8_lossy(&port_output.stdout)
-                                    .trim()
-                                    .trim_matches('\'')
-                                    .to_owned();
-                                if !port.is_empty() {
-                                    return Some(format!("http://{host}:{port}"));
+                    let mut parts = Vec::new();
+                    let mut check_gnome_proxy = |schema: &str, tag: &str| {
+                        if let Ok(host_output) = Command::new("gsettings")
+                            .args(["get", schema, "host"])
+                            .output()
+                        {
+                            let raw_host = String::from_utf8_lossy(&host_output.stdout)
+                                .trim()
+                                .trim_matches('\'')
+                                .to_owned();
+                            if !raw_host.is_empty() {
+                                let host = if raw_host.parse::<std::net::Ipv6Addr>().is_ok() {
+                                    format!("[{raw_host}]")
+                                } else {
+                                    raw_host
+                                };
+                                if let Ok(port_output) = Command::new("gsettings")
+                                    .args(["get", schema, "port"])
+                                    .output()
+                                {
+                                    let port = String::from_utf8_lossy(&port_output.stdout)
+                                        .trim()
+                                        .trim_matches('\'')
+                                        .to_owned();
+                                    if !port.is_empty() && port != "0" {
+                                        parts.push(format!("{tag}={host}:{port}"));
+                                    }
                                 }
                             }
                         }
+                    };
+
+                    check_gnome_proxy("org.gnome.system.proxy.http", "http");
+                    check_gnome_proxy("org.gnome.system.proxy.https", "https");
+                    check_gnome_proxy("org.gnome.system.proxy.socks", "socks");
+
+                    if !parts.is_empty() {
+                        return Some(parts.join(";"));
                     }
                 }
             }
@@ -858,26 +900,46 @@ pub fn get_sys_proxy_address() -> Option<String> {
             {
                 let ptype = String::from_utf8_lossy(&output.stdout).trim().to_owned();
                 if ptype == "1" {
-                    if let Ok(proxy_output) = Command::new(kread_cmd)
-                        .args([
-                            "--file",
-                            "kioslaverc",
-                            "--group",
-                            "Proxy Settings",
-                            "--key",
-                            "httpProxy",
-                        ])
-                        .output()
-                    {
-                        let proxy = String::from_utf8_lossy(&proxy_output.stdout)
-                            .trim()
-                            .to_owned();
-                        if !proxy.is_empty() {
-                            if proxy.starts_with("http://") || proxy.starts_with("https://") {
-                                return Some(proxy);
+                    let mut parts = Vec::new();
+                    let mut check_kde_proxy = |key: &str, tag: &str| {
+                        if let Ok(proxy_output) = Command::new(kread_cmd)
+                            .args([
+                                "--file",
+                                "kioslaverc",
+                                "--group",
+                                "Proxy Settings",
+                                "--key",
+                                key,
+                            ])
+                            .output()
+                        {
+                            let proxy = String::from_utf8_lossy(&proxy_output.stdout)
+                                .trim()
+                                .to_owned();
+                            if !proxy.is_empty() {
+                                let normalized = match proxy.rsplit_once(' ') {
+                                    Some((head, tail))
+                                        if tail.parse::<u16>().is_ok() && !head.is_empty() =>
+                                    {
+                                        format!("{}:{tail}", head.trim_end())
+                                    }
+                                    _ => proxy.to_string(),
+                                };
+                                if normalized.contains('=') {
+                                    parts.push(normalized);
+                                } else {
+                                    parts.push(format!("{tag}={normalized}"));
+                                }
                             }
-                            return Some(format!("http://{proxy}"));
                         }
+                    };
+
+                    check_kde_proxy("httpProxy", "http");
+                    check_kde_proxy("httpsProxy", "https");
+                    check_kde_proxy("socksProxy", "socks");
+
+                    if !parts.is_empty() {
+                        return Some(parts.join(";"));
                     }
                 }
             }
