@@ -91,6 +91,9 @@ pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
 
 /// Main scheduler loop - checks each subscription individually.
 async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
+    // Reconcile and restore any un-restored global mode or GLOBAL selection marker left from an abrupt shutdown
+    let _ = super::subscription::reconcile_global_mode_restore(&app).await;
+
     let mut check_interval = interval(Duration::from_secs(60)); // Check every minute
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -154,6 +157,23 @@ async fn check_and_update_subscriptions(
     app: &AppHandle,
     state: &Arc<SchedulerState>,
 ) -> Result<usize, String> {
+    // Reconcile any un-restored global mode marker before triggering new subscription downloads.
+    // If lock acquisition times out, another task is actively using global mode; wait briefly and retry once.
+    if !super::subscription::reconcile_global_mode_restore(app).await {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        if !super::subscription::reconcile_global_mode_restore(app).await {
+            emit_warn!(
+                Subscription,
+                SUB_UPDATE_FAILED,
+                "Skipping subscription update pass: global mode lock acquisition timed out"
+            );
+            return Err(
+                "Skipping subscription update pass: global mode lock acquisition timed out"
+                    .to_owned(),
+            );
+        }
+    }
+
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
