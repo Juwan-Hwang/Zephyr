@@ -153,10 +153,13 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
     let mut secret = String::new();
+    let mut api_port = 9090;
 
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {e}"))?;
+
+        api_port = zephyr_core::process::parse_external_controller_port(content.clone());
 
         // Extract current secret from config or generate new one
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
@@ -308,15 +311,17 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
     // Wait for port to be bound
     let mut bound = false;
+    let target_addr = format!("127.0.0.1:{api_port}");
     for _ in 0..10 {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
+        if std::net::TcpStream::connect(&target_addr).is_ok() {
             bound = true;
             break;
         }
     }
 
     if !bound {
+        let _ = kill_all_mihomo_as_root();
         return Err("root_start_failed".to_owned());
     }
 
