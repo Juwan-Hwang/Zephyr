@@ -139,6 +139,48 @@ fn extract_tun_enabled_from_yaml(content: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns the log file path for mihomo running in root TUN mode on macOS.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    std::env::var("HOME")
+        .map(|h| {
+            // macOS: ~/Library/Logs/ - user-specific, other users cannot access
+            let path = format!("{h}/Library/Logs");
+            match std::fs::create_dir_all(&path) {
+                Ok(()) => format!("{path}/mihomo-tun.log"),
+                Err(e) => {
+                    emit_warn!(
+                        System,
+                        SYS_TUN_FAILED,
+                        "Failed to create log directory: {e}"
+                    );
+                    let temp = std::env::temp_dir();
+                    temp.join(format!("mihomo-tun-{}.log", std::process::id()))
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            }
+        })
+        .unwrap_or_else(|_| {
+            // Fallback to user temp directory with process-specific name
+            let temp = std::env::temp_dir();
+            temp.join(format!("mihomo-tun-{}.log", std::process::id()))
+                .to_string_lossy()
+                .into_owned()
+        })
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    let temp = std::env::temp_dir();
+    temp.join(format!("mihomo-tun-{}.log", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Restart mihomo core with root privileges on macOS for TUN mode
 /// This is required because creating /dev/utun devices needs root access
 /// Returns the secret for frontend to update
@@ -153,10 +195,13 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
     let mut secret = String::new();
+    let mut api_port = 9090;
 
     if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read config: {e}"))?;
+
+        api_port = zephyr_core::process::parse_external_controller_port(content.clone());
 
         // Extract current secret from config or generate new one
         secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
@@ -194,26 +239,14 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    // Use user-specific Logs directory (~/Library/Logs/) - secure and predictable for debugging
-    let log_path = std::env::var("HOME")
-        .map(|h| {
-            // macOS: ~/Library/Logs/ - user-specific, other users cannot access
-            let path = format!("{h}/Library/Logs");
-            // Create directory if it doesn't exist
-            if let Err(e) = std::fs::create_dir_all(&path) {
-                emit_warn!(
-                    System,
-                    SYS_TUN_FAILED,
-                    "Failed to create log directory: {e}"
-                );
-            }
-            format!("{path}/mihomo-tun.log")
-        })
-        .unwrap_or_else(|_| {
-            // Fallback to user temp directory with fixed name
-            let temp = std::env::temp_dir();
-            temp.join("mihomo-tun.log").to_string_lossy().into_owned()
-        });
+    let log_path = get_tun_log_path();
+
+    // Security: Unlink if log_path is a pre-existing symlink to prevent privilege escalation via root redirection
+    if let Ok(meta) = std::fs::symlink_metadata(&log_path) {
+        if meta.file_type().is_symlink() {
+            let _ = std::fs::remove_file(&log_path);
+        }
+    }
 
     // CRITICAL: Escape paths in two phases — shell first, then AppleScript
     // 1. Shell-escape: replace ' with '\'' for single-quote context (end quote, escaped quote, start quote)
@@ -241,7 +274,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     let script = format!(
         // nosemgrep: rust-osascript-privilege-escalation — paths are shell-escaped via replace("'", "'\\''")
         // nosemgrep: rust-osascript-command-pattern — escaped values prevent injection
-        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; rm -f '{escaped_log_path}'; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
@@ -282,41 +315,92 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         Err(_) => {}
     }
 
-    // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
+    // Wait for osascript to finish and root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
+    let mut script_finished = false;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Check if user canceled (osascript exited with failure)
-        if let Ok(Some(status)) = child.try_wait() {
-            if !status.success() {
-                return Err("canceled".to_owned());
+        if !script_finished {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        let stderr = child.stderr.take();
+                        if let Some(mut stderr) = stderr {
+                            let mut err = String::new();
+                            let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
+                            if err.contains("canceled") || err.contains("User canceled") {
+                                return Err("canceled".to_owned());
+                            }
+                            return Err(format!("osascript failed: {err}"));
+                        }
+                        return Err("canceled".to_owned());
+                    }
+                    script_finished = true;
+                }
+                Ok(None) => {
+                    // Password dialog is still showing or script is still executing,
+                    // but child may already have started mihomo in background.
+                }
+                Err(_) => {}
             }
         }
 
-        if has_root_mihomo() {
+        let is_ready = if api_port > 0 {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                tokio::net::TcpStream::connect(format!("127.0.0.1:{api_port}")),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false)
+        } else {
+            script_finished
+        };
+        if is_ready && has_root_mihomo() {
             started = true;
             break;
         }
     }
 
     if !started {
-        // Kill osascript if still running
+        // Kill osascript if still running and reap child
         let _ = child.kill();
+        let _ = child.wait();
+        if script_finished || has_root_mihomo() {
+            let kill_res = tokio::task::spawn_blocking(smart_kill_all_mihomo_as_root).await;
+            if kill_res.ok().and_then(Result::ok).is_some() {
+                set_tun_mode(false);
+            }
+        }
         return Err("Root mihomo failed to start within 30 seconds".to_owned());
     }
 
-    // Wait for port to be bound
-    let mut bound = false;
-    for _ in 0..10 {
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
-            bound = true;
-            break;
+    // Wait for port to be bound (skip TCP probe if api_port is 0, e.g. disabled controller)
+    let mut bound = api_port == 0;
+    if !bound {
+        let target_addr = format!("127.0.0.1:{api_port}");
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let connected = tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                tokio::net::TcpStream::connect(&target_addr),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+            if connected {
+                bound = true;
+                break;
+            }
         }
     }
 
     if !bound {
+        let kill_res = tokio::task::spawn_blocking(kill_all_mihomo_as_root).await;
+        if kill_res.ok().and_then(Result::ok).is_some() {
+            set_tun_mode(false);
+        }
         return Err("root_start_failed".to_owned());
     }
 
@@ -481,7 +565,7 @@ mod tests {
 /// Check if there's a root-owned mihomo process running
 /// Checks for both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
 #[cfg(target_os = "macos")]
-fn has_root_mihomo() -> bool {
+pub(crate) fn has_root_mihomo() -> bool {
     if let Ok(output) = std::process::Command::new("ps")
         .args(["-axo", "user,comm"])
         .output()
@@ -499,7 +583,7 @@ fn has_root_mihomo() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-const fn has_root_mihomo() -> bool {
+pub(crate) const fn has_root_mihomo() -> bool {
     false
 }
 
@@ -512,15 +596,41 @@ pub fn kill_all_mihomo_as_root() -> Result<(), String> {
     // nosemgrep: rust-osascript-privilege-escalation — static string, no interpolation
     // nosemgrep: rust-osascript-command-pattern — static string, no injection vector
     let script = r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
-    let status = std::process::Command::new("osascript")
+    let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
-        .status()
-        .map_err(|e| format!("Failed to run osascript: {e}"))?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn osascript: {e}"))?;
 
-    if !status.success() {
-        return Err(format!("osascript exit code: {status}"));
+    let timeout = std::time::Duration::from_secs(30);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(format!("osascript exit code: {status}"));
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(
+                        "osascript timed out waiting for administrator privileges".to_owned()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed waiting for osascript: {e}"));
+            }
+        }
     }
-    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -554,8 +664,8 @@ pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String>
 #[tauri::command]
 #[cfg(target_os = "macos")]
 pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
-    set_tun_mode(false);
     kill_all_mihomo_as_root()?;
+    set_tun_mode(false);
 
     // Wait for ALL root processes (including osascript shell) to die
     let mut waited = 0;
