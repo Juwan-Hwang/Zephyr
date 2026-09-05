@@ -82,7 +82,7 @@ pub async fn override_create(
                 .map_err(|e| format!("Lock failed: {e}"))?;
             lock.mixed_port
         };
-        match download_remote_content(download_url, proxy_port).await {
+        match download_remote_content(&state.app, download_url, proxy_port).await {
             Ok(content) => {
                 // Validate content is not HTML / binary
                 validate_override_content(&content)?;
@@ -720,7 +720,7 @@ pub async fn override_refresh_remote(
     };
 
     // Download with proxy, falling back to direct if proxy is unavailable
-    let content = download_remote_content(&url, proxy_port).await?;
+    let content = download_remote_content(&state.app, &url, proxy_port).await?;
 
     // Update content
     overrides_store::write_content(&state, &id, &content)?;
@@ -938,8 +938,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 ///
 /// Uses the unified `fetch_url_content` function from `fetch_util` for consistent
 /// security measures (SSRF protection, DNS pinning, redirect validation).
-async fn download_remote_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
-    let mut content = fetch_url_content(url, proxy_port).await?;
+async fn download_remote_content(
+    app: &tauri::AppHandle,
+    url: &str,
+    proxy_port: Option<u16>,
+) -> Result<String, String> {
+    let mut content = fetch_url_content(url, proxy_port, Some(app)).await?;
     // Strip UTF-8 BOM in-place to avoid interfering with content detection
     if content.starts_with('\u{feff}') {
         content.drain(..'\u{feff}'.len_utf8());
