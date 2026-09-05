@@ -173,16 +173,26 @@ pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<Str
                 "Direct download failed: {direct_err}"
             );
 
-            // Try proxy fallback if available
-            if let Some(port) = proxy_port.filter(|&p| p > 0) {
-                crate::emit_info!(
-                    Subscription,
-                    SUB_PROXY_RETRY,
-                    "Retrying with proxy on port {port}..."
-                );
-                match try_proxy_download(url, port).await {
-                    Ok(content) => Ok(content),
-                    Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+            // SSRF rejection is a security policy decision, not a transient transport failure.
+            // Reject immediately instead of retrying through proxy.
+            if direct_err.contains("SSRF protection") {
+                return Err(direct_err);
+            }
+
+            // Try proxy fallback if available and destination is not private
+            if !user_entered_private && !is_private_host(&host) {
+                if let Some(port) = proxy_port.filter(|&p| p > 0) {
+                    crate::emit_info!(
+                        Subscription,
+                        SUB_PROXY_RETRY,
+                        "Retrying with proxy on port {port}..."
+                    );
+                    match try_proxy_download(url, port).await {
+                        Ok(content) => Ok(content),
+                        Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+                    }
+                } else {
+                    Err(direct_err)
                 }
             } else {
                 Err(direct_err)
