@@ -211,16 +211,82 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
 /// Check if a host is a private or local address (SSRF protection)
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.trim_end_matches('.');
+    if normalized.is_empty() {
+        return false;
+    }
+    let host_lower = normalized.to_lowercase();
 
     if host_lower == "localhost"
         || host_lower.ends_with(".localhost")
         || host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".intranet")
+        || host_lower.ends_with(".private")
+        || host_lower.ends_with(".lan")
+        || host_lower == "home.arpa"
+        || host_lower.ends_with(".home.arpa")
+        || host_lower.ends_with(".home")
+        || host_lower.ends_with(".corp")
     {
         return true;
     }
 
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    let unbracketed = normalized
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(normalized);
+
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+        return is_private_ip(ip);
+    }
+
+    false
+}
+
+/// Check if a host is a single-label non-IP host (e.g. "myhost", "router").
+/// Single-label hosts are strictly direct-only to prevent internal SSRF via proxies.
+#[must_use]
+pub fn is_single_label_host(host: &str) -> bool {
+    let trimmed = host.trim();
+    let normalized = trimmed.trim_end_matches('.');
+    let unbracketed = normalized
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(normalized);
+    !unbracketed.contains('.') && unbracketed.parse::<IpAddr>().is_err()
+}
+
+/// Check if a host is a literal private IP address or localhost.
+/// Unlike `is_private_host`, this returns false for private domain name suffixes
+/// (.internal, .lan, etc.) so domain names are still subject to DNS resolution and
+/// destination IP validation rather than being treated as pre-trusted addresses.
+#[must_use]
+pub fn is_literal_private_host(host: &str) -> bool {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.trim_end_matches('.');
+    if normalized.is_empty() {
+        return false;
+    }
+    let host_lower = normalized.to_lowercase();
+
+    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+        return true;
+    }
+
+    let unbracketed = normalized
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(normalized);
+
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
         return is_private_ip(ip);
     }
 
@@ -237,21 +303,42 @@ pub fn validate_subscription_name(name: &str) -> Result<String, crate::error::Ap
     crate::config::sanitizer::sanitize_base_filename(name.to_owned())
 }
 
+/// Dedicated error type for public host address validation, distinguishing SSRF policy blocks
+/// from transient or empty DNS lookup results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicHostAddrError {
+    SsrfBlocked(String),
+    NoAddresses(String),
+    Other(String),
+}
+
+impl std::fmt::Display for PublicHostAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SsrfBlocked(msg) | Self::NoAddresses(msg) | Self::Other(msg) => {
+                write!(f, "{msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PublicHostAddrError {}
+
 /// Core validation logic for a public host's resolved addresses.
 /// Extracted so tests can inject mock DNS results without real DNS.
 pub fn validate_public_host_addrs(
     host: &str,
     addrs: &[std::net::SocketAddr],
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+) -> Result<(String, Option<std::net::SocketAddr>, bool), PublicHostAddrError> {
     let mut resolved_addr = None;
 
     for addr in addrs {
         if is_private_ip(addr.ip()) {
-            return Err(format!(
-                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed. \
+            return Err(PublicHostAddrError::SsrfBlocked(format!(
+                "SSRF protection: host '{host}' resolved to private IP {} — access to private/local addresses is not allowed. \
                  If this is a trusted internal subscription, enter the private address directly (e.g. http://192.168.x.x) instead of using a domain name.",
-                host, addr.ip()
-            ));
+                addr.ip()
+            )));
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(*addr);
@@ -259,18 +346,23 @@ pub fn validate_public_host_addrs(
     }
 
     if resolved_addr.is_none() {
-        return Err("Could not resolve any IP address for the host".to_owned());
+        return Err(PublicHostAddrError::NoAddresses(
+            "Could not resolve any IP address for the host".to_owned(),
+        ));
     }
 
     Ok((host.to_owned(), resolved_addr, false))
 }
 
-/// Validate URL and its resolved IPs for SSRF protection.
-/// Returns `(host, resolved_addr, user_entered_private)`.
-pub fn validate_subscription_url_with_ip(
-    url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    let parsed_url = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+/// Validate URL scheme, host, and port without DNS resolution.
+/// Returns `(host, port, user_entered_private)`.
+pub fn validate_subscription_url_basic(url: &str) -> Result<(String, u16, bool), String> {
+    let trimmed = url.trim();
+    if trimmed.starts_with("http:///") || trimmed.starts_with("https:///") {
+        return Err("URL must have a host".to_owned());
+    }
+
+    let parsed_url = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {e}"))?;
 
     let scheme = parsed_url.scheme();
     if scheme != "http" && scheme != "https" {
@@ -278,20 +370,52 @@ pub fn validate_subscription_url_with_ip(
     }
 
     let host = parsed_url.host_str().ok_or("URL must have a host")?;
+    if host.trim().is_empty() {
+        return Err("URL must have a host".to_owned());
+    }
 
     let user_entered_private = is_private_host(host);
 
-    if user_entered_private {
-        return Ok((host.to_owned(), None, true));
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let port = parsed_url.port().unwrap_or(default_port);
+
+    Ok((host.to_owned(), port, user_entered_private))
+}
+
+/// Validate URL and its resolved IPs for SSRF protection.
+/// Returns `(host, resolved_addr, user_entered_private)`.
+pub fn validate_subscription_url_with_ip(
+    url: &str,
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+    let (host, port, user_entered_private) = validate_subscription_url_basic(url)?;
+    let trusted_private_literal = is_literal_private_host(&host);
+
+    if trusted_private_literal {
+        return Ok((host, None, true));
     }
 
-    let default_port = if scheme == "https" { 443 } else { 80 };
     let addrs: Vec<std::net::SocketAddr> =
-        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{port}"))
             .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
-    validate_public_host_addrs(host, &addrs)
+    if user_entered_private {
+        // Explicitly entered private-suffix hostname (e.g. nas.local, router.lan, svc.internal).
+        // It is an authorized direct-only LAN destination.
+        // Pin the first resolved address and treat as user_entered_private (direct-only).
+        let first_addr = addrs.first().copied();
+        return Ok((host, first_addr, true));
+    }
+
+    validate_public_host_addrs(&host, &addrs).map_err(|e| e.to_string())
+}
+
+fn contains_http_status(e: &str) -> bool {
+    e.match_indices("HTTP ").any(|(i, _)| {
+        e.as_bytes()
+            .get(i + 5..i + 8)
+            .is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+    })
 }
 
 /// Determine the appropriate error code based on the error message content.
@@ -300,16 +424,25 @@ pub fn validate_subscription_url_with_ip(
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn classify_sub_error(e: String) -> u16 {
-    if e.contains("SSRF protection") {
+    if e.contains("SSRF protection")
+        || e.contains("[SSRF_BLOCKED]")
+        || e.contains("Direct SSRF blocked")
+    {
         crate::event::codes::SUB_SSRF_BLOCKED
-    } else if e.contains("DNS resolution failed") || e.contains("Could not resolve") {
-        crate::event::codes::SUB_DNS_FAILED
     } else if e.contains("Invalid URL")
         || e.contains("Only HTTP")
         || e.contains("must have a host")
         || e.contains("URL must not be empty")
     {
         crate::event::codes::SUB_URL_INVALID
+    } else if contains_http_status(&e) {
+        crate::event::codes::SUB_HTTP_ERROR
+    } else if e.contains("DNS resolution failed")
+        || e.contains("Could not resolve")
+        || e.contains("DNS resolution returned no addresses")
+        || e.contains("DNS deadline elapsed")
+    {
+        crate::event::codes::SUB_DNS_FAILED
     } else if e.contains("Subscription name")
         || e.contains("Path traversal detected")
         || e.contains("Invalid character in filename")
@@ -318,9 +451,7 @@ pub fn classify_sub_error(e: String) -> u16 {
         || e.contains("Invalid file type")
     {
         crate::event::codes::SUB_NAME_INVALID
-    } else if e.contains("HTTP ") {
-        crate::event::codes::SUB_HTTP_ERROR
-    } else if e.contains("timeout") || e.contains("Timeout") {
+    } else if e.contains("timeout") || e.contains("Timeout") || e.contains("timed out") {
         crate::event::codes::SUB_UPDATE_TIMEOUT
     } else if e.contains("Response too large") || e.contains("exceeded size limit") {
         crate::event::codes::SUB_RESPONSE_TOO_LARGE
@@ -422,6 +553,143 @@ pub struct BatchUpdateItem {
     pub name: String,
 }
 
+/// 从 mihomo /proxies 返回的字典中提取全局模式候选节点及当前 GLOBAL 选中项。
+/// 纯函数，便于独立单元测试。
+pub fn select_global_candidate(
+    proxies: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(String, Option<String>)> {
+    let global_obj = proxies.get("GLOBAL");
+    let global_now = global_obj
+        .and_then(|g| g.get("now"))
+        .and_then(|n| n.as_str())
+        .map(std::borrow::ToOwned::to_owned);
+
+    fn is_special_target(s: &str) -> bool {
+        matches!(
+            s,
+            "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "PASS-RULE" | "COMPATIBLE"
+        )
+    }
+
+    let global_all: Vec<&str> = global_obj
+        .and_then(|g| g.get("all"))
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // 递归解析候选节点/策略组，确保最终生效的叶子节点存在于 proxies 中且不是 DIRECT / REJECT 等特殊目标。
+    // 使用 visited 集合检测循环依赖，支持任意深度的无环策略组链路与嵌套策略组递归验证。
+    fn check_node_resolves_to_proxy(
+        name: &str,
+        proxies: &serde_json::Map<String, serde_json::Value>,
+        visited: &mut std::collections::HashSet<String>,
+        depth: usize,
+    ) -> bool {
+        if depth > proxies.len().max(16) {
+            return false;
+        }
+        if is_special_target(name) {
+            return false;
+        }
+        if !visited.insert(name.to_owned()) {
+            return false;
+        }
+        let Some(p_obj) = proxies.get(name) else {
+            return false;
+        };
+        let p_type = p_obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if p_type.eq_ignore_ascii_case("Selector")
+            || p_type.eq_ignore_ascii_case("URLTest")
+            || p_type.eq_ignore_ascii_case("Fallback")
+            || p_type.eq_ignore_ascii_case("LoadBalance")
+            || p_type.eq_ignore_ascii_case("Relay")
+        {
+            if let Some(next_now) = p_obj.get("now").and_then(|n| n.as_str()) {
+                return check_node_resolves_to_proxy(next_now, proxies, visited, depth + 1);
+            }
+            if p_type.eq_ignore_ascii_case("LoadBalance") {
+                if let Some(all_arr) = p_obj.get("all").and_then(|a| a.as_array()) {
+                    let members: Vec<&str> = all_arr.iter().filter_map(|v| v.as_str()).collect();
+                    if !members.is_empty() {
+                        return members.iter().all(|member| {
+                            let mut branch_visited = visited.clone();
+                            check_node_resolves_to_proxy(
+                                member,
+                                proxies,
+                                &mut branch_visited,
+                                depth + 1,
+                            )
+                        });
+                    }
+                }
+            }
+            return false;
+        }
+        if p_type.is_empty()
+            || p_type.eq_ignore_ascii_case("Direct")
+            || p_type.eq_ignore_ascii_case("Reject")
+            || p_type.eq_ignore_ascii_case("RejectDrop")
+            || p_type.eq_ignore_ascii_case("Pass")
+            || p_type.eq_ignore_ascii_case("Pass-Rule")
+            || p_type.eq_ignore_ascii_case("Compatible")
+        {
+            return false;
+        }
+        p_obj.get("alive").and_then(serde_json::Value::as_bool) != Some(false)
+    }
+
+    let resolves_to_effective_proxy = |start_name: &str| -> bool {
+        let mut visited = std::collections::HashSet::new();
+        check_node_resolves_to_proxy(start_name, proxies, &mut visited, 0)
+    };
+
+    let is_valid_global_candidate = |s: &str| {
+        !global_all.is_empty() && global_all.contains(&s) && resolves_to_effective_proxy(s)
+    };
+
+    let active_node = global_now
+        .as_deref()
+        .filter(|n| is_valid_global_candidate(n))
+        .map(std::borrow::ToOwned::to_owned)
+        .or_else(|| {
+            // Priority 1: Check active `now` of common selector/urltest/fallback groups.
+            // If the group's `now` is in GLOBAL.all and resolves to a real proxy, prefer it.
+            // If not, but the group itself is in GLOBAL.all and resolves to a real proxy, use the group name.
+            for (name, proxy_val) in proxies {
+                if name == "GLOBAL" || is_special_target(name) {
+                    continue;
+                }
+                let p_type = proxy_val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if p_type.eq_ignore_ascii_case("Selector")
+                    || p_type.eq_ignore_ascii_case("URLTest")
+                    || p_type.eq_ignore_ascii_case("Fallback")
+                {
+                    if let Some(now) = proxy_val.get("now").and_then(|n| n.as_str()) {
+                        if is_valid_global_candidate(now) {
+                            return Some(now.to_owned());
+                        }
+                    }
+                    if is_valid_global_candidate(name) {
+                        return Some(name.clone());
+                    }
+                }
+            }
+
+            // Priority 2: Look through GLOBAL's member list `all` for the first valid candidate.
+            // This ensures the chosen node or group is recognized as a valid GLOBAL member
+            // by Mihomo's PUT /proxies/GLOBAL API and actually routes through an active proxy.
+            for &member_name in &global_all {
+                if is_valid_global_candidate(member_name) {
+                    return Some(member_name.to_owned());
+                }
+            }
+
+            None
+        })?;
+
+    Some((active_node, global_now))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -453,12 +721,70 @@ mod tests {
         assert!(is_private_host("localhost"));
         assert!(is_private_host("my.localhost"));
         assert!(is_private_host("my.local"));
+        assert!(is_private_host("service.internal"));
+        assert!(is_private_host("router.lan"));
+        assert!(is_private_host("device.home.arpa"));
+        assert!(is_private_host("home.arpa"));
         assert!(is_private_host("127.0.0.1"));
         assert!(is_private_host("10.0.0.1"));
         assert!(is_private_host("192.168.1.1"));
+        assert!(is_private_host("172.16.0.1"));
+        assert!(is_private_host("::1"));
+        assert!(is_private_host("[::1]"));
+        assert!(is_private_host("[fd00::1]"));
+        assert!(is_private_host("[fe80::1]"));
+        assert!(is_private_host("nas.corp"));
+        assert!(is_private_host("gateway.home"));
+        assert!(!is_private_host("router"));
+        assert!(!is_private_host("intranet"));
         assert!(!is_private_host("my.test"));
         assert!(!is_private_host("example.com"));
+        assert!(!is_private_host("1.1.1.1"));
         assert!(!is_private_host("8.8.8.8"));
+        assert!(!is_private_host("[2606:4700:4700::1111]"));
+    }
+
+    #[test]
+    fn test_is_literal_private_host() {
+        assert!(is_literal_private_host("localhost"));
+        assert!(is_literal_private_host("my.localhost"));
+        assert!(is_literal_private_host("127.0.0.1"));
+        assert!(is_literal_private_host("10.0.0.1"));
+        assert!(is_literal_private_host("192.168.1.1"));
+        assert!(is_literal_private_host("172.16.0.1"));
+        assert!(is_literal_private_host("::1"));
+        assert!(is_literal_private_host("[::1]"));
+        assert!(is_literal_private_host("[fd00::1]"));
+        assert!(is_literal_private_host("[fe80::1]"));
+
+        // Domain names must return false so they undergo DNS resolution and destination-IP validation
+        assert!(!is_literal_private_host("service.internal"));
+        assert!(!is_literal_private_host("router.lan"));
+        assert!(!is_literal_private_host("device.home.arpa"));
+        assert!(!is_literal_private_host("home.arpa"));
+        assert!(!is_literal_private_host("my.local"));
+        assert!(!is_literal_private_host("nas.corp"));
+        assert!(!is_literal_private_host("gateway.home"));
+        assert!(!is_literal_private_host("example.com"));
+        assert!(!is_literal_private_host("8.8.8.8"));
+    }
+
+    #[test]
+    fn test_is_private_host_trailing_dots_and_empty() {
+        assert!(is_private_host("service.internal."));
+        assert!(is_private_host("service.internal.."));
+        assert!(is_private_host("router.lan."));
+        assert!(is_private_host("router.lan..."));
+        assert!(is_private_host("localhost."));
+        assert!(is_private_host("localhost.."));
+        assert!(is_private_host("127.0.0.1.."));
+        assert!(is_literal_private_host("localhost.."));
+        assert!(is_literal_private_host("127.0.0.1.."));
+        assert!(is_single_label_host("myhost.."));
+        assert!(!is_private_host(""));
+        assert!(!is_private_host("   "));
+        assert!(!is_private_host("."));
+        assert!(!is_private_host(".."));
     }
 
     #[test]
@@ -510,12 +836,63 @@ mod tests {
         let (_, resolved_addr, user_entered_private) = result.unwrap();
         assert!(resolved_addr.is_none());
         assert!(user_entered_private);
+
+        let result_suffix = validate_subscription_url_with_ip("http://nas.local:8080/sub");
+        if let Ok((host, resolved_addr, is_private)) = result_suffix {
+            assert_eq!(host, "nas.local");
+            assert!(resolved_addr.is_some());
+            assert!(is_private);
+        }
+
+        let result_local = validate_subscription_url_basic("http://nas.local:8080/sub");
+        assert!(result_local.is_ok());
+        let (host, port, user_entered_private) = result_local.unwrap();
+        assert_eq!(host, "nas.local");
+        assert_eq!(port, 8080);
+        assert!(user_entered_private);
+
+        let result_internal = validate_subscription_url_basic("http://service.internal:8080/sub");
+        assert!(result_internal.is_ok());
+        let (_, _, user_entered_private) = result_internal.unwrap();
+        assert!(user_entered_private);
     }
 
     #[test]
     fn test_validate_invalid_schemes_rejected() {
         assert!(validate_subscription_url_with_ip("ftp://192.168.1.1/sub").is_err());
         assert!(validate_subscription_url_with_ip("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("ftp://192.168.1.1/sub").is_err());
+        assert!(validate_subscription_url_basic("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("http:///sub").is_err());
+        assert!(validate_subscription_url_with_ip("http:///sub").is_err());
+    }
+
+    #[test]
+    fn test_validate_subscription_url_basic_success() {
+        let (host, port, private) =
+            validate_subscription_url_basic("https://blocked-domain.example.com/sub?token=123")
+                .unwrap();
+        assert_eq!(host, "blocked-domain.example.com");
+        assert_eq!(port, 443);
+        assert!(!private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://192.168.1.100:8080/sub").unwrap();
+        assert_eq!(host, "192.168.1.100");
+        assert_eq!(port, 8080);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://localhost:9090/sub").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9090);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://[::1]:8080/sub").unwrap();
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 8080);
+        assert!(private);
     }
 
     #[test]
@@ -527,10 +904,29 @@ mod tests {
 
     #[test]
     fn test_public_host_resolving_to_private_ip_rejected() {
-        let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
-        let result = validate_public_host_addrs("attacker.com", &addrs);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("SSRF protection"));
+        let sinkhole_ips = [
+            "192.168.1.1:80",
+            "10.0.0.1:80",
+            "172.16.0.1:80",
+            "127.0.0.1:80",
+            "0.0.0.0:80",
+            "169.254.169.254:80",
+            "[::1]:80",
+            "[fc00::1]:80",
+            "[fe80::1]:80",
+        ];
+        for ip in sinkhole_ips {
+            let addrs: Vec<std::net::SocketAddr> = vec![ip.parse().unwrap()];
+            let result = validate_public_host_addrs("attacker.com", &addrs);
+            assert!(
+                result.is_err(),
+                "Expected sinkhole IP {ip} to be rejected as SSRF"
+            );
+            assert!(
+                matches!(result.unwrap_err(), PublicHostAddrError::SsrfBlocked(_)),
+                "Expected SsrfBlocked for sinkhole IP {ip}"
+            );
+        }
     }
 
     #[test]
@@ -597,5 +993,394 @@ mod tests {
     #[test]
     fn snapshot_redact_url_in_string_no_url() {
         insta::assert_snapshot!(redact_url_in_string("Just a plain message".to_owned()));
+    }
+
+    #[test]
+    fn test_select_global_candidate_special_targets_only() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["DIRECT", "REJECT", "REJECT-DROP", "PASS-RULE"],
+                "now": "PASS-RULE"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_cycle_resolution() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["GroupA"],
+                "now": "GroupA"
+            },
+            "GroupA": {
+                "type": "Selector",
+                "now": "GroupB"
+            },
+            "GroupB": {
+                "type": "Selector",
+                "now": "GroupA"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_nested_selector() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["ProxyGroup"],
+                "now": "ProxyGroup"
+            },
+            "ProxyGroup": {
+                "type": "Selector",
+                "now": "HK-01"
+            },
+            "HK-01": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("ProxyGroup".to_owned(), Some("ProxyGroup".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_prefers_active_now_if_in_all() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["HK-01", "US-01"],
+                "now": "DIRECT"
+            },
+            "AutoGroup": {
+                "type": "Selector",
+                "now": "US-01"
+            },
+            "HK-01": {
+                "type": "Vmess"
+            },
+            "US-01": {
+                "type": "Vmess"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("US-01".to_owned(), Some("DIRECT".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_fallback_to_global_all_member() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["DIRECT", "JP-01"],
+                "now": "DIRECT"
+            },
+            "JP-01": {
+                "type": "Trojan"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("JP-01".to_owned(), Some("DIRECT".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_empty_global_all() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": [],
+                "now": "DIRECT"
+            },
+            "CustomSelector": {
+                "type": "Selector",
+                "now": "Node-A"
+            },
+            "Node-A": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_unknown_leaf_rejected() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["GhostNode"],
+                "now": "GhostNode"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_rejects_custom_named_non_proxy_types() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["MyDirect", "MyReject", "MyCompatible", "ValidNode"],
+                "now": "MyDirect"
+            },
+            "MyDirect": {
+                "type": "Direct"
+            },
+            "MyReject": {
+                "type": "Reject"
+            },
+            "MyCompatible": {
+                "type": "Compatible"
+            },
+            "ValidNode": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("ValidNode".to_owned(), Some("MyDirect".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_load_balance_and_relay() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["LB-Group", "Relay-Group"],
+                "now": "LB-Group"
+            },
+            "LB-Group": {
+                "type": "LoadBalance",
+                "now": "DIRECT"
+            },
+            "Relay-Group": {
+                "type": "Relay",
+                "now": "Leaf-01"
+            },
+            "Leaf-01": {
+                "type": "Vmess"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("Relay-Group".to_owned(), Some("LB-Group".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_load_balance_without_now() {
+        let mixed_json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["LB-Group"],
+                "now": "LB-Group"
+            },
+            "LB-Group": {
+                "type": "LoadBalance",
+                "all": ["DIRECT", "DeadNode", "LiveLeaf"]
+            },
+            "DeadNode": {
+                "type": "Shadowsocks",
+                "alive": false
+            },
+            "LiveLeaf": {
+                "type": "Shadowsocks",
+                "alive": true
+            }
+        });
+        let mixed_proxies = mixed_json.as_object().unwrap();
+        assert_eq!(select_global_candidate(mixed_proxies), None);
+
+        let valid_json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["LB-Group"],
+                "now": "LB-Group"
+            },
+            "LB-Group": {
+                "type": "LoadBalance",
+                "all": ["LiveLeaf1", "LiveLeaf2"]
+            },
+            "LiveLeaf1": {
+                "type": "Shadowsocks",
+                "alive": true
+            },
+            "LiveLeaf2": {
+                "type": "Shadowsocks",
+                "alive": true
+            }
+        });
+        let valid_proxies = valid_json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(valid_proxies),
+            Some(("LB-Group".to_owned(), Some("LB-Group".to_owned())))
+        );
+
+        // LoadBalance containing a nested Selector that selects DIRECT must be rejected
+        let nested_direct_json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["LB-Group"],
+                "now": "LB-Group"
+            },
+            "LB-Group": {
+                "type": "LoadBalance",
+                "all": ["NestedSelector", "LiveLeaf"]
+            },
+            "NestedSelector": {
+                "type": "Selector",
+                "now": "DIRECT",
+                "all": ["DIRECT", "LiveLeaf"]
+            },
+            "LiveLeaf": {
+                "type": "Shadowsocks",
+                "alive": true
+            }
+        });
+        let nested_direct_proxies = nested_direct_json.as_object().unwrap();
+        assert_eq!(select_global_candidate(nested_direct_proxies), None);
+
+        // LoadBalance containing a nested Selector that selects a live proxy node must succeed
+        let nested_valid_json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["LB-Group"],
+                "now": "LB-Group"
+            },
+            "LB-Group": {
+                "type": "LoadBalance",
+                "all": ["NestedSelector", "LiveLeaf"]
+            },
+            "NestedSelector": {
+                "type": "Selector",
+                "now": "LiveLeaf2",
+                "all": ["DIRECT", "LiveLeaf2"]
+            },
+            "LiveLeaf": {
+                "type": "Shadowsocks",
+                "alive": true
+            },
+            "LiveLeaf2": {
+                "type": "Shadowsocks",
+                "alive": true
+            }
+        });
+        let nested_valid_proxies = nested_valid_json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(nested_valid_proxies),
+            Some(("LB-Group".to_owned(), Some("LB-Group".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_ignores_dead_leaf() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["DeadNode", "LiveNode"],
+                "now": "DIRECT"
+            },
+            "DeadNode": {
+                "type": "Shadowsocks",
+                "alive": false
+            },
+            "LiveNode": {
+                "type": "Shadowsocks",
+                "alive": true
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("LiveNode".to_owned(), Some("DIRECT".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_deep_acyclic_chain() {
+        let mut map = serde_json::Map::new();
+        // Create a chain of 10 nested Selectors: S0 -> S1 -> ... -> S9 -> Leaf (> 8 links)
+        for i in 0..10 {
+            let next = if i == 9 {
+                "RealLeaf".to_owned()
+            } else {
+                format!("S{}", i + 1)
+            };
+            map.insert(
+                format!("S{i}"),
+                serde_json::json!({
+                    "type": "Selector",
+                    "now": next,
+                    "all": [next]
+                }),
+            );
+        }
+        map.insert(
+            "RealLeaf".to_owned(),
+            serde_json::json!({
+                "type": "Shadowsocks",
+                "alive": true
+            }),
+        );
+        map.insert(
+            "GLOBAL".to_owned(),
+            serde_json::json!({
+                "type": "Selector",
+                "now": "S0",
+                "all": ["S0"]
+            }),
+        );
+
+        assert_eq!(
+            select_global_candidate(&map)
+                .as_ref()
+                .map(|(c, _)| c.as_str()),
+            Some("S0")
+        );
+    }
+
+    #[test]
+    fn test_classify_sub_error() {
+        use crate::event::codes::*;
+        assert_eq!(
+            classify_sub_error("SSRF protection: Direct download blocked".to_owned()),
+            SUB_SSRF_BLOCKED
+        );
+        assert_eq!(
+            classify_sub_error("Invalid URL: Only HTTP and HTTPS URLs are allowed".to_owned()),
+            SUB_URL_INVALID
+        );
+        assert_eq!(
+            classify_sub_error(
+                "Direct DNS: DNS resolution failed; Proxy: HTTP 404 Not Found".to_owned()
+            ),
+            SUB_HTTP_ERROR
+        );
+        assert_eq!(
+            classify_sub_error(
+                "Direct DNS: DNS resolution failed; Proxy: Connection failed".to_owned()
+            ),
+            SUB_DNS_FAILED
+        );
+        assert_eq!(
+            classify_sub_error("Subscription name cannot be empty".to_owned()),
+            SUB_NAME_INVALID
+        );
+        assert_eq!(
+            classify_sub_error("Request timed out".to_owned()),
+            SUB_UPDATE_TIMEOUT
+        );
+        assert_eq!(
+            classify_sub_error("DNS resolution returned no addresses for host".to_owned()),
+            SUB_DNS_FAILED
+        );
+        assert_eq!(
+            classify_sub_error("DNS deadline elapsed while resolving host".to_owned()),
+            SUB_DNS_FAILED
+        );
     }
 }
