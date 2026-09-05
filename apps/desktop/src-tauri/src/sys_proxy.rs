@@ -188,15 +188,14 @@ fn run_networksetup(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Dynamically get all network services from macOS
+/// Dynamically get all network services from macOS with a bounded timeout
 #[cfg(target_os = "macos")]
-fn get_network_services() -> Vec<String> {
-    let output = match Command::new("networksetup")
-        .arg("-listallnetworkservices")
-        .output()
-    {
-        Ok(out) => out,
-        Err(_) => return vec!["Wi-Fi".to_owned(), "Ethernet".to_owned()],
+fn get_network_services_bounded(timeout: std::time::Duration) -> Vec<String> {
+    let mut cmd = Command::new("networksetup");
+    cmd.arg("-listallnetworkservices");
+    let output = match run_cmd_bounded(cmd, timeout) {
+        Some(out) => out,
+        None => return vec!["Wi-Fi".to_owned(), "Ethernet".to_owned()],
     };
 
     if !output.status.success() {
@@ -230,6 +229,12 @@ fn get_network_services() -> Vec<String> {
     services
 }
 
+/// Dynamically get all network services from macOS
+#[cfg(target_os = "macos")]
+fn get_network_services() -> Vec<String> {
+    get_network_services_bounded(std::time::Duration::from_millis(800))
+}
+
 #[cfg(target_os = "macos")]
 fn apply_networksetup_for_services<F>(mut op: F) -> Result<(), String>
 where
@@ -251,16 +256,123 @@ where
     }
 }
 
-#[cfg(target_os = "linux")]
-fn is_cmd_available(cmd: &str) -> bool {
-    Command::new(cmd).arg("--help").output().is_ok()
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn kill_child_and_descendants(child: &mut std::process::Child) {
+    if let Ok(pid) = i32::try_from(child.id()) {
+        if pid > 0 {
+            // SAFETY: We send SIGKILL to the process group created for this child (pgid == pid).
+            // The child was spawned in its own process group via `process_group(0)`, so killing `-pid`
+            // cleanly terminates the child and any descendants holding inherited file descriptors.
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn run_cmd_bounded(mut cmd: Command, timeout: std::time::Duration) -> Option<std::process::Output> {
+    use std::os::unix::process::CommandExt as _;
+
+    cmd.process_group(0);
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader_handle = std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // The child has exited, so the reader thread only drains buffered
+                // pipe data. Use a fixed grace window instead of the remaining
+                // budget, which can already be zero at the deadline boundary.
+                let stdout_bytes = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        // If the reader hasn't seen EOF within the grace window, a descendant process
+                        // may still hold the inherited stdout pipe open. Terminate the process group
+                        // to close the pipe before joining the reader thread.
+                        kill_child_and_descendants(&mut child);
+                        rx.recv_timeout(std::time::Duration::from_millis(100))
+                            .unwrap_or_default()
+                    }
+                };
+                let _ = reader_handle.join();
+                return Some(std::process::Output {
+                    status,
+                    stdout: stdout_bytes,
+                    stderr: Vec::new(),
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    kill_child_and_descendants(&mut child);
+                    let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+                    let _ = reader_handle.join();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            Err(_) => {
+                kill_child_and_descendants(&mut child);
+                let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+                let _ = reader_handle.join();
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "linux"))]
+fn push_normalized_proxy_part(parts: &mut Vec<String>, raw: &str, tag: &str) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "false" {
+        return;
+    }
+    let mut normalized = trimmed.to_owned();
+    if let Some(rest) = normalized.strip_prefix("socks://") {
+        normalized = format!("socks5://{rest}");
+    }
+    if normalized.ends_with(":0") {
+        return;
+    }
+    if normalized.contains('=') {
+        parts.push(normalized);
+    } else {
+        parts.push(format!("{tag}={normalized}"));
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn get_kde_cmd() -> Option<(&'static str, &'static str)> {
-    if is_cmd_available("kwriteconfig6") {
+fn run_cmd_bounded_status(cmd: Command, timeout: std::time::Duration) -> bool {
+    run_cmd_bounded(cmd, timeout).is_some_and(|out| out.status.success())
+}
+
+#[cfg(target_os = "linux")]
+fn is_cmd_available_bounded(cmd: &str, timeout: std::time::Duration) -> bool {
+    let mut command = Command::new(cmd);
+    command.arg("--help");
+    run_cmd_bounded_status(command, timeout)
+}
+
+#[cfg(target_os = "linux")]
+fn get_kde_cmd_bounded(timeout: std::time::Duration) -> Option<(&'static str, &'static str)> {
+    if is_cmd_available_bounded("kwriteconfig6", timeout) {
         Some(("kwriteconfig6", "kreadconfig6"))
-    } else if is_cmd_available("kwriteconfig5") {
+    } else if is_cmd_available_bounded("kwriteconfig5", timeout) {
         Some(("kwriteconfig5", "kreadconfig5"))
     } else {
         None
@@ -268,18 +380,30 @@ fn get_kde_cmd() -> Option<(&'static str, &'static str)> {
 }
 
 #[cfg(target_os = "linux")]
+fn get_kde_cmd() -> Option<(&'static str, &'static str)> {
+    get_kde_cmd_bounded(std::time::Duration::from_millis(800))
+}
+
+#[cfg(target_os = "linux")]
+fn has_gnome_bounded(timeout: std::time::Duration) -> bool {
+    let mut cmd = Command::new("gsettings");
+    cmd.args(["get", "org.gnome.system.proxy", "mode"]);
+    run_cmd_bounded_status(cmd, timeout)
+}
+
+#[cfg(target_os = "linux")]
 fn has_gnome() -> bool {
-    Command::new("gsettings")
-        .arg("get")
-        .arg("org.gnome.system.proxy")
-        .arg("mode")
-        .output()
-        .is_ok()
+    has_gnome_bounded(std::time::Duration::from_millis(800))
+}
+
+#[cfg(target_os = "linux")]
+fn has_xfce_bounded(timeout: std::time::Duration) -> bool {
+    is_cmd_available_bounded("xfconf-query", timeout)
 }
 
 #[cfg(target_os = "linux")]
 fn has_xfce() -> bool {
-    is_cmd_available("xfconf-query")
+    has_xfce_bounded(std::time::Duration::from_millis(800))
 }
 
 /// Run a gsettings command and return whether it succeeded.
@@ -758,8 +882,16 @@ pub fn has_sysproxy_ownership(app: AppHandle) -> bool {
 
 #[must_use]
 pub fn get_sys_proxy_address() -> Option<String> {
+    get_sys_proxy_address_with_deadline(
+        std::time::Instant::now() + std::time::Duration::from_millis(1500),
+    )
+}
+
+#[must_use]
+pub fn get_sys_proxy_address_with_deadline(deadline: std::time::Instant) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
+        let _ = deadline;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
         if let Ok(key) = hkcu.open_subkey(path) {
@@ -767,7 +899,7 @@ pub fn get_sys_proxy_address() -> Option<String> {
             if enable == 1 {
                 if let Ok(server) = key.get_value::<String, _>("ProxyServer") {
                     if !server.is_empty() {
-                        if server.contains("://") {
+                        if server.contains("://") || server.contains('=') {
                             return Some(server);
                         }
                         return Some(format!("http://{server}"));
@@ -779,12 +911,25 @@ pub fn get_sys_proxy_address() -> Option<String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let services = get_network_services();
+        let rem = deadline.saturating_duration_since(std::time::Instant::now());
+        if rem < std::time::Duration::from_millis(50) {
+            return None;
+        }
+        let services = get_network_services_bounded(std::time::Duration::from_millis(800).min(rem));
         for service in services {
-            if let Ok(output) = Command::new("networksetup")
-                .args(["-getwebproxy", &service])
-                .output()
-            {
+            let rem_loop = deadline.saturating_duration_since(std::time::Instant::now());
+            if rem_loop < std::time::Duration::from_millis(50) {
+                break;
+            }
+            let parse_proxy = |proto: &str| -> Option<(String, String)> {
+                let rem_cmd = deadline.saturating_duration_since(std::time::Instant::now());
+                if rem_cmd < std::time::Duration::from_millis(50) {
+                    return None;
+                }
+                let mut cmd = Command::new("networksetup");
+                cmd.args([proto, &service]);
+                let output =
+                    run_cmd_bounded(cmd, std::time::Duration::from_millis(800).min(rem_cmd))?;
                 let text = String::from_utf8_lossy(&output.stdout);
                 let mut enabled = false;
                 let mut host = String::new();
@@ -792,51 +937,180 @@ pub fn get_sys_proxy_address() -> Option<String> {
 
                 for line in text.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("Enabled:") {
-                        enabled = trimmed.contains("Yes");
-                    } else if trimmed.starts_with("Server:") {
-                        host = trimmed.split(':').nth(1).unwrap_or("").trim().to_owned();
-                    } else if trimmed.starts_with("Port:") {
-                        port = trimmed.split(':').nth(1).unwrap_or("").trim().to_owned();
+                    if let Some((key, val)) = trimmed.split_once(':') {
+                        let k = key.trim();
+                        let v = val.trim();
+                        if k.eq_ignore_ascii_case("Enabled") {
+                            enabled = v.contains("Yes");
+                        } else if k.eq_ignore_ascii_case("Server") {
+                            if v.parse::<std::net::Ipv6Addr>().is_ok() {
+                                host = format!("[{v}]");
+                            } else {
+                                host = v.to_owned();
+                            }
+                        } else if k.eq_ignore_ascii_case("Port") {
+                            port = v.to_owned();
+                        }
                     }
                 }
 
-                if enabled && !host.is_empty() && !port.is_empty() {
-                    return Some(format!("http://{host}:{port}"));
+                if enabled && !host.is_empty() && !port.is_empty() && port != "0" {
+                    Some((host, port))
+                } else {
+                    None
                 }
+            };
+
+            let mut parts = Vec::new();
+            if let Some((h, p)) = parse_proxy("-getwebproxy") {
+                parts.push(format!("http={h}:{p}"));
+            }
+            if let Some((h, p)) = parse_proxy("-getsecurewebproxy") {
+                parts.push(format!("https={h}:{p}"));
+            }
+            if let Some((h, p)) = parse_proxy("-getsocksfirewallproxy") {
+                parts.push(format!("socks={h}:{p}"));
+            }
+
+            if !parts.is_empty() {
+                return Some(parts.join(";"));
             }
         }
         None
     }
     #[cfg(target_os = "linux")]
     {
-        if has_gnome() {
-            if let Ok(output) = Command::new("gsettings")
-                .args(["get", "org.gnome.system.proxy", "mode"])
-                .output()
-            {
-                let mode = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                if mode == "'manual'" {
-                    if let Ok(host_output) = Command::new("gsettings")
-                        .args(["get", "org.gnome.system.proxy.http", "host"])
-                        .output()
-                    {
-                        let host = String::from_utf8_lossy(&host_output.stdout)
-                            .trim()
-                            .trim_matches('\'')
-                            .to_owned();
-                        if !host.is_empty() {
-                            if let Ok(port_output) = Command::new("gsettings")
-                                .args(["get", "org.gnome.system.proxy.http", "port"])
-                                .output()
-                            {
-                                let port = String::from_utf8_lossy(&port_output.stdout)
+        let rem_gnome = deadline.saturating_duration_since(std::time::Instant::now());
+        if rem_gnome >= std::time::Duration::from_millis(50)
+            && has_gnome_bounded(std::time::Duration::from_millis(800).min(rem_gnome))
+        {
+            let rem_cmd = deadline.saturating_duration_since(std::time::Instant::now());
+            if rem_cmd >= std::time::Duration::from_millis(50) {
+                let mut m_cmd = Command::new("gsettings");
+                m_cmd.args(["get", "org.gnome.system.proxy", "mode"]);
+                if let Some(output) =
+                    run_cmd_bounded(m_cmd, std::time::Duration::from_millis(800).min(rem_cmd))
+                {
+                    let mode = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                    if mode == "'manual'" {
+                        let mut parts = Vec::new();
+                        let mut check_gnome_proxy = |schema: &str, tag: &str| {
+                            let rem = deadline.saturating_duration_since(std::time::Instant::now());
+                            if rem < std::time::Duration::from_millis(50) {
+                                return;
+                            }
+                            let mut h_cmd = Command::new("gsettings");
+                            h_cmd.args(["get", schema, "host"]);
+                            if let Some(host_output) = run_cmd_bounded(
+                                h_cmd,
+                                std::time::Duration::from_millis(800).min(rem),
+                            ) {
+                                let raw_host = String::from_utf8_lossy(&host_output.stdout)
                                     .trim()
                                     .trim_matches('\'')
                                     .to_owned();
-                                if !port.is_empty() {
-                                    return Some(format!("http://{host}:{port}"));
+                                if !raw_host.is_empty() {
+                                    let host = if raw_host.parse::<std::net::Ipv6Addr>().is_ok() {
+                                        format!("[{raw_host}]")
+                                    } else {
+                                        raw_host
+                                    };
+                                    let rem_p = deadline
+                                        .saturating_duration_since(std::time::Instant::now());
+                                    if rem_p < std::time::Duration::from_millis(50) {
+                                        return;
+                                    }
+                                    let mut p_cmd = Command::new("gsettings");
+                                    p_cmd.args(["get", schema, "port"]);
+                                    if let Some(port_output) = run_cmd_bounded(
+                                        p_cmd,
+                                        std::time::Duration::from_millis(800).min(rem_p),
+                                    ) {
+                                        let port = String::from_utf8_lossy(&port_output.stdout)
+                                            .trim()
+                                            .trim_matches('\'')
+                                            .to_owned();
+                                        if !port.is_empty() && port != "0" {
+                                            parts.push(format!("{tag}={host}:{port}"));
+                                        }
+                                    }
                                 }
+                            }
+                        };
+
+                        check_gnome_proxy("org.gnome.system.proxy.http", "http");
+                        check_gnome_proxy("org.gnome.system.proxy.https", "https");
+                        check_gnome_proxy("org.gnome.system.proxy.socks", "socks");
+
+                        if !parts.is_empty() {
+                            return Some(parts.join(";"));
+                        }
+                    }
+                }
+            }
+        }
+
+        let rem_kde = deadline.saturating_duration_since(std::time::Instant::now());
+        if rem_kde >= std::time::Duration::from_millis(50) {
+            if let Some((_, kread_cmd)) =
+                get_kde_cmd_bounded(std::time::Duration::from_millis(800).min(rem_kde))
+            {
+                let rem_cmd = deadline.saturating_duration_since(std::time::Instant::now());
+                if rem_cmd >= std::time::Duration::from_millis(50) {
+                    let mut k_cmd = Command::new(kread_cmd);
+                    k_cmd.args([
+                        "--file",
+                        "kioslaverc",
+                        "--group",
+                        "Proxy Settings",
+                        "--key",
+                        "ProxyType",
+                    ]);
+                    if let Some(output) =
+                        run_cmd_bounded(k_cmd, std::time::Duration::from_millis(800).min(rem_cmd))
+                    {
+                        let ptype = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                        if ptype == "1" {
+                            let mut parts = Vec::new();
+                            let mut check_kde_proxy = |key: &str, tag: &str| {
+                                let rem =
+                                    deadline.saturating_duration_since(std::time::Instant::now());
+                                if rem < std::time::Duration::from_millis(50) {
+                                    return;
+                                }
+                                let mut cmd = Command::new(kread_cmd);
+                                cmd.args([
+                                    "--file",
+                                    "kioslaverc",
+                                    "--group",
+                                    "Proxy Settings",
+                                    "--key",
+                                    key,
+                                ]);
+                                if let Some(proxy_output) = run_cmd_bounded(
+                                    cmd,
+                                    std::time::Duration::from_millis(800).min(rem),
+                                ) {
+                                    let raw_proxy = String::from_utf8_lossy(&proxy_output.stdout);
+                                    let trimmed = raw_proxy.trim();
+                                    let normalized = match trimmed.rsplit_once(' ') {
+                                        Some((head, tail))
+                                            if tail.parse::<u16>().is_ok() && !head.is_empty() =>
+                                        {
+                                            format!("{}:{tail}", head.trim_end())
+                                        }
+                                        _ => trimmed.to_owned(),
+                                    };
+                                    push_normalized_proxy_part(&mut parts, &normalized, tag);
+                                }
+                            };
+
+                            check_kde_proxy("httpProxy", "http");
+                            check_kde_proxy("httpsProxy", "https");
+                            check_kde_proxy("socksProxy", "socks");
+
+                            if !parts.is_empty() {
+                                return Some(parts.join(";"));
                             }
                         }
                     }
@@ -844,42 +1118,32 @@ pub fn get_sys_proxy_address() -> Option<String> {
             }
         }
 
-        if let Some((_, kread_cmd)) = get_kde_cmd() {
-            if let Ok(output) = Command::new(kread_cmd)
-                .args([
-                    "--file",
-                    "kioslaverc",
-                    "--group",
-                    "Proxy Settings",
-                    "--key",
-                    "ProxyType",
-                ])
-                .output()
-            {
-                let ptype = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                if ptype == "1" {
-                    if let Ok(proxy_output) = Command::new(kread_cmd)
-                        .args([
-                            "--file",
-                            "kioslaverc",
-                            "--group",
-                            "Proxy Settings",
-                            "--key",
-                            "httpProxy",
-                        ])
-                        .output()
-                    {
-                        let proxy = String::from_utf8_lossy(&proxy_output.stdout)
-                            .trim()
-                            .to_owned();
-                        if !proxy.is_empty() {
-                            if proxy.starts_with("http://") || proxy.starts_with("https://") {
-                                return Some(proxy);
-                            }
-                            return Some(format!("http://{proxy}"));
-                        }
-                    }
+        let rem_xfce = deadline.saturating_duration_since(std::time::Instant::now());
+        if rem_xfce >= std::time::Duration::from_millis(50)
+            && has_xfce_bounded(std::time::Duration::from_millis(800).min(rem_xfce))
+        {
+            let mut parts = Vec::new();
+            let mut check_xfce_proxy = |prop: &str, tag: &str| {
+                let rem = deadline.saturating_duration_since(std::time::Instant::now());
+                if rem < std::time::Duration::from_millis(50) {
+                    return;
                 }
+                let mut cmd = Command::new("xfconf-query");
+                cmd.args(["-c", "xfce4-session", "-p", prop]);
+                if let Some(output) =
+                    run_cmd_bounded(cmd, std::time::Duration::from_millis(800).min(rem))
+                {
+                    let raw = String::from_utf8_lossy(&output.stdout);
+                    push_normalized_proxy_part(&mut parts, &raw, tag);
+                }
+            };
+
+            check_xfce_proxy("/proxies/HTTP", "http");
+            check_xfce_proxy("/proxies/HTTPS", "https");
+            check_xfce_proxy("/proxies/SOCKS", "socks");
+
+            if !parts.is_empty() {
+                return Some(parts.join(";"));
             }
         }
 
@@ -1061,5 +1325,28 @@ mod tests {
         assert!(parse_host_port("[::1]").is_err());
         assert!(parse_host_port("[::1]:").is_err());
         assert!(parse_host_port("[::1]:abc").is_err());
+    }
+
+    #[test]
+    fn test_push_normalized_proxy_part() {
+        let mut parts = Vec::new();
+        push_normalized_proxy_part(&mut parts, "127.0.0.1:7890", "http");
+        assert_eq!(parts, vec!["http=127.0.0.1:7890"]);
+
+        parts.clear();
+        push_normalized_proxy_part(&mut parts, "socks://127.0.0.1:1080", "socks");
+        assert_eq!(parts, vec!["socks=socks5://127.0.0.1:1080"]);
+
+        parts.clear();
+        push_normalized_proxy_part(&mut parts, "127.0.0.1:0", "http");
+        assert!(parts.is_empty());
+
+        parts.clear();
+        push_normalized_proxy_part(&mut parts, "false", "http");
+        assert!(parts.is_empty());
+
+        parts.clear();
+        push_normalized_proxy_part(&mut parts, "http=127.0.0.1:7890", "ignored");
+        assert_eq!(parts, vec!["http=127.0.0.1:7890"]);
     }
 }
