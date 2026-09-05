@@ -4,7 +4,7 @@
 //! Only pure data types and validation functions are here;
 //! `build_http_client()` and `fetch_url_content()` stay in src-tauri (reqwest-dependent).
 
-use super::subscription::{is_private_host, is_private_ip};
+use super::subscription::{is_literal_private_host, is_private_ip};
 use crate::error::AppError;
 
 /// Configuration for HTTP client building.
@@ -84,7 +84,7 @@ pub fn validate_url_basic(url: String) -> Result<UrlValidationResult, AppError> 
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
     // Check if user explicitly entered a private/local host
-    let user_entered_private = is_private_host(&host);
+    let user_entered_private = is_literal_private_host(&host);
 
     Ok(UrlValidationResult {
         host,
