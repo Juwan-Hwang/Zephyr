@@ -1491,7 +1491,9 @@ pub async fn start_core_inner(
         // Notify the network coordinator that a fresh core instance was started.
         // The new process has no rules applied, so the coordinator's applied_state
         // is now stale and must be re-evaluated.
+        health_check(DEFAULT_API_PORT).await?;
         notify_core_started(&app).await;
+        let _ = super::subscription::reconcile_global_mode_restore(&app).await;
         return Ok(CoreStartResult {
             secret,
             port: DEFAULT_API_PORT,
@@ -1708,6 +1710,7 @@ pub async fn start_core_inner(
     // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
 
     notify_core_started(&app).await;
+    let _ = super::subscription::reconcile_global_mode_restore(&app).await;
 
     Ok(CoreStartResult {
         secret: resolved_secret,
