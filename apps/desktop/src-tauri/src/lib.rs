@@ -1509,6 +1509,11 @@ pub fn run() {
             let scheduler_state = start_scheduler(app.handle().clone());
             app.manage(scheduler_state);
 
+            let reconcile_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                core_manager::core::subscription::reconcile_global_mode_restore(&reconcile_handle).await;
+            });
+
             // Start Network Change Coordinator (SSID/interface monitoring & single-flight auto-apply)
             let coordinator_handle = network_coordinator::start_coordinator(app.handle());
             app.manage(coordinator_handle);
