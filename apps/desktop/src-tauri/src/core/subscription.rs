@@ -6,7 +6,8 @@ use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove
 use zephyr_core::config::subscription::{
     classify_sub_error, extract_name_from_rules, is_private_host, is_private_ip,
     parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
-    try_decode_base64_content, validate_subscription_name, validate_subscription_url_with_ip,
+    select_global_candidate, try_decode_base64_content, validate_subscription_name,
+    validate_subscription_url_basic,
 };
 
 use super::core_process::ensure_app_storage;
@@ -17,10 +18,13 @@ use crate::emit_warn;
 
 fn build_http_client_with_proxy(
     user_agent: Option<&str>,
-    resolve_pin: Option<(String, std::net::SocketAddr)>,
+    resolve_pin: Option<&(String, std::net::SocketAddr)>,
     proxy_url: Option<String>,
+    connect_timeout: Duration,
+    timeout: Duration,
 ) -> Result<reqwest::Client, String> {
-    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
+    let via_proxy = proxy_url.is_some();
+    let redirect_policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() > 5 {
             return attempt.error("Too many redirects (max 5)");
         }
@@ -41,6 +45,10 @@ fn build_http_client_with_proxy(
             return attempt.error(format!("Redirect to private host blocked: {host}"));
         }
 
+        // Validate resolved IP addresses to block redirects to private IPs (SSRF protection).
+        // For direct requests without a proxy, local DNS resolution failure is fatal.
+        // For requests configured with a proxy, the proxy resolves the target remotely,
+        // so local DNS resolution failure is permitted to allow reaching blocked domains.
         let port = url
             .port()
             .unwrap_or(if scheme == "https" { 443 } else { 80 });
@@ -56,15 +64,28 @@ fn build_http_client_with_proxy(
                     }
                 }
             }
-            Err(e) => return attempt.error(format!("Failed to resolve redirect host {host}: {e}")),
+            Err(e) => {
+                let is_same_host = attempt
+                    .previous()
+                    .first()
+                    .and_then(|u| u.host_str())
+                    .is_some_and(|h| h.eq_ignore_ascii_case(&host));
+                // For requests via proxy, local DNS resolution failure is permitted ONLY if
+                // redirecting to the same host as originally requested (e.g. http->https or path redirects
+                // for domains unresolvable locally). Cross-host redirects must resolve to public IPs to prevent
+                // SSRF probing against unresolvable internal hostnames through the proxy.
+                if !via_proxy || !is_same_host {
+                    return attempt.error(format!("Failed to resolve redirect host {host}: {e}"));
+                }
+            }
         }
 
         attempt.follow()
     });
 
     let mut client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .connect_timeout(Duration::from_secs(5))
+        .timeout(timeout)
+        .connect_timeout(connect_timeout)
         .redirect(redirect_policy)
         .no_proxy();
 
@@ -75,7 +96,7 @@ fn build_http_client_with_proxy(
     }
 
     if let Some((host, addr)) = resolve_pin {
-        client_builder = client_builder.resolve(&host, addr);
+        client_builder = client_builder.resolve(host, *addr);
     }
 
     // Determine User-Agent: use provided UA, or default to Zephyr
@@ -165,9 +186,9 @@ fn resolve_url_from_metadata(
     super::config_manager::get_config_url(app, name)
 }
 
-/// 获取 mihomo API 的客户端、URL 和 secret。
+/// 获取 mihomo API 的客户端、基础 URL 和 secret。
 /// 失败时返回 None（核心未运行或端口未就绪）。
-fn mihomo_api_client(app: &AppHandle) -> Option<(reqwest::Client, String, String)> {
+fn mihomo_base_api(app: &AppHandle) -> Option<(reqwest::Client, String, String)> {
     let (api_port, secret) = {
         let state = app.state::<MihomoState>();
         let guard = state
@@ -180,17 +201,18 @@ fn mihomo_api_client(app: &AppHandle) -> Option<(reqwest::Client, String, String
 
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_millis(1000))
         .build()
         .ok()?;
-    let url = format!("http://127.0.0.1:{api_port}/configs");
-    Some((client, url, secret))
+    let base = format!("http://127.0.0.1:{api_port}");
+    Some((client, base, secret))
 }
 
 /// 获取 mihomo 当前的代理模式（rule / global / direct）。
 /// 失败时返回 None，调用方可据此跳过 global 回退。
 async fn get_mihomo_mode(app: &AppHandle) -> Option<String> {
-    let (client, url, secret) = mihomo_api_client(app)?;
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/configs");
     let mut req = client.get(&url);
     if !secret.is_empty() {
         req = req.bearer_auth(&secret);
@@ -207,7 +229,8 @@ async fn get_mihomo_mode(app: &AppHandle) -> Option<String> {
 
 /// 通过 mihomo API 切换代理模式。失败时返回 None。
 async fn set_mihomo_mode(app: &AppHandle, mode: &str) -> Option<()> {
-    let (client, url, secret) = mihomo_api_client(app)?;
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/configs");
     let mut req = client
         .patch(&url)
         .json(&serde_json::json!({ "mode": mode }));
@@ -218,10 +241,416 @@ async fn set_mihomo_mode(app: &AppHandle, mode: &str) -> Option<()> {
     resp.status().is_success().then_some(())
 }
 
+/// 查询 mihomo /proxies，获取主策略组当前激活的代理节点名以及 GLOBAL 组当前的选中项。
+async fn get_mihomo_active_node_and_global_now(
+    app: &AppHandle,
+) -> Option<(String, Option<String>)> {
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/proxies");
+    let mut req = client.get(&url);
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let proxies = body.get("proxies")?.as_object()?;
+    select_global_candidate(proxies)
+}
+
+/// 通过 mihomo REST API 设置策略组的选中项。
+async fn set_mihomo_proxy_group(app: &AppHandle, group: &str, name: &str) -> Option<()> {
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/proxies/{group}");
+    let mut req = client.put(&url).json(&serde_json::json!({ "name": name }));
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    resp.status().is_success().then_some(())
+}
+
+/// 全局互斥锁，确保并发的订阅下载任务在尝试临时切换 Mihomo global 模式时不发生竞态。
+static GLOBAL_MODE_LOCK: std::sync::LazyLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+
+/// 全局 DNS 信号量，限制并发阻塞式 DNS 解析任务最多为 4 个，防止并发刷新时占满 Tokio 阻塞线程池。
+static DNS_SEMAPHORE: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(4)));
+
+/// 缓存的系统代理探测结果项。
+struct SysProxyCacheEntry {
+    cached_at: std::time::Instant,
+    proxy: Option<String>,
+}
+
+/// 系统代理发现互斥锁与缓存，限制全应用同时最多仅有 1 个系统代理发现任务在执行，
+/// 避免并发刷新时累积阻塞 worker 或系统子进程，并缓存最近 5 秒内的探测结果。
+static SYS_PROXY_DISCOVERY_LOCK: std::sync::LazyLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+static SYS_PROXY_CACHE: std::sync::LazyLock<std::sync::RwLock<Option<SysProxyCacheEntry>>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+
+async fn get_bounded_sys_proxy_address(timeout_dur: Duration) -> Option<String> {
+    if let Ok(guard) = SYS_PROXY_CACHE.read() {
+        if let Some(entry) = guard.as_ref() {
+            if entry.cached_at.elapsed() < Duration::from_secs(5) {
+                return entry.proxy.clone();
+            }
+        }
+    }
+
+    let discovery_deadline = std::time::Instant::now() + timeout_dur;
+    let lock_guard =
+        tokio::time::timeout(timeout_dur, SYS_PROXY_DISCOVERY_LOCK.clone().lock_owned())
+            .await
+            .ok()?;
+
+    if let Ok(guard) = SYS_PROXY_CACHE.read() {
+        if let Some(entry) = guard.as_ref() {
+            if entry.cached_at.elapsed() < Duration::from_secs(5) {
+                return entry.proxy.clone();
+            }
+        }
+    }
+
+    let handle = tokio::task::spawn_blocking(move || {
+        let _held_lock = lock_guard;
+        let res = crate::sys_proxy::get_sys_proxy_address_with_deadline(discovery_deadline);
+        if let Ok(mut guard) = SYS_PROXY_CACHE.write() {
+            *guard = Some(SysProxyCacheEntry {
+                cached_at: std::time::Instant::now(),
+                proxy: res.clone(),
+            });
+        }
+        res
+    });
+
+    tokio::time::timeout(timeout_dur, handle)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+}
+
+/// 执行单项 Mihomo 状态恢复的重试逻辑。
+/// 返回 (是否成功, 是否因时间不足且未尝试而 defer 给 drop guard)。
+async fn retry_restore_step<F, Fut>(
+    deadline: Option<std::time::Instant>,
+    mut action: F,
+) -> (bool, bool)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<()>>,
+{
+    let mut ok = false;
+    let mut deferred = false;
+    for attempt in 0..2 {
+        let call_timeout = if let Some(dl) = deadline {
+            let rem = dl.saturating_duration_since(std::time::Instant::now());
+            if rem < Duration::from_millis(300) {
+                if attempt == 0 {
+                    deferred = true;
+                }
+                break;
+            }
+            Duration::from_millis(1000).min(rem)
+        } else {
+            Duration::from_millis(1000)
+        };
+
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        if tokio::time::timeout(call_timeout, action())
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            ok = true;
+            break;
+        }
+    }
+    (ok, deferred)
+}
+
+/// 恢复 Mihomo 的原模式和原 GLOBAL 策略组选择。
+/// 支持在 inline 流程中受 deadline 约束，若时间耗尽则提前退出，由 `ModeRestoreGuard` 的 `Drop` 实现接管在后台异步完成。
+async fn restore_mihomo_state(
+    app: &AppHandle,
+    orig_global_now: &mut Option<String>,
+    orig_mode: &mut Option<String>,
+    deadline: Option<std::time::Instant>,
+    on_drop: bool,
+) {
+    // 1. 先恢复原模式（如 rule），使用户常规流量立即脱离 global 路由
+    if let Some(orig) = orig_mode.as_deref() {
+        let (ok, deferred) = retry_restore_step(deadline, || set_mihomo_mode(app, orig)).await;
+
+        if ok {
+            *orig_mode = None;
+        } else if on_drop {
+            crate::emit_warn!(
+                Core,
+                CORE_MODE_RESTORE_DROPPED,
+                "Failed to restore original mihomo mode '{orig}' on drop"
+            );
+        } else if !deferred {
+            crate::emit_warn!(
+                Core,
+                CORE_MODE_RESTORE_FAILED,
+                "Failed to restore original mihomo mode '{orig}'"
+            );
+        }
+    }
+
+    // 2. 模式恢复成功后再恢复原 GLOBAL 策略组选择。
+    // 注意：若模式恢复未成功（仍停留在 global 模式），则跳过节点恢复，
+    // 避免在 global 模式下将节点切换回原节点（如 DIRECT）导致流量直接直连泄露。
+    if orig_mode.is_none() {
+        if let Some(orig_node) = orig_global_now.as_deref() {
+            let (ok, deferred) = retry_restore_step(deadline, || {
+                set_mihomo_proxy_group(app, "GLOBAL", orig_node)
+            })
+            .await;
+
+            if ok {
+                *orig_global_now = None;
+            } else if on_drop {
+                crate::emit_warn!(
+                    Core,
+                    CORE_GLOBAL_RESTORE_DROPPED,
+                    "Failed to restore original GLOBAL proxy group selection '{orig_node}' on drop"
+                );
+            } else if !deferred {
+                crate::emit_warn!(
+                    Core,
+                    CORE_GLOBAL_RESTORE_FAILED,
+                    "Failed to restore original GLOBAL proxy group selection '{orig_node}'"
+                );
+            }
+        }
+    }
+}
+
+/// Drop guard: 在发出 mode 切换前先行构造 guard。
+/// 即使后续的 `set_mihomo_mode`、`get_mihomo_active_node_and_global_now`、
+/// `set_mihomo_proxy_group`、sleep 或 download 任务被超时取消（Cancel），
+/// 也能在 drop 时恢复 core 的原模式和原节点选择，并在恢复执行期间持续持有互斥锁。
+struct ModeRestoreGuard {
+    app: tauri::AppHandle,
+    orig_mode: Option<String>,
+    orig_global_now: Option<String>,
+    lock_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for ModeRestoreGuard {
+    fn drop(&mut self) {
+        let app = self.app.clone();
+        let mut orig_mode = self.orig_mode.take();
+        let mut orig_global_now = self.orig_global_now.take();
+        let lock_guard = self.lock_guard.take();
+        if orig_mode.is_some() || orig_global_now.is_some() {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _held_lock = lock_guard;
+                    restore_mihomo_state(&app, &mut orig_global_now, &mut orig_mode, None, true)
+                        .await;
+                });
+            } else {
+                drop(lock_guard);
+                crate::emit_warn!(
+                    Core,
+                    CORE_MODE_RESTORE_DROPPED,
+                    "No Tokio runtime available in Drop; mihomo mode '{orig_mode:?}' and GLOBAL selection '{orig_global_now:?}' were not restored"
+                );
+            }
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct DownloadSubResult {
     pub name: String,
     pub message: String,
+}
+
+fn append_error(acc: &mut String, msg: &str) {
+    if !acc.is_empty() {
+        acc.push_str(" | ");
+    }
+    acc.push_str(msg);
+}
+
+async fn do_download_stream(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<(Vec<u8>, String, String, Option<String>), String> {
+    let resp = client.get(url).send().await.map_err(|e| {
+        if e.is_timeout() {
+            format!("Request timeout: {e}")
+        } else if e.is_connect() {
+            format!("Connection failed: {e}")
+        } else if e.is_request() {
+            format!("Request error: {e}")
+        } else if e.is_body() {
+            format!("Body error: {e}")
+        } else if e.is_decode() {
+            format!("Decode error: {e}")
+        } else {
+            format!("Network error: {e}")
+        }
+    })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let url_display = super::config_manager::mask_url(resp.url().as_ref());
+        return Err(format!("HTTP {status} from {url_display}"));
+    }
+
+    if let Some(content_length) = resp.content_length() {
+        if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
+            return Err(format!(
+                "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
+            ));
+        }
+    }
+
+    let sub_info_header = resp
+        .headers()
+        .get("subscription-userinfo")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+
+    // Persist the requested URL, not `resp.url()`. Redirect targets are often
+    // one-time signed URLs that would break later subscription updates.
+    let requested_url = url.to_owned();
+
+    let disp_filename = resp
+        .headers()
+        .get("content-disposition")
+        .and_then(|h| h.to_str().ok())
+        .and_then(parse_content_disposition_filename);
+
+    let bytes = read_response_body(resp).await?;
+
+    Ok((bytes, sub_info_header, requested_url, disp_filename))
+}
+
+async fn try_global_mode_tier(
+    app: &AppHandle,
+    m_url: &str,
+    url: &str,
+    user_agent: Option<&str>,
+    total_deadline: std::time::Instant,
+) -> Result<(Vec<u8>, String, String, Option<String>), String> {
+    let remaining = total_deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining < Duration::from_millis(4000) {
+        return Err("Global-mode: Skipped due to deadline exhaustion".to_owned());
+    }
+
+    let lock_wait = remaining.min(Duration::from_millis(1500));
+    let lock_guard = tokio::time::timeout(lock_wait, GLOBAL_MODE_LOCK.clone().lock_owned())
+        .await
+        .map_err(|_timeout| "Global-mode: Skipped due to lock contention".to_owned())?;
+
+    let orig_mode = get_mihomo_mode(app)
+        .await
+        .ok_or_else(|| "Global-mode: Failed to get current Mihomo mode".to_owned())?;
+
+    let (active_node, global_now) = get_mihomo_active_node_and_global_now(app)
+        .await
+        .ok_or_else(|| "Global-mode: No eligible proxy node found in GLOBAL group".to_owned())?;
+
+    let orig_global_now = global_now.ok_or_else(|| {
+        "Global-mode: Original GLOBAL proxy group selection is unknown".to_owned()
+    })?;
+
+    let need_mode_switch = orig_mode != "global";
+    let need_node_switch = orig_global_now != active_node;
+
+    if !need_mode_switch && !need_node_switch {
+        return Err("Global-mode: Already in global mode with active node selected".to_owned());
+    }
+
+    // Re-check cumulative deadline before mutating any core state
+    let rem_before_mutate = total_deadline.saturating_duration_since(std::time::Instant::now());
+    if rem_before_mutate < Duration::from_millis(2500) {
+        return Err("Global-mode: Skipped due to deadline exhaustion".to_owned());
+    }
+
+    let mut restore_guard = ModeRestoreGuard {
+        app: app.clone(),
+        orig_mode: None,
+        orig_global_now: None,
+        lock_guard: Some(lock_guard),
+    };
+
+    if need_node_switch {
+        // 先在原模式下切换 GLOBAL 策略组的目标节点；
+        // 若切换失败，尚未进入 global 模式，用户当前流量不会受到任何影响。
+        restore_guard.orig_global_now = Some(orig_global_now);
+        if set_mihomo_proxy_group(app, "GLOBAL", &active_node)
+            .await
+            .is_none()
+        {
+            crate::emit_warn!(
+                Core,
+                CORE_GLOBAL_SWITCH_FAILED,
+                "Failed to switch GLOBAL proxy group to '{active_node}'"
+            );
+            return Err(format!(
+                "Global-mode: Failed to select node '{active_node}'"
+            ));
+        }
+    }
+
+    if need_mode_switch {
+        restore_guard.orig_mode = Some(orig_mode);
+        if set_mihomo_mode(app, "global").await.is_none() {
+            return Err("Global-mode: Failed to switch Mihomo mode to global".to_owned());
+        }
+    }
+
+    // 切换后短暂等待 mihomo 生效
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let rem_dl = total_deadline.saturating_duration_since(std::time::Instant::now());
+    let (conn_to, req_to) = if rem_dl < Duration::from_millis(800) {
+        return Err("Global-mode: Skipped due to deadline exhaustion".to_owned());
+    } else {
+        (
+            Duration::from_millis(1500).min(rem_dl),
+            Duration::from_millis(2500).min(rem_dl),
+        )
+    };
+
+    let client =
+        build_http_client_with_proxy(user_agent, None, Some(m_url.to_owned()), conn_to, req_to)
+            .map_err(|e| format!("Global-mode client build: {e}"))?;
+
+    let download_res = do_download_stream(&client, url).await;
+
+    // 正常流程：尝试恢复原模式和策略组选择。
+    // 传递 restore_guard 字段的可变引用，成功恢复的字段会被置为 None；
+    // 若在 inline 恢复执行期间任务被取消，guard 内部尚未恢复的字段完好无损，
+    // Drop 守卫将在后台继续接管恢复，并在恢复期间继续持有互斥锁。
+    restore_mihomo_state(
+        app,
+        &mut restore_guard.orig_global_now,
+        &mut restore_guard.orig_mode,
+        Some(total_deadline),
+        false,
+    )
+    .await;
+    drop(restore_guard);
+
+    download_res.map_err(|e| format!("Global-mode: {e}"))
 }
 
 pub(crate) async fn download_sub_inner(
@@ -246,81 +675,153 @@ async fn download_sub_inner_raw(
 ) -> Result<DownloadSubResult, String> {
     let safe_name = validate_subscription_name(&name).map_err(|e| e.to_string())?;
 
-    let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
+    let (host, port, user_entered_private) = validate_subscription_url_basic(&url)?;
+
+    // Outer scheduler timeout is 15s. We set a cumulative internal budget of 12.0s
+    // across all tiers and DNS resolution to guarantee completion, cleanup, YAML parsing,
+    // and transactional file saving before outer scheduler cancellation (leaving a 3.0s margin).
+    let total_deadline = std::time::Instant::now() + Duration::from_millis(12000);
+
     // For user-entered private addresses, skip DNS pinning (proxy/system handles resolution).
-    // For public addresses, use DNS pinning to prevent DNS rebinding.
+    // For public addresses, resolve and pin DNS to prevent DNS rebinding for direct connections.
+    // If DNS resolution fails (e.g. host is blocked by GFW or DNS poisoned to private IP)
+    // or times out (unresponsive DNS / packet drop), record the error and bypass direct connection,
+    // falling through to proxy.
+    let mut direct_dns_error = None;
     let resolve_pin = if user_entered_private {
         None
     } else {
-        resolved_addr.map(|addr| (host.clone(), addr))
+        let remaining = total_deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining < Duration::from_millis(1000) {
+            direct_dns_error = Some("Skipped DNS resolution due to deadline exhaustion".to_owned());
+            None
+        } else {
+            let dns_timeout = Duration::from_millis(1500).min(remaining);
+            let host_clone = host.clone();
+            let resolve_future = async {
+                let deadline = tokio::time::Instant::now() + dns_timeout;
+                let permit = tokio::time::timeout_at(deadline, DNS_SEMAPHORE.clone().acquire_owned())
+                    .await
+                    .map_err(|_err| {
+                        format!("DNS resolution timed out waiting for permit for '{host}' ({dns_timeout:?})")
+                    })?
+                    .map_err(|e| e.to_string())?;
+
+                let remaining_dns = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining_dns.is_zero() {
+                    return Err(format!(
+                        "DNS resolution timed out for '{host}' ({dns_timeout:?})"
+                    ));
+                }
+
+                let handle = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    std::net::ToSocketAddrs::to_socket_addrs(&format!("{host_clone}:{port}"))
+                        .map(std::iter::Iterator::collect::<Vec<_>>)
+                });
+                let abort_handle = handle.abort_handle();
+                tokio::select! {
+                    res = handle => match res {
+                        Ok(Ok(addrs)) => Ok(addrs),
+                        Ok(Err(e)) => Err(format!("DNS resolution failed for '{host}': {e}")),
+                        Err(e) => Err(format!("DNS resolution task join error: {e}")),
+                    },
+                    _ = tokio::time::sleep_until(deadline) => {
+                        abort_handle.abort();
+                        Err(format!("DNS resolution timed out for '{host}' ({dns_timeout:?})"))
+                    }
+                }
+            };
+
+            match resolve_future.await {
+                Ok(addrs) => {
+                    if addrs.is_empty() {
+                        direct_dns_error =
+                            Some("Could not resolve any IP address for host".to_owned());
+                        None
+                    } else {
+                        match zephyr_core::config::subscription::validate_public_host_addrs(
+                            &host, &addrs,
+                        ) {
+                            Ok((_, Some(addr), _)) => Some((host.clone(), addr)),
+                            Ok((_, None, _)) => {
+                                direct_dns_error =
+                                    Some("Could not resolve any IP address for host".to_owned());
+                                None
+                            }
+                            Err(
+                                zephyr_core::config::subscription::PublicHostAddrError::SsrfBlocked(
+                                    e,
+                                ),
+                            ) => {
+                                // SSRF rejection is a security policy decision, not a transient transport failure.
+                                // Reject immediately instead of retrying through proxy tiers.
+                                return Err(e);
+                            }
+                            Err(e) => {
+                                direct_dns_error = Some(e.to_string());
+                                None
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    direct_dns_error = Some(e);
+                    None
+                }
+            }
+        }
     };
 
-    let do_download = |client: reqwest::Client, url: String| async move {
-        let resp = client.get(&url).send().await.map_err(|e| {
-            if e.is_timeout() {
-                format!("Request timeout: {e}")
-            } else if e.is_connect() {
-                format!("Connection failed: {e}")
-            } else if e.is_request() {
-                format!("Request error: {e}")
-            } else if e.is_body() {
-                format!("Body error: {e}")
-            } else if e.is_decode() {
-                format!("Decode error: {e}")
-            } else {
-                format!("Network error: {e}")
-            }
-        })?;
+    let has_mihomo = {
+        let state = app.state::<MihomoState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.process().is_some()
+    };
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let url_display = super::config_manager::mask_url(resp.url().as_ref());
-            return Err(format!("HTTP {status} from {url_display}"));
+    let get_tier_timeout = |max_total_ms: u64, max_conn_ms: u64| -> Option<(Duration, Duration)> {
+        let remaining = total_deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining < Duration::from_millis(500) {
+            return None;
         }
-
-        if let Some(content_length) = resp.content_length() {
-            if usize::try_from(content_length).unwrap_or(0) > MAX_RESPONSE_SIZE {
-                return Err(format!(
-                    "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
-                ));
-            }
-        }
-
-        let sub_info_header = resp
-            .headers()
-            .get("subscription-userinfo")
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or("")
-            .to_owned();
-
-        // Use original URL for metadata storage, not profile-web-page-url
-        // profile-web-page-url often points to HTML pages, not the actual subscription endpoint
-        let final_url = url.clone();
-
-        // Try to extract filename from Content-Disposition header
-        let disp_filename = resp
-            .headers()
-            .get("content-disposition")
-            .and_then(|h| h.to_str().ok())
-            .and_then(parse_content_disposition_filename);
-
-        let bytes = read_response_body(resp).await?;
-
-        Ok::<(Vec<u8>, String, String, Option<String>), String>((
-            bytes,
-            sub_info_header,
-            final_url,
-            disp_filename,
-        ))
+        let connect_timeout = Duration::from_millis(max_conn_ms).min(remaining);
+        let request_timeout = Duration::from_millis(max_total_ms).min(remaining);
+        Some((connect_timeout, request_timeout))
     };
 
     let mut last_error = String::new();
     let mut result: Option<(Vec<u8>, String, String, Option<String>)> = None;
 
-    // Try direct connection first
-    let direct_error =
-        match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
-            Ok(client) => match do_download(client, url.clone()).await {
+    // Try direct connection first (if DNS resolution didn't fail)
+    // 1. For user-entered private/LAN subscriptions, proxy tiers are not attempted, so allocate a full
+    //    10000ms request window (4000ms connect timeout).
+    // 2. For public subscriptions with Mihomo running, allocate 3500ms request (1500ms connect) so
+    //    slow direct endpoints have time to complete while blocked domains fast-fail on connect (1500ms)
+    //    and leave ample budget (>= 7000ms before Tier 2; >= 4500ms before Tier 3) for proxy tiers.
+    // 3. For public subscriptions with Mihomo stopped, allocate up to 5500ms (2000ms connect) to allow
+    //    direct servers to succeed while still reserving at least 4500ms for ambient proxy fallbacks.
+    let (direct_req_ms, direct_conn_ms) = if user_entered_private {
+        (10000, 4000)
+    } else if has_mihomo {
+        (3500, 1500)
+    } else {
+        (5500, 2000)
+    };
+
+    let direct_error = if let Some(dns_err) = direct_dns_error {
+        Some(format!("Direct DNS: {dns_err}"))
+    } else if let Some((conn_to, req_to)) = get_tier_timeout(direct_req_ms, direct_conn_ms) {
+        match build_http_client_with_proxy(
+            user_agent.as_deref(),
+            resolve_pin.as_ref(),
+            None,
+            conn_to,
+            req_to,
+        ) {
+            Ok(client) => match do_download_stream(&client, &url).await {
                 Ok(data) => {
                     result = Some(data);
                     None
@@ -328,132 +829,190 @@ async fn download_sub_inner_raw(
                 Err(e) => Some(format!("Direct: {e}")),
             },
             Err(e) => Some(format!("Direct client build: {e}")),
-        };
+        }
+    } else {
+        Some("Direct: Skipped due to deadline exhaustion".to_owned())
+    };
 
     if result.is_none() {
-        // Get proxy port from state, then immediately release the lock
-        let proxy_url = {
-            let state = app.state::<MihomoState>();
-            let guard = state.0.lock().ok();
-            guard.and_then(|g| {
-                g.process()
-                    .is_some()
-                    .then(|| format!("http://127.0.0.1:{}", g.last_proxy_port().unwrap_or(7890)))
-            })
-        };
+        if let Some(de) = direct_error.as_deref() {
+            append_error(&mut last_error, de);
+        }
 
-        if let Some(proxy_url_val) = proxy_url {
-            // When using proxy, skip DNS pre-resolve pinning to let the proxy
-            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs).
-            //
-            // SSRF protection coverage for proxy paths:
-            // - ✅ Initial URL host validated (private host check before any request)
-            // - ✅ Redirect policy blocks redirects to private hosts/IPs
-            // - ⚠️  Proxy-side SSRF (proxy resolving to internal IPs) is NOT
-            //     preventable client-side — this is inherent to any proxy architecture.
-            //     Mitigate by only configuring trusted proxies.
-            let client_mihomo = build_http_client_with_proxy(
-                user_agent.as_deref(),
-                None,
-                Some(proxy_url_val.clone()),
-            );
-            match client_mihomo {
-                Ok(client) => match do_download(client, url.clone()).await {
-                    Ok(data) => {
-                        result = Some(data);
+        // Only public subscription URLs fall back to proxy tiers.
+        // User-entered private/LAN destinations are strictly direct-only to prevent internal SSRF via proxies.
+        if !user_entered_private {
+            // Resolve Mihomo mixed-port proxy and ambient (system / environment) proxy as distinct candidates.
+            let mihomo_proxy_url = {
+                let state = app.state::<MihomoState>();
+                let guard = state
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                guard.process().is_some().then(|| {
+                    format!(
+                        "http://127.0.0.1:{}",
+                        guard.last_proxy_port().unwrap_or(7890)
+                    )
+                })
+            };
+
+            // ── Tier 2: Mihomo proxy (mixed-port) ──────────────────────────────────
+            if let Some(m_url) = &mihomo_proxy_url {
+                if let Some((conn_to, req_to)) = get_tier_timeout(2500, 1500) {
+                    let client_proxy = build_http_client_with_proxy(
+                        user_agent.as_deref(),
+                        None,
+                        Some(m_url.clone()),
+                        conn_to,
+                        req_to,
+                    );
+                    match client_proxy {
+                        Ok(client) => match do_download_stream(&client, &url).await {
+                            Ok(data) => {
+                                result = Some(data);
+                            }
+                            Err(e) => {
+                                append_error(&mut last_error, &format!("Proxy: {e}"));
+                            }
+                        },
+                        Err(e) => {
+                            append_error(&mut last_error, &format!("Proxy client build: {e}"));
+                        }
                     }
-                    Err(e) => {
-                        last_error = match direct_error.as_deref() {
-                            Some(de) => format!("{de} | Proxy: {e}"),
-                            None => format!("Proxy: {e}"),
-                        };
-                    }
-                },
-                Err(e) => {
-                    last_error = match direct_error.as_deref() {
-                        Some(de) => format!("{de} | Proxy client build: {e}"),
-                        None => format!("Proxy client build: {e}"),
+                } else {
+                    append_error(&mut last_error, "Proxy: Skipped due to deadline exhaustion");
+                }
+
+                // ── Tier 3: 临时切换 global 模式并选择可用节点重试 ──────────────────
+                // 直连和普通代理（规则分流）都失败后，若使用的是 Mihomo 内核代理，
+                // 尝试把 Mihomo 切到 global 模式并确保 GLOBAL 策略组选择当前活跃的代理节点，
+                // 让所有流量走代理节点（绕过分流规则可能导致的不可达），
+                // 下载完成后或任务中断时自动切回原模式和原策略组选择。
+                // 使用全局异步互斥锁防止并发下载任务在全局模式切换和还原期间发生竞态。
+                if result.is_none() {
+                    match try_global_mode_tier(
+                        app,
+                        m_url,
+                        &url,
+                        user_agent.as_deref(),
+                        total_deadline,
+                    )
+                    .await
+                    {
+                        Ok(data) => {
+                            result = Some(data);
+                        }
+                        Err(err) => {
+                            append_error(&mut last_error, &err);
+                        }
                     }
                 }
             }
 
-            // ── Tier 3: 临时切换 global 模式重试 ──────────────────────────────
-            // 直连和普通代理都失败后，尝试临时把 mihomo 切到 global 模式，
-            // 让所有流量走当前选中的代理节点（绕过分流规则可能导致的不可达），
-            // 下载完成后切回原模式。
+            // ── Tier 4: 环境代理 / 系统代理回退 ──────────────────────────────────
+            // 若 Mihomo 未启动，或 Mihomo 代理与全局模式均无法拉取订阅，
+            // 则在存在且不与 Mihomo 重复的有效本地回环代理（系统代理及环境变量代理）中按优先级依次尝试重试。
             if result.is_none() {
-                // 只有成功获取到当前模式且不是 global 时才切换，
-                // 否则切到 global 后无法切回（original_mode 为 None 时跳过恢复）。
-                if let Some(orig) = get_mihomo_mode(app).await {
-                    if orig != "global" && set_mihomo_mode(app, "global").await.is_some() {
-                        // Drop guard: 即使 task 在 sleep/download 期间被 cancel，
-                        // 也能在 drop 时 spawn 恢复任务，避免 core 永久停留在 global 模式。
-                        struct ModeRestoreGuard {
-                            app: tauri::AppHandle,
-                            orig_mode: Option<String>,
+                let sub_scheme = url::Url::parse(&url)
+                    .ok()
+                    .map(|u| u.scheme().to_ascii_lowercase());
+                let remaining = total_deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining >= Duration::from_millis(600) {
+                    let sys_proxy_timeout = Duration::from_millis(500).min(remaining / 2);
+                    let sys_proxy = get_bounded_sys_proxy_address(sys_proxy_timeout).await;
+
+                    let mut ambient_candidates: Vec<String> = Vec::new();
+
+                    if let Some(raw) = sys_proxy.as_deref() {
+                        for sp in
+                            zephyr_core::config::subscription::collect_ambient_proxy_urls_for_scheme(
+                                raw,
+                                sub_scheme.as_deref(),
+                            )
+                        {
+                            if !ambient_candidates.contains(&sp) {
+                                ambient_candidates.push(sp);
+                            }
                         }
-                        impl Drop for ModeRestoreGuard {
-                            fn drop(&mut self) {
-                                if let Some(orig) = self.orig_mode.take() {
-                                    let app = self.app.clone();
-                                    tokio::spawn(async move {
-                                        if set_mihomo_mode(&app, &orig).await.is_none() {
-                                            crate::emit_warn!(
-                                                Core,
-                                                CORE_MODE_RESTORE_DROPPED,
-                                                "Failed to restore original mihomo mode '{orig}' on drop"
-                                            );
-                                        }
-                                    });
+                    }
+
+                    let env_keys: &[&str] = if sub_scheme.as_deref() == Some("https") {
+                        &[
+                            "HTTPS_PROXY",
+                            "https_proxy",
+                            "ALL_PROXY",
+                            "all_proxy",
+                            "HTTP_PROXY",
+                            "http_proxy",
+                        ]
+                    } else {
+                        &[
+                            "HTTP_PROXY",
+                            "http_proxy",
+                            "ALL_PROXY",
+                            "all_proxy",
+                            "HTTPS_PROXY",
+                            "https_proxy",
+                        ]
+                    };
+
+                    for key in env_keys {
+                        if let Ok(val) = std::env::var(key) {
+                            for candidate in
+                                zephyr_core::config::subscription::collect_ambient_proxy_urls_for_scheme(
+                                    &val,
+                                    sub_scheme.as_deref(),
+                                )
+                            {
+                                if !ambient_candidates.contains(&candidate) {
+                                    ambient_candidates.push(candidate);
                                 }
                             }
                         }
+                    }
 
-                        let mut restore_guard = ModeRestoreGuard {
-                            app: app.clone(),
-                            orig_mode: Some(orig.clone()),
-                        };
-
-                        // 切换后短暂等待 mihomo 生效
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-
-                        let client_global = build_http_client_with_proxy(
-                            user_agent.as_deref(),
-                            None,
-                            Some(proxy_url_val),
-                        );
-                        match client_global {
-                            Ok(client) => match do_download(client, url).await {
-                                Ok(data) => {
-                                    result = Some(data);
-                                }
+                    for amb_url in ambient_candidates {
+                        if Some(&amb_url) == mihomo_proxy_url.as_ref() {
+                            continue;
+                        }
+                        if result.is_some() {
+                            break;
+                        }
+                        if let Some((conn_to, req_to)) = get_tier_timeout(2500, 1500) {
+                            let client_ambient = build_http_client_with_proxy(
+                                user_agent.as_deref(),
+                                resolve_pin.as_ref(),
+                                Some(amb_url),
+                                conn_to,
+                                req_to,
+                            );
+                            match client_ambient {
+                                Ok(client) => match do_download_stream(&client, &url).await {
+                                    Ok(data) => {
+                                        result = Some(data);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        append_error(
+                                            &mut last_error,
+                                            &format!("Ambient Proxy: {e}"),
+                                        );
+                                    }
+                                },
                                 Err(e) => {
-                                    last_error = if last_error.is_empty() {
-                                        format!("Global-mode: {e}")
-                                    } else {
-                                        format!("{last_error} | Global-mode: {e}")
-                                    };
+                                    append_error(
+                                        &mut last_error,
+                                        &format!("Ambient Proxy client build: {e}"),
+                                    );
                                 }
-                            },
-                            Err(e) => {
-                                last_error = if last_error.is_empty() {
-                                    format!("Global-mode client build: {e}")
-                                } else {
-                                    format!("{last_error} | Global-mode client build: {e}")
-                                };
                             }
-                        }
-
-                        // 正常流程：手动恢复原模式并从 guard 中 take 走 orig_mode，
-                        // 避免 Drop 时重复执行恢复。
-                        if let Some(orig) = restore_guard.orig_mode.take() {
-                            if set_mihomo_mode(app, &orig).await.is_none() {
-                                crate::emit_warn!(
-                                    Core,
-                                    CORE_MODE_RESTORE_FAILED,
-                                    "Failed to restore original mihomo mode '{orig}'"
-                                );
-                            }
+                        } else {
+                            append_error(
+                                &mut last_error,
+                                "Ambient Proxy: Skipped due to deadline exhaustion",
+                            );
+                            break;
                         }
                     }
                 }
@@ -461,11 +1020,12 @@ async fn download_sub_inner_raw(
         }
     }
 
-    // Two-tier download strategy: direct → Mihomo proxy.
-    // System proxy fallback is intentionally removed to reduce SSRF attack surface.
-    // The Mihomo proxy path is trusted (user-configured), while system proxy
-    // could be set by any application/malware on the system.
-    let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
+    // Multi-tier download strategy:
+    // Tier 1: Direct connection with DNS pinning (SSRF protection).
+    // Tier 2: Mihomo mixed-port proxy connection.
+    // Tier 3: Mihomo global mode with active proxy node selection and auto-restoration.
+    // Tier 4: Ambient proxy (system / environment proxy fallback).
+    let (bytes, sub_info_header, requested_url, disp_filename) = result.ok_or_else(|| {
         if !last_error.is_empty() {
             last_error
         } else if let Some(de) = direct_error {
@@ -676,7 +1236,7 @@ async fn download_sub_inner_raw(
         metadata.configs.insert(
             clean_name.clone(),
             super::crypto::ConfigMetadata {
-                url: preserved_url.or(Some(final_url)),
+                url: preserved_url.or(Some(requested_url)),
                 sub_info: if sub_info_header.is_empty() {
                     preserved_sub_info
                 } else {
@@ -1004,7 +1564,10 @@ mod tests {
         let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("attacker.com", &addrs);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("SSRF protection"));
+        assert!(matches!(
+            result.unwrap_err(),
+            zephyr_core::config::PublicHostAddrError::SsrfBlocked(_)
+        ));
     }
 
     #[test]
@@ -1036,7 +1599,10 @@ mod tests {
         let addrs: Vec<std::net::SocketAddr> = vec![];
         let result = validate_public_host_addrs("empty.com", &addrs);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Could not resolve"));
+        assert!(matches!(
+            result.unwrap_err(),
+            zephyr_core::config::PublicHostAddrError::NoAddresses(_)
+        ));
     }
 
     #[test]
