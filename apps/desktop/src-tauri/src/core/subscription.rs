@@ -6,7 +6,7 @@ use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove
 use zephyr_core::config::subscription::{
     classify_sub_error, extract_name_from_rules, is_private_host, is_private_ip,
     parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
-    try_decode_base64_content, validate_subscription_name, validate_subscription_url_with_ip,
+    try_decode_base64_content, validate_subscription_name, validate_subscription_url_basic,
 };
 
 use super::core_process::ensure_app_storage;
@@ -19,8 +19,11 @@ fn build_http_client_with_proxy(
     user_agent: Option<&str>,
     resolve_pin: Option<(String, std::net::SocketAddr)>,
     proxy_url: Option<String>,
+    connect_timeout: Duration,
+    timeout: Duration,
 ) -> Result<reqwest::Client, String> {
-    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
+    let is_proxied = proxy_url.is_some();
+    let redirect_policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() > 5 {
             return attempt.error("Too many redirects (max 5)");
         }
@@ -41,6 +44,11 @@ fn build_http_client_with_proxy(
             return attempt.error(format!("Redirect to private host blocked: {host}"));
         }
 
+        // Validate resolved IP addresses to block redirects to private IPs (SSRF protection).
+        // For direct connections, resolution failures are fatal.
+        // For proxy connections, remote proxy handles resolution for blocked domains, so local
+        // DNS resolution failures are tolerated, but if local resolution succeeds and resolves
+        // to a private IP, it is strictly blocked.
         let port = url
             .port()
             .unwrap_or(if scheme == "https" { 443 } else { 80 });
@@ -56,15 +64,19 @@ fn build_http_client_with_proxy(
                     }
                 }
             }
-            Err(e) => return attempt.error(format!("Failed to resolve redirect host {host}: {e}")),
+            Err(e) => {
+                if !is_proxied {
+                    return attempt.error(format!("Failed to resolve redirect host {host}: {e}"));
+                }
+            }
         }
 
         attempt.follow()
     });
 
     let mut client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .connect_timeout(Duration::from_secs(5))
+        .timeout(timeout)
+        .connect_timeout(connect_timeout)
         .redirect(redirect_policy)
         .no_proxy();
 
@@ -165,9 +177,9 @@ fn resolve_url_from_metadata(
     super::config_manager::get_config_url(app, name)
 }
 
-/// 获取 mihomo API 的客户端、URL 和 secret。
+/// 获取 mihomo API 的客户端、基础 URL 和 secret。
 /// 失败时返回 None（核心未运行或端口未就绪）。
-fn mihomo_api_client(app: &AppHandle) -> Option<(reqwest::Client, String, String)> {
+fn mihomo_base_api(app: &AppHandle) -> Option<(reqwest::Client, String, String)> {
     let (api_port, secret) = {
         let state = app.state::<MihomoState>();
         let guard = state
@@ -180,17 +192,18 @@ fn mihomo_api_client(app: &AppHandle) -> Option<(reqwest::Client, String, String
 
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_millis(500))
         .build()
         .ok()?;
-    let url = format!("http://127.0.0.1:{api_port}/configs");
-    Some((client, url, secret))
+    let base = format!("http://127.0.0.1:{api_port}");
+    Some((client, base, secret))
 }
 
 /// 获取 mihomo 当前的代理模式（rule / global / direct）。
 /// 失败时返回 None，调用方可据此跳过 global 回退。
 async fn get_mihomo_mode(app: &AppHandle) -> Option<String> {
-    let (client, url, secret) = mihomo_api_client(app)?;
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/configs");
     let mut req = client.get(&url);
     if !secret.is_empty() {
         req = req.bearer_auth(&secret);
@@ -207,7 +220,8 @@ async fn get_mihomo_mode(app: &AppHandle) -> Option<String> {
 
 /// 通过 mihomo API 切换代理模式。失败时返回 None。
 async fn set_mihomo_mode(app: &AppHandle, mode: &str) -> Option<()> {
-    let (client, url, secret) = mihomo_api_client(app)?;
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/configs");
     let mut req = client
         .patch(&url)
         .json(&serde_json::json!({ "mode": mode }));
@@ -217,6 +231,104 @@ async fn set_mihomo_mode(app: &AppHandle, mode: &str) -> Option<()> {
     let resp = req.send().await.ok()?;
     resp.status().is_success().then_some(())
 }
+
+/// 查询 mihomo /proxies，获取主策略组当前激活的代理节点名以及 GLOBAL 组当前的选中项。
+async fn get_mihomo_active_node_and_global_now(
+    app: &AppHandle,
+) -> Option<(String, Option<String>)> {
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/proxies");
+    let mut req = client.get(&url);
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let proxies = body.get("proxies")?.as_object()?;
+
+    let global_obj = proxies.get("GLOBAL");
+    let global_now = global_obj
+        .and_then(|g| g.get("now"))
+        .and_then(|n| n.as_str())
+        .map(std::borrow::ToOwned::to_owned);
+
+    let is_special_target = |s: &str| {
+        matches!(
+            s,
+            "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "COMPATIBLE"
+        )
+    };
+
+    let global_all: Vec<&str> = global_obj
+        .and_then(|g| g.get("all"))
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    let is_valid_global_candidate =
+        |s: &str| !is_special_target(s) && (global_all.is_empty() || global_all.contains(&s));
+
+    let active_node = global_now
+        .as_deref()
+        .filter(|n| is_valid_global_candidate(n))
+        .map(std::borrow::ToOwned::to_owned)
+        .or_else(|| {
+            // Priority 1: Check active `now` of common selector/urltest/fallback groups.
+            // If the group's `now` is in GLOBAL.all, prefer it.
+            // If not, but the group itself is in GLOBAL.all, use the group name.
+            for (name, proxy_val) in proxies {
+                if name == "GLOBAL" || is_special_target(name) {
+                    continue;
+                }
+                let p_type = proxy_val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if p_type.eq_ignore_ascii_case("Selector")
+                    || p_type.eq_ignore_ascii_case("URLTest")
+                    || p_type.eq_ignore_ascii_case("Fallback")
+                {
+                    if let Some(now) = proxy_val.get("now").and_then(|n| n.as_str()) {
+                        if is_valid_global_candidate(now) {
+                            return Some(now.to_owned());
+                        }
+                    }
+                    if is_valid_global_candidate(name) {
+                        return Some(name.clone());
+                    }
+                }
+            }
+
+            // Priority 2: Look through GLOBAL's member list `all` for the first non-special candidate.
+            // This ensures the chosen node or group is recognized as a valid GLOBAL member
+            // by Mihomo's PUT /proxies/GLOBAL API.
+            for &member_name in &global_all {
+                if !is_special_target(member_name) {
+                    return Some(member_name.to_owned());
+                }
+            }
+
+            None
+        })?;
+
+    Some((active_node, global_now))
+}
+
+/// 通过 mihomo REST API 设置策略组的选中项。
+async fn set_mihomo_proxy_group(app: &AppHandle, group: &str, name: &str) -> Option<()> {
+    let (client, base, secret) = mihomo_base_api(app)?;
+    let url = format!("{base}/proxies/{group}");
+    let mut req = client.put(&url).json(&serde_json::json!({ "name": name }));
+    if !secret.is_empty() {
+        req = req.bearer_auth(&secret);
+    }
+    let resp = req.send().await.ok()?;
+    resp.status().is_success().then_some(())
+}
+
+/// 全局互斥锁，确保并发的订阅下载任务在尝试临时切换 Mihomo global 模式时不发生竞态。
+static GLOBAL_MODE_LOCK: std::sync::LazyLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
 
 #[derive(serde::Serialize)]
 pub struct DownloadSubResult {
@@ -246,13 +358,53 @@ async fn download_sub_inner_raw(
 ) -> Result<DownloadSubResult, String> {
     let safe_name = validate_subscription_name(&name).map_err(|e| e.to_string())?;
 
-    let (host, resolved_addr, user_entered_private) = validate_subscription_url_with_ip(&url)?;
+    let (host, port, user_entered_private) = validate_subscription_url_basic(&url)?;
+
     // For user-entered private addresses, skip DNS pinning (proxy/system handles resolution).
-    // For public addresses, use DNS pinning to prevent DNS rebinding.
+    // For public addresses, resolve and pin DNS to prevent DNS rebinding for direct connections.
+    // If DNS resolution fails (e.g. host is blocked by GFW or DNS poisoned to private IP)
+    // or times out (unresponsive DNS / packet drop), record the error and bypass direct connection,
+    // falling through to proxy.
+    let mut direct_dns_error = None;
     let resolve_pin = if user_entered_private {
         None
     } else {
-        resolved_addr.map(|addr| (host.clone(), addr))
+        let host_clone = host.clone();
+        let resolve_task = tokio::task::spawn_blocking(move || {
+            std::net::ToSocketAddrs::to_socket_addrs(&format!("{host_clone}:{port}"))
+                .map(std::iter::Iterator::collect::<Vec<_>>)
+        });
+        let abort_handle = resolve_task.abort_handle();
+
+        match tokio::time::timeout(Duration::from_millis(1500), resolve_task).await {
+            Ok(Ok(Ok(addrs))) => {
+                match zephyr_core::config::subscription::validate_public_host_addrs(&host, &addrs) {
+                    Ok((_, Some(addr), _)) => Some((host.clone(), addr)),
+                    Ok((_, None, _)) => {
+                        direct_dns_error =
+                            Some("Could not resolve any IP address for host".to_owned());
+                        None
+                    }
+                    Err(e) => {
+                        direct_dns_error = Some(e);
+                        None
+                    }
+                }
+            }
+            Ok(Ok(Err(e))) => {
+                direct_dns_error = Some(format!("DNS resolution failed for '{host}': {e}"));
+                None
+            }
+            Ok(Err(e)) => {
+                direct_dns_error = Some(format!("DNS resolution task join error: {e}"));
+                None
+            }
+            Err(_) => {
+                abort_handle.abort();
+                direct_dns_error = Some(format!("DNS resolution timed out for '{host}' (1.5s)"));
+                None
+            }
+        }
     };
 
     let do_download = |client: reqwest::Client, url: String| async move {
@@ -317,9 +469,17 @@ async fn download_sub_inner_raw(
     let mut last_error = String::new();
     let mut result: Option<(Vec<u8>, String, String, Option<String>)> = None;
 
-    // Try direct connection first
-    let direct_error =
-        match build_http_client_with_proxy(user_agent.as_deref(), resolve_pin.clone(), None) {
+    // Try direct connection first (if DNS resolution didn't fail)
+    let direct_error = if let Some(dns_err) = direct_dns_error {
+        Some(format!("Direct DNS: {dns_err}"))
+    } else {
+        match build_http_client_with_proxy(
+            user_agent.as_deref(),
+            resolve_pin,
+            None,
+            Duration::from_millis(1500),
+            Duration::from_millis(2500),
+        ) {
             Ok(client) => match do_download(client, url.clone()).await {
                 Ok(data) => {
                     result = Some(data);
@@ -328,36 +488,53 @@ async fn download_sub_inner_raw(
                 Err(e) => Some(format!("Direct: {e}")),
             },
             Err(e) => Some(format!("Direct client build: {e}")),
-        };
+        }
+    };
 
     if result.is_none() {
-        // Get proxy port from state, then immediately release the lock
-        let proxy_url = {
+        // Resolve Mihomo mixed-port proxy and ambient (system / environment) proxy as distinct candidates.
+        let mihomo_proxy_url = {
             let state = app.state::<MihomoState>();
-            let guard = state.0.lock().ok();
-            guard.and_then(|g| {
-                g.process()
-                    .is_some()
-                    .then(|| format!("http://127.0.0.1:{}", g.last_proxy_port().unwrap_or(7890)))
+            let guard = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.process().is_some().then(|| {
+                format!(
+                    "http://127.0.0.1:{}",
+                    guard.last_proxy_port().unwrap_or(7890)
+                )
             })
         };
 
-        if let Some(proxy_url_val) = proxy_url {
-            // When using proxy, skip DNS pre-resolve pinning to let the proxy
-            // handle DNS resolution (avoids issues with CDN / geo-balanced IPs).
-            //
-            // SSRF protection coverage for proxy paths:
-            // - ✅ Initial URL host validated (private host check before any request)
-            // - ✅ Redirect policy blocks redirects to private hosts/IPs
-            // - ⚠️  Proxy-side SSRF (proxy resolving to internal IPs) is NOT
-            //     preventable client-side — this is inherent to any proxy architecture.
-            //     Mitigate by only configuring trusted proxies.
-            let client_mihomo = build_http_client_with_proxy(
+        let ambient_proxy_url = crate::sys_proxy::get_sys_proxy_address()
+            .as_deref()
+            .and_then(zephyr_core::config::subscription::validate_ambient_proxy_url)
+            .or_else(|| {
+                let get_valid_env_proxy = |key: &str| {
+                    std::env::var(key)
+                        .ok()
+                        .as_deref()
+                        .and_then(zephyr_core::config::subscription::validate_ambient_proxy_url)
+                };
+                get_valid_env_proxy("HTTPS_PROXY")
+                    .or_else(|| get_valid_env_proxy("https_proxy"))
+                    .or_else(|| get_valid_env_proxy("ALL_PROXY"))
+                    .or_else(|| get_valid_env_proxy("all_proxy"))
+                    .or_else(|| get_valid_env_proxy("HTTP_PROXY"))
+                    .or_else(|| get_valid_env_proxy("http_proxy"))
+            });
+
+        // ── Tier 2: Mihomo proxy (mixed-port) ──────────────────────────────────
+        if let Some(m_url) = &mihomo_proxy_url {
+            let client_proxy = build_http_client_with_proxy(
                 user_agent.as_deref(),
                 None,
-                Some(proxy_url_val.clone()),
+                Some(m_url.clone()),
+                Duration::from_millis(1500),
+                Duration::from_millis(2500),
             );
-            match client_mihomo {
+            match client_proxy {
                 Ok(client) => match do_download(client, url.clone()).await {
                     Ok(data) => {
                         result = Some(data);
@@ -373,87 +550,227 @@ async fn download_sub_inner_raw(
                     last_error = match direct_error.as_deref() {
                         Some(de) => format!("{de} | Proxy client build: {e}"),
                         None => format!("Proxy client build: {e}"),
-                    }
+                    };
                 }
             }
 
-            // ── Tier 3: 临时切换 global 模式重试 ──────────────────────────────
-            // 直连和普通代理都失败后，尝试临时把 mihomo 切到 global 模式，
-            // 让所有流量走当前选中的代理节点（绕过分流规则可能导致的不可达），
-            // 下载完成后切回原模式。
+            // ── Tier 3: 临时切换 global 模式并选择可用节点重试 ──────────────────
+            // 直连和普通代理（规则分流）都失败后，若使用的是 Mihomo 内核代理，
+            // 尝试把 Mihomo 切到 global 模式并确保 GLOBAL 策略组选择当前活跃的代理节点，
+            // 让所有流量走代理节点（绕过分流规则可能导致的不可达），
+            // 下载完成后或任务中断时自动切回原模式和原策略组选择。
+            // 使用全局异步互斥锁防止并发下载任务在全局模式切换和还原期间发生竞态。
             if result.is_none() {
-                // 只有成功获取到当前模式且不是 global 时才切换，
-                // 否则切到 global 后无法切回（original_mode 为 None 时跳过恢复）。
-                if let Some(orig) = get_mihomo_mode(app).await {
-                    if orig != "global" && set_mihomo_mode(app, "global").await.is_some() {
-                        // Drop guard: 即使 task 在 sleep/download 期间被 cancel，
-                        // 也能在 drop 时 spawn 恢复任务，避免 core 永久停留在 global 模式。
-                        struct ModeRestoreGuard {
-                            app: tauri::AppHandle,
-                            orig_mode: Option<String>,
-                        }
-                        impl Drop for ModeRestoreGuard {
-                            fn drop(&mut self) {
-                                if let Some(orig) = self.orig_mode.take() {
+                if let Ok(lock_guard) = tokio::time::timeout(
+                    Duration::from_millis(1500),
+                    GLOBAL_MODE_LOCK.clone().lock_owned(),
+                )
+                .await
+                {
+                    if let Some(orig_mode) = get_mihomo_mode(app).await {
+                        if orig_mode != "global" {
+                            // Drop guard: 在发出 mode 切换前先行构造 guard。
+                            // 即使后续的 set_mihomo_mode、get_mihomo_active_node_and_global_now、
+                            // set_mihomo_proxy_group、sleep 或 download 任务被超时取消（Cancel），
+                            // 也能在 drop 时恢复 core 的原模式和原节点选择，并在恢复执行期间持续持有互斥锁。
+                            struct ModeRestoreGuard {
+                                app: tauri::AppHandle,
+                                orig_mode: Option<String>,
+                                orig_global_now: Option<String>,
+                                lock_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+                            }
+                            impl Drop for ModeRestoreGuard {
+                                fn drop(&mut self) {
                                     let app = self.app.clone();
-                                    tokio::spawn(async move {
-                                        if set_mihomo_mode(&app, &orig).await.is_none() {
-                                            crate::emit_warn!(
-                                                Core,
-                                                CORE_MODE_RESTORE_DROPPED,
-                                                "Failed to restore original mihomo mode '{orig}' on drop"
-                                            );
-                                        }
-                                    });
+                                    let orig_mode = self.orig_mode.take();
+                                    let orig_global_now = self.orig_global_now.take();
+                                    let lock_guard = self.lock_guard.take();
+                                    if orig_mode.is_some() || orig_global_now.is_some() {
+                                        tokio::spawn(async move {
+                                            let _held_lock = lock_guard;
+                                            if let Some(orig_node) = orig_global_now {
+                                                if set_mihomo_proxy_group(
+                                                    &app, "GLOBAL", &orig_node,
+                                                )
+                                                .await
+                                                .is_none()
+                                                {
+                                                    crate::emit_warn!(
+                                                        Core,
+                                                        CORE_GLOBAL_RESTORE_DROPPED,
+                                                        "Failed to restore original GLOBAL proxy group selection '{orig_node}' on drop"
+                                                    );
+                                                }
+                                            }
+                                            if let Some(orig) = orig_mode {
+                                                if set_mihomo_mode(&app, &orig).await.is_none() {
+                                                    crate::emit_warn!(
+                                                        Core,
+                                                        CORE_MODE_RESTORE_DROPPED,
+                                                        "Failed to restore original mihomo mode '{orig}' on drop"
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    }
                                 }
                             }
-                        }
 
-                        let mut restore_guard = ModeRestoreGuard {
-                            app: app.clone(),
-                            orig_mode: Some(orig.clone()),
-                        };
+                            let mut restore_guard = ModeRestoreGuard {
+                                app: app.clone(),
+                                orig_mode: Some(orig_mode),
+                                orig_global_now: None,
+                                lock_guard: Some(lock_guard),
+                            };
 
-                        // 切换后短暂等待 mihomo 生效
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-
-                        let client_global = build_http_client_with_proxy(
-                            user_agent.as_deref(),
-                            None,
-                            Some(proxy_url_val),
-                        );
-                        match client_global {
-                            Ok(client) => match do_download(client, url).await {
-                                Ok(data) => {
-                                    result = Some(data);
-                                }
-                                Err(e) => {
+                            let mode_switched = set_mihomo_mode(app, "global").await.is_some();
+                            if mode_switched {
+                                let mut node_switch_failed = false;
+                                // 尝试将 GLOBAL 组指向当前活跃的代理节点
+                                if let Some((active_node, global_now)) =
+                                    get_mihomo_active_node_and_global_now(app).await
+                                {
+                                    if let Some(orig_node) = global_now.as_deref() {
+                                        if orig_node != active_node.as_str() {
+                                            // 在执行切换前预先装载 orig_global_now，即使 PUT 请求在途中被取消也能安全回滚。
+                                            // 无论 PUT 返回成功还是连接超时/断连，均保持装载状态（因为服务端可能已处理变更），
+                                            // 确保退出时保守地尝试回滚至 orig_node。
+                                            restore_guard.orig_global_now = global_now;
+                                            if set_mihomo_proxy_group(app, "GLOBAL", &active_node)
+                                                .await
+                                                .is_none()
+                                            {
+                                                node_switch_failed = true;
+                                                last_error = if last_error.is_empty() {
+                                                    format!("Global-mode: Failed to select node '{active_node}'")
+                                                } else {
+                                                    format!("{last_error} | Global-mode: Failed to select node '{active_node}'")
+                                                };
+                                                crate::emit_warn!(
+                                                    Core,
+                                                    CORE_GLOBAL_SWITCH_FAILED,
+                                                    "Failed to switch GLOBAL proxy group to '{active_node}'"
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    node_switch_failed = true;
                                     last_error = if last_error.is_empty() {
-                                        format!("Global-mode: {e}")
+                                        "Global-mode: No eligible proxy node found in GLOBAL group"
+                                            .to_owned()
                                     } else {
-                                        format!("{last_error} | Global-mode: {e}")
+                                        format!("{last_error} | Global-mode: No eligible proxy node found in GLOBAL group")
                                     };
                                 }
-                            },
+
+                                if !node_switch_failed {
+                                    // 切换后短暂等待 mihomo 生效
+                                    tokio::time::sleep(Duration::from_millis(150)).await;
+
+                                    let client_global = build_http_client_with_proxy(
+                                        user_agent.as_deref(),
+                                        None,
+                                        Some(m_url.clone()),
+                                        Duration::from_millis(1500),
+                                        Duration::from_millis(2500),
+                                    );
+                                    match client_global {
+                                        Ok(client) => {
+                                            match do_download(client, url.clone()).await {
+                                                Ok(data) => {
+                                                    result = Some(data);
+                                                }
+                                                Err(e) => {
+                                                    last_error = if last_error.is_empty() {
+                                                        format!("Global-mode: {e}")
+                                                    } else {
+                                                        format!("{last_error} | Global-mode: {e}")
+                                                    };
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            last_error = if last_error.is_empty() {
+                                                format!("Global-mode client build: {e}")
+                                            } else {
+                                                format!(
+                                                    "{last_error} | Global-mode client build: {e}"
+                                                )
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 正常流程：尝试恢复原模式和策略组选择。
+                            // 仅在明确恢复成功后才从 restore_guard 中清除对应字段；
+                            // 若恢复请求失败或在 await 期间任务被取消，guard 内部保留原值，
+                            // Drop 守卫将在后台继续重试恢复，并在恢复期间继续持有互斥锁。
+                            if let Some(orig_node) = restore_guard.orig_global_now.clone() {
+                                if set_mihomo_proxy_group(app, "GLOBAL", &orig_node)
+                                    .await
+                                    .is_some()
+                                {
+                                    restore_guard.orig_global_now = None;
+                                } else {
+                                    crate::emit_warn!(
+                                        Core,
+                                        CORE_GLOBAL_RESTORE_FAILED,
+                                        "Failed to restore original GLOBAL proxy group selection '{orig_node}'"
+                                    );
+                                }
+                            }
+                            if let Some(orig) = restore_guard.orig_mode.clone() {
+                                if set_mihomo_mode(app, &orig).await.is_some() {
+                                    restore_guard.orig_mode = None;
+                                } else {
+                                    crate::emit_warn!(
+                                        Core,
+                                        CORE_MODE_RESTORE_FAILED,
+                                        "Failed to restore original mihomo mode '{orig}'"
+                                    );
+                                }
+                            }
+                            drop(restore_guard);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Tier 4: 环境代理 / 系统代理回退 ──────────────────────────────────
+        // 若 Mihomo 未启动，或 Mihomo 代理与全局模式均无法拉取订阅，
+        // 则在存在且不与 Mihomo 重复的有效本地回环代理（如系统代理或环境变量代理）时进行最终重试。
+        if result.is_none() {
+            if let Some(amb_url) = ambient_proxy_url {
+                if Some(&amb_url) != mihomo_proxy_url.as_ref() {
+                    let client_ambient = build_http_client_with_proxy(
+                        user_agent.as_deref(),
+                        None,
+                        Some(amb_url),
+                        Duration::from_millis(1500),
+                        Duration::from_millis(2500),
+                    );
+                    match client_ambient {
+                        Ok(client) => match do_download(client, url).await {
+                            Ok(data) => {
+                                result = Some(data);
+                            }
                             Err(e) => {
                                 last_error = if last_error.is_empty() {
-                                    format!("Global-mode client build: {e}")
+                                    format!("Ambient Proxy: {e}")
                                 } else {
-                                    format!("{last_error} | Global-mode client build: {e}")
+                                    format!("{last_error} | Ambient Proxy: {e}")
                                 };
                             }
-                        }
-
-                        // 正常流程：手动恢复原模式并从 guard 中 take 走 orig_mode，
-                        // 避免 Drop 时重复执行恢复。
-                        if let Some(orig) = restore_guard.orig_mode.take() {
-                            if set_mihomo_mode(app, &orig).await.is_none() {
-                                crate::emit_warn!(
-                                    Core,
-                                    CORE_MODE_RESTORE_FAILED,
-                                    "Failed to restore original mihomo mode '{orig}'"
-                                );
-                            }
+                        },
+                        Err(e) => {
+                            last_error = if last_error.is_empty() {
+                                format!("Ambient Proxy client build: {e}")
+                            } else {
+                                format!("{last_error} | Ambient Proxy client build: {e}")
+                            };
                         }
                     }
                 }
@@ -461,10 +778,11 @@ async fn download_sub_inner_raw(
         }
     }
 
-    // Two-tier download strategy: direct → Mihomo proxy.
-    // System proxy fallback is intentionally removed to reduce SSRF attack surface.
-    // The Mihomo proxy path is trusted (user-configured), while system proxy
-    // could be set by any application/malware on the system.
+    // Multi-tier download strategy:
+    // Tier 1: Direct connection with DNS pinning (SSRF protection).
+    // Tier 2: Mihomo mixed-port proxy connection.
+    // Tier 3: Mihomo global mode with active proxy node selection and auto-restoration.
+    // Tier 4: Ambient proxy (system / environment proxy fallback).
     let (bytes, sub_info_header, final_url, disp_filename) = result.ok_or_else(|| {
         if !last_error.is_empty() {
             last_error
