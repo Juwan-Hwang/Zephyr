@@ -26,7 +26,7 @@ const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
 const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
 const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
-use super::tun_manager::{is_tun_mode, restart_core_as_root};
+use super::tun_manager::{is_tun_mode, kill_all_mihomo_as_root, restart_core_as_root};
 use super::{AppPaths, CoreData, CoreStartResult, MihomoState, CORE_STARTING};
 
 #[cfg(target_os = "windows")]
@@ -699,10 +699,10 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
         .unwrap_or(DEFAULT_API_PORT)
 }
 
-/// Parse the proxy port from YAML config.
-/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
-/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
-fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+/// Extract the configured proxy port from a parsed YAML value, if present.
+/// Checks `mixed-port`, `port`, `socks-port` in order without defaulting.
+#[must_use]
+pub fn extract_configured_proxy_port_from_yaml(yaml_val: &serde_yaml::Value) -> Option<u16> {
     let parse_u16 = |val: &serde_yaml::Value| -> Option<u16> {
         val.as_u64()
             .and_then(|p| u16::try_from(p).ok())
@@ -715,7 +715,20 @@ fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
         .and_then(parse_u16)
         .or_else(|| yaml_val.get("port").and_then(parse_u16))
         .or_else(|| yaml_val.get("socks-port").and_then(parse_u16))
-        .unwrap_or(DEFAULT_MIXED_PORT)
+}
+
+/// Extract configured proxy port from raw YAML content string.
+#[must_use]
+pub fn extract_configured_proxy_port(yaml_content: &str) -> Option<u16> {
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+    extract_configured_proxy_port_from_yaml(&yaml_val)
+}
+
+/// Parse the proxy port from YAML config.
+/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
+/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
+fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+    extract_configured_proxy_port_from_yaml(yaml_val).unwrap_or(DEFAULT_MIXED_PORT)
 }
 
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
@@ -1464,6 +1477,11 @@ pub async fn start_core_inner(
         // mihomo as root; the normal spawn path below is never reached).
         // Best-effort: if the lock fails, mihomo is already running — don't
         // fail the entire start just because we couldn't record the timestamp.
+        let tun_proxy_port = resolve_app_paths(&app).ok().and_then(|paths| {
+            let run_config_path = paths.core_dir.join("run_config.yaml");
+            let content = std::fs::read_to_string(&run_config_path).ok()?;
+            extract_configured_proxy_port(&content)
+        });
         if let Ok(mut lock) = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
         {
             // Clear the stale Child handle: restart_core_as_root killed the
@@ -1475,9 +1493,7 @@ pub async fn start_core_inner(
             lock.set_last_secret(secret.clone());
             lock.set_last_config_path(Some(config_path.clone()));
             lock.set_last_port(Some(DEFAULT_API_PORT));
-            // proxy_port is not yet parsed (select_runtime_config runs later
-            // in the normal path); clear any stale value from a prior config.
-            lock.set_last_proxy_port(None);
+            lock.set_last_proxy_port(tun_proxy_port);
             lock.set_started_at(Some(std::time::Instant::now()));
         } else {
             emit_warn!(
@@ -1491,7 +1507,27 @@ pub async fn start_core_inner(
         // Notify the network coordinator that a fresh core instance was started.
         // The new process has no rules applied, so the coordinator's applied_state
         // is now stale and must be re-evaluated.
+        if let Err(e) = health_check(DEFAULT_API_PORT).await {
+            #[cfg(target_os = "macos")]
+            {
+                let kill_res = tokio::task::spawn_blocking(kill_all_mihomo_as_root).await;
+                if let Ok(Err(err)) = kill_res {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to clean up root mihomo process after health check failure: {err}"
+                    );
+                }
+            }
+            if let Ok(mut lock) =
+                lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+            {
+                clear_stopped_core_state(&mut lock);
+            }
+            return Err(e);
+        }
         notify_core_started(&app).await;
+        let _ = super::subscription::reconcile_global_mode_restore(&app).await;
         return Ok(CoreStartResult {
             secret,
             port: DEFAULT_API_PORT,
@@ -1708,6 +1744,7 @@ pub async fn start_core_inner(
     // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
 
     notify_core_started(&app).await;
+    let _ = super::subscription::reconcile_global_mode_restore(&app).await;
 
     Ok(CoreStartResult {
         secret: resolved_secret,
@@ -2482,5 +2519,25 @@ mod tests {
             secret.chars().all(|c| c.is_ascii_alphanumeric()),
             "secret must be alphanumeric"
         );
+    }
+
+    #[test]
+    fn test_extract_configured_proxy_port() {
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: 7890"),
+            Some(7890)
+        );
+        assert_eq!(extract_configured_proxy_port("port: 7891"), Some(7891));
+        assert_eq!(
+            extract_configured_proxy_port("socks-port: 7892"),
+            Some(7892)
+        );
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: '9090'"),
+            Some(9090)
+        );
+        assert_eq!(extract_configured_proxy_port("other: 1234"), None);
+        assert_eq!(extract_configured_proxy_port("invalid yaml ::::"), None);
+        assert_eq!(extract_configured_proxy_port("mixed-port: 0"), None);
     }
 }
