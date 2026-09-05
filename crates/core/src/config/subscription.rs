@@ -211,16 +211,34 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
 /// Check if a host is a private or local address (SSRF protection)
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.strip_suffix('.').unwrap_or(trimmed);
+    if normalized.is_empty() {
+        return false;
+    }
+    let host_lower = normalized.to_lowercase();
 
     if host_lower == "localhost"
         || host_lower.ends_with(".localhost")
         || host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".lan")
+        || host_lower.ends_with(".home.arpa")
+        || host_lower.ends_with(".home")
+        || host_lower.ends_with(".corp")
     {
         return true;
     }
 
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    let unbracketed = normalized
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(normalized);
+
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
         return is_private_ip(ip);
     }
 
@@ -237,21 +255,42 @@ pub fn validate_subscription_name(name: &str) -> Result<String, crate::error::Ap
     crate::config::sanitizer::sanitize_base_filename(name.to_owned())
 }
 
+/// Dedicated error type for public host address validation, distinguishing SSRF policy blocks
+/// from transient or empty DNS lookup results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicHostAddrError {
+    SsrfBlocked(String),
+    NoAddresses(String),
+    Other(String),
+}
+
+impl std::fmt::Display for PublicHostAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SsrfBlocked(msg) | Self::NoAddresses(msg) | Self::Other(msg) => {
+                write!(f, "{msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PublicHostAddrError {}
+
 /// Core validation logic for a public host's resolved addresses.
 /// Extracted so tests can inject mock DNS results without real DNS.
 pub fn validate_public_host_addrs(
     host: &str,
     addrs: &[std::net::SocketAddr],
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+) -> Result<(String, Option<std::net::SocketAddr>, bool), PublicHostAddrError> {
     let mut resolved_addr = None;
 
     for addr in addrs {
         if is_private_ip(addr.ip()) {
-            return Err(format!(
-                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed. \
+            return Err(PublicHostAddrError::SsrfBlocked(format!(
+                "SSRF protection: host '{host}' resolved to private IP {} — access to private/local addresses is not allowed. \
                  If this is a trusted internal subscription, enter the private address directly (e.g. http://192.168.x.x) instead of using a domain name.",
-                host, addr.ip()
-            ));
+                addr.ip()
+            )));
         }
         if resolved_addr.is_none() {
             resolved_addr = Some(*addr);
@@ -259,18 +298,23 @@ pub fn validate_public_host_addrs(
     }
 
     if resolved_addr.is_none() {
-        return Err("Could not resolve any IP address for the host".to_owned());
+        return Err(PublicHostAddrError::NoAddresses(
+            "Could not resolve any IP address for the host".to_owned(),
+        ));
     }
 
     Ok((host.to_owned(), resolved_addr, false))
 }
 
-/// Validate URL and its resolved IPs for SSRF protection.
-/// Returns `(host, resolved_addr, user_entered_private)`.
-pub fn validate_subscription_url_with_ip(
-    url: &str,
-) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    let parsed_url = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+/// Validate URL scheme, host, and port without DNS resolution.
+/// Returns `(host, port, user_entered_private)`.
+pub fn validate_subscription_url_basic(url: &str) -> Result<(String, u16, bool), String> {
+    let trimmed = url.trim();
+    if trimmed.starts_with("http:///") || trimmed.starts_with("https:///") {
+        return Err("URL must have a host".to_owned());
+    }
+
+    let parsed_url = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {e}"))?;
 
     let scheme = parsed_url.scheme();
     if scheme != "http" && scheme != "https" {
@@ -278,20 +322,584 @@ pub fn validate_subscription_url_with_ip(
     }
 
     let host = parsed_url.host_str().ok_or("URL must have a host")?;
+    if host.trim().is_empty() {
+        return Err("URL must have a host".to_owned());
+    }
 
     let user_entered_private = is_private_host(host);
 
-    if user_entered_private {
-        return Ok((host.to_owned(), None, true));
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    let port = parsed_url.port().unwrap_or(default_port);
+
+    Ok((host.to_owned(), port, user_entered_private))
+}
+
+/// Validate an ambient environment or system proxy URL.
+/// Security: Only permit local loopback proxies (`127.0.0.1` / `localhost` / `::1`)
+/// and reject cleartext credentialed `http://` proxies to prevent SSRF and credential leaks.
+/// Also supports semicolon/whitespace-separated entries and scheme-prefixed entries
+/// commonly found in Windows/macOS/Linux system proxy configurations (e.g. `http=127.0.0.1:7890;https=...`).
+#[must_use]
+pub fn validate_ambient_proxy_url(raw: &str) -> Option<String> {
+    validate_ambient_proxy_url_for_scheme(raw, None)
+}
+
+struct AmbientCandidate {
+    tag: Option<String>,
+    url: String,
+}
+
+fn parse_assignment_tag(s: &str) -> Option<(&str, &str)> {
+    let (raw_prefix, rest) = s.split_once('=')?;
+    let prefix = raw_prefix.trim();
+    (!prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_alphanumeric()))
+        .then(|| (prefix, rest.trim()))
+}
+
+fn map_protocol_tag(prefix: &str) -> Option<(Option<String>, &'static str)> {
+    let p_lower = prefix.to_ascii_lowercase();
+    match p_lower.as_str() {
+        "socks" | "socks5" => Some((Some("socks".to_owned()), "socks5")),
+        "socks5h" => Some((Some("socks".to_owned()), "socks5h")),
+        "socks4" => Some((Some("socks".to_owned()), "socks4")),
+        "socks4a" => Some((Some("socks".to_owned()), "socks4a")),
+        "https" => Some((Some("https".to_owned()), "http")),
+        "http" => Some((Some("http".to_owned()), "http")),
+        "all" => Some((Some("all".to_owned()), "http")),
+        _ => None,
+    }
+}
+
+fn parse_ambient_proxy_segment(segment: &str) -> Option<AmbientCandidate> {
+    let mut seg = segment.trim();
+    if seg.is_empty() {
+        return None;
     }
 
-    let default_port = if scheme == "https" { 443 } else { 80 };
+    // Strip extraneous "http://" or "https://" prefix if followed by a recognized scheme assignment
+    // (e.g. "http://http=127.0.0.1:7890"), while preserving valid authenticated URLs
+    // (e.g. "https://user:p=ss@127.0.0.1:8443").
+    if let Some(rest) = seg
+        .strip_prefix("http://")
+        .or_else(|| seg.strip_prefix("https://"))
+    {
+        if let Some((prefix, _)) = parse_assignment_tag(rest) {
+            if map_protocol_tag(prefix).is_some() {
+                seg = rest;
+            }
+        }
+    }
+
+    // Handle leading scheme assignment prefixes like "http=host:port", "socks=...", "all=..."
+    let (tag, default_scheme, inner) = if let Some((prefix, remainder)) = parse_assignment_tag(seg)
+    {
+        if let Some((mapped_tag, default_scheme)) = map_protocol_tag(prefix) {
+            (mapped_tag, default_scheme, remainder)
+        } else {
+            // Explicit protocol key that is unsupported for HTTP/SOCKS proxies (e.g. "ftp=")
+            return None;
+        }
+    } else {
+        (None, "http", seg)
+    };
+
+    let candidate = if let Some(rest) = inner.strip_prefix("socks://") {
+        format!("socks5://{rest}")
+    } else if inner.contains("://") {
+        inner.to_owned()
+    } else {
+        format!("{default_scheme}://{inner}")
+    };
+
+    let parsed = url::Url::parse(&candidate).ok()?;
+    if !matches!(
+        parsed.scheme(),
+        "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h"
+    ) {
+        return None;
+    }
+    let is_loopback = parsed.host_str().is_some_and(|h| {
+        if h.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        let unbracketed = h.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = unbracketed.parse::<std::net::IpAddr>() {
+            ip.is_loopback()
+        } else {
+            false
+        }
+    });
+    if !is_loopback {
+        return None;
+    }
+    if parsed.port() == Some(0) {
+        return None;
+    }
+    let has_credentials = !parsed.username().is_empty() || parsed.password().is_some();
+    if has_credentials && parsed.scheme() == "http" {
+        return None;
+    }
+
+    Some(AmbientCandidate {
+        tag,
+        url: candidate,
+    })
+}
+
+/// Check if the remainder string starts a new proxy configuration entry.
+/// Matches supported schemes (http://, https://, socks5://, etc.),
+/// supported assignment tags with destinations (http=..., socks=..., etc.),
+/// and host:port targets (localhost:port, 127.0.0.1:port, IPv6 loopback:port).
+fn is_proxy_entry_start(s: &str) -> bool {
+    let trimmed = s.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Check schemes (e.g. http://, https://, socks5://, ftp://)
+    if let Some(idx) = trimmed.find("://") {
+        let scheme = &trimmed[..idx];
+        if !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+        {
+            return true;
+        }
+    }
+    // Check recognized protocol tags followed by '='
+    if let Some((prefix, rest)) = parse_assignment_tag(trimmed) {
+        if (map_protocol_tag(prefix).is_some() || prefix.eq_ignore_ascii_case("ftp"))
+            && rest.contains(':')
+        {
+            return true;
+        }
+    }
+    // Check bracketed IPv6 host:port (e.g. [::1]:7890)
+    if trimmed.starts_with('[') {
+        if let Some(bracket_end) = trimmed.find(']') {
+            let after_bracket = &trimmed[bracket_end + 1..];
+            if let Some(port_part) = after_bracket.strip_prefix(':') {
+                return port_part.chars().next().is_some_and(|c| c.is_ascii_digit());
+            }
+        }
+    }
+    // Check host:port (e.g. localhost:7890, 127.0.0.1:7890, proxy.corp:8080)
+    let mut parts = trimmed.splitn(2, ':');
+    if let (Some(host), Some(rest)) = (parts.next(), parts.next()) {
+        if !host.is_empty()
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+            && rest.chars().next().is_some_and(|c| c.is_ascii_digit())
+        {
+            let port_digits = rest.chars().take_while(char::is_ascii_digit).count();
+            if (1..=5).contains(&port_digits) {
+                let rest_after_port = &rest[port_digits..];
+                if rest_after_port.is_empty()
+                    || rest_after_port.starts_with('/')
+                    || rest_after_port.starts_with(';')
+                    || rest_after_port.starts_with(' ')
+                    || rest_after_port.starts_with('\n')
+                    || rest_after_port.starts_with('\r')
+                    || rest_after_port.starts_with('?')
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Split ambient/system proxy configuration into candidate segments.
+/// Standalone URLs with semicolons in credentials (e.g. `user:p;ss@127.0.0.1:8443`),
+/// paths (e.g. `http://127.0.0.1:7890/p;1`), or query strings (e.g. `http://127.0.0.1:7890/?a=1;b=2`)
+/// are preserved without incorrect splitting.
+fn split_ambient_proxy_segments(raw: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+
+    for (i, &b) in raw.as_bytes().iter().enumerate() {
+        if b == b'\n' || b == b'\r' {
+            if let Some(raw_part) = raw.get(start..i) {
+                let part = raw_part.trim();
+                if !part.is_empty() {
+                    segments.push(part);
+                }
+            }
+            start = i.saturating_add(1);
+        } else if b == b';' || b == b' ' {
+            let remainder = raw.get(i.saturating_add(1)..).unwrap_or("").trim_start();
+            let is_separator = if !is_proxy_entry_start(remainder) {
+                false
+            } else if b == b' ' {
+                true
+            } else {
+                // Semicolons are separators unless inside user credentials of an ongoing URL scheme
+                // (e.g. `http://user:p;ss@127.0.0.1:8443`).
+                let in_userinfo = if let Some(raw_part) = raw.get(start..i) {
+                    if let Some(slash_idx) = raw_part.find("://") {
+                        let after_scheme = &raw_part[slash_idx + 3..];
+                        if !after_scheme.contains('@') && !after_scheme.contains('/') {
+                            let delims = [
+                                remainder.find(';'),
+                                remainder.find(' '),
+                                remainder.find('\n'),
+                                remainder.find('\r'),
+                            ];
+                            let next_delim = delims
+                                .into_iter()
+                                .flatten()
+                                .min()
+                                .unwrap_or(remainder.len());
+                            let segment_ahead = remainder.get(..next_delim).unwrap_or(remainder);
+                            let before_slash =
+                                segment_ahead.split('/').next().unwrap_or(segment_ahead);
+                            before_slash.contains('@')
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                !in_userinfo
+            };
+
+            if is_separator {
+                if let Some(raw_part) = raw.get(start..i) {
+                    let part = raw_part.trim();
+                    if !part.is_empty() {
+                        segments.push(part);
+                    }
+                }
+                start = i.saturating_add(1);
+            }
+        }
+    }
+
+    if let Some(raw_tail) = raw.get(start..) {
+        let tail = raw_tail.trim();
+        if !tail.is_empty() {
+            segments.push(tail);
+        }
+    }
+
+    segments
+}
+
+/// Validate an ambient environment or system proxy configuration, returning all valid loopback proxy candidates
+/// ordered by priority for the specified destination scheme.
+#[must_use]
+pub fn collect_ambient_proxy_urls_for_scheme(
+    raw: &str,
+    target_scheme: Option<&str>,
+) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let segments = split_ambient_proxy_segments(trimmed);
+    let candidates: Vec<AmbientCandidate> = if segments.len() <= 1 {
+        parse_ambient_proxy_segment(trimmed)
+            .or_else(|| {
+                segments
+                    .first()
+                    .copied()
+                    .and_then(parse_ambient_proxy_segment)
+            })
+            .into_iter()
+            .collect()
+    } else {
+        segments
+            .into_iter()
+            .filter_map(parse_ambient_proxy_segment)
+            .collect()
+    };
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    let mut push_dedup = |u: &str| {
+        if seen.insert(u.to_owned()) {
+            result.push(u.to_owned());
+        }
+    };
+
+    if let Some(target) = target_scheme {
+        let t_lower = target.to_ascii_lowercase();
+        // 1. Direct scheme match (e.g. tag == "https" when requesting HTTPS)
+        for c in candidates
+            .iter()
+            .filter(|c| c.tag.as_deref() == Some(&t_lower))
+        {
+            push_dedup(&c.url);
+        }
+        // 2. "all" match
+        for c in candidates
+            .iter()
+            .filter(|c| c.tag.as_deref() == Some("all"))
+        {
+            push_dedup(&c.url);
+        }
+        // 3. "socks" match
+        for c in candidates
+            .iter()
+            .filter(|c| c.tag.as_deref() == Some("socks"))
+        {
+            push_dedup(&c.url);
+        }
+        // 4. Unprefixed candidate
+        for c in candidates.iter().filter(|c| c.tag.is_none()) {
+            push_dedup(&c.url);
+        }
+    }
+
+    // 5. Any remaining candidates in discovery order
+    for c in &candidates {
+        push_dedup(&c.url);
+    }
+
+    result
+}
+
+/// Validate an ambient environment or system proxy URL, selecting candidate matching an optional destination scheme.
+#[must_use]
+pub fn validate_ambient_proxy_url_for_scheme(
+    raw: &str,
+    target_scheme: Option<&str>,
+) -> Option<String> {
+    collect_ambient_proxy_urls_for_scheme(raw, target_scheme)
+        .into_iter()
+        .next()
+}
+
+fn matches_cidr(host_ip: IpAddr, pat: &str) -> bool {
+    let Some((ip_str, prefix_str)) = pat.split_once('/') else {
+        return false;
+    };
+    let Ok(prefix_len) = prefix_str.trim().parse::<u32>() else {
+        return false;
+    };
+    match (
+        host_ip,
+        ip_str
+            .trim()
+            .trim_matches('[')
+            .trim_matches(']')
+            .parse::<IpAddr>(),
+    ) {
+        (IpAddr::V4(target), Ok(IpAddr::V4(net))) => {
+            if prefix_len > 32 {
+                return false;
+            }
+            let mask = !((!0u32).checked_shr(prefix_len).unwrap_or(0));
+            (u32::from(target) & mask) == (u32::from(net) & mask)
+        }
+        (IpAddr::V6(target), Ok(IpAddr::V6(net))) => {
+            if prefix_len > 128 {
+                return false;
+            }
+            let mask = !((!0u128).checked_shr(prefix_len).unwrap_or(0));
+            (u128::from(target) & mask) == (u128::from(net) & mask)
+        }
+        _ => false,
+    }
+}
+
+/// Check if a host and optional port match a `NO_PROXY` rule list.
+#[must_use]
+pub fn matches_no_proxy_rules_with_port(host: &str, port: Option<u16>, no_proxy_val: &str) -> bool {
+    if no_proxy_val.is_empty() {
+        return false;
+    }
+    let trimmed_host = host.trim().trim_matches('[').trim_matches(']');
+    if trimmed_host.is_empty() {
+        return false;
+    }
+    let host_ip = trimmed_host.parse::<IpAddr>().ok();
+    for raw_pat in no_proxy_val.split(|c: char| c == ',' || c == ';' || c.is_ascii_whitespace()) {
+        let pat = raw_pat.trim();
+        if pat.is_empty() {
+            continue;
+        }
+
+        let (pat_host, pat_port) = if pat.parse::<std::net::Ipv6Addr>().is_ok() {
+            (std::borrow::Cow::Borrowed(pat), None)
+        } else if let Some(rest) = pat.strip_prefix('[') {
+            if let Some((raw_inside, raw_after)) = rest.split_once(']') {
+                let inside = raw_inside.trim();
+                let after = raw_after.trim();
+                if let Some(rest_after) = after.strip_prefix('/') {
+                    if let Some((cidr_len, port_str)) = rest_after.split_once(':') {
+                        let parsed_port = port_str.trim().parse::<u16>().ok();
+                        (
+                            std::borrow::Cow::Owned(format!("{inside}/{cidr_len}")),
+                            parsed_port,
+                        )
+                    } else {
+                        (
+                            std::borrow::Cow::Owned(format!("{inside}/{rest_after}")),
+                            None,
+                        )
+                    }
+                } else if let Some(port_str) = after.strip_prefix(':') {
+                    let parsed_port = port_str.trim().parse::<u16>().ok();
+                    (std::borrow::Cow::Borrowed(inside), parsed_port)
+                } else {
+                    (std::borrow::Cow::Borrowed(inside), None)
+                }
+            } else {
+                (
+                    std::borrow::Cow::Borrowed(pat.trim_matches('[').trim_matches(']')),
+                    None,
+                )
+            }
+        } else if let Some((h, p)) = pat.rsplit_once(':') {
+            if let Ok(parsed_port) = p.parse::<u16>() {
+                (
+                    std::borrow::Cow::Borrowed(h.trim_matches('[').trim_matches(']')),
+                    Some(parsed_port),
+                )
+            } else {
+                (
+                    std::borrow::Cow::Borrowed(pat.trim_matches('[').trim_matches(']')),
+                    None,
+                )
+            }
+        } else {
+            (
+                std::borrow::Cow::Borrowed(pat.trim_matches('[').trim_matches(']')),
+                None,
+            )
+        };
+
+        if pat_host.is_empty() {
+            continue;
+        }
+
+        if let Some(rule_port) = pat_port {
+            if port != Some(rule_port) {
+                continue;
+            }
+        }
+
+        if let Some(ip) = host_ip {
+            if pat_host.contains('/') && matches_cidr(ip, &pat_host) {
+                return true;
+            }
+        }
+
+        let host_for_match = if host_ip.is_some() {
+            trimmed_host
+        } else {
+            trimmed_host.strip_suffix('.').unwrap_or(trimmed_host)
+        };
+
+        if pat_host.as_ref() == "*" {
+            return true;
+        }
+        if pat_host.eq_ignore_ascii_case("<local>") {
+            if let Some(ip) = host_ip {
+                if ip.is_loopback() {
+                    return true;
+                }
+            } else if !host_for_match.contains('.') && !host_for_match.contains(':') {
+                return true;
+            }
+        }
+        let pat_for_match = if pat_host.contains('/') {
+            pat_host.as_ref()
+        } else {
+            pat_host.strip_suffix('.').unwrap_or(&pat_host)
+        };
+
+        if host_for_match.eq_ignore_ascii_case(pat_for_match) {
+            return true;
+        }
+        if let Some(prefix) = pat_for_match.strip_suffix('*') {
+            if !prefix.is_empty()
+                && host_for_match
+                    .to_ascii_lowercase()
+                    .starts_with(&prefix.to_ascii_lowercase())
+            {
+                return true;
+            }
+        }
+        let domain_suffix = pat_for_match
+            .strip_prefix("*.")
+            .or_else(|| pat_for_match.strip_prefix('.'))
+            .unwrap_or(pat_for_match);
+        if host_for_match.eq_ignore_ascii_case(domain_suffix) {
+            return true;
+        }
+        if host_for_match.len() > domain_suffix.len()
+            && host_for_match
+                .to_ascii_lowercase()
+                .ends_with(&domain_suffix.to_ascii_lowercase())
+            && host_for_match
+                .as_bytes()
+                .get(host_for_match.len() - domain_suffix.len() - 1)
+                == Some(&b'.')
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a host matches a `NO_PROXY` rule list.
+#[must_use]
+pub fn matches_no_proxy_rules(host: &str, no_proxy_val: &str) -> bool {
+    matches_no_proxy_rules_with_port(host, None, no_proxy_val)
+}
+
+/// Check if a host and optional port match the current process environment `NO_PROXY` / `no_proxy` setting.
+#[must_use]
+pub fn is_destination_in_no_proxy(host: &str, port: Option<u16>) -> bool {
+    if let Ok(val_upper) = std::env::var("NO_PROXY") {
+        if matches_no_proxy_rules_with_port(host, port, &val_upper) {
+            return true;
+        }
+    }
+    if let Ok(val_lower) = std::env::var("no_proxy") {
+        if matches_no_proxy_rules_with_port(host, port, &val_lower) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a host matches the current process environment `NO_PROXY` / `no_proxy` setting.
+#[must_use]
+pub fn is_host_in_no_proxy(host: &str) -> bool {
+    is_destination_in_no_proxy(host, None)
+}
+
+/// Validate URL and its resolved IPs for SSRF protection.
+/// Returns `(host, resolved_addr, user_entered_private)`.
+pub fn validate_subscription_url_with_ip(
+    url: &str,
+) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
+    let (host, port, user_entered_private) = validate_subscription_url_basic(url)?;
+
+    if user_entered_private {
+        return Ok((host, None, true));
+    }
+
     let addrs: Vec<std::net::SocketAddr> =
-        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{default_port}"))
+        std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:{port}"))
             .map_err(|e| format!("DNS resolution failed for '{host}': {e}"))?
             .collect();
 
-    validate_public_host_addrs(host, &addrs)
+    validate_public_host_addrs(&host, &addrs).map_err(|e| e.to_string())
 }
 
 /// Determine the appropriate error code based on the error message content.
@@ -422,6 +1030,114 @@ pub struct BatchUpdateItem {
     pub name: String,
 }
 
+/// 从 mihomo /proxies 返回的字典中提取全局模式候选节点及当前 GLOBAL 选中项。
+/// 纯函数，便于独立单元测试。
+pub fn select_global_candidate(
+    proxies: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(String, Option<String>)> {
+    let global_obj = proxies.get("GLOBAL");
+    let global_now = global_obj
+        .and_then(|g| g.get("now"))
+        .and_then(|n| n.as_str())
+        .map(std::borrow::ToOwned::to_owned);
+
+    let is_special_target = |s: &str| {
+        matches!(
+            s,
+            "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "PASS-RULE" | "COMPATIBLE"
+        )
+    };
+
+    let global_all: Vec<&str> = global_obj
+        .and_then(|g| g.get("all"))
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // 递归解析候选节点/策略组，确保最终生效的叶子节点存在于 proxies 中且不是 DIRECT / REJECT 等特殊目标。
+    // 递归深度限制为 8 层以防止配置中存在循环依赖。
+    let resolves_to_effective_proxy = |start_name: &str| -> bool {
+        let mut curr = start_name;
+        for _ in 0..8 {
+            if is_special_target(curr) {
+                return false;
+            }
+            if let Some(p_obj) = proxies.get(curr) {
+                let p_type = p_obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if p_type.eq_ignore_ascii_case("Selector")
+                    || p_type.eq_ignore_ascii_case("URLTest")
+                    || p_type.eq_ignore_ascii_case("Fallback")
+                {
+                    if let Some(next_now) = p_obj.get("now").and_then(|n| n.as_str()) {
+                        curr = next_now;
+                        continue;
+                    }
+                    return false;
+                }
+                if p_type.is_empty()
+                    || p_type.eq_ignore_ascii_case("Direct")
+                    || p_type.eq_ignore_ascii_case("Reject")
+                    || p_type.eq_ignore_ascii_case("RejectDrop")
+                    || p_type.eq_ignore_ascii_case("Pass")
+                    || p_type.eq_ignore_ascii_case("Pass-Rule")
+                    || p_type.eq_ignore_ascii_case("Compatible")
+                {
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        }
+        false
+    };
+
+    let is_valid_global_candidate = |s: &str| {
+        !global_all.is_empty() && global_all.contains(&s) && resolves_to_effective_proxy(s)
+    };
+
+    let active_node = global_now
+        .as_deref()
+        .filter(|n| is_valid_global_candidate(n))
+        .map(std::borrow::ToOwned::to_owned)
+        .or_else(|| {
+            // Priority 1: Check active `now` of common selector/urltest/fallback groups.
+            // If the group's `now` is in GLOBAL.all and resolves to a real proxy, prefer it.
+            // If not, but the group itself is in GLOBAL.all and resolves to a real proxy, use the group name.
+            for (name, proxy_val) in proxies {
+                if name == "GLOBAL" || is_special_target(name) {
+                    continue;
+                }
+                let p_type = proxy_val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if p_type.eq_ignore_ascii_case("Selector")
+                    || p_type.eq_ignore_ascii_case("URLTest")
+                    || p_type.eq_ignore_ascii_case("Fallback")
+                {
+                    if let Some(now) = proxy_val.get("now").and_then(|n| n.as_str()) {
+                        if is_valid_global_candidate(now) {
+                            return Some(now.to_owned());
+                        }
+                    }
+                    if is_valid_global_candidate(name) {
+                        return Some(name.clone());
+                    }
+                }
+            }
+
+            // Priority 2: Look through GLOBAL's member list `all` for the first valid candidate.
+            // This ensures the chosen node or group is recognized as a valid GLOBAL member
+            // by Mihomo's PUT /proxies/GLOBAL API and actually routes through an active proxy.
+            for &member_name in &global_all {
+                if is_valid_global_candidate(member_name) {
+                    return Some(member_name.to_owned());
+                }
+            }
+
+            None
+        })?;
+
+    Some((active_node, global_now))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -453,12 +1169,36 @@ mod tests {
         assert!(is_private_host("localhost"));
         assert!(is_private_host("my.localhost"));
         assert!(is_private_host("my.local"));
+        assert!(is_private_host("service.internal"));
+        assert!(is_private_host("router.lan"));
+        assert!(is_private_host("device.home.arpa"));
         assert!(is_private_host("127.0.0.1"));
         assert!(is_private_host("10.0.0.1"));
         assert!(is_private_host("192.168.1.1"));
+        assert!(is_private_host("172.16.0.1"));
+        assert!(is_private_host("::1"));
+        assert!(is_private_host("[::1]"));
+        assert!(is_private_host("[fd00::1]"));
+        assert!(is_private_host("[fe80::1]"));
+        assert!(is_private_host("nas.corp"));
+        assert!(is_private_host("gateway.home"));
+        assert!(!is_private_host("router"));
+        assert!(!is_private_host("intranet"));
         assert!(!is_private_host("my.test"));
         assert!(!is_private_host("example.com"));
+        assert!(!is_private_host("1.1.1.1"));
         assert!(!is_private_host("8.8.8.8"));
+        assert!(!is_private_host("[2606:4700:4700::1111]"));
+    }
+
+    #[test]
+    fn test_is_private_host_trailing_dots_and_empty() {
+        assert!(is_private_host("service.internal."));
+        assert!(is_private_host("router.lan."));
+        assert!(is_private_host("localhost."));
+        assert!(!is_private_host(""));
+        assert!(!is_private_host("   "));
+        assert!(!is_private_host("."));
     }
 
     #[test]
@@ -516,6 +1256,285 @@ mod tests {
     fn test_validate_invalid_schemes_rejected() {
         assert!(validate_subscription_url_with_ip("ftp://192.168.1.1/sub").is_err());
         assert!(validate_subscription_url_with_ip("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("ftp://192.168.1.1/sub").is_err());
+        assert!(validate_subscription_url_basic("file:///etc/passwd").is_err());
+        assert!(validate_subscription_url_basic("http:///sub").is_err());
+        assert!(validate_subscription_url_with_ip("http:///sub").is_err());
+    }
+
+    #[test]
+    fn test_validate_subscription_url_basic_success() {
+        let (host, port, private) =
+            validate_subscription_url_basic("https://blocked-domain.example.com/sub?token=123")
+                .unwrap();
+        assert_eq!(host, "blocked-domain.example.com");
+        assert_eq!(port, 443);
+        assert!(!private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://192.168.1.100:8080/sub").unwrap();
+        assert_eq!(host, "192.168.1.100");
+        assert_eq!(port, 8080);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://localhost:9090/sub").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9090);
+        assert!(private);
+
+        let (host, port, private) =
+            validate_subscription_url_basic("http://[::1]:8080/sub").unwrap();
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 8080);
+        assert!(private);
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url() {
+        // Valid loopback proxies
+        assert_eq!(
+            validate_ambient_proxy_url("http://127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://localhost:7890"),
+            Some("http://localhost:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://[::1]:7890"),
+            Some("http://[::1]:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://user:pass@127.0.0.1:1080"),
+            Some("socks5://user:pass@127.0.0.1:1080".to_owned())
+        );
+
+        // Multi-scheme and semicolon-separated (common Windows/GNOME proxy formats)
+        assert_eq!(
+            validate_ambient_proxy_url("http=127.0.0.1:7890;https=127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http=proxy.corp.com:8080;socks=127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks=127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://http=127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+
+        // Disallowed: Non-loopback IP or external host
+        assert_eq!(validate_ambient_proxy_url("http://192.168.1.1:7890"), None);
+        assert_eq!(validate_ambient_proxy_url("http://10.0.0.1:7890"), None);
+        assert_eq!(
+            validate_ambient_proxy_url("http://proxy.example.com:7890"),
+            None
+        );
+
+        // Disallowed: Cleartext credentials over http://
+        assert_eq!(
+            validate_ambient_proxy_url("http://user:pass@127.0.0.1:7890"),
+            None
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://user@localhost:7890"),
+            None
+        );
+
+        // Disallowed: Unsupported schemes (e.g. ftp://)
+        assert_eq!(validate_ambient_proxy_url("ftp://127.0.0.1:21"), None);
+        assert_eq!(
+            validate_ambient_proxy_url("ftp://127.0.0.1:21;http://127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".to_owned())
+        );
+
+        // Disallowed: Empty / whitespace
+        assert_eq!(validate_ambient_proxy_url(""), None);
+        assert_eq!(validate_ambient_proxy_url("   "), None);
+
+        // Scheme-specific ambient proxy selection (e.g. Windows protocol-specific ProxyServer)
+        let multi_proxy = "http=127.0.0.1:8080;https=127.0.0.1:8443;socks=127.0.0.1:1080";
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(multi_proxy, Some("https")),
+            Some("http://127.0.0.1:8443".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(multi_proxy, Some("http")),
+            Some("http://127.0.0.1:8080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(multi_proxy, None),
+            Some("http://127.0.0.1:8080".to_owned())
+        );
+
+        // Fallback to socks when scheme-specific entry is absent
+        let socks_fallback = "ftp=127.0.0.1:21;socks=127.0.0.1:1080";
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(socks_fallback, Some("https")),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_ipv6_loopback() {
+        let ipv6_proxy = "http=[::1]:7890;https=[::1]:7890";
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(ipv6_proxy, Some("http")),
+            Some("http://[::1]:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme(ipv6_proxy, Some("https")),
+            Some("http://[::1]:7890".to_owned())
+        );
+        // Test full 127.0.0.0/8 loopback range and localhost
+        assert_eq!(
+            validate_ambient_proxy_url("http://127.0.0.2:7890"),
+            Some("http://127.0.0.2:7890".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("http://localhost:7890"),
+            Some("http://localhost:7890".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_socks_schemes() {
+        // SOCKS prefix variants (socks4, socks4a, socks5, socks5h)
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks4=127.0.0.1:1080", None),
+            Some("socks4://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks4a=127.0.0.1:1081", None),
+            Some("socks4a://127.0.0.1:1081".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks5=127.0.0.1:1082", None),
+            Some("socks5://127.0.0.1:1082".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks5h=127.0.0.1:1083", None),
+            Some("socks5h://127.0.0.1:1083".to_owned())
+        );
+        // Bare socks:// normalized to socks5://
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks=socks://127.0.0.1:1080", None),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("socks://127.0.0.1:1080", None),
+            Some("socks5://127.0.0.1:1080".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_unknown_prefixes_rejected() {
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("ftp=127.0.0.1:21", None),
+            None
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("unknown=127.0.0.1:8080", Some("http")),
+            None
+        );
+        assert_eq!(
+            validate_ambient_proxy_url_for_scheme("ftp=127.0.0.1:21;http=127.0.0.1:8080", None),
+            Some("http://127.0.0.1:8080".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_query_param_preserved() {
+        assert_eq!(
+            validate_ambient_proxy_url("http://127.0.0.1:7890/p?token=abc"),
+            Some("http://127.0.0.1:7890/p?token=abc".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_zero_port_rejected() {
+        assert_eq!(validate_ambient_proxy_url("http://127.0.0.1:0"), None);
+        assert_eq!(validate_ambient_proxy_url("socks5://127.0.0.1:0"), None);
+    }
+
+    #[test]
+    fn test_validate_ambient_proxy_url_credentials_with_equals() {
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://user:p=ss@127.0.0.1:1080"),
+            Some("socks5://user:p=ss@127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks5://user:p=ss=word@127.0.0.1:1080"),
+            Some("socks5://user:p=ss=word@127.0.0.1:1080".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("https://user:p=ss@127.0.0.1:8443"),
+            Some("https://user:p=ss@127.0.0.1:8443".to_owned())
+        );
+        assert_eq!(
+            validate_ambient_proxy_url("socks=socks5://user:p=ss@127.0.0.1:1080"),
+            Some("socks5://user:p=ss@127.0.0.1:1080".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_collect_ambient_proxy_urls_for_scheme_multiple_candidates() {
+        let multi_proxy = "http=127.0.0.1:8080;https=127.0.0.1:8443;socks=127.0.0.1:1080";
+        let candidates = collect_ambient_proxy_urls_for_scheme(multi_proxy, Some("https"));
+        assert_eq!(
+            candidates,
+            vec![
+                "http://127.0.0.1:8443".to_owned(),
+                "socks5://127.0.0.1:1080".to_owned(),
+                "http://127.0.0.1:8080".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_collect_ambient_proxy_urls_credentials_with_semicolon() {
+        let proxy_with_semicolon = "https://user:p;ss@127.0.0.1:8443";
+        let candidates = collect_ambient_proxy_urls_for_scheme(proxy_with_semicolon, Some("https"));
+        assert_eq!(
+            candidates,
+            vec!["https://user:p;ss@127.0.0.1:8443".to_owned()]
+        );
+
+        let multi = "https=https://user:p;ss@127.0.0.1:7890;http=127.0.0.1:8443";
+        let candidates_multi = collect_ambient_proxy_urls_for_scheme(multi, Some("https"));
+        assert_eq!(
+            candidates_multi,
+            vec![
+                "https://user:p;ss@127.0.0.1:7890".to_owned(),
+                "http://127.0.0.1:8443".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_collect_ambient_proxy_urls_with_path_in_multi_entry() {
+        let multi = "http=http://127.0.0.1:7890/sub_proxy;https=127.0.0.1:8443";
+        let candidates = collect_ambient_proxy_urls_for_scheme(multi, Some("http"));
+        assert_eq!(
+            candidates,
+            vec![
+                "http://127.0.0.1:7890/sub_proxy".to_owned(),
+                "http://127.0.0.1:8443".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -530,7 +1549,10 @@ mod tests {
         let addrs: Vec<std::net::SocketAddr> = vec!["192.168.1.1:80".parse().unwrap()];
         let result = validate_public_host_addrs("attacker.com", &addrs);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("SSRF protection"));
+        assert!(matches!(
+            result.unwrap_err(),
+            PublicHostAddrError::SsrfBlocked(_)
+        ));
     }
 
     #[test]
@@ -597,5 +1619,369 @@ mod tests {
     #[test]
     fn snapshot_redact_url_in_string_no_url() {
         insta::assert_snapshot!(redact_url_in_string("Just a plain message".to_owned()));
+    }
+
+    #[test]
+    fn test_select_global_candidate_special_targets_only() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["DIRECT", "REJECT", "REJECT-DROP", "PASS-RULE"],
+                "now": "PASS-RULE"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_cycle_resolution() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["GroupA"],
+                "now": "GroupA"
+            },
+            "GroupA": {
+                "type": "Selector",
+                "now": "GroupB"
+            },
+            "GroupB": {
+                "type": "Selector",
+                "now": "GroupA"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_nested_selector() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["ProxyGroup"],
+                "now": "ProxyGroup"
+            },
+            "ProxyGroup": {
+                "type": "Selector",
+                "now": "HK-01"
+            },
+            "HK-01": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("ProxyGroup".to_owned(), Some("ProxyGroup".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_prefers_active_now_if_in_all() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["HK-01", "US-01"],
+                "now": "DIRECT"
+            },
+            "AutoGroup": {
+                "type": "Selector",
+                "now": "US-01"
+            },
+            "HK-01": {
+                "type": "Vmess"
+            },
+            "US-01": {
+                "type": "Vmess"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("US-01".to_owned(), Some("DIRECT".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_fallback_to_global_all_member() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["DIRECT", "JP-01"],
+                "now": "DIRECT"
+            },
+            "JP-01": {
+                "type": "Trojan"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("JP-01".to_owned(), Some("DIRECT".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_select_global_candidate_empty_global_all() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": [],
+                "now": "DIRECT"
+            },
+            "CustomSelector": {
+                "type": "Selector",
+                "now": "Node-A"
+            },
+            "Node-A": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_unknown_leaf_rejected() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["GhostNode"],
+                "now": "GhostNode"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(select_global_candidate(proxies), None);
+    }
+
+    #[test]
+    fn test_select_global_candidate_rejects_custom_named_non_proxy_types() {
+        let json = serde_json::json!({
+            "GLOBAL": {
+                "all": ["MyDirect", "MyReject", "MyCompatible", "ValidNode"],
+                "now": "MyDirect"
+            },
+            "MyDirect": {
+                "type": "Direct"
+            },
+            "MyReject": {
+                "type": "Reject"
+            },
+            "MyCompatible": {
+                "type": "Compatible"
+            },
+            "ValidNode": {
+                "type": "Shadowsocks"
+            }
+        });
+        let proxies = json.as_object().unwrap();
+        assert_eq!(
+            select_global_candidate(proxies),
+            Some(("ValidNode".to_owned(), Some("MyDirect".to_owned())))
+        );
+    }
+
+    #[test]
+    fn test_split_ambient_proxy_segments_with_socks5h() {
+        let raw = "127.0.0.1:7890 socks5h://127.0.0.1:1080 socks4a://127.0.0.1:1081";
+        let segments = split_ambient_proxy_segments(raw);
+        assert_eq!(
+            segments,
+            vec![
+                "127.0.0.1:7890",
+                "socks5h://127.0.0.1:1080",
+                "socks4a://127.0.0.1:1081"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_split_ambient_proxy_segments_preserves_url_semicolons() {
+        // Semicolon in path
+        assert_eq!(
+            split_ambient_proxy_segments("http://127.0.0.1:7890/p;1"),
+            vec!["http://127.0.0.1:7890/p;1"]
+        );
+        assert_eq!(
+            split_ambient_proxy_segments("http://127.0.0.1:7890/p;q"),
+            vec!["http://127.0.0.1:7890/p;q"]
+        );
+        // Semicolon in query string with assignment-like parameter
+        assert_eq!(
+            split_ambient_proxy_segments("http://127.0.0.1:7890/?a=1;b=2"),
+            vec!["http://127.0.0.1:7890/?a=1;b=2"]
+        );
+        // Semicolons in credentials
+        assert_eq!(
+            split_ambient_proxy_segments("http://user:p;ss@127.0.0.1:8443"),
+            vec!["http://user:p;ss@127.0.0.1:8443"]
+        );
+        // Semicolon between tags where second tag has credentials
+        assert_eq!(
+            split_ambient_proxy_segments("http=127.0.0.1:7890;https=user:pass@127.0.0.1:8443"),
+            vec!["http=127.0.0.1:7890", "https=user:pass@127.0.0.1:8443"]
+        );
+        // Space-delimited host:port with general domain names
+        assert_eq!(
+            split_ambient_proxy_segments("127.0.0.1:7890 proxy.corp:8080"),
+            vec!["127.0.0.1:7890", "proxy.corp:8080"]
+        );
+    }
+
+    #[test]
+    fn test_split_ambient_proxy_segments_with_semicolon_in_query() {
+        let raw = "http://127.0.0.1:7890/?token=a;b;http=http://127.0.0.1:7891";
+        let segments = split_ambient_proxy_segments(raw);
+        assert_eq!(
+            segments,
+            vec![
+                "http://127.0.0.1:7890/?token=a;b",
+                "http=http://127.0.0.1:7891"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_split_ambient_proxy_segments_with_all_tag() {
+        let raw = "http=127.0.0.1:7890;all=127.0.0.1:1080";
+        let segments = split_ambient_proxy_segments(raw);
+        assert_eq!(segments, vec!["http=127.0.0.1:7890", "all=127.0.0.1:1080"]);
+        let urls = collect_ambient_proxy_urls_for_scheme(raw, Some("http"));
+        assert_eq!(urls, vec!["http://127.0.0.1:7890", "http://127.0.0.1:1080"]);
+    }
+
+    #[test]
+    fn test_split_ambient_proxy_segments_with_trailing_unknown_prefix() {
+        let raw = "http=127.0.0.1:7890;ftp=127.0.0.1:21";
+        let segments = split_ambient_proxy_segments(raw);
+        assert_eq!(segments, vec!["http=127.0.0.1:7890", "ftp=127.0.0.1:21"]);
+        let urls = collect_ambient_proxy_urls_for_scheme(raw, Some("http"));
+        assert_eq!(urls, vec!["http://127.0.0.1:7890"]);
+
+        let raw_space = "http://127.0.0.1:7890 ftp://127.0.0.1:21";
+        let segments_space = split_ambient_proxy_segments(raw_space);
+        assert_eq!(
+            segments_space,
+            vec!["http://127.0.0.1:7890", "ftp://127.0.0.1:21"]
+        );
+        let urls_space = collect_ambient_proxy_urls_for_scheme(raw_space, Some("http"));
+        assert_eq!(urls_space, vec!["http://127.0.0.1:7890"]);
+    }
+
+    #[test]
+    fn test_matches_no_proxy_rules() {
+        assert!(matches_no_proxy_rules("example.com", "example.com"));
+        assert!(matches_no_proxy_rules("example.com", ".example.com"));
+        assert!(matches_no_proxy_rules("example.com", "*.example.com"));
+        assert!(matches_no_proxy_rules("sub.example.com", "example.com"));
+        assert!(matches_no_proxy_rules("sub.example.com", ".example.com"));
+        assert!(matches_no_proxy_rules("sub.example.com", "*.example.com"));
+        assert!(matches_no_proxy_rules(
+            "deep.sub.example.com",
+            "*.example.com"
+        ));
+        assert!(matches_no_proxy_rules("any.domain.com", "*"));
+        assert!(matches_no_proxy_rules("127.0.0.1", "127.0.0.1,localhost"));
+        assert!(matches_no_proxy_rules("localhost", "127.0.0.1,localhost"));
+        assert!(!matches_no_proxy_rules(
+            "other.com",
+            "example.com,localhost"
+        ));
+        assert!(!matches_no_proxy_rules("notexample.com", "example.com"));
+        assert!(!matches_no_proxy_rules("notexample.com", "*.example.com"));
+        // Trailing DNS root dot normalization
+        assert!(matches_no_proxy_rules("example.com.", "example.com"));
+        assert!(matches_no_proxy_rules("example.com.", ".example.com"));
+        assert!(matches_no_proxy_rules("example.com", "example.com."));
+        assert!(matches_no_proxy_rules("sub.example.com.", "*.example.com"));
+    }
+
+    #[test]
+    fn test_matches_no_proxy_rules_ports_and_cidr() {
+        // Whitespace separation and port-qualified rules
+        assert!(matches_no_proxy_rules_with_port(
+            "example.com",
+            Some(443),
+            "example.com:443 other.com:80"
+        ));
+        assert!(!matches_no_proxy_rules_with_port(
+            "example.com",
+            Some(80),
+            "example.com:443 other.com:80"
+        ));
+        assert!(matches_no_proxy_rules_with_port(
+            "sub.example.com",
+            Some(443),
+            "example.com:443"
+        ));
+        assert!(matches_no_proxy_rules_with_port(
+            "127.0.0.1",
+            Some(8080),
+            "127.0.0.1:8080 [::1]:8080"
+        ));
+        assert!(matches_no_proxy_rules_with_port(
+            "::1",
+            Some(8080),
+            "127.0.0.1:8080 [::1]:8080"
+        ));
+
+        // CIDR subnet rules
+        assert!(matches_no_proxy_rules("100.64.0.1", "100.64.0.0/10"));
+        assert!(matches_no_proxy_rules("100.127.255.254", "100.64.0.0/10"));
+        assert!(!matches_no_proxy_rules("100.128.0.1", "100.64.0.0/10"));
+        assert!(!matches_no_proxy_rules("192.168.1.1", "100.64.0.0/10"));
+        assert!(matches_no_proxy_rules("192.168.1.50", "192.168.0.0/16"));
+        assert!(matches_no_proxy_rules("2001:db8::1", "2001:db8::/32"));
+        assert!(!matches_no_proxy_rules("2001:db9::1", "2001:db8::/32"));
+
+        // Bracketed IPv6 CIDR rules with and without port
+        assert!(matches_no_proxy_rules_with_port(
+            "2001:db8::1",
+            Some(443),
+            "[2001:db8::]/32:443"
+        ));
+        assert!(!matches_no_proxy_rules_with_port(
+            "2001:db8::1",
+            Some(80),
+            "[2001:db8::]/32:443"
+        ));
+        assert!(matches_no_proxy_rules_with_port(
+            "2001:db8::1",
+            Some(80),
+            "[2001:db8::]/32"
+        ));
+        assert!(!matches_no_proxy_rules_with_port(
+            "2001:db9::1",
+            Some(443),
+            "[2001:db8::]/32:443"
+        ));
+        assert!(matches_no_proxy_rules_with_port(
+            "2001:db8::1",
+            Some(443),
+            "[2001:db8::/32]:443"
+        ));
+    }
+
+    #[test]
+    fn test_matches_no_proxy_rules_port_and_windows_bypass() {
+        // Port-qualified CIDR and semicolon separation
+        assert!(matches_no_proxy_rules_with_port(
+            "192.168.1.10",
+            Some(443),
+            "192.168.0.0/16:443;10.0.0.0/8:80"
+        ));
+        assert!(!matches_no_proxy_rules_with_port(
+            "192.168.1.10",
+            Some(80),
+            "192.168.0.0/16:443;10.0.0.0/8:80"
+        ));
+
+        // Windows <local> tag
+        assert!(matches_no_proxy_rules("localhost", "<local>"));
+        assert!(matches_no_proxy_rules("myintranet", "<local>"));
+        assert!(matches_no_proxy_rules("127.0.0.1", "<local>"));
+        assert!(matches_no_proxy_rules("::1", "<local>"));
+        assert!(!matches_no_proxy_rules("example.com", "<local>"));
+        assert!(!matches_no_proxy_rules("2606:4700:4700::1111", "<local>"));
+        assert!(!matches_no_proxy_rules("1.1.1.1", "<local>"));
+
+        // Windows-style wildcard prefix
+        assert!(matches_no_proxy_rules("192.168.1.5", "192.168.*"));
+        assert!(!matches_no_proxy_rules("10.0.0.1", "192.168.*"));
     }
 }
