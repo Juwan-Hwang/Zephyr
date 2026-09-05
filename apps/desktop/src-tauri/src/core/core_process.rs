@@ -11,7 +11,9 @@ use tokio::net::TcpStream;
 use std::os::unix::fs::PermissionsExt as _;
 
 use super::secure_io::write_file_secure;
-use crate::backend_event::{codes, lock_critical, redact_error_message, BackendModule};
+use crate::backend_event::{
+    codes, lock_best_effort, lock_critical, redact_error_message, BackendModule,
+};
 #[allow(unused_imports)]
 use crate::{emit_error, emit_info, emit_warn};
 use zephyr_core::config::sanitizer::{sanitize_config_file_name, validate_path_within_dir};
@@ -26,7 +28,12 @@ const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
 const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
 const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
-use super::tun_manager::{is_tun_mode, restart_core_as_root};
+pub(crate) use super::tun_manager::has_root_mihomo;
+#[cfg(target_os = "macos")]
+use super::tun_manager::{
+    get_tun_log_path, is_tun_mode, restart_core_as_root, set_tun_mode,
+    smart_kill_all_mihomo_as_root,
+};
 use super::{AppPaths, CoreData, CoreStartResult, MihomoState, CORE_STARTING};
 
 #[cfg(target_os = "windows")]
@@ -699,10 +706,12 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
         .unwrap_or(DEFAULT_API_PORT)
 }
 
-/// Parse the proxy port from YAML config.
-/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
-/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
-fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+/// Extract the configured proxy port and the scheme that listener speaks ("http" or "socks5").
+/// Checks `mixed-port`, `port`, `socks-port` in order without defaulting.
+#[must_use]
+pub fn extract_configured_proxy_endpoint_from_yaml(
+    yaml_val: &serde_yaml::Value,
+) -> Option<(u16, &'static str)> {
     let parse_u16 = |val: &serde_yaml::Value| -> Option<u16> {
         val.as_u64()
             .and_then(|p| u16::try_from(p).ok())
@@ -713,9 +722,47 @@ fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
     yaml_val
         .get("mixed-port")
         .and_then(parse_u16)
-        .or_else(|| yaml_val.get("port").and_then(parse_u16))
-        .or_else(|| yaml_val.get("socks-port").and_then(parse_u16))
-        .unwrap_or(DEFAULT_MIXED_PORT)
+        .map(|p| (p, "http"))
+        .or_else(|| {
+            yaml_val
+                .get("port")
+                .and_then(parse_u16)
+                .map(|p| (p, "http"))
+        })
+        .or_else(|| {
+            yaml_val
+                .get("socks-port")
+                .and_then(parse_u16)
+                .map(|p| (p, "socks5h"))
+        })
+}
+
+/// Extract configured proxy endpoint (port and scheme) from raw YAML content string.
+#[must_use]
+pub fn extract_configured_proxy_endpoint(yaml_content: &str) -> Option<(u16, &'static str)> {
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+    extract_configured_proxy_endpoint_from_yaml(&yaml_val)
+}
+
+/// Extract the configured proxy port from a parsed YAML value, if present.
+/// Checks `mixed-port`, `port`, `socks-port` in order without defaulting.
+#[must_use]
+pub fn extract_configured_proxy_port_from_yaml(yaml_val: &serde_yaml::Value) -> Option<u16> {
+    extract_configured_proxy_endpoint_from_yaml(yaml_val).map(|(p, _)| p)
+}
+
+/// Extract configured proxy port from raw YAML content string.
+#[must_use]
+pub fn extract_configured_proxy_port(yaml_content: &str) -> Option<u16> {
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+    extract_configured_proxy_port_from_yaml(&yaml_val)
+}
+
+/// Parse the proxy port from YAML config.
+/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
+/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
+fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+    extract_configured_proxy_port_from_yaml(yaml_val).unwrap_or(DEFAULT_MIXED_PORT)
 }
 
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
@@ -1456,54 +1503,26 @@ pub async fn start_core_inner(
         drain_connections_if_alive(port, &secret).await;
     }
 
-    // Check if TUN mode is active via flag (memory-based, not from config file)
+    // In macOS TUN mode, the running mihomo is root-owned and cannot be killed by
+    // non-root kill_mihomo, and holds the port until restart_core_as_root runs.
+    // Skipping unprivileged kill avoids a 7-second dead delay on TUN restart.
     #[cfg(target_os = "macos")]
-    if is_tun_mode() {
-        let secret = restart_core_as_root(&app, true).await?;
-        // Record uptime for the TUN start path (restart_core_as_root spawns
-        // mihomo as root; the normal spawn path below is never reached).
-        // Best-effort: if the lock fails, mihomo is already running — don't
-        // fail the entire start just because we couldn't record the timestamp.
-        if let Ok(mut lock) = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
-        {
-            // Clear the stale Child handle: restart_core_as_root killed the
-            // old process and spawned a new root-owned one that is NOT tracked
-            // by Child (it's managed externally via killall).  Without this,
-            // get_core_uptime() would see the dead Child, call try_wait(),
-            // detect exit, and incorrectly clear started_at + ports.
-            lock.set_process(None);
-            lock.set_last_secret(secret.clone());
-            lock.set_last_config_path(Some(config_path.clone()));
-            lock.set_last_port(Some(DEFAULT_API_PORT));
-            // proxy_port is not yet parsed (select_runtime_config runs later
-            // in the normal path); clear any stale value from a prior config.
-            lock.set_last_proxy_port(None);
-            lock.set_started_at(Some(std::time::Instant::now()));
-        } else {
-            emit_warn!(
-                Core,
-                CORE_LOCK_FAILED,
-                "TUN start: failed to acquire lock to record started_at — uptime will be unavailable until next restart"
-            );
+    let tun_active = {
+        if !is_tun_mode() {
+            let _ = super::tun_manager::init_tun_mode_from_config(&app);
         }
-        // For TUN mode, use the config_path as-is to match the frontend's requested name.
-        // Do NOT strip extension here, as normal mode returns full filename with extension.
-        // Notify the network coordinator that a fresh core instance was started.
-        // The new process has no rules applied, so the coordinator's applied_state
-        // is now stale and must be re-evaluated.
-        notify_core_started(&app).await;
-        return Ok(CoreStartResult {
-            secret,
-            port: DEFAULT_API_PORT,
-            active_config: Some(config_path),
-        });
-    }
+        is_tun_mode()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let tun_active = false;
 
-    // Kill any existing mihomo processes before starting a new one
-    // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
-    tokio::task::spawn_blocking(kill_mihomo)
-        .await
-        .map_err(|e| format!("Kill task failed: {e}"))?;
+    if !tun_active {
+        // Kill any existing mihomo processes before starting a new one
+        // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
+        tokio::task::spawn_blocking(kill_mihomo)
+            .await
+            .map_err(|e| format!("Kill task failed: {e}"))?;
+    }
 
     let paths = ensure_app_storage(&app)?;
 
@@ -1514,7 +1533,9 @@ pub async fn start_core_inner(
 
     // Wait for port to be truly free (max 5s)
     #[cfg(target_os = "macos")]
-    wait_for_port_free(DEFAULT_API_PORT).await;
+    if !tun_active {
+        wait_for_port_free(DEFAULT_API_PORT).await;
+    }
 
     let exe_path = get_core_exe_path(&app)?;
 
@@ -1557,13 +1578,39 @@ pub async fn start_core_inner(
         );
     }
 
-    let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || {
-        let state = app_clone.state::<MihomoState>();
-        stop_core_inner(&app_clone, &state)
-    })
-    .await
-    .map_err(|e| format!("Failed to stop core: {e}"))??;
+    if !tun_active {
+        let app_clone = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let state = app_clone.state::<MihomoState>();
+            stop_core_inner(&app_clone, &state)
+        })
+        .await
+        .map_err(|e| format!("Failed to stop core: {e}"))??;
+    } else {
+        // When tun_active is true, stop_core_inner is skipped to preserve the root TUN daemon
+        // across preflight. However, if a tracked unprivileged Child exists in MihomoState
+        // (e.g. transition from normal mode to TUN mode), explicitly terminate and reap it.
+        #[cfg(target_os = "macos")]
+        let has_root = tokio::task::spawn_blocking(has_root_mihomo)
+            .await
+            .unwrap_or(false);
+
+        let maybe_child = {
+            let state = app.state::<MihomoState>();
+            let mut guard = lock_best_effort(&state.0);
+            let child = guard.take_process();
+            #[cfg(target_os = "macos")]
+            if !has_root {
+                clear_stopped_core_state(&mut guard);
+            }
+            child
+        };
+        if let Some(child) = maybe_child {
+            tokio::task::spawn_blocking(move || terminate_child_process(child))
+                .await
+                .map_err(|e| format!("Failed to terminate tracked core process: {e}"))?;
+        }
+    }
 
     let resolved_secret = secret.unwrap_or_else(generate_secret);
 
@@ -1586,6 +1633,8 @@ pub async fn start_core_inner(
     )?;
 
     let run_config_path = paths.core_dir.join("run_config.yaml");
+    #[cfg(target_os = "macos")]
+    let prev_run_config = std::fs::read(&run_config_path).ok();
     write_file_secure(&run_config_path, &final_config)?;
 
     // Preflight: validate config with `mihomo -t` before spawning the process.
@@ -1595,7 +1644,7 @@ pub async fn start_core_inner(
         let exe_path_clone = exe_path.clone();
         let core_dir_clone = paths.core_dir.clone();
         let safe_custom_args_clone = safe_custom_args.clone();
-        let output = tokio::task::spawn_blocking(move || {
+        let preflight_res = tokio::task::spawn_blocking(move || {
             let mut cmd = Command::new(&exe_path_clone);
             #[cfg(target_os = "windows")]
             use std::os::windows::process::CommandExt as _;
@@ -1609,9 +1658,41 @@ pub async fn start_core_inner(
             }
             cmd.output()
         })
-        .await
-        .map_err(|e| format!("Preflight check task panicked: {e}"))?
-        .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
+        .await;
+
+        let output = match preflight_res {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => {
+                #[cfg(target_os = "macos")]
+                if let Some(prev) = &prev_run_config {
+                    if let Err(write_err) =
+                        write_file_secure(&run_config_path, &String::from_utf8_lossy(prev))
+                    {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to restore previous run config after preflight execution failure: {write_err}"
+                        );
+                    }
+                }
+                return Err(format!("Preflight check failed to execute: {e}"));
+            }
+            Err(e) => {
+                #[cfg(target_os = "macos")]
+                if let Some(prev) = &prev_run_config {
+                    if let Err(write_err) =
+                        write_file_secure(&run_config_path, &String::from_utf8_lossy(prev))
+                    {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to restore previous run config after preflight task panic: {write_err}"
+                        );
+                    }
+                }
+                return Err(format!("Preflight check task panicked: {e}"));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1629,6 +1710,18 @@ pub async fn start_core_inner(
                 CONFIG_PARSE_FAILED,
                 "Config preflight failed: {err_msg}"
             );
+            #[cfg(target_os = "macos")]
+            if let Some(prev) = &prev_run_config {
+                if let Err(write_err) =
+                    write_file_secure(&run_config_path, &String::from_utf8_lossy(prev))
+                {
+                    emit_warn!(
+                        Config,
+                        CONFIG_WRITE_FAILED,
+                        "Failed to restore previous run config after preflight failure: {write_err}"
+                    );
+                }
+            }
             return Err(format!(
                 "Config preflight check failed. The config file has errors and the core will not be started. Details: {err_msg}"
             ));
@@ -1650,6 +1743,102 @@ pub async fn start_core_inner(
                 String::from_utf8_lossy(&o.stdout)
             );
         }
+    }
+
+    // Check if TUN mode is active via flag captured at start of startup
+    #[cfg(target_os = "macos")]
+    if tun_active {
+        let secret = match restart_core_as_root(&app, true).await {
+            Ok(s) => s,
+            Err(e) => {
+                if let Some(prev) = &prev_run_config {
+                    if let Err(write_err) =
+                        write_file_secure(&run_config_path, &String::from_utf8_lossy(prev))
+                    {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to restore previous run config after root restart failure: {write_err}"
+                        );
+                    }
+                }
+                if !super::tun_manager::has_root_mihomo() {
+                    set_tun_mode(false);
+                    if let Ok(mut lock) =
+                        lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+                    {
+                        clear_stopped_core_state(&mut lock);
+                    }
+                }
+                return Err(e);
+            }
+        };
+
+        if config_port > 0 {
+            if let Err(e) = health_check(config_port).await {
+                if let Some(prev) = &prev_run_config {
+                    if let Err(write_err) =
+                        write_file_secure(&run_config_path, &String::from_utf8_lossy(prev))
+                    {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to restore previous run config after health check failure: {write_err}"
+                        );
+                    }
+                }
+                let kill_res = tokio::task::spawn_blocking(smart_kill_all_mihomo_as_root).await;
+                let killed = matches!(kill_res, Ok(Ok(())));
+                if killed {
+                    set_tun_mode(false);
+                } else if let Ok(Err(err)) = kill_res {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to clean up root mihomo process after health check failure: {err}"
+                    );
+                }
+                if killed {
+                    if let Ok(mut lock) =
+                        lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+                    {
+                        clear_stopped_core_state(&mut lock);
+                    }
+                }
+                emit_error!(
+                    Core,
+                    CORE_START_FAILED,
+                    "Health check failed for root core on port {config_port}: {e}"
+                );
+                return Err(e);
+            }
+        }
+
+        // Record uptime for the TUN start path after health check succeeds (restart_core_as_root spawns
+        // mihomo with root privileges, bypassing regular process tracker).
+        // Best-effort lock ensures state is recorded without blocking or holding
+        // a !Send MutexGuard across any async yield point.
+        {
+            let mut lock = lock_best_effort(&state.0);
+            lock.set_process(None);
+            lock.set_last_secret(secret.clone());
+            lock.set_last_config_path(active_config_name.clone());
+            lock.set_last_custom_args(None);
+            lock.set_last_port(Some(config_port));
+            lock.set_last_proxy_port(Some(proxy_port));
+            lock.set_last_log_path(Some(get_tun_log_path()));
+            lock.set_started_at(Some(std::time::Instant::now()));
+        }
+        notify_core_started(&app).await;
+        let app_reconcile = app.clone();
+        tokio::spawn(async move {
+            let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
+        });
+        return Ok(CoreStartResult {
+            secret,
+            port: config_port,
+            active_config: active_config_name,
+        });
     }
 
     // Spawn mihomo (stdout/stderr redirected to log file internally)
@@ -1708,6 +1897,10 @@ pub async fn start_core_inner(
     // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
 
     notify_core_started(&app).await;
+    let app_reconcile = app.clone();
+    tokio::spawn(async move {
+        let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
+    });
 
     Ok(CoreStartResult {
         secret: resolved_secret,
@@ -1762,8 +1955,78 @@ fn clear_stopped_core_state(lock: &mut CoreData) {
     lock.set_last_proxy_port(None);
 }
 
+/// Terminate a spawned child process and its entire process group on Unix,
+/// or force kill on non-Unix platforms.
+fn terminate_child_process(mut child_process: std::process::Child) {
+    #[cfg(unix)]
+    {
+        // Kill the entire process group (mihomo + any child processes it spawned).
+        // Negative PID signals the process group whose ID equals |pid|.
+        #[allow(clippy::cast_possible_wrap)]
+        let pid = child_process.id() as libc::pid_t;
+        let mut killed_group = false;
+        if pid > 1 {
+            let pgid = -pid;
+            // Safety: libc::kill is a well-defined POSIX syscall. Negative pgid
+            // signals the process group, which is standard POSIX behavior.
+            if unsafe { libc::kill(pgid, libc::SIGTERM) } == 0 {
+                // Wait up to 500ms for the process group to exit gracefully.
+                // This ensures ports are released before we return, preventing
+                // port binding conflicts on restart.
+                for _ in 0..5 {
+                    if let Ok(Some(_)) = child_process.try_wait() {
+                        // Safety: signal 0 performs error checking without sending a signal,
+                        // used here to check if all processes in the process group have exited.
+                        if unsafe { libc::kill(pgid, 0) } != 0 {
+                            killed_group = true;
+                            break;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                if !killed_group {
+                    // Safety: same as above — force-kill the process group.
+                    let _ = unsafe { libc::kill(pgid, libc::SIGKILL) };
+                    let _ = child_process.wait();
+                    killed_group = true;
+                }
+            }
+        }
+        // Fallback: if process group kill failed or pid <= 1, kill the child directly
+        if !killed_group {
+            let _ = child_process.kill();
+            let _ = child_process.wait();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Force kill the process (cross-platform safe)
+        let _ = child_process.kill();
+        let _ = child_process.wait();
+    }
+}
+
 /// Internal: stop the core process (no rate limiter reset).
 pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let root_kill_err = {
+        let mut err = None;
+        if super::tun_manager::is_tun_mode() {
+            if super::tun_manager::has_root_mihomo() {
+                if let Err(e) = super::tun_manager::smart_kill_all_mihomo_as_root() {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to kill root mihomo process on stop: {e}"
+                    );
+                    err = Some(format!("Failed to kill root mihomo process on stop: {e}"));
+                }
+            }
+            super::tun_manager::set_tun_mode(false);
+        }
+        err
+    };
+
     // Take the child process
     let child = {
         let mut lock = state
@@ -1776,52 +2039,17 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
         child
     };
 
-    if let Some(mut child_process) = child {
-        #[cfg(unix)]
-        {
-            // Kill the entire process group (mihomo + any child processes it spawned).
-            // Negative PID signals the process group whose ID equals |pid|.
-            #[allow(clippy::cast_possible_wrap)]
-            let pid = child_process.id() as libc::pid_t;
-            let mut killed_group = false;
-            if pid > 1 {
-                let pgid = -pid;
-                // Safety: libc::kill is a well-defined POSIX syscall. Negative pgid
-                // signals the process group, which is standard POSIX behavior.
-                if unsafe { libc::kill(pgid, libc::SIGTERM) } == 0 {
-                    // Wait up to 500ms for the process group to exit gracefully.
-                    // This ensures ports are released before we return, preventing
-                    // port binding conflicts on restart.
-                    for _ in 0..5 {
-                        if let Ok(Some(_)) = child_process.try_wait() {
-                            killed_group = true;
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    if !killed_group {
-                        // Safety: same as above — force-kill the process group.
-                        let _ = unsafe { libc::kill(pgid, libc::SIGKILL) };
-                        let _ = child_process.wait();
-                        killed_group = true;
-                    }
-                }
-            }
-            // Fallback: if process group kill failed or pid <= 1, kill the child directly
-            if !killed_group {
-                let _ = child_process.kill();
-                let _ = child_process.wait();
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            // Force kill the process (cross-platform safe)
-            let _ = child_process.kill();
-            let _ = child_process.wait();
-        }
+    if let Some(child_process) = child {
+        terminate_child_process(child_process);
     }
 
     cleanup_run_config(app);
+
+    #[cfg(target_os = "macos")]
+    if let Some(err) = root_kill_err {
+        return Err(err);
+    }
+
     Ok(())
 }
 
@@ -2482,5 +2710,48 @@ mod tests {
             secret.chars().all(|c| c.is_ascii_alphanumeric()),
             "secret must be alphanumeric"
         );
+    }
+
+    #[test]
+    fn test_extract_configured_proxy_port() {
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: 7890"),
+            Some(7890)
+        );
+        assert_eq!(extract_configured_proxy_port("port: 7891"), Some(7891));
+        assert_eq!(
+            extract_configured_proxy_port("socks-port: 7892"),
+            Some(7892)
+        );
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: '9090'"),
+            Some(9090)
+        );
+        assert_eq!(extract_configured_proxy_port("other: 1234"), None);
+        assert_eq!(extract_configured_proxy_port("invalid yaml ::::"), None);
+        assert_eq!(extract_configured_proxy_port("mixed-port: 0"), None);
+    }
+
+    #[test]
+    fn test_extract_configured_proxy_endpoint() {
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: 7890"),
+            Some((7890, "http"))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("port: 7891"),
+            Some((7891, "http"))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("socks-port: 7892"),
+            Some((7892, "socks5h"))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: '9090'"),
+            Some((9090, "http"))
+        );
+        assert_eq!(extract_configured_proxy_endpoint("other: 1234"), None);
+        assert_eq!(extract_configured_proxy_endpoint("invalid yaml ::::"), None);
+        assert_eq!(extract_configured_proxy_endpoint("mixed-port: 0"), None);
     }
 }
