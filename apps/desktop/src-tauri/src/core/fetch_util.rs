@@ -17,7 +17,38 @@
 use std::time::Duration;
 
 use super::MAX_RESPONSE_SIZE;
-use zephyr_core::config::subscription::{is_private_host, is_private_ip};
+use zephyr_core::config::subscription::{
+    is_private_host, is_private_ip, is_single_label_host, validate_public_host_addrs,
+    PublicHostAddrError,
+};
+
+/// Marker embedded in error messages when a request or redirect is blocked by SSRF protection.
+pub const SSRF_BLOCK_MARKER: &str = "[SSRF_BLOCKED]";
+
+/// Error type distinguishing security policy rejections (SSRF) from transient transport failures.
+#[derive(Debug)]
+pub enum DownloadError {
+    Ssrf(String),
+    Transport(String),
+}
+
+impl std::fmt::Display for DownloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ssrf(msg) | Self::Transport(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for DownloadError {}
+
+/// Check if an error message indicates an SSRF policy rejection.
+#[must_use]
+pub fn is_ssrf_error(err: &str) -> bool {
+    err.contains(SSRF_BLOCK_MARKER)
+        || err.contains("SSRF protection")
+        || err.contains("Redirect to private")
+}
 
 /// Configuration for HTTP client building.
 #[derive(Debug, Clone)]
@@ -43,10 +74,15 @@ impl Default for HttpClientConfig {
 
 /// Format a host:port string, handling IPv6 bracket notation.
 fn format_host_port(host: &str, port: u16) -> String {
-    if host.contains(':') {
-        format!("[{host}]:{port}")
+    let unbracketed = if host.starts_with('[') && host.ends_with(']') && host.len() >= 2 {
+        &host[1..host.len() - 1]
     } else {
-        format!("{host}:{port}")
+        host
+    };
+    if unbracketed.contains(':') {
+        format!("[{unbracketed}]:{port}")
+    } else {
+        format!("{unbracketed}:{port}")
     }
 }
 
@@ -59,7 +95,8 @@ fn format_host_port(host: &str, port: u16) -> String {
 /// - Optional DNS pinning (`resolve_pin`)
 /// - `.no_proxy()` by default to prevent system proxy leaks
 pub fn build_http_client(config: HttpClientConfig) -> Result<reqwest::Client, String> {
-    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
+    let via_proxy = config.proxy_url.is_some();
+    let redirect_policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() > 5 {
             return attempt.error("Too many redirects (max 5)");
         }
@@ -75,8 +112,10 @@ pub fn build_http_client(config: HttpClientConfig) -> Result<reqwest::Client, St
             None => return attempt.error("Redirect URL has no host"),
         };
 
-        if is_private_host(&host) {
-            return attempt.error(format!("Redirect to private host blocked: {host}"));
+        if is_private_host(&host) || is_single_label_host(&host) {
+            return attempt.error(format!(
+                "{SSRF_BLOCK_MARKER} Redirect to private host blocked: {host}"
+            ));
         }
 
         let port = url
@@ -88,14 +127,18 @@ pub fn build_http_client(config: HttpClientConfig) -> Result<reqwest::Client, St
                 for addr in addrs {
                     if is_private_ip(addr.ip()) {
                         return attempt.error(format!(
-                            "Redirect to private IP blocked: {} -> {}",
+                            "{SSRF_BLOCK_MARKER} Redirect to private IP blocked: {} -> {}",
                             host,
                             addr.ip()
                         ));
                     }
                 }
             }
-            Err(e) => return attempt.error(format!("Failed to resolve redirect host {host}: {e}")),
+            Err(e) => {
+                if !via_proxy {
+                    return attempt.error(format!("Failed to resolve redirect host {host}: {e}"));
+                }
+            }
         }
 
         attempt.follow()
@@ -157,32 +200,51 @@ pub fn build_http_client(config: HttpClientConfig) -> Result<reqwest::Client, St
 /// * `Ok(String)` - The fetched content as UTF-8 string
 /// * `Err(String)` - Error message if fetch failed
 pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
+    let trimmed_url = url.trim();
     // Basic URL validation (scheme, host format) without DNS resolution
     // DNS resolution is deferred to allow proxy to handle it
-    let (host, port, user_entered_private) = validate_url_basic(url)?;
+    let (host, port, user_entered_private) = validate_url_basic(trimmed_url)?;
 
     // Try direct connection first (with DNS pinning for public addresses)
-    let direct_result = try_direct_download(url, &host, port, user_entered_private).await;
+    let direct_result = try_direct_download(trimmed_url, &host, port, user_entered_private).await;
 
     match direct_result {
         Ok(content) => Ok(content),
-        Err(direct_err) => {
+        Err(DownloadError::Ssrf(direct_err)) => {
+            crate::emit_warn!(
+                Subscription,
+                SUB_DIRECT_DOWNLOAD_FAILED,
+                "Direct download failed (SSRF blocked): {direct_err}"
+            );
+
+            // SSRF rejection is a security policy decision, not a transient transport failure.
+            // Reject immediately instead of retrying through proxy.
+            Err(direct_err)
+        }
+        Err(DownloadError::Transport(direct_err)) => {
             crate::emit_warn!(
                 Subscription,
                 SUB_DIRECT_DOWNLOAD_FAILED,
                 "Direct download failed: {direct_err}"
             );
 
-            // Try proxy fallback if available
-            if let Some(port) = proxy_port.filter(|&p| p > 0) {
-                crate::emit_info!(
-                    Subscription,
-                    SUB_PROXY_RETRY,
-                    "Retrying with proxy on port {port}..."
-                );
-                match try_proxy_download(url, port).await {
-                    Ok(content) => Ok(content),
-                    Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+            // Exclude single-label non-IP hostnames from proxy fallback (matches subscription downloader)
+            let is_single_label = zephyr_core::config::is_single_label_host(&host);
+
+            // Try proxy fallback if available and destination is not private or single-label
+            if !user_entered_private && !is_private_host(&host) && !is_single_label {
+                if let Some(port) = proxy_port.filter(|&p| p > 0) {
+                    crate::emit_info!(
+                        Subscription,
+                        SUB_PROXY_RETRY,
+                        "Retrying with proxy on port {port}..."
+                    );
+                    match try_proxy_download(trimmed_url, port).await {
+                        Ok(content) => Ok(content),
+                        Err(proxy_err) => Err(format!("Direct: {direct_err}; Proxy: {proxy_err}")),
+                    }
+                } else {
+                    Err(direct_err)
                 }
             } else {
                 Err(direct_err)
@@ -195,28 +257,7 @@ pub async fn fetch_url_content(url: &str, proxy_port: Option<u16>) -> Result<Str
 ///
 /// Returns `(host, port, user_entered_private)` for further processing.
 fn validate_url_basic(url: &str) -> Result<(String, u16, bool), String> {
-    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
-
-    // Only allow http and https schemes
-    let scheme = parsed_url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err("Only HTTP and HTTPS URLs are allowed".to_owned());
-    }
-
-    // Extract host
-    let host = parsed_url
-        .host_str()
-        .ok_or("URL must have a host")?
-        .to_owned();
-
-    let port = parsed_url
-        .port()
-        .unwrap_or(if scheme == "https" { 443 } else { 80 });
-
-    // Check if user explicitly entered a private/local host
-    let user_entered_private = is_private_host(&host);
-
-    Ok((host, port, user_entered_private))
+    zephyr_core::config::subscription::validate_subscription_url_basic(url)
 }
 
 /// Try direct download with DNS pinning for public addresses.
@@ -225,7 +266,7 @@ async fn try_direct_download(
     host: &str,
     port: u16,
     user_entered_private: bool,
-) -> Result<String, String> {
+) -> Result<String, DownloadError> {
     // For user-entered private addresses, skip DNS resolution
     // For public addresses, resolve and pin to prevent DNS rebinding
     let resolve_pin = if user_entered_private {
@@ -239,7 +280,7 @@ async fn try_direct_download(
         resolve_pin,
         ..Default::default()
     };
-    let client = build_http_client(config)?;
+    let client = build_http_client(config).map_err(DownloadError::Transport)?;
     fetch_body(&client, url).await
 }
 
@@ -251,7 +292,7 @@ async fn try_direct_download(
 /// Security: If ANY resolved address is private, the request is blocked.
 /// This prevents DNS rebinding attacks where a public domain resolves to
 /// both public and private IPs.
-async fn resolve_and_pin(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
+async fn resolve_and_pin(host: &str, port: u16) -> Result<std::net::SocketAddr, DownloadError> {
     let host_port = format_host_port(host, port);
 
     let addrs: Vec<std::net::SocketAddr> = tokio::task::spawn_blocking(move || {
@@ -260,25 +301,19 @@ async fn resolve_and_pin(host: &str, port: u16) -> Result<std::net::SocketAddr, 
             .map_err(|e| format!("Failed to resolve host: {e}"))
     })
     .await
-    .map_err(|e| format!("DNS resolution task failed: {e}"))??;
+    .map_err(|e| DownloadError::Transport(format!("DNS resolution task failed: {e}")))?
+    .map_err(DownloadError::Transport)?;
 
-    // Core validation logic - aligned with subscription.rs validate_public_host_addrs
-    let mut resolved_addr = None;
-
-    for addr in &addrs {
-        if is_private_ip(addr.ip()) {
-            // Public domain resolving to a private IP = SSRF, always block.
-            return Err(format!(
-                "SSRF protection: host '{}' resolved to private IP {} — access to private/local addresses is not allowed",
-                host, addr.ip()
-            ));
+    match validate_public_host_addrs(host, &addrs) {
+        Ok((_, Some(addr), _)) => Ok(addr),
+        Ok((_, None, _)) => Err(DownloadError::Transport(
+            "Could not resolve any IP address for the host".to_owned(),
+        )),
+        Err(PublicHostAddrError::SsrfBlocked(msg)) => {
+            Err(DownloadError::Ssrf(format!("{SSRF_BLOCK_MARKER} {msg}")))
         }
-        if resolved_addr.is_none() {
-            resolved_addr = Some(*addr);
-        }
+        Err(e) => Err(DownloadError::Transport(e.to_string())),
     }
-
-    resolved_addr.ok_or_else(|| "Could not resolve any IP address for the host".to_owned())
 }
 
 /// Try proxy download without DNS pinning.
@@ -297,19 +332,40 @@ async fn try_proxy_download(url: &str, proxy_port: u16) -> Result<String, String
         ..Default::default()
     };
     let client = build_http_client(config)?;
-    fetch_body(&client, url).await
+    fetch_body(&client, url).await.map_err(|e| e.to_string())
+}
+
+/// Format an error and its source chain into a combined string.
+fn format_error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut messages = Vec::new();
+    let mut current = Some(e);
+    while let Some(error) = current {
+        let msg = error.to_string();
+        if !messages.contains(&msg) {
+            messages.push(msg);
+        }
+        current = error.source();
+    }
+    messages.join(": ")
 }
 
 /// Fetch body from a response with size limiting.
-async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String, String> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {e}"))?;
+async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String, DownloadError> {
+    let response = client.get(url).send().await.map_err(|e| {
+        let chain = format_error_chain(&e);
+        let msg = format!("Download failed: {chain}");
+        if is_ssrf_error(&chain) {
+            DownloadError::Ssrf(msg)
+        } else {
+            DownloadError::Transport(msg)
+        }
+    })?;
 
     if !response.status().is_success() {
-        return Err(format!("Download returned {}", response.status()));
+        return Err(DownloadError::Transport(format!(
+            "Download returned {}",
+            response.status()
+        )));
     }
 
     // Check Content-Length before reading body
@@ -317,9 +373,9 @@ async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String, Strin
     // the check correctly triggers an error instead of passing.
     if let Some(len) = response.content_length() {
         if usize::try_from(len).unwrap_or(usize::MAX) > MAX_RESPONSE_SIZE {
-            return Err(format!(
+            return Err(DownloadError::Transport(format!(
                 "Response body exceeds maximum size of {MAX_RESPONSE_SIZE} bytes"
-            ));
+            )));
         }
     }
 
@@ -337,11 +393,12 @@ async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String, Strin
     let mut stream = response.bytes_stream();
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {e}"))?;
+        let chunk = chunk_result
+            .map_err(|e| DownloadError::Transport(format!("Failed to read chunk: {e}")))?;
         if bytes.len() + chunk.len() > MAX_RESPONSE_SIZE {
-            return Err(format!(
+            return Err(DownloadError::Transport(format!(
                 "Response exceeded size limit of {MAX_RESPONSE_SIZE} bytes"
-            ));
+            )));
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -363,7 +420,9 @@ mod tests {
     fn test_format_host_port() {
         assert_eq!(format_host_port("example.com", 443), "example.com:443");
         assert_eq!(format_host_port("::1", 80), "[::1]:80");
+        assert_eq!(format_host_port("[::1]", 80), "[::1]:80");
         assert_eq!(format_host_port("2001:db8::1", 443), "[2001:db8::1]:443");
+        assert_eq!(format_host_port("[2001:db8::1]", 443), "[2001:db8::1]:443");
     }
 
     #[test]
@@ -415,5 +474,26 @@ mod tests {
     #[test]
     fn snapshot_format_host_port_ipv6_full() {
         insta::assert_snapshot!(format_host_port("2001:db8::1", 443));
+    }
+
+    #[test]
+    fn test_is_ssrf_error_detection() {
+        assert!(is_ssrf_error(
+            "[SSRF_BLOCKED] Redirect to private host blocked: 127.0.0.1"
+        ));
+        assert!(is_ssrf_error(
+            "SSRF protection: host 'attacker.com' resolved to private IP"
+        ));
+        assert!(is_ssrf_error("Redirect to private host blocked: localhost"));
+        assert!(!is_ssrf_error("connection refused"));
+        assert!(!is_ssrf_error("timed out"));
+    }
+
+    #[test]
+    fn test_download_error_display() {
+        let err = DownloadError::Ssrf("blocked".to_owned());
+        assert_eq!(err.to_string(), "blocked");
+        let err = DownloadError::Transport("connection reset".to_owned());
+        assert_eq!(err.to_string(), "connection reset");
     }
 }
