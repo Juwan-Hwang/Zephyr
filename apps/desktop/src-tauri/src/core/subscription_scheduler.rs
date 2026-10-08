@@ -91,6 +91,18 @@ pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
 
 /// Main scheduler loop - checks each subscription individually.
 async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
+    // Reconcile and restore any un-restored global mode or GLOBAL selection marker left from an abrupt shutdown.
+    // Core is not running yet on startup, so CoreUnavailable is expected and silent.
+    if super::subscription::reconcile_global_mode_restore(&app).await
+        == super::subscription::ReconcileResult::TimedOut
+    {
+        emit_warn!(
+            Core,
+            CORE_GLOBAL_RESTORE_FAILED,
+            "Timed out during global mode restore reconciliation on startup"
+        );
+    }
+
     let mut check_interval = interval(Duration::from_secs(60)); // Check every minute
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -154,6 +166,35 @@ async fn check_and_update_subscriptions(
     app: &AppHandle,
     state: &Arc<SchedulerState>,
 ) -> Result<usize, String> {
+    // Reconcile any un-restored global mode marker before triggering new subscription downloads.
+    //
+    // A core that is simply not running leaves the marker for a later pass and
+    // downloads must still run, so that is not an error. A *timeout* is
+    // different: the marker is still on disk, which means the previous GLOBAL
+    // mode and node selection may still be in force. Downloading now would apply
+    // a configuration on top of a state the user is about to be moved out of, so
+    // this pass is deferred — the next tick retries the reconciliation and, once
+    // it succeeds, downloads proceed.
+    //
+    // `Busy` is not deferred: it means a fallback is in flight or the lock wait
+    // expired, and that operation performs the restore itself.
+    if super::subscription::reconcile_global_mode_restore_with_deadline(
+        app,
+        std::time::Instant::now() + std::time::Duration::from_millis(500),
+    )
+    .await
+        == super::subscription::ReconcileResult::TimedOut
+    {
+        emit_warn!(
+            Core,
+            CORE_GLOBAL_RESTORE_FAILED,
+            "Global mode restore marker not reconciled in time; deferring this scheduled update pass"
+        );
+        return Err(
+            "Deferred subscription update: global mode restore marker is still pending".to_owned(),
+        );
+    }
+
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 
