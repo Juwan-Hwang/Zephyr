@@ -440,6 +440,16 @@ impl Settings {
 
 pub(crate) struct SettingsState(pub(crate) Arc<Mutex<Settings>>);
 
+impl SettingsState {
+    pub(crate) fn is_global_mode(&self) -> bool {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|g| g.mode.as_ref().map(|m| m.eq_ignore_ascii_case("global")))
+            .unwrap_or(false)
+    }
+}
+
 /// Flag to signal that the user explicitly requested exit (tray "Quit" or
 /// close button with `close_to_tray` disabled). Prevents `ExitRequested`
 /// from blocking the shutdown.
@@ -796,7 +806,23 @@ fn patch_settings(
                 };
             }
             patch_field!(theme);
-            patch_field!(mode);
+            if let Some(v) = map.get("mode") {
+                if let Ok(val) = serde_json::from_value::<Option<String>>(v.clone()) {
+                    let mode_changed = guard.mode != val;
+                    guard.mode = val;
+                    modified = true;
+                    if mode_changed {
+                        core_manager::core::subscription::notify_user_mode_changed();
+                    }
+                } else {
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "failed to deserialize field 'mode': {:?}",
+                        v
+                    );
+                }
+            }
             patch_field!(tun_enabled);
             patch_field!(mixed_port);
             patch_field!(socks_port);
