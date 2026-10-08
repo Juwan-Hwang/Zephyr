@@ -23,6 +23,8 @@ import {
     openPrismFolder,
     setSecret,
     setBaseUrl,
+    getConfig,
+    closeAllConnections,
 } from '../api.js';
 import { setWsSecret, setWsBaseUrl, forceReconnect } from '../websocket.js';
 import { translations, setLanguage } from '../i18n.js';
@@ -62,6 +64,7 @@ import { navigateTo } from './navigation.js';
 import { initCustomDropdown } from './dropdown.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies.js';
+import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
@@ -169,8 +172,13 @@ function initCopyEnvSettings() {
             const format = resolveEnvFormat(settings.copy_env_format);
             const { getConfig } = await import('../api.js');
             const currentConfig = /** @type {any} */ (await getConfig());
-            const port = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
-            const text = generateProxyEnvVars(format, port);
+            // Same rule as the tray copy: an HTTP-capable listener first, else
+            // the SOCKS listener with a socks5h:// URL; never an invented port.
+            const httpPort = currentConfig?.['mixed-port'] || currentConfig?.port;
+            const socksPort = currentConfig?.['socks-port'];
+            const port = httpPort || socksPort;
+            if (!port) throw new Error('No proxy listener is configured');
+            const text = generateProxyEnvVars(format, port, httpPort ? 'http' : 'socks5h');
             await copyToClipboard(text);
             const t = getT();
             // Visual feedback: briefly change button text (target span to preserve i18n)
@@ -1176,6 +1184,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         save: () => save(),
     });
 
+    /**
+     * Mode the core falls back to when no preference is stored: the value the
+     * generated runtime config carries (`mode: rule`).
+     * @type {string}
+     */
+    const DEFAULT_PROXY_MODE = 'rule';
+
     // ---- Restore defaults ----
     if (restoreDefaultsBtn) {
         restoreDefaultsBtn.onclick = async () => {
@@ -1311,9 +1326,140 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
+                // Reset the proxy mode preference explicitly. A full-snapshot save
+                // can no longer clear it: the backend keeps the authoritative mode
+                // (`switch_mode` owns live changes) so a stale snapshot carrying
+                // `mode: null` cannot revert a concurrent user choice. Clearing it
+                // is therefore an explicit partial update, and the live core is
+                // brought to the default through `switch_mode` below.
+
+                await trackResult('mode', async () => {
+                    // Live core and the stored preference, in one call, always.
+                    // `switch_mode` with `clearPreference` sets the core to the
+                    // default and clears the stored mode under the same
+                    // `GLOBAL_MODE_LOCK` hold, so a mode the user picks
+                    // concurrently cannot be erased by a separate settings patch.
+                    // Switching to the mode the core is already on is a harmless
+                    // no-op, so there is no need to read the live mode first.
+                    await invoke(COMMANDS.SWITCH_MODE, {
+                        mode: DEFAULT_PROXY_MODE,
+                        clearPreference: true,
+                    });
+                    invalidateSettingsCache();
+                    updateModeUI(DEFAULT_PROXY_MODE);
+                    // As a normal mode switch does: connections opened under the
+                    // old mode keep its routing until they close. The mode is
+                    // already committed, so a failed close only warns.
+                    closeAllConnections().catch((e) =>
+                        settingsLogger.warn('Failed to close connections after mode reset', e)
+                    );
+                    // The buttons alone are not the mode: the store (console
+                    // selector, tray menu) follows MODE_CHANGED.
+                    Bus.emit(Events.MODE_CHANGED, DEFAULT_PROXY_MODE);
+                });
+
+                // Same for TUN: the backend keeps the authoritative value (the TUN
+                // commands apply changes to the running core first), so a stale
+                // snapshot cannot revert a concurrent toggle. Resetting it is an
+                // explicit partial update.
+                await trackResult('tun_enabled', async () => {
+                    // Live core first, then the stored preference — the same
+                    // order the mode reset above uses, and for the same reason:
+                    // clearing only the preference would leave the core routing
+                    // through TUN while `settings.json` says the default, and
+                    // macOS startup reads that flag to pick the TUN path.
+                    //
+                    // TUN is the case where I would rather not touch the live
+                    // core: disabling it means a root restart, which on macOS
+                    // raises the administrator dialog as a side effect of
+                    // "Restore Defaults". Doing nothing is worse — it reports a
+                    // reset that did not happen — so the core is disabled when it
+                    // is actually on, and a failure is reported rather than
+                    // swallowed.
+                    // Read from the live core: `appStore` is a cache that
+                    // `syncCoreConfig()` refreshes only when the core reports a
+                    // `tun` block, so it can be stale.
+                    //
+                    // No fallback to the cache when the read fails: a stale
+                    // `false` would clear the preference while the core keeps
+                    // TUN on. A failed read only counts as "TUN off" when the
+                    // backend confirms no core is running (uptime `null`);
+                    // then there is no live TUN to disable and the stored
+                    // preference must still be cleared, or the next start
+                    // turns TUN back on. Any other failure fails this item.
+                    // Serialize with the TUN toggle and Geo update for the
+                    // whole item, the live read included: both restart the
+                    // core under this lock, and a toggle that lands between
+                    // the read and the preference clear below would have its
+                    // freshly saved preference wiped while the core runs TUN.
+                    if (appStore.get('isNetworkUpdating')) {
+                        throw new Error('A TUN or network change is already in progress');
+                    }
+                    appStore.set('isNetworkUpdating', true);
+                    try {
+                        /** @type {any} */
+                        let liveConfig = null;
+                        try {
+                            liveConfig = await getConfig();
+                        } catch (err) {
+                            // A failed uptime lookup must not mask the config error.
+                            const uptime = await invoke(COMMANDS.GET_CORE_UPTIME).catch(() => undefined);
+                            if (uptime !== null) throw err;
+                        }
+                        const tunOn = Boolean(liveConfig?.tun?.enable);
+                        if (tunOn) {
+                            await invoke(COMMANDS.DISABLE_CMD);
+                            // `disable_tun_cmd` stops the root core on macOS and only
+                            // rewrites `run_config.yaml` elsewhere — neither leaves
+                            // the core running without TUN. Without this the reset
+                            // would report success with no core at all (macOS) or
+                            // with TUN still active (Windows/Linux). This mirrors the
+                            // TUN toggle in tun.js: disable, then bring the core
+                            // back up on the updated config.
+                            //
+                            // TUN is off from here on, so the store is updated
+                            // before the restart: a failed restart is then reported
+                            // as itself instead of leaving the toggle showing TUN on.
+                            //
+                            // The preference is cleared only *after* the restart:
+                            // `DISABLE_CMD` recorded `false`, and clearing it first
+                            // would let a profile with `tun.enable: true` bring TUN
+                            // straight back on this restart. Cleared afterwards, the
+                            // next start follows the profile, which is the default.
+                            appStore.set('isTunEnabled', false);
+                            let clearErr = null;
+                            try {
+                                const afterDisable = await invoke(COMMANDS.GET_SETTINGS);
+                                const configName = afterDisable.last_config || 'config.yaml';
+                                const customArgs = afterDisable.custom_args || [];
+                                await restartCore(configName, customArgs);
+                                await postRestartRecovery(configName);
+                            } finally {
+                                // A failed preference write must not replace a
+                                // restart error: that is the failure to report.
+                                // After a successful restart it is reported below:
+                                // `DISABLE_CMD` left `tun_enabled: false` stored,
+                                // which is not the default.
+                                await invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } })
+                                    .catch((err) => {
+                                        clearErr = err;
+                                        settingsLogger.warn('[RestoreDefaults] could not clear tun_enabled', err);
+                                    });
+                                Bus.emit(Events.CONFIG_UPDATED);
+                            }
+                            if (clearErr) throw clearErr;
+                            return;
+                        }
+                        // The live core has no TUN (or no core is running); the
+                        // cached store may still say otherwise.
+                        appStore.set('isTunEnabled', false);
+                        await invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
+                    } finally {
+                        appStore.set('isNetworkUpdating', false);
+                    }
+                });
+
                 // Reset global preference overrides (injected into runtime YAML)
-                settings.mode = null;
-                settings.tun_enabled = null;
                 settings.mixed_port = null;
                 settings.socks_port = null;
                 settings.http_port = null;
@@ -1381,7 +1527,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             if (hideTimeoutToggle) currentSettings.hide_timeout_nodes = hideTimeoutToggle.checked;
             if (failoverToggle) currentSettings.failover_enabled = failoverToggle.checked;
-            if (encryptConfigsToggle) currentSettings.encrypt_configs = encryptConfigsToggle.checked;
             currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').map(a => a.trim()).filter(Boolean);
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
