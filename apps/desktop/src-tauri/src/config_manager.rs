@@ -101,7 +101,10 @@ pub async fn update_config(
                         if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
                             remove_dangerous_keys(&mut profile_yaml, false);
                             if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                                if let Err(e) = crate::core_manager::write_file_secure(
+                                // Keeps the profile encrypted when encryption
+                                // is on (it was read decrypted above).
+                                if let Err(e) = crate::core_manager::save_profile_file(
+                                    &app,
                                     &profile_path,
                                     &new_profile_content,
                                 ) {
