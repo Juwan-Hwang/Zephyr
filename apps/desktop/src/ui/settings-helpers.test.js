@@ -52,21 +52,21 @@ describe('saveSetting', () => {
 
     it('logs failures without rejecting or breaking later writes', async () => {
         invokeMock.mockRejectedValueOnce(new Error('backend down'));
-        await expect(saveSetting('mode', 'rule')).resolves.toBeUndefined();
+        await expect(saveSetting('theme_mode', 'dark')).resolves.toBeUndefined();
         expect(settingsLogger.warn).toHaveBeenCalledTimes(1);
         expect(invalidateSettingsCache).not.toHaveBeenCalled();
 
-        await saveSetting('mode', 'global');
-        expect(invokeMock).toHaveBeenLastCalledWith('patch_settings', { patch: { mode: 'global' } });
+        await saveSetting('theme_mode', 'light');
+        expect(invokeMock).toHaveBeenLastCalledWith('patch_settings', { patch: { theme_mode: 'light' } });
         expect(invalidateSettingsCache).toHaveBeenCalledTimes(1);
     });
 });
 
 describe('saveSettings', () => {
     it('sends all fields in one atomic patch', async () => {
-        await saveSettings({ mode: 'rule', tun_enabled: false });
+        await saveSettings({ theme_mode: 'dark', tun_enabled: false });
         expect(invokeMock).toHaveBeenCalledTimes(1);
-        expect(invokeMock).toHaveBeenCalledWith('patch_settings', { patch: { mode: 'rule', tun_enabled: false } });
+        expect(invokeMock).toHaveBeenCalledWith('patch_settings', { patch: { theme_mode: 'dark', tun_enabled: false } });
         expect(invalidateSettingsCache).toHaveBeenCalledTimes(1);
     });
 

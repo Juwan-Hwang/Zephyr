@@ -1,5 +1,5 @@
 use std::sync::atomic::Ordering;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 
 #[cfg(not(target_os = "macos"))]
 use super::core_process::resolve_app_paths;
@@ -9,6 +9,26 @@ use super::core_process::{
 };
 use super::secure_io::write_file_secure;
 use super::{TUN_MODE_ACTIVE, TUN_TOGGLING};
+
+/// Executable path of the root core this process started, if any.
+///
+/// Used as a fallback when the managed binary can no longer be resolved (for
+/// example it was replaced or removed while the app kept running), so the exit
+/// path can still terminate the app's own root core.
+static ROOT_CORE_EXE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Record the executable of the root core started by this process.
+pub fn record_root_core_exe(path: &std::path::Path) {
+    if let Ok(mut guard) = ROOT_CORE_EXE.lock() {
+        *guard = Some(path.to_path_buf());
+    }
+}
+
+/// Executable of the root core started by this process, when known.
+#[must_use]
+pub fn last_root_core_exe() -> Option<std::path::PathBuf> {
+    ROOT_CORE_EXE.lock().ok().and_then(|guard| guard.clone())
+}
 
 /// Set TUN mode active state
 pub fn set_tun_mode(active: bool) {
@@ -38,112 +58,147 @@ pub fn is_tun_toggling() -> bool {
     TUN_TOGGLING.load(Ordering::SeqCst)
 }
 
-/// Extract secret from YAML config content using the YAML parser.
-/// This avoids issues with line-by-line parsing (multi-line strings, comments, etc.).
 #[cfg(target_os = "macos")]
-fn extract_secret_from_yaml(content: &str) -> Option<String> {
-    let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
-    yaml.get("secret")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-}
+use zephyr_core::config::tun::{extract_secret_from_yaml, set_secret_in_yaml};
+use zephyr_core::config::tun::{
+    extract_tun_enabled_from_yaml, update_tun_in_yaml as core_update_tun_in_yaml,
+};
 
-use serde_yaml::Value as YamlValue;
-
-/// Ensure dns-hijack list contains both UDP (`any:53`) and TCP (`tcp://any:53`) entries.
-/// This prevents DNS leaks by hijacking all DNS traffic to mihomo.
-fn ensure_dns_hijack_entries(tun_map: &mut serde_yaml::Mapping) {
-    const ANY_UDP: &str = "any:53";
-    const ANY_TCP: &str = "tcp://any:53";
-
-    let dns_hijack_key = YamlValue::String("dns-hijack".to_owned());
-    let any_udp_val = YamlValue::String(ANY_UDP.to_owned());
-    let any_tcp_val = YamlValue::String(ANY_TCP.to_owned());
-
-    match tun_map.entry(dns_hijack_key) {
-        serde_yaml::mapping::Entry::Occupied(mut entry) => {
-            // Existing dns-hijack entry - ensure it contains both entries
-            match entry.get_mut() {
-                YamlValue::Sequence(seq) => {
-                    if !seq.contains(&any_udp_val) {
-                        seq.push(any_udp_val);
-                    }
-                    if !seq.contains(&any_tcp_val) {
-                        seq.push(any_tcp_val);
-                    }
-                }
-                // If it's not a sequence (e.g., a string or other type), replace it
-                YamlValue::Null
-                | YamlValue::Bool(_)
-                | YamlValue::Number(_)
-                | YamlValue::String(_)
-                | YamlValue::Mapping(_)
-                | YamlValue::Tagged(_) => {
-                    entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
-                }
-            }
-        }
-        serde_yaml::mapping::Entry::Vacant(entry) => {
-            // No dns-hijack entry - create new sequence
-            entry.insert(YamlValue::Sequence(vec![any_udp_val, any_tcp_val]));
-        }
-    }
-}
-
-/// Update TUN enable setting in YAML config content using `serde_yaml`.
+/// Update TUN enable setting in YAML config content using `zephyr_core`.
 /// Returns updated content with TUN block modified or appended.
 fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, String> {
-    let mut yaml = serde_yaml::from_str::<YamlValue>(content)
-        .map_err(|e| format!("Failed to parse YAML config: {e}"))?;
-
-    if let Some(mapping) = yaml.as_mapping_mut() {
-        let tun = mapping
-            .entry(YamlValue::String("tun".to_owned()))
-            .or_insert_with(|| YamlValue::Mapping(serde_yaml::Mapping::new()));
-        if let Some(tun_map) = tun.as_mapping_mut() {
-            tun_map.insert(
-                YamlValue::String("enable".to_owned()),
-                YamlValue::Bool(enable),
-            );
-            // Preserve sensible defaults when enabling TUN
-            if enable {
-                tun_map
-                    .entry(YamlValue::String("stack".to_owned()))
-                    .or_insert_with(|| YamlValue::String("system".to_owned()));
-                tun_map
-                    .entry(YamlValue::String("auto-route".to_owned()))
-                    .or_insert_with(|| YamlValue::Bool(true));
-                tun_map
-                    .entry(YamlValue::String("auto-detect-interface".to_owned()))
-                    .or_insert_with(|| YamlValue::Bool(true));
-                // Hijack all DNS traffic to prevent leaks (UDP + TCP)
-                ensure_dns_hijack_entries(tun_map);
-            }
-        }
-    }
-
-    serde_yaml::to_string(&yaml)
-        .map_err(|e| format!("Failed to serialize YAML after TUN toggle: {e}"))
+    core_update_tun_in_yaml(content, enable).map_err(|e| e.to_string())
 }
 
-/// Extract TUN enable status from YAML config content using `serde_yaml`.
-fn extract_tun_enabled_from_yaml(content: &str) -> bool {
-    let yaml = match serde_yaml::from_str::<YamlValue>(content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
+/// Returns the log file path for mihomo running in root TUN mode on macOS.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    "/Library/Logs/Zephyr/tun.log".to_string()
+}
 
-    yaml.get("tun")
-        .and_then(|t| t.get("enable"))
-        .and_then(YamlValue::as_bool)
-        .unwrap_or(false)
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+#[must_use]
+pub fn get_tun_log_path() -> String {
+    let temp = std::env::temp_dir();
+    temp.join(format!("mihomo-tun-{}.log", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Marker the frontend uses to tell "the privileged script ran and the core did
+/// not come up" apart from "authorization was cancelled".
+///
+/// It travels as the message because [`restart_core_as_root_cmd`] flattens
+/// [`RootStartError`] to a string and the frontend keys off this value. Losing it
+/// is not cosmetic: for those variants the script has already killed the user's
+/// core, so the frontend must run its recovery rather than report a cancelled
+/// authorization and leave a stopped core. The human-readable detail follows the
+/// marker after a colon, so the frontend matches on the prefix.
+pub const ROOT_START_FAILED_MARKER: &str = "root_start_failed";
+
+/// Prefix of every `start_core` error from the macOS root TUN start path. The
+/// launch flow retries without TUN only when the error carries it, so an
+/// unrelated start failure never changes the saved TUN preference.
+pub const TUN_START_FAILED_MARKER: &str = "tun_start_failed";
+
+/// Typed error representing failure modes during root TUN core startup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootStartError {
+    Canceled(String),
+    PrivilegeTimeout(String),
+    ExecutionFailed(String),
+    ScriptRanStartTimeout(String),
+    ScriptRanPortBindTimeout(String),
+}
+
+impl RootStartError {
+    #[must_use]
+    pub const fn script_ran(&self) -> bool {
+        matches!(
+            self,
+            Self::ScriptRanStartTimeout(_) | Self::ScriptRanPortBindTimeout(_)
+        )
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Canceled(msg)
+            | Self::PrivilegeTimeout(msg)
+            | Self::ExecutionFailed(msg)
+            | Self::ScriptRanStartTimeout(msg)
+            | Self::ScriptRanPortBindTimeout(msg) => msg,
+        }
+    }
+}
+
+impl std::fmt::Display for RootStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message())
+    }
+}
+
+impl std::error::Error for RootStartError {}
+
+impl From<String> for RootStartError {
+    fn from(s: String) -> Self {
+        Self::ExecutionFailed(s)
+    }
+}
+
+/// PIDs of root-owned processes running *this app's* managed core.
+///
+/// Readiness decisions during a root restart must be scoped to app-owned
+/// processes: an unrelated root mihomo service that happens to (re)start or
+/// hold the controller port must not make the app's core look started.
+#[cfg(target_os = "macos")]
+async fn get_managed_root_pids_async(core_path: std::path::PathBuf) -> Vec<i32> {
+    tokio::task::spawn_blocking(move || managed_root_mihomo_pids(Some(&core_path)))
+        .await
+        .unwrap_or_default()
+}
+
+/// The privileged script exited with an error (the administrator dialog was
+/// cancelled or authorization failed), so no root core was started and the
+/// running core still uses the run config it was started with. Put that config
+/// back: `run_config.yaml` was already rewritten with the requested TUN state
+/// and secret, and the tray reads TUN status from it while a core runs.
+#[cfg(target_os = "macos")]
+fn root_script_failure(
+    child: &mut std::process::Child,
+    config_file: &std::path::Path,
+    original_config: &str,
+) -> RootStartError {
+    if let Err(e) = write_file_secure(config_file, original_config) {
+        crate::emit_warn!(
+            Config,
+            CONFIG_PERSIST_FAILED,
+            "Failed to restore run_config.yaml after the privileged start failed: {e}"
+        );
+    }
+    let mut err = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
+    }
+    if err.contains("canceled") || err.contains("User canceled") {
+        RootStartError::Canceled("canceled".to_owned())
+    } else if err.is_empty() {
+        RootStartError::ExecutionFailed("osascript failed".to_owned())
+    } else {
+        RootStartError::ExecutionFailed(format!("osascript failed: {err}"))
+    }
 }
 
 /// Restart mihomo core with root privileges on macOS for TUN mode
 /// This is required because creating /dev/utun devices needs root access
 /// Returns the secret for frontend to update
 #[cfg(target_os = "macos")]
-pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<String, String> {
+pub async fn restart_core_as_root(
+    app: &AppHandle,
+    enable_tun: bool,
+) -> Result<String, RootStartError> {
     let paths = resolve_app_paths(app)?;
     let core_path = get_core_exe_path(app)?;
     ensure_executable(&core_path)?;
@@ -152,101 +207,111 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 
     // Update TUN config in run_config.yaml before starting
     let config_file = paths.core_dir.join("run_config.yaml");
-    let mut secret = String::new();
-
-    if config_file.exists() {
-        let content = std::fs::read_to_string(&config_file)
-            .map_err(|e| format!("Failed to read config: {e}"))?;
-
-        // Extract current secret from config or generate new one
-        secret = extract_secret_from_yaml(&content).unwrap_or_else(|| generate_secret());
-
-        // Update TUN setting
-        let mut updated = update_tun_in_yaml(&content, enable_tun)?;
-
-        // Ensure secret is present and up-to-date
-        let mut found_secret = false;
-        let mut lines: Vec<String> = updated
-            .lines()
-            .map(|line| {
-                if line.trim().starts_with("secret:") {
-                    found_secret = true;
-                    let indent = line
-                        .chars()
-                        .take_while(|c| c.is_whitespace())
-                        .collect::<String>();
-                    format!("{indent}secret: {secret}")
-                } else {
-                    line.to_owned()
-                }
-            })
-            .collect();
-
-        if !found_secret {
-            lines.push(format!("secret: {secret}"));
-        }
-
-        updated = lines.join("\n");
-
-        write_file_secure(&config_file, &updated)
-            .map_err(|e| format!("Failed to write config: {e}"))?;
+    // Without a run config there is nothing to switch TUN on in, and no secret:
+    // the readiness probe could not tell our core from any unauthenticated
+    // controller on the port. The core writes this file on every normal start.
+    if !config_file.exists() {
+        return Err(RootStartError::ExecutionFailed(
+            "No running configuration found; start the core first".to_owned(),
+        ));
     }
+
+    let content =
+        std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
+
+    let api_port = zephyr_core::process::parse_external_controller_port(content.clone());
+
+    // Keep the current secret, or generate one when it is missing or empty: an
+    // empty secret would let any unauthenticated controller pass the probe.
+    let secret = extract_secret_from_yaml(&content)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| generate_secret());
+
+    // Update TUN setting, then the top-level controller secret (nested
+    // `secret:` keys in proxy/listener blocks stay untouched).
+    let updated = update_tun_in_yaml(&content, enable_tun)
+        .and_then(|toggled| set_secret_in_yaml(&toggled, &secret).map_err(|e| e.to_string()))?;
+
+    write_file_secure(&config_file, &updated)
+        .map_err(|e| format!("Failed to write config: {e}"))?;
 
     // Build the command: kill all mihomo (including root), wait, then start new
     // All in one osascript with administrator privileges
-    // Use user-specific Logs directory (~/Library/Logs/) - secure and predictable for debugging
-    let log_path = std::env::var("HOME")
-        .map(|h| {
-            // macOS: ~/Library/Logs/ - user-specific, other users cannot access
-            let path = format!("{h}/Library/Logs");
-            // Create directory if it doesn't exist
-            if let Err(e) = std::fs::create_dir_all(&path) {
-                emit_warn!(
-                    System,
-                    SYS_TUN_FAILED,
-                    "Failed to create log directory: {e}"
-                );
-            }
-            format!("{path}/mihomo-tun.log")
-        })
-        .unwrap_or_else(|_| {
-            // Fallback to user temp directory with fixed name
-            let temp = std::env::temp_dir();
-            temp.join("mihomo-tun.log").to_string_lossy().into_owned()
-        });
+    let log_path = get_tun_log_path();
+
+    // Security: Unlink if log_path is a pre-existing symlink to prevent privilege escalation via root redirection.
+    if let Ok(meta) = std::fs::symlink_metadata(&log_path) {
+        if meta.file_type().is_symlink() {
+            let _ = std::fs::remove_file(&log_path);
+        }
+    }
 
     // CRITICAL: Escape paths in two phases — shell first, then AppleScript
     // 1. Shell-escape: replace ' with '\'' for single-quote context (end quote, escaped quote, start quote)
     // 2. AppleScript-escape: replace \ with \\ and " with \" to prevent breaking the outer "do shell script" literal
-    let escaped_config_dir = config_dir_str
-        .replace("'", "'\\''")
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    let escaped_log_path = log_path
-        .replace("'", "'\\''")
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+    let escaped_config_dir = shell_escape_single(&config_dir_str);
+    let escaped_log_path = shell_escape_single(&log_path);
 
-    // Get binary name from resolved core_path to ensure backward compatibility
-    let binary_name = core_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "Invalid core binary name".to_owned())?;
-    let escaped_binary_name = binary_name
-        .replace("'", "'\\''")
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    // Kill both new (zephyr-mihomo) and legacy (mihomo) names to handle upgrade scenario
-    // where a root-owned legacy process might still be running
+    // Launch the managed core by its ABSOLUTE path (not `./name` after `cd`):
+    // `ps comm` then reports the absolute executable path, so managed-process
+    // detection can match it exactly instead of relying on the legacy
+    // working-directory probe for root-owned processes.
+    let core_path_str = core_path.to_string_lossy();
+    let escaped_core_path = shell_escape_single(&core_path_str);
+    let uid = unsafe { libc::getuid() };
+    // Terminate only this app's managed core processes (root- and user-owned):
+    // an unrelated root mihomo service must never be killed by a TUN start.
+    // The scan runs `ps` twice (plus `lsof` per legacy candidate), so it goes
+    // through `spawn_blocking` like every other process probe here.
+    let core_path_for_scan = core_path.clone();
+    let (confirmed_pids, legacy_pids) = tokio::task::spawn_blocking(move || {
+        let confirmed = managed_mihomo_pids_scoped(&core_path_for_scan, false);
+        let confirmed_set: std::collections::HashSet<i32> = confirmed.iter().copied().collect();
+        let legacy = legacy_candidate_pids()
+            .into_iter()
+            .filter(|pid| !confirmed_set.contains(pid))
+            .collect::<Vec<_>>();
+        (confirmed, legacy)
+    })
+    .await
+    .unwrap_or_default();
+    // The PIDs were collected before the authorization dialog, so the script
+    // re-verifies each one before SIGKILL: confirmed PIDs must still show the
+    // managed executable; otherwise (for both loops) the legacy launch identity
+    // must still hold — the app's core directory as working directory (`lsof`
+    // works here because the script runs as root) plus argv[0] named
+    // `mihomo`/`zephyr-mihomo` and the managed `run_config.yaml` argument.
+    let (confirmed_cmd, legacy_cmd) = build_pid_kill_commands(
+        &confirmed_pids,
+        &legacy_pids,
+        &escaped_core_path,
+        &escaped_config_dir,
+    );
+    let mut kill_parts: Vec<String> = Vec::new();
+    if !confirmed_cmd.is_empty() {
+        // nosemgrep: rust-oscript-privilege-escalation — escaped paths + numeric PIDs
+        // nosemgrep: rust-oscript-command-pattern — escaped values prevent injection
+        kill_parts.push(confirmed_cmd);
+    }
+    if !legacy_cmd.is_empty() {
+        // nosemgrep: rust-oscript-privilege-escalation — escaped paths + numeric PIDs
+        // nosemgrep: rust-osascript-command-pattern — escaped values prevent injection
+        kill_parts.push(legacy_cmd);
+    }
+    let kill_prefix = kill_parts.join(" ");
     let script = format!(
         // nosemgrep: rust-osascript-privilege-escalation — paths are shell-escaped via replace("'", "'\\''")
         // nosemgrep: rust-osascript-command-pattern — escaped values prevent injection
-        r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; cd '{escaped_config_dir}' && './{escaped_binary_name}' -d '.' -f 'run_config.yaml' > '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
+        r#"do shell script "{kill_prefix}sleep 0.3; [ -L '/Library/Logs/Zephyr' ] && rm -f '/Library/Logs/Zephyr'; mkdir -p -m 0755 '/Library/Logs/Zephyr'; chown root:wheel '/Library/Logs/Zephyr' 2>/dev/null; chmod 0755 '/Library/Logs/Zephyr'; rm -f '{escaped_log_path}'; : > '{escaped_log_path}'; chown {uid} '{escaped_log_path}'; chmod 600 '{escaped_log_path}'; cd '{escaped_config_dir}' && '{escaped_core_path}' -d '.' -f 'run_config.yaml' >> '{escaped_log_path}' 2>&1 &" with administrator privileges"#,
     );
 
     // Spawn osascript without waiting for it to complete
     // The & at the end of the shell command makes mihomo run in background
     // but osascript might still wait, so we use spawn() instead of output()
+    // Snapshot managed root PIDs before the script so only processes this app
+    // starts count as "new" (an unrelated root mihomo service must not make the
+    // app's core look started).
+    let initial_root_pids: Vec<i32> = get_managed_root_pids_async(core_path.clone()).await;
     let mut child = std::process::Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -263,17 +328,7 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
     match child.try_wait() {
         Ok(Some(status)) => {
             if !status.success() {
-                // Read stderr to get the error
-                let stderr = child.stderr.take();
-                if let Some(mut stderr) = stderr {
-                    let mut err = String::new();
-                    let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
-                    if err.contains("canceled") || err.contains("User canceled") {
-                        return Err("canceled".to_owned());
-                    }
-                    return Err(format!("osascript failed: {err}"));
-                }
-                return Err("osascript failed".to_owned());
+                return Err(root_script_failure(&mut child, &config_file, &content));
             }
         }
         Ok(None) => {
@@ -282,46 +337,248 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
         Err(_) => {}
     }
 
-    // Wait for root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
+    /// Consecutive 500ms polls, after the privileged script has exited, that see no
+    /// new managed root PID.
+    ///
+    /// The script backgrounds the core and then exits, so the PID exists before
+    /// `osascript` returns. A handful of polls without one is therefore enough to
+    /// conclude the core started and immediately exited (typically a config error),
+    /// and reporting that beats making the user wait out the full 30s window for a
+    /// message that describes a timeout rather than the crash that actually
+    /// happened.
+    #[cfg(target_os = "macos")]
+    const ROOT_START_POST_SCRIPT_POLL_LIMIT: u8 = 4;
+
+    // Wait for osascript to finish and root mihomo to appear (poll for up to 30 seconds to allow time for password entry)
     let mut started = false;
+    let mut script_finished = false;
+    // Consecutive polls that saw a finished script and no new root process.
+    let mut polls_after_script_finished = 0_u8;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Check if user canceled (osascript exited with failure)
-        if let Ok(Some(status)) = child.try_wait() {
-            if !status.success() {
-                return Err("canceled".to_owned());
+        if !script_finished {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        return Err(root_script_failure(&mut child, &config_file, &content));
+                    }
+                    script_finished = true;
+                    // This run re-verified every legacy candidate as root, just
+                    // like the standalone kill does. Recording them matters
+                    // because this script is not only a kill: a foreign root
+                    // core skipped here would otherwise be handed to the kill
+                    // script again by any later verified kill — this function's
+                    // own failure paths, `disable_tun_cmd`, `stop_core` — and
+                    // put a second administrator dialog in front of the user for
+                    // a process that would be skipped again anyway.
+                    remember_privileged_legacy_checked(&legacy_pids);
+                }
+                Ok(None) => {
+                    // Password dialog is still showing or script is still executing,
+                    // but child may already have started mihomo in background.
+                }
+                Err(_) => {}
             }
         }
 
-        if has_root_mihomo() {
+        // Authenticated, not a bare TCP connect: the probe has to tell our own core
+        // apart from whatever else happens to be listening on `api_port`. An
+        // unauthenticated connect is satisfied by any listener, so a core that
+        // failed to bind its own API would be reported as a successful start.
+        let is_ready = if api_port > 0 {
+            super::core_process::authenticated_health_check_once(
+                api_port,
+                &secret,
+                std::time::Duration::from_millis(500),
+            )
+            .await
+        } else {
+            true
+        };
+        let current_root_pids = get_managed_root_pids_async(core_path.clone()).await;
+        let new_root_running = current_root_pids
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+        let ready_now = new_root_running && is_ready;
+        if ready_now {
             started = true;
             break;
         }
+
+        // Once the script has exited, the managed root PID it launched already
+        // exists (the script backgrounds the core and then exits), so a few
+        // consecutive polls with no new PID mean the core started and exited
+        // again — almost always a config error. Continuing to poll would keep
+        // the user waiting out the full 30s only to be told the core "failed to
+        // start within 30 seconds", which does not describe a crash at all.
+        if script_finished {
+            if new_root_running {
+                // The core is up but its API is not answering yet; keep waiting.
+                polls_after_script_finished = 0;
+            } else {
+                polls_after_script_finished = polls_after_script_finished.saturating_add(1);
+                if polls_after_script_finished >= ROOT_START_POST_SCRIPT_POLL_LIMIT {
+                    break;
+                }
+            }
+        }
     }
 
-    if !started {
-        // Kill osascript if still running
-        let _ = child.kill();
-        return Err("Root mihomo failed to start within 30 seconds".to_owned());
-    }
+    if started {
+        // The new core only launches after the kill prefix, so the prefix has
+        // already re-verified every legacy candidate as root even when the core
+        // answered before `osascript` exited.
+        remember_privileged_legacy_checked(&legacy_pids);
+        if !script_finished {
+            tokio::task::spawn_blocking(move || {
+                let _ = child.wait();
+            });
+        }
+    } else {
+        // Kill osascript if still running and reap child on a blocking thread
+        let exited_ok = tokio::task::spawn_blocking(move || {
+            if let Ok(Some(status)) = child.try_wait() {
+                return status.success();
+            }
+            let _ = child.kill();
+            child.wait().map(|s| s.success()).unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false);
+        let script_finished = script_finished || exited_ok;
 
-    // Wait for port to be bound
-    let mut bound = false;
-    for _ in 0..10 {
+        // Brief grace wait to check if root core appeared just as timeout hit
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if std::net::TcpStream::connect("127.0.0.1:9090").is_ok() {
-            bound = true;
-            break;
+        let current_root_pids = get_managed_root_pids_async(core_path.clone()).await;
+        let new_root_present = current_root_pids
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+
+        if new_root_present {
+            // New root mihomo started right at the deadline; proceed to verify port
+        } else if script_finished {
+            let core_path_for_kill = core_path.clone();
+            let kill_res = tokio::task::spawn_blocking(move || {
+                kill_managed_root_mihomo_as_root_verified(Some(&core_path_for_kill))
+            })
+            .await;
+            if kill_res.ok().and_then(Result::ok).is_some() {
+                set_tun_mode(false);
+            }
+            return Err(RootStartError::ScriptRanStartTimeout(
+                if polls_after_script_finished >= ROOT_START_POST_SCRIPT_POLL_LIMIT {
+                    // The script completed and left no core behind: it started
+                    // and exited again. Name that, rather than the 30s timeout
+                    // the user did not actually wait out.
+                    "Root mihomo was launched but exited immediately (check the core log for a configuration error)".to_owned()
+                } else {
+                    "Root mihomo failed to start within 30 seconds".to_owned()
+                },
+            ));
+        } else {
+            // osascript never exited within the poll window. Before reporting a
+            // privilege timeout (which callers treat as "the script never
+            // ran"), poll the managed root PIDs for a bounded window: a
+            // last-moment authorization can have run the privileged script
+            // (kill + core start) while osascript itself is still waiting to
+            // exit. The script itself sleeps 0.3s before launching the core.
+            //
+            // A newly appearing PID is the positive signal, but its absence is
+            // not proof the script never ran: if the relaunched core failed to
+            // come up, the script still killed the old root core. Disappearance
+            // of a previously running PID is therefore treated as "the script
+            // ran" too, so the caller does not restore the previous run state
+            // on top of a core that is already gone.
+            let mut script_actually_ran = false;
+            for _ in 0..6 {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let late_root_pids = get_managed_root_pids_async(core_path.clone()).await;
+                if late_root_pids
+                    .iter()
+                    .any(|pid| !initial_root_pids.contains(pid))
+                {
+                    script_actually_ran = true;
+                    break;
+                }
+                if initial_root_pids
+                    .iter()
+                    .any(|pid| !late_root_pids.contains(pid))
+                {
+                    // The old root core is gone, so the script's kill ran. The
+                    // fresh core may have crashed right after; either way the
+                    // previous run config must not be restored.
+                    script_actually_ran = true;
+                    break;
+                }
+            }
+            if script_actually_ran {
+                // The script ran: treat it as the start-timeout path so the
+                // caller does not restore the previous run config while a root
+                // core with the new config is running.
+                let core_path_for_kill = core_path.clone();
+                let kill_res = tokio::task::spawn_blocking(move || {
+                    kill_managed_root_mihomo_as_root_verified(Some(&core_path_for_kill))
+                })
+                .await;
+                if kill_res.ok().and_then(Result::ok).is_some() {
+                    set_tun_mode(false);
+                }
+                return Err(RootStartError::ScriptRanStartTimeout(
+                    "Root mihomo failed to start within 30 seconds".to_owned(),
+                ));
+            }
+            return Err(RootStartError::PrivilegeTimeout(
+                "osascript failed: timed out waiting for administrator privileges".to_owned(),
+            ));
+        }
+    }
+
+    // Wait for port to be bound (or verify root daemon liveness if controller is disabled)
+    let mut bound = false;
+    if api_port == 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        bound = get_managed_root_pids_async(core_path.clone())
+            .await
+            .iter()
+            .any(|pid| !initial_root_pids.contains(pid));
+    } else {
+        // Authenticated for the same reason as the start poll above: a bare
+        // connect is satisfied by any listener on `api_port`.
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            if super::core_process::authenticated_health_check_once(
+                api_port,
+                &secret,
+                std::time::Duration::from_millis(500),
+            )
+            .await
+            {
+                bound = true;
+                break;
+            }
         }
     }
 
     if !bound {
-        return Err("root_start_failed".to_owned());
+        let core_path_for_kill = core_path.clone();
+        let kill_res = tokio::task::spawn_blocking(move || {
+            kill_managed_root_mihomo_as_root_verified(Some(&core_path_for_kill))
+        })
+        .await;
+        if kill_res.ok().and_then(Result::ok).is_some() {
+            set_tun_mode(false);
+        }
+        return Err(RootStartError::ScriptRanPortBindTimeout(
+            "Root mihomo started but its controller did not answer in time".to_owned(),
+        ));
     }
 
     // Mark TUN mode as active
     set_tun_mode(true);
+    // Remember which executable this root core runs, so later cleanup can
+    // still identify it if the binary is replaced or removed.
+    record_root_core_exe(&core_path);
 
     Ok(secret)
 }
@@ -329,7 +586,10 @@ pub async fn restart_core_as_root(app: &AppHandle, enable_tun: bool) -> Result<S
 /// On non-macOS platforms, this is a no-op
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-pub const fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result<String, String> {
+pub const fn restart_core_as_root(
+    _app: &AppHandle,
+    _enable_tun: bool,
+) -> Result<String, RootStartError> {
     Ok(String::new())
 }
 
@@ -341,6 +601,138 @@ pub const fn restart_core_as_root(_app: &AppHandle, _enable_tun: bool) -> Result
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use serde_yaml::Value as YamlValue;
+    use zephyr_core::config::tun::ensure_dns_hijack_entries;
+
+    /// Assert that every `"` inside an `AppleScript` `do shell script "..."`
+    /// literal is escaped as `\"` (a bare `"` would end the literal early and
+    /// make `osascript` fail with a syntax error).
+    fn assert_applescript_quotes_escaped(script: &str) {
+        let open = script
+            .find("do shell script \"")
+            .expect("script must open the AppleScript literal");
+        let close = script
+            .rfind("\" with administrator privileges")
+            .expect("script must close the AppleScript literal");
+        assert!(open < close, "AppleScript literal delimiters out of order");
+        let literal = &script[open + "do shell script \"".len()..close];
+        let mut escaped = false;
+        for ch in literal.chars() {
+            assert!(
+                ch != '"' || escaped,
+                "unescaped double quote inside AppleScript literal: {script}"
+            );
+            escaped = if ch == '\\' { !escaped } else { false };
+        }
+    }
+
+    /// Shared expectations for both kill loops: the working directory may only
+    /// authorise a SIGKILL together with the legacy launch identity (argv[0]
+    /// named `mihomo`/`zephyr-mihomo` plus the managed `run_config.yaml`
+    /// argument), and every shell-visible quote must be escaped for `AppleScript`.
+    fn assert_rechecks_legacy_identity(snippet: &str) {
+        assert!(snippet.contains("if [ \\\"$cwd\\\" = '/Applications/Zephyr.app/Contents/MacOS/core' ] && [ \\\"$cfg\\\" = 1 ] && [ \\\"$named\\\" = 1 ]; then ok=1; fi;"));
+        assert!(snippet.contains("exe=${args%% *}; base=${exe##*/};"));
+        assert!(snippet.contains(
+            "case \\\"$args\\\" in *run_config.yaml|*'run_config.yaml '*) cfg=1;; esac;"
+        ));
+        assert!(snippet.contains(
+            "if [ \\\"$base\\\" = 'mihomo' ] || [ \\\"$base\\\" = 'zephyr-mihomo' ]; then named=1; fi;"
+        ));
+        // `-ww` keeps a long absolute argv[0] (and therefore the managed config
+        // argument) from being truncated away.
+        assert!(snippet.contains("args=$(ps -ww -p $p -o args= 2>/dev/null)"));
+        for var in ["$cwd", "$cfg", "$named", "$base", "$args", "$ok"] {
+            assert!(
+                snippet.contains(&format!("\\\"{var}\\\"")),
+                "unescaped {var} inside the AppleScript literal: {snippet}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pid_kill_commands_escape_applescript_quotes() {
+        // Both snippets are embedded into `do shell script "..."`, so the shell
+        // command-substitution quotes must be escaped for `AppleScript`.
+        let (confirmed, legacy) = build_pid_kill_commands(
+            &[1234, 5678],
+            &[9012],
+            "/Applications/Zephyr.app/Contents/MacOS/zephyr-mihomo",
+            "/Applications/Zephyr.app/Contents/MacOS/core",
+        );
+
+        assert!(confirmed.contains("for p in 1234 5678"));
+        assert!(legacy.contains("for p in 9012"));
+        assert!(legacy.contains("$(lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"));
+        assert!(legacy.contains("sed -n 's/^n//p'"));
+
+        // The confirmed loop must accept every PID discovery confirmed: the
+        // executable path (`comm`) directly, or the app's core directory as the
+        // working directory (a relative `./mihomo` launch). A working directory
+        // alone is never enough — see `assert_rechecks_legacy_identity`, which
+        // pins the guard on both loops. Without the `comm` branch a relative
+        // launch would be skipped and the verified wait would time out; with a
+        // bare `cwd` branch a recycled PID in the core directory would be killed.
+        assert!(confirmed.contains("comm=$(ps -ww -p $p -o comm= 2>/dev/null)"));
+        assert!(confirmed.contains("if [ \\\"$comm\\\" = '/Applications/Zephyr.app/Contents/MacOS/zephyr-mihomo' ] || [ \\\"$exe\\\" = '/Applications/Zephyr.app/Contents/MacOS/zephyr-mihomo' ]; then ok=1; fi;"));
+        // Only the confirmed loop may kill on `argv[0]` alone, too.
+        assert!(!legacy.contains("\\\"$exe\\\" ="));
+        // Only the confirmed loop may kill on the executable path.
+        assert!(!legacy.contains("\\\"$comm\\\" ="));
+        assert_rechecks_legacy_identity(&confirmed);
+        assert_rechecks_legacy_identity(&legacy);
+
+        // A successful kill marks the run so the caller can skip the TUN route
+        // teardown when nothing was actually terminated (a foreign candidate
+        // that the working-directory check skipped).
+        assert!(confirmed.contains("kill -9 $p 2>/dev/null && killed=1"));
+        assert!(legacy.contains("kill -9 $p 2>/dev/null && killed=1"));
+
+        // Empty lists produce empty commands (so the script stays valid).
+        let (none_conf, none_leg) = build_pid_kill_commands(&[], &[], "/opt/core", "/opt/core");
+        assert!(none_conf.is_empty());
+        assert!(none_leg.is_empty());
+    }
+
+    #[test]
+    fn test_managed_root_kill_script_escapes_applescript_quotes() {
+        let exe = std::path::Path::new("/Applications/Zephyr.app/Contents/MacOS/zephyr-mihomo");
+
+        // Both loops present: the full script must contain no unescaped `"`
+        // inside the AppleScript literal.
+        let script = build_managed_root_kill_script(exe, &[1234], &[5678])
+            .expect("script expected for non-empty PID lists");
+        assert_applescript_quotes_escaped(&script);
+        // The routes are only removed when a loop actually killed something.
+        assert!(script.starts_with("do shell script \"killed=0; "));
+        assert!(script.contains("if [ \\\"$killed\\\" = 1 ]; then route delete 0.0.0.0/1"));
+        assert!(script.contains("route delete 128.0.0.0/1"));
+
+        // Confirmed-only and legacy-only variants must also stay escaped.
+        let confirmed_only = build_managed_root_kill_script(exe, &[1234], &[])
+            .expect("script expected for confirmed PIDs");
+        assert_applescript_quotes_escaped(&confirmed_only);
+
+        let legacy_only = build_managed_root_kill_script(exe, &[], &[5678])
+            .expect("script expected for legacy candidates");
+        assert_applescript_quotes_escaped(&legacy_only);
+
+        // Nothing to kill: no script at all.
+        assert!(build_managed_root_kill_script(exe, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn test_shell_escape_single_covers_quotes_and_backslashes() {
+        // The same escaping the TUN restart script uses for its paths: shell
+        // escaping first, then AppleScript escaping, so the output is what
+        // appears inside the `do shell script "..."` literal.
+        assert_eq!(shell_escape_single("/opt/core"), "/opt/core");
+        // `'` becomes the shell `'\''` idiom, whose backslash is then doubled
+        // for AppleScript.
+        assert_eq!(shell_escape_single("/opt/it's"), "/opt/it'\\\\''s");
+        assert_eq!(shell_escape_single("C:\\core"), "C:\\\\core");
+        assert_eq!(shell_escape_single("/opt/a\"b"), "/opt/a\\\"b");
+    }
 
     // Helper to extract dns-hijack values from YAML string
     fn extract_dns_hijack(content: &str) -> Option<Vec<String>> {
@@ -478,102 +870,613 @@ mod tests {
     }
 }
 
-/// Check if there's a root-owned mihomo process running
-/// Checks for both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
+/// PIDs of processes running this app's managed core.
+///
+/// A process counts as managed when either:
+/// - its executable is exactly the app's configured managed core, or
+/// - it is a legacy launch (`mihomo` or `zephyr-mihomo` with `-d .` and a
+///   `run_config.yaml` argument) whose working directory is the app's core
+///   directory (verified with `lsof`).
+///
+/// When `root_only` is set, only root-owned processes match. Unrelated mihomo
+/// services — regardless of name or arguments — never match.
 #[cfg(target_os = "macos")]
-fn has_root_mihomo() -> bool {
+fn managed_mihomo_pids_scoped(managed_exe_path: &std::path::Path, root_only: bool) -> Vec<i32> {
+    let core_dir = managed_exe_path
+        .parent()
+        .unwrap_or(managed_exe_path)
+        .to_path_buf();
+    let user_matches = |user: &str| !root_only || user == "root";
+    let mut pids: Vec<i32> = Vec::new();
+
+    // 1. Exact executable path match. `-ww`: BSD `ps` caps output at 79
+    // columns when stdout is not a terminal, and a truncated `comm` path never
+    // equals the managed path.
     if let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "user,comm"])
+        .args(["-ww", "-axo", "pid,user,comm"])
         .output()
     {
         let text = String::from_utf8_lossy(&output.stdout);
-        text.lines().any(|line| {
+        pids.extend(text.lines().filter_map(|line| {
             let trimmed = line.trim_start();
-            trimmed.starts_with("root ")
-                && (trimmed.contains("zephyr-mihomo") || trimmed.contains("mihomo"))
-        })
-    } else {
-        false
+            let (pid_str, rest) = trimmed.split_once(char::is_whitespace)?;
+            let (user, comm) = rest.trim_start().split_once(char::is_whitespace)?;
+            let comm = comm.trim();
+            if !user_matches(user) || std::path::Path::new(comm) != managed_exe_path {
+                return None;
+            }
+            pid_str.trim().parse::<i32>().ok()
+        }));
     }
+
+    // 2. Exact executable path match via the command line (covers relative
+    // launches such as `./zephyr-mihomo`, whose `comm` may not equal the
+    // absolute path), followed by the legacy core-directory launch pattern.
+    // `-ww` keeps `ps` from truncating a long command line: without it the
+    // `run_config.yaml` argument can be cut off and the legacy pattern below
+    // stops matching, so a running managed core would not be found at all.
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-ww", "-axo", "pid,user,args"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        pids.extend(text.lines().filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid_str = fields.next()?;
+            let user = fields.next()?;
+            if !user_matches(user) {
+                return None;
+            }
+            let exe = fields.next()?;
+            let pid = pid_str.trim().parse::<i32>().ok()?;
+            if std::path::Path::new(exe) == managed_exe_path {
+                return Some(pid);
+            }
+            // Legacy launch: `mihomo` or `zephyr-mihomo` with `-d .` and a
+            // `run_config.yaml` argument, started from the app's core directory
+            // (working directory verified with `lsof`).
+            let basename = std::path::Path::new(exe)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(exe);
+            if basename != "mihomo" && basename != "zephyr-mihomo" {
+                return None;
+            }
+            let args: Vec<&str> = fields.collect();
+            let uses_core_dir = args
+                .iter()
+                .position(|a| *a == "-d")
+                .is_some_and(|i| args.get(i + 1) == Some(&"."));
+            let uses_managed_config = args.iter().any(|a| a.ends_with("run_config.yaml"));
+            if uses_core_dir && uses_managed_config && process_cwd_is(pid, &core_dir) {
+                Some(pid)
+            } else {
+                None
+            }
+        }));
+    }
+
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
+/// PIDs of root-owned processes running this app's managed core, confirmed
+/// without privileges:
+/// - the configured managed executable (matched by full path or `ps args`), or
+/// - a legacy launch (`mihomo` or `zephyr-mihomo` with `-d .` and a
+///   `run_config.yaml` argument) whose working directory is the app's core
+///   directory (verified with `lsof` when permissions allow).
+#[cfg(target_os = "macos")]
+fn managed_root_mihomo_pids(managed_exe_path: Option<&std::path::Path>) -> Vec<i32> {
+    match managed_exe_path {
+        Some(path) => managed_mihomo_pids_scoped(path, true),
+        None => Vec::new(),
+    }
+}
+
+/// PIDs of root-owned processes that LOOK like this app's managed core but
+/// could not be confirmed without privileges: a legacy launch (`mihomo` or
+/// `zephyr-mihomo` with `-d .` and a `run_config.yaml` argument) whose working
+/// directory could not be verified because an unprivileged `lsof` cannot read
+/// a root process's cwd on macOS.
+///
+/// These are candidates only: the privileged kill script re-verifies each
+/// one's working directory (as root) before terminating it.
+///
+/// `-ww` keeps `ps` from truncating the command line, so a long `argv` still
+/// exposes its trailing `run_config.yaml` argument; without it the pattern
+/// below silently stops matching managed cores launched with long arguments.
+///
+/// Takes no executable path, and that is deliberate rather than an oversight:
+/// the filter is already path-independent — `ps comm` reports a bare `mihomo`
+/// for an old launch, so there is nothing to match a path against — and a
+/// caller with no path at hand is exactly the case where this scan is the only
+/// evidence that a root core exists. An earlier version took the path and
+/// ignored it, which read as though a `None` path meant "no candidates".
+#[cfg(target_os = "macos")]
+fn legacy_candidate_pids() -> Vec<i32> {
+    let mut pids: Vec<i32> = Vec::new();
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-ww", "-axo", "pid,user,args"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        pids.extend(text.lines().filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid_str = fields.next()?;
+            let user = fields.next()?;
+            if user != "root" {
+                return None;
+            }
+            let exe = fields.next()?;
+            let basename = std::path::Path::new(exe)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(exe);
+            if basename != "mihomo" && basename != "zephyr-mihomo" {
+                return None;
+            }
+            let args: Vec<&str> = fields.collect();
+            let uses_core_dir = args
+                .iter()
+                .position(|a| *a == "-d")
+                .is_some_and(|i| args.get(i + 1) == Some(&"."));
+            let uses_managed_config = args.iter().any(|a| a.ends_with("run_config.yaml"));
+            if uses_core_dir && uses_managed_config {
+                pid_str.trim().parse::<i32>().ok()
+            } else {
+                None
+            }
+        }));
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    // Drop candidates a previous privileged run in this process already
+    // re-verified as foreign, so they stop re-triggering the administrator
+    // dialog on every start. See PRIVILEGED_LEGACY_CHECKED.
+    if let Ok(already_checked) = PRIVILEGED_LEGACY_CHECKED.lock() {
+        pids.retain(|pid| !already_checked.contains(pid));
+    }
+    pids
+}
+
+/// Legacy candidate PIDs that a privileged run has already re-verified in this
+/// process.
+///
+/// The privileged script re-checks each candidate's working directory as root
+/// and deliberately skips one that turns out to belong to a foreign core, but
+/// the app only observes the script's exit status — never which PIDs it skipped.
+/// Without this record the same foreign PID re-triggers the administrator dialog
+/// on *every* core start (profile switch, resume restart, forced restart) and the
+/// user can never get past it.
+///
+/// Entries are added only when the script actually ran, so a cancelled prompt can
+/// ask again, and they are safe to keep for the lifetime of the process: a PID
+/// re-verified as foreign cannot become the app's own core later unless the OS
+/// recycles it. The filter only decides *when* the optional cleanup is offered;
+/// the script still re-verifies every PID it is actually given.
+#[cfg(target_os = "macos")]
+static PRIVILEGED_LEGACY_CHECKED: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<i32>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+/// Record that a privileged run has re-verified these legacy candidates as root.
+///
+/// Must only be called once the script has actually run: a cancelled
+/// authorization has verified nothing, and the user should be asked again.
+#[cfg(target_os = "macos")]
+fn remember_privileged_legacy_checked(candidates: &[i32]) {
+    if let Ok(mut already_checked) = PRIVILEGED_LEGACY_CHECKED.lock() {
+        already_checked.extend(candidates.iter().copied());
+    }
+}
+
+/// Check if there is a root-owned mihomo process running our managed core executable
+/// (confirmed, or a legacy candidate awaiting privileged verification).
+#[cfg(target_os = "macos")]
+pub(crate) fn has_managed_root_mihomo(managed_exe_path: Option<&std::path::Path>) -> bool {
+    let Some(path) = managed_exe_path else {
+        return false;
+    };
+    !managed_root_mihomo_pids(Some(path)).is_empty() || !legacy_candidate_pids().is_empty()
+}
+
+/// Whether a root-owned process running *this app's* managed core executable is
+/// confirmed alive without privileges.
+///
+/// Unlike [`has_managed_root_mihomo`], legacy candidates are excluded: an
+/// unprivileged scan cannot read a root process's working directory, so a
+/// candidate may belong to a different install (e.g. another macOS user
+/// running its own root core with `-d .` and `run_config.yaml`). The privileged
+/// kill script skips such a foreign process, so letting a candidate block a
+/// decision would make an unrelated service block startup, TUN disable and
+/// stop — exactly what the managed-scope cleanup exists to prevent. Use
+/// [`has_managed_root_mihomo`] only where an unverified candidate is worth a
+/// (harmless) privileged cleanup attempt.
+#[cfg(target_os = "macos")]
+pub(crate) fn has_confirmed_root_mihomo(managed_exe_path: Option<&std::path::Path>) -> bool {
+    let Some(path) = managed_exe_path else {
+        return false;
+    };
+    !managed_root_mihomo_pids(Some(path)).is_empty()
 }
 
 #[cfg(not(target_os = "macos"))]
 #[allow(dead_code)]
-const fn has_root_mihomo() -> bool {
+pub(crate) const fn has_confirmed_root_mihomo(_managed_exe_path: Option<&std::path::Path>) -> bool {
     false
 }
 
-/// Kill all mihomo processes with root privileges (kills both root and user processes)
-/// Also cleans up TUN interface and routes to avoid blocking new mihomo startup
-/// Note: Does NOT clear TUN mode flag - caller should call set_tun_mode(false) if disabling TUN
+/// Whether the process with `pid` has `expected_dir` as its working directory.
 #[cfg(target_os = "macos")]
-pub fn kill_all_mihomo_as_root() -> Result<(), String> {
-    // Kill both zephyr-mihomo (new) and mihomo (legacy) for backward compatibility
-    // nosemgrep: rust-osascript-privilege-escalation — static string, no interpolation
-    // nosemgrep: rust-osascript-command-pattern — static string, no injection vector
-    let script = r#"do shell script "killall -9 zephyr-mihomo mihomo 2>/dev/null; sleep 0.3; route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; true" with administrator privileges"#;
-    let status = std::process::Command::new("osascript")
+fn process_cwd_is(pid: i32, expected_dir: &std::path::Path) -> bool {
+    let Ok(output) = std::process::Command::new("lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .output()
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .any(|path| std::path::Path::new(path) == expected_dir)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+pub(crate) const fn has_managed_root_mihomo(_managed_exe_path: Option<&std::path::Path>) -> bool {
+    false
+}
+
+/// Run an AppleScript privileged shell command, waiting up to 30s for
+/// administrator authorization.
+#[cfg(target_os = "macos")]
+fn run_privileged_shell_script(script: &str) -> Result<(), String> {
+    let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
-        .status()
-        .map_err(|e| format!("Failed to run osascript: {e}"))?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn osascript: {e}"))?;
 
-    if !status.success() {
-        return Err(format!("osascript exit code: {status}"));
+    let timeout = std::time::Duration::from_secs(30);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(format!("osascript exit code: {status}"));
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(
+                        "osascript timed out waiting for administrator privileges".to_owned()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed waiting for osascript: {e}"));
+            }
+        }
     }
-    Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-pub const fn kill_all_mihomo_as_root() -> Result<(), String> {
-    Ok(())
+/// Shell-escape a value for the single-quoted context inside the privileged
+/// `do shell script` strings (same two-phase escaping as the restart script).
+///
+/// Pure string manipulation, so it is compiled (and unit-tested) on every
+/// platform; the privileged scripts themselves are macOS-only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn shell_escape_single(value: &str) -> String {
+    value
+        .replace('\'', "'\\''")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
-/// Smart kill: only prompt for password if there's actually a root mihomo running
-/// Note: This kills ALL mihomo processes, not just root ones
+/// Build the shell snippets that re-verify each managed PID inside the
+/// privileged script before sending SIGKILL.
+///
+/// The PID list is collected before the authorization dialog, so each entry is
+/// re-checked immediately before the kill. Two properties have to hold at once:
+///
+/// * **No false negatives.** The accepted criteria must cover every way
+///   [`managed_mihomo_pids_scoped`] confirmed the PID — the executable path in
+///   `comm` or `argv[0]`, or (for a relative `./mihomo` launch) the app's core directory as
+///   the working directory — otherwise [`kill_managed_root_mihomo_as_root_verified`]
+///   keeps waiting for a process the script deliberately skipped and every
+///   caller (TUN start/stop, core update) fails with a timeout.
+/// * **No false positives.** A working directory alone must never authorize a
+///   kill: between collection and the kill the PID can be recycled, or the
+///   process can have exec'd something else while keeping that directory.
+///   So the working-directory path additionally re-verifies the legacy launch
+///   identity — `argv[0]`'s basename is `mihomo`/`zephyr-mihomo` and the managed
+///   `run_config.yaml` is still an argument — which is exactly what discovery
+///   required (`-d .` is left out: it adds nothing once the config file and the
+///   core directory are both confirmed, and rejecting it could skip our own
+///   core). Checking only `comm` would skip PIDs discovery matched another way.
+///
+/// `-ww` keeps `ps` from truncating a long absolute `argv[0]`, which would
+/// otherwise hide the managed config file.
+///
+/// A successful kill sets the shell variable `killed`, which the caller uses to
+/// decide whether the TUN routes may be torn down: a skipped (foreign) candidate
+/// must leave them alone.
+///
+/// The snippets are embedded into `do shell script "..."`, an `AppleScript`
+/// string literal delimited by double quotes, so every literal `"` inside them
+/// MUST be escaped as `\"` for `AppleScript` (written `\\\"` in Rust source);
+/// otherwise the `AppleScript` literal ends early and `osascript` fails. The
+/// returned strings are raw shell text (no `AppleScript` wrapper).
+///
+/// Pure string manipulation, so it is compiled (and unit-tested) on every
+/// platform; the privileged scripts themselves are macOS-only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn build_pid_kill_commands(
+    confirmed: &[i32],
+    legacy: &[i32],
+    core_escaped: &str,
+    core_dir_escaped: &str,
+) -> (String, String) {
+    // Identity probe shared by both loops: re-read `comm`, the full `argv` and
+    // the working directory, then reduce them to the two legacy signals. The
+    // basename of `argv[0]` is taken with shell parameter expansion (`=`
+    // context), so it neither splits nor globs a hostile argument list.
+    let probe = concat!(
+        "comm=$(ps -ww -p $p -o comm= 2>/dev/null); ",
+        "args=$(ps -ww -p $p -o args= 2>/dev/null); ",
+        "cwd=$(lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); ",
+        "exe=${args%% *}; base=${exe##*/}; ",
+        "cfg=0; case \\\"$args\\\" in *run_config.yaml|*'run_config.yaml '*) cfg=1;; esac; ",
+        "named=0; ",
+        "if [ \\\"$base\\\" = 'mihomo' ] || [ \\\"$base\\\" = 'zephyr-mihomo' ]; then named=1; fi; ",
+    );
+    let join_pids = |pids: &[i32]| {
+        pids.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    // The working directory only authorises a kill together with the legacy
+    // launch identity: a recycled PID that merely happens to sit in the core
+    // directory must not be terminated.
+    let cwd_ok = format!(
+        "if [ \\\"$cwd\\\" = '{core_dir_escaped}' ] && [ \\\"$cfg\\\" = 1 ] && [ \\\"$named\\\" = 1 ]; then ok=1; fi; "
+    );
+    let kill_tail = "if [ \\\"$ok\\\" = 1 ]; then kill -9 $p 2>/dev/null && killed=1; fi; done;";
+
+    let confirmed_cmd = if confirmed.is_empty() {
+        String::new()
+    } else {
+        // Discovery confirms a PID by `comm` or by `argv[0]` equal to the
+        // managed path (a relative launch's `comm` can differ), so both count.
+        let comm_ok = format!(
+            "if [ \\\"$comm\\\" = '{core_escaped}' ] || [ \\\"$exe\\\" = '{core_escaped}' ]; then ok=1; fi; "
+        );
+        format!(
+            "for p in {}; do {} ok=0; {} {} {}",
+            join_pids(confirmed),
+            probe,
+            comm_ok,
+            cwd_ok,
+            kill_tail
+        )
+    };
+    let legacy_cmd = if legacy.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "for p in {}; do {} ok=0; {} {}",
+            join_pids(legacy),
+            probe,
+            cwd_ok,
+            kill_tail
+        )
+    };
+    (confirmed_cmd, legacy_cmd)
+}
+
+/// Compose the privileged script that terminates this app's managed root core.
+///
+/// The script re-verifies each PID immediately before SIGKILL (confirmed PIDs
+/// must still show the managed executable; otherwise the legacy launch identity
+/// must still hold — core directory as working directory plus argv[0] named
+/// `mihomo`/`zephyr-mihomo` and the managed `run_config.yaml` argument — `lsof`
+/// works here because the script runs as root), then removes the TUN routes.
+/// Returns `None` when there is nothing to kill.
+///
+/// The snippets are embedded into `do shell script "..."`, an `AppleScript` string
+/// literal delimited by double quotes, so every literal `"` inside them MUST be
+/// escaped as `\"` for `AppleScript`; otherwise the literal ends early and
+/// `osascript` fails with a syntax error. Covered by
+/// `test_managed_root_kill_script_escapes_applescript_quotes`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn build_managed_root_kill_script(
+    exe: &std::path::Path,
+    confirmed: &[i32],
+    candidates: &[i32],
+) -> Option<String> {
+    if confirmed.is_empty() && candidates.is_empty() {
+        return None;
+    }
+    let core_escaped = shell_escape_single(&exe.to_string_lossy());
+    let core_dir_escaped = shell_escape_single(&exe.parent().unwrap_or(exe).to_string_lossy());
+    let (confirmed_cmd, legacy_cmd) =
+        build_pid_kill_commands(confirmed, candidates, &core_escaped, &core_dir_escaped);
+    let mut parts: Vec<String> = Vec::new();
+    if !confirmed_cmd.is_empty() {
+        parts.push(confirmed_cmd);
+    }
+    if !legacy_cmd.is_empty() {
+        parts.push(legacy_cmd);
+    }
+    // Tear down the split-default routes only when a loop above actually
+    // terminated an app-owned core. A legacy candidate whose working directory
+    // is not the app's core directory (a foreign root core) is skipped, and
+    // removing its routes would break that unrelated service's TUN.
+    Some(format!(
+        r#"do shell script "killed=0; {body} sleep 0.3; if [ \"$killed\" = 1 ]; then route delete 0.0.0.0/1 2>/dev/null; route delete 128.0.0.0/1 2>/dev/null; fi; true" with administrator privileges"#,
+        body = parts.join(" ")
+    ))
+}
+
+/// Kill only root-owned processes running this app's managed core (matched by
+/// PID), leaving unrelated root mihomo services untouched. Also cleans up TUN
+/// interface and routes. Returns `Ok(())` when no managed root process exists.
+///
+/// The PID list is collected before the authorization dialog, so the script
+/// re-verifies each PID immediately before sending SIGKILL:
+/// - confirmed PIDs must still show the managed executable in `ps comm` or
+///   as `argv[0]`;
+/// - otherwise the legacy launch identity must still hold: the app's core
+///   directory as working directory (verified with `lsof`, which runs with
+///   privileges here and can therefore read root processes) together with an
+///   `argv[0]` named `mihomo`/`zephyr-mihomo` and a `run_config.yaml` argument.
 #[cfg(target_os = "macos")]
-pub fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
-    if !has_root_mihomo() {
-        return Ok(()); // No root mihomo, silently return
+pub fn kill_managed_root_mihomo_as_root(
+    managed_exe_path: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let Some(exe) = managed_exe_path else {
+        return Ok(());
+    };
+    let confirmed = managed_root_mihomo_pids(Some(exe));
+    let candidates = legacy_candidate_pids();
+    let Some(script) = build_managed_root_kill_script(exe, &confirmed, &candidates) else {
+        return Ok(());
+    };
+    let result = run_privileged_shell_script(&script);
+    if result.is_ok() {
+        // The script re-verified every candidate as root while it had the
+        // privileges to do so. Remember them so a candidate that was skipped as
+        // foreign does not prompt again on the next start, while a genuinely new
+        // PID still triggers.
+        remember_privileged_legacy_checked(&candidates);
     }
-    kill_all_mihomo_as_root()
+    result
 }
 
 #[cfg(not(target_os = "macos"))]
-pub const fn smart_kill_all_mihomo_as_root() -> Result<(), String> {
+pub const fn kill_managed_root_mihomo_as_root(
+    _managed_exe_path: Option<&std::path::Path>,
+) -> Result<(), String> {
     Ok(())
 }
 
-/// Tauri command to kill all mihomo with root privileges
+/// Longest wait for a terminated managed root core to disappear before the
+/// termination is reported as failed.
+#[cfg(target_os = "macos")]
+const ROOT_KILL_VERIFY_TIMEOUT_MS: u32 = 8000;
+
+/// Terminate this app's managed root core and confirm that it is gone.
+///
+/// [`kill_managed_root_mihomo_as_root`] only reports whether the privileged
+/// *script* ran: the script suppresses per-PID kill failures (`2>/dev/null`) and
+/// always exits successfully, so `Ok(())` is not proof that the process died.
+/// A caller that trusted it would clear the TUN flag while the root core keeps
+/// running and holding the configured ports.
+///
+/// Only the executable-confirmed set can block here. A legacy candidate's
+/// working directory cannot be read without privileges, so it may be a foreign
+/// root core that the script deliberately skipped; treating it as "still
+/// running" would make an unrelated service block the caller.
+///
+/// The scan is blocking; run it on a blocking task.
+#[cfg(target_os = "macos")]
+pub fn kill_managed_root_mihomo_as_root_verified(
+    managed_exe_path: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let script_result = kill_managed_root_mihomo_as_root(managed_exe_path);
+    // A script failure (most often a cancelled authorization prompt) only
+    // matters when this app's own managed core is confirmed alive. When only
+    // unverified legacy candidates triggered the prompt, the script skipped
+    // them and the caller must not fail — otherwise a foreign root core (e.g.
+    // another install) would break startup, TUN disable and stop.
+    if let Err(err) = script_result {
+        if has_confirmed_root_mihomo(managed_exe_path) {
+            return Err(err);
+        }
+    }
+    wait_for_confirmed_root_exit(managed_exe_path)
+}
+
+/// Wait until no executable-confirmed managed root core remains, or fail after
+/// [`ROOT_KILL_VERIFY_TIMEOUT_MS`]. Blocking.
+#[cfg(target_os = "macos")]
+fn wait_for_confirmed_root_exit(managed_exe_path: Option<&std::path::Path>) -> Result<(), String> {
+    let mut waited = 0;
+    while has_confirmed_root_mihomo(managed_exe_path) {
+        if waited > ROOT_KILL_VERIFY_TIMEOUT_MS {
+            return Err("Root mihomo still running after termination".to_owned());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        waited += 200;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub const fn kill_managed_root_mihomo_as_root_verified(
+    _managed_exe_path: Option<&std::path::Path>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+/// Tauri command to terminate this app's managed core with root privileges.
+///
+/// Scoped to app-owned processes: an unrelated root mihomo service must never
+/// be killed.
 #[tauri::command]
-pub fn kill_all_mihomo_as_root_cmd(_app: tauri::AppHandle) -> Result<(), String> {
-    kill_all_mihomo_as_root()
+#[allow(clippy::needless_pass_by_value)]
+pub async fn kill_all_mihomo_as_root_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    let exe = super::core_process::managed_core_exe_path(&app);
+    // Async + `spawn_blocking`: a synchronous command runs on the main thread,
+    // and the privileged script waits for the administrator dialog (up to 30s),
+    // which would freeze the window for that whole time. The verified variant
+    // also confirms the core is actually gone instead of merely assuming it.
+    tokio::task::spawn_blocking(move || kill_managed_root_mihomo_as_root_verified(exe.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Tauri command to disable TUN mode (clears flag and kills root mihomo)
 /// Only available on macOS - TUN requires root on macOS
 #[tauri::command]
 #[cfg(target_os = "macos")]
-pub fn disable_tun_cmd(_app: tauri::AppHandle) -> Result<(), String> {
+pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<bool, String> {
+    // Scope the privileged cleanup to this app's managed core: unrelated root
+    // mihomo services must never be killed, and a self-restarting external
+    // service must not be able to block TUN from being disabled.
+    //
+    // Unlike the start/stop paths, a failed privileged run (most often a
+    // cancelled administrator dialog) always fails the disable. The script only
+    // runs when there is a candidate to re-verify, and an unconfirmed legacy
+    // candidate may be this app's own core launched by an older version: only
+    // the script can tell, so without it TUN must not be recorded as off. The
+    // user cancelled, so reporting a cancelled disable is accurate either way.
+    let managed_exe = super::core_process::managed_core_exe_path(&app);
+    tokio::task::spawn_blocking(move || {
+        kill_managed_root_mihomo_as_root(managed_exe.as_deref())?;
+        wait_for_confirmed_root_exit(managed_exe.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
     set_tun_mode(false);
-    kill_all_mihomo_as_root()?;
-
-    // Wait for ALL root processes (including osascript shell) to die
-    let mut waited = 0;
-    loop {
-        let has_root_process = std::process::Command::new("sh")
-            .args(["-c", "ps aux | grep -E 'mihomo|osascript.*mihomo|sleep.*mihomo' | grep root | grep -v grep"])
-            .output()
-            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-            .unwrap_or(false);
-
-        if !has_root_process || waited > 8000 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        waited += 200;
-    }
-
-    Ok(())
+    // Only the preference is recorded: the frontend restarts the core next, and
+    // every start regenerates `run_config.yaml` from it. Nothing after the kill
+    // may fail the command: the frontend reads an error as a cancelled disable,
+    // which would leave no core while the UI showed TUN on. A failed preference
+    // write is returned as `false` so the UI can warn about it instead.
+    Ok(record_tun_disabled(&app))
 }
 
 /// Tauri command to disable TUN mode on non-macOS platforms
@@ -586,6 +1489,46 @@ pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
     // On Windows/Linux, TUN is handled via config change, no need for root kill
     // Just update the config
     set_tun_enabled_internal(&app, false)
+}
+
+/// Persist the `tun_enabled` preference in `settings.json` (never touches
+/// `run_config.yaml`), so the next launch reads a value that matches what is
+/// actually running.
+///
+/// Persists and publishes while holding the settings lock, the same order
+/// `save_settings` / `patch_settings` use: a concurrent writer cannot land in
+/// between, and a failed write leaves memory unchanged.
+pub fn sync_tun_settings(app: &AppHandle, enable: bool) -> Result<(), String> {
+    crate::commit_settings(app, |s| s.tun_enabled = Some(enable))
+}
+
+/// Record TUN as off after the root core is already gone.
+///
+/// Used where TUN has *already* stopped (a verified disable, a failed TUN
+/// start), so a failed `settings.json` write cannot be reported as "TUN still
+/// on". The in-memory preference is set to `false` even then, so the restart
+/// that follows in this session takes the non-TUN path instead of prompting for
+/// administrator rights again; the failed write is surfaced as a warning.
+///
+/// Returns whether the preference reached `settings.json`.
+#[must_use]
+pub fn record_tun_disabled(app: &AppHandle) -> bool {
+    let Err(err) = sync_tun_settings(app, false) else {
+        return true;
+    };
+    let state = app.state::<crate::SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.tun_enabled = Some(false);
+    drop(guard);
+    crate::emit_warn!(
+        Config,
+        CONFIG_PERSIST_FAILED,
+        "TUN is off, but saving that to settings failed: {err}"
+    );
+    false
 }
 
 /// Update TUN enable setting in `run_config.yaml` (without restarting core)
@@ -605,6 +1548,15 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
     write_file_secure(&config_file, &updated)
         .map_err(|e| format!("Failed to write config: {e}"))?;
 
+    if let Err(e) = sync_tun_settings(app, enable) {
+        // Settings persistence failed after the YAML was already updated.
+        // Roll the YAML back so the two files cannot disagree; if the rollback
+        // itself fails, surface the original error (the next start reconciles
+        // from the authoritative settings).
+        let _ = write_file_secure(&config_file, &content);
+        return Err(e);
+    }
+
     Ok(())
 }
 
@@ -613,6 +1565,35 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
 #[allow(clippy::needless_pass_by_value)]
 pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
     set_tun_enabled_internal(&app, enable)
+}
+
+/// Record the TUN preference after a caller has already applied TUN to the core.
+///
+/// [`set_tun_enabled`] is the command for "make the core like this"; this one is
+/// for the flows that have already done that themselves — the privileged
+/// macOS restart, the non-macOS config patch, the Linux permission-gated
+/// restart — and only need the setting recorded. It deliberately does not touch
+/// `run_config.yaml`, so it cannot undo a change those flows made.
+///
+/// It exists so `patch_settings` can reject a non-null `tun_enabled`: a generic
+/// settings write is not aware that the flag describes the *running* core, and a
+/// stale or racing one could persist a value that disagrees with it. macOS
+/// startup reads this flag to choose the TUN path.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
+    // Every caller records `false` after TUN has already stopped.
+    // `record_tun_disabled` switches this session to the non-TUN path even when
+    // the write fails; the error only tells the caller to warn that the saved
+    // preference is stale, so the next launch could bring TUN back.
+    if !enable {
+        return if record_tun_disabled(&app) {
+            Ok(())
+        } else {
+            Err("TUN is off, but saving that preference failed".to_owned())
+        };
+    }
+    sync_tun_settings(&app, true)
 }
 
 /// Initialize TUN mode flag from config file (call at app startup)
@@ -648,7 +1629,63 @@ pub async fn restart_core_as_root_cmd(
     app: tauri::AppHandle,
     enable_tun: bool,
 ) -> Result<String, String> {
-    restart_core_as_root(&app, enable_tun).await
+    let secret = restart_core_as_root(&app, enable_tun).await.map_err(|e| {
+        // Preserve the "script ran" classification across the string boundary.
+        // `root_start_failed` is what makes the frontend run its recovery: for
+        // these variants the script already killed the user's core, so reporting
+        // a plain message would leave a stopped core behind a misleading
+        // "Authorization failed". The human-readable detail is kept as a suffix.
+        if e.script_ran() {
+            format!("{}: {}", ROOT_START_FAILED_MARKER, e.message())
+        } else {
+            e.to_string()
+        }
+    })?;
+    adopt_toggled_root_core(&app, &secret).await;
+    Ok(secret)
+}
+
+/// Point `MihomoState` at the root core a TUN toggle just started.
+///
+/// The privileged script killed the tracked unprivileged child and started a
+/// root core on `run_config.yaml`. The controller port and proxy endpoint are
+/// re-read from that file rather than kept: a core that crashed before the
+/// toggle has had them cleared, and without them status reports the core as
+/// stopped, the next non-forced start cannot reuse the root core (and prompts
+/// for administrator rights again), and the system proxy has no endpoint.
+#[cfg(target_os = "macos")]
+async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
+    let tracked = {
+        let state = app.state::<super::MihomoState>();
+        let mut guard = crate::backend_event::lock_best_effort(&state.0);
+        let child = guard.take_process();
+        drop(guard);
+        child
+    };
+    if let Some(child) = tracked {
+        let _ = tokio::task::spawn_blocking(move || {
+            super::core_process::terminate_child_process(child);
+        })
+        .await;
+    }
+    let run_config = resolve_app_paths(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p.core_dir.join("run_config.yaml")).ok());
+    let state = app.state::<super::MihomoState>();
+    let mut guard = crate::backend_event::lock_best_effort(&state.0);
+    if let Some(content) = run_config {
+        guard.set_last_proxy_endpoint(super::core_process::extract_configured_proxy_endpoint(
+            &content,
+        ));
+        guard.set_last_port(Some(zephyr_core::process::parse_external_controller_port(
+            content,
+        )));
+    }
+    guard.set_last_secret(secret.to_owned());
+    guard.set_last_custom_args(None);
+    guard.set_last_log_path(Some(get_tun_log_path()));
+    guard.set_started_at(Some(std::time::Instant::now()));
+    drop(guard);
 }
 
 /// On non-macOS platforms, this is a no-op
