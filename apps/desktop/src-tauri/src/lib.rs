@@ -739,12 +739,22 @@ fn save_settings(
     state: tauri::State<SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
-    {
+    if let Some(m) = &settings.mode {
+        if !matches!(m.as_str(), "rule" | "global" | "direct") {
+            return Err(format!("Invalid mode: {m}"));
+        }
+    }
+    let mode_changed = {
         let mut guard = state
             .0
             .lock()
             .map_err(|e| format!("Settings lock failed: {e}"))?;
+        let changed = guard.mode != settings.mode;
         *guard = settings.clone();
+        changed
+    };
+    if mode_changed {
+        core_manager::core::subscription::notify_user_mode_changed();
     }
     persist_settings(&app, &settings)
 }
@@ -777,6 +787,21 @@ fn patch_settings(
                     return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
                 }
             }
+            // Validate mode before mutating state to match save_settings validation
+            if let Some(v) = map.get("mode") {
+                if !v.is_null() {
+                    match serde_json::from_value::<String>(v.clone()) {
+                        Ok(val) => {
+                            if !matches!(val.as_str(), "rule" | "global" | "direct") {
+                                return Err(format!("Invalid mode: {val}"));
+                            }
+                        }
+                        Err(_) => {
+                            return Err("Invalid mode: expected string or null".to_owned());
+                        }
+                    }
+                }
+            }
             macro_rules! patch_field {
                 ($field:ident) => {
                     if let Some(v) = map.get(stringify!($field)) {
@@ -796,7 +821,24 @@ fn patch_settings(
                 };
             }
             patch_field!(theme);
-            patch_field!(mode);
+            if let Some(v) = map.get("mode") {
+                if v.is_null() {
+                    let mode_changed = guard.mode.is_some();
+                    guard.mode = None;
+                    modified = true;
+                    if mode_changed {
+                        core_manager::core::subscription::notify_user_mode_changed();
+                    }
+                } else if let Ok(val) = serde_json::from_value::<String>(v.clone()) {
+                    let new_mode = Some(val);
+                    let mode_changed = guard.mode != new_mode;
+                    guard.mode = new_mode;
+                    modified = true;
+                    if mode_changed {
+                        core_manager::core::subscription::notify_user_mode_changed();
+                    }
+                }
+            }
             patch_field!(tun_enabled);
             patch_field!(mixed_port);
             patch_field!(socks_port);
@@ -1237,6 +1279,11 @@ fn write_frontend_log(level: String, source: String, message: String) -> Result<
 #[allow(clippy::needless_pass_by_value)]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+#[tauri::command]
+fn notify_user_node_changed() {
+    core_manager::core::subscription::notify_user_node_changed();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1702,6 +1749,7 @@ invalidate_heartbeat(window.app_handle());
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            notify_user_node_changed,
             heartbeat,
 write_frontend_log,
             // Prism Engine commands

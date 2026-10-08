@@ -374,7 +374,7 @@ pub async fn rule_import_url(
     state.check_rate_limit("rule_import_url")?;
 
     // Use unified fetch function for consistent security measures
-    let raw = fetch_url_content(&url, None).await?;
+    let raw = fetch_url_content(&url, Some(&state.app)).await?;
 
     let content = normalize_to_prism_yaml(&raw);
     if content.is_empty() {
