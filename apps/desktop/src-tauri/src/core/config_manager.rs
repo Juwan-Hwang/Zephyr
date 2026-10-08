@@ -503,6 +503,20 @@ fn write_config_file_inner(
     if config_file_name == "run_config.yaml" {
         write_file_secure(&resolved_path, &content)?;
     } else {
+        // Reading the flag and writing the file under the same guard is what
+        // makes the save safe: `patch_settings`' encryption batch holds this
+        // lock while it rewrites every profile, so without it a save could land
+        // between the batch's read of this file and its write of it, and the
+        // batch would then overwrite the saved content with its stale copy.
+        //
+        // Taken *before* the settings lock, matching `patch_settings`, which
+        // reads the authoritative value under that lock while holding this one.
+        // The reverse order would deadlock the two.
+        let Ok(transform_guard) = crate::PROFILE_CRYPTO_TRANSFORM.lock() else {
+            return Err(
+                "Failed to save profile: the profile encryption lock was poisoned".to_owned(),
+            );
+        };
         let encrypt = {
             let settings_state = app.state::<crate::SettingsState>();
             let settings = settings_state
@@ -512,6 +526,7 @@ fn write_config_file_inner(
             settings.encrypt_configs
         };
         write_profile_file(&resolved_path, &content, encrypt)?;
+        drop(transform_guard);
     }
 
     Ok("Config saved".to_owned())

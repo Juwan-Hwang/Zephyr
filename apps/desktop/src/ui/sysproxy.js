@@ -104,7 +104,17 @@ async function _doSetSysProxyEnabled(enabled) {
     if (enabled) {
         /** @type {Record<string, any>} */
         const currentConfig = await getConfig();
-        const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port || currentConfig?.['socks-port'] || 7890;
+        // Only `mixed-port` / `port`: the system HTTP and HTTPS settings need an
+        // HTTP listener. Falling back to `socks-port` — or to a hardcoded 7890 —
+        // would hand the OS an address it cannot use as an HTTP proxy, breaking
+        // HTTP traffic in every other application. This mirrors the guard the
+        // tray's System Proxy action applies.
+        const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port;
+        if (!currentPort) {
+            throw new Error(
+                'System proxy not enabled: the core exposes no HTTP proxy port. Enable a mixed or HTTP port in the profile.'
+            );
+        }
         await invoke(COMMANDS.ENABLE_SYSPROXY, {
             server: `127.0.0.1:${currentPort}`,
             bypass: null,
