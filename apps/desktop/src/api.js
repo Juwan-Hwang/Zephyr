@@ -568,6 +568,15 @@ export async function getProxiesMerged(existingData) {
  */
 export async function switchProxy(group, name) {
   try {
+    // GLOBAL switches go through the backend so the user-change generation is
+    // bumped under the restore lock; otherwise an in-flight fallback restore
+    // could silently overwrite the user's selection. Only the reserved GLOBAL
+    // group (exact name) uses this path; user-defined groups named e.g.
+    // "Global" keep the direct HTTP PUT.
+    if (group === 'GLOBAL') {
+      await invoke('switch_global_node', { name });
+      return true;
+    }
     const res = await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
       method: 'PUT',
       body: JSON.stringify({ name }),

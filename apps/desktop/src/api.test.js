@@ -300,12 +300,52 @@ describe('getProxies', () => {
 });
 
 describe('switchProxy', () => {
+    it('routes GLOBAL switches through the backend IPC', async () => {
+        // Tauri IPC is unavailable in the test environment, so the GLOBAL path
+        // fails closed and never issues a direct HTTP PUT to the core.
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('fetch', fetchSpy);
+
+        const result = await switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(false);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+    });
+
+    it('invokes switch_global_node when IPC is available', async () => {
+        // Provide IPC before importing api.js (the bridge is captured at module
+        // load), then verify the command name and arguments.
+        const invokeSpy = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: invokeSpy,
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+
+        const result = await api.switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(true);
+        expect(invokeSpy).toHaveBeenCalledWith('switch_global_node', { name: 'Auto' });
+
+        // A user-defined group named "Global" is not the reserved GLOBAL group
+        // and keeps the direct HTTP path.
+        const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
+        vi.stubGlobal('fetch', fetchSpy);
+        const otherResult = await api.switchProxy('Global', 'Node1');
+        expect(otherResult).toBe(true);
+        expect(fetchSpy).toHaveBeenCalled();
+        expect(invokeSpy).toHaveBeenCalledTimes(1);
+
+        vi.unstubAllGlobals();
+        vi.resetModules();
+    });
+
     it('returns true on success', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: true,
         }));
 
-        const result = await switchProxy('GLOBAL', 'Auto');
+        const result = await switchProxy('Proxy', 'Auto');
         expect(result).toBe(true);
         vi.unstubAllGlobals();
     });
@@ -317,7 +357,7 @@ describe('switchProxy', () => {
             statusText: 'Not Found',
         }));
 
-        await expect(switchProxy('GLOBAL', 'Bad')).rejects.toThrow();
+        await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
 });
