@@ -37,10 +37,11 @@ use core_manager::{
     decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
     encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_uptime,
     get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
-    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
-    open_config_folder, open_log_folder, read_config_file, rename_config, restart_core_as_root_cmd,
-    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
-    update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
+    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_managed_root_mihomo_as_root,
+    kill_mihomo, list_configs, open_config_folder, open_log_folder, read_config_file,
+    rename_config, restart_core_as_root_cmd, set_tun_enabled, start_core, stop_core,
+    update_config_url, update_subscription_interval, update_subscription_ua, write_config_file,
+    CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -739,6 +740,11 @@ fn save_settings(
     state: tauri::State<SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
+    if let Some(m) = &settings.mode {
+        if !matches!(m.as_str(), "rule" | "global" | "direct") {
+            return Err(format!("Invalid mode: {m}"));
+        }
+    }
     {
         let mut guard = state
             .0
@@ -746,6 +752,11 @@ fn save_settings(
             .map_err(|e| format!("Settings lock failed: {e}"))?;
         *guard = settings.clone();
     }
+    // NOTE: no generation bump here. Settings-only writes do not change the live
+    // core mode; user-initiated mode changes go through `switch_mode`, which
+    // performs the live PUT and bumps `USER_MODE_GENERATION` under the restore
+    // lock. A settings-path bump would make a concurrent fallback restore skip
+    // its restore and leave the temporary mode active.
     persist_settings(&app, &settings)
 }
 
@@ -777,6 +788,21 @@ fn patch_settings(
                     return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
                 }
             }
+            // Validate mode before mutating state to match save_settings validation
+            if let Some(v) = map.get("mode") {
+                if !v.is_null() {
+                    match serde_json::from_value::<String>(v.clone()) {
+                        Ok(val) => {
+                            if !matches!(val.as_str(), "rule" | "global" | "direct") {
+                                return Err(format!("Invalid mode: {val}"));
+                            }
+                        }
+                        Err(_) => {
+                            return Err("Invalid mode: expected string or null".to_owned());
+                        }
+                    }
+                }
+            }
             macro_rules! patch_field {
                 ($field:ident) => {
                     if let Some(v) = map.get(stringify!($field)) {
@@ -796,7 +822,19 @@ fn patch_settings(
                 };
             }
             patch_field!(theme);
-            patch_field!(mode);
+            // NOTE: no generation bump for settings-only mode writes. User
+            // mode changes go through `switch_mode` (live PUT + bump under the
+            // restore lock); a settings-path bump would make a concurrent
+            // fallback restore skip its restore and strand the temp mode.
+            if let Some(v) = map.get("mode") {
+                if v.is_null() {
+                    guard.mode = None;
+                    modified = true;
+                } else if let Ok(val) = serde_json::from_value::<String>(v.clone()) {
+                    guard.mode = Some(val);
+                    modified = true;
+                }
+            }
             patch_field!(tun_enabled);
             patch_field!(mixed_port);
             patch_field!(socks_port);
@@ -1237,6 +1275,26 @@ fn write_frontend_log(level: String, source: String, message: String) -> Result<
 #[allow(clippy::needless_pass_by_value)]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+/// Switch the GLOBAL proxy group selection on behalf of the user.
+///
+/// Runs the selection change under the restore lock together with the
+/// user-change generation bump, so an in-flight fallback restore cannot
+/// overwrite the user's choice.
+#[tauri::command]
+async fn switch_global_node(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_global_node(&app, &name).await
+}
+
+/// Switch the proxy mode on behalf of the user.
+///
+/// Runs the mode change under the restore lock together with the user-mode
+/// generation bump, so an in-flight fallback restore cannot overwrite the
+/// user's choice.
+#[tauri::command]
+async fn switch_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_mode(&app, &mode).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1702,6 +1760,8 @@ invalidate_heartbeat(window.app_handle());
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            switch_global_node,
+            switch_mode,
             heartbeat,
 write_frontend_log,
             // Prism Engine commands
@@ -1842,8 +1902,13 @@ write_frontend_log,
                     scheduler_state.shutdown();
                 }
                 kill_mihomo();
-                // Smart kill: only prompts for password if there's actually a root mihomo running
-                let _ = smart_kill_all_mihomo_as_root();
+                // Clean up only this app's managed core (root- and user-owned):
+                // an unrelated root mihomo service must survive the app exit.
+                let _ = kill_managed_root_mihomo_as_root(
+                    core_manager::core::core_process::get_core_exe_path(handle)
+                        .ok()
+                        .as_deref(),
+                );
             }
             tauri::RunEvent::Resumed => {
                 // System woke up from sleep. The mihomo core's TCP connections
