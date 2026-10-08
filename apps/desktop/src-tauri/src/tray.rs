@@ -14,7 +14,8 @@ use tauri::{
     AppHandle, Manager as _,
 };
 
-use crate::core_manager::{MihomoState, DEFAULT_MIXED_PORT};
+use crate::core_manager::core::ProxyEndpoint;
+use crate::core_manager::MihomoState;
 use crate::sys_proxy;
 
 /// Tray menu state for tracking check states
@@ -273,8 +274,11 @@ pub(crate) const fn resolve_proxy_format(format: &str) -> &str {
 /// PowerShell/NuShell are cross-platform; on macOS/Linux env vars are case-sensitive,
 /// so both lowercase and uppercase are set for compatibility.
 #[must_use]
-pub(crate) fn format_proxy_env(format: &str, port: u16) -> String {
-    let proxy = format!("http://127.0.0.1:{port}");
+pub(crate) fn format_proxy_env(format: &str, endpoint: ProxyEndpoint) -> String {
+    // Use the scheme the listener actually speaks. A configuration exposing only
+    // `socks-port` has no HTTP listener, so emitting `http://` variables here
+    // would hand the user a proxy setting that cannot connect.
+    let proxy = format!("{}://127.0.0.1:{}", endpoint.scheme, endpoint.port);
     match format.to_ascii_lowercase().as_str() {
         "fish" => format!(
             "set -x http_proxy {proxy}; set -x https_proxy {proxy}; set -x all_proxy {proxy}; set -x HTTP_PROXY {proxy}; set -x HTTPS_PROXY {proxy}; set -x ALL_PROXY {proxy}"
@@ -309,18 +313,18 @@ fn copy_proxy_env_to_clipboard(app: &AppHandle) -> Result<(), String> {
         .copy_env_format
         .clone();
 
-    // Get proxy port from core state
+    // Get the managed proxy endpoint (port *and* scheme) from core state
     let mihomo_state = app.state::<MihomoState>();
-    let port = mihomo_state
+    let endpoint = mihomo_state
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .last_proxy_port()
-        .unwrap_or(DEFAULT_MIXED_PORT);
+        .last_proxy_endpoint()
+        .ok_or_else(|| "No managed proxy endpoint is configured; nothing to copy".to_owned())?;
 
     // Resolve format: fall back to platform-appropriate default if empty
     let resolved_format = resolve_proxy_format(&format);
-    let text = format_proxy_env(resolved_format, port);
+    let text = format_proxy_env(resolved_format, endpoint);
 
     // Write to clipboard using arboard (cross-platform)
     let mut cb = arboard::Clipboard::new().map_err(|e| format!("Clipboard access failed: {e}"))?;
@@ -406,16 +410,30 @@ fn toggle_sys_proxy(app: &AppHandle) {
     let result = if current {
         sys_proxy::disable_sysproxy(app.clone())
     } else {
-        // Get the current PROXY port from core state (not the API port)
+        // Get the managed proxy endpoint (port *and* scheme) from core state
+        // (not the API port)
         let state = app.state::<MihomoState>();
-        let port = state
+        let endpoint = state
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .last_proxy_port()
-            .unwrap_or(DEFAULT_MIXED_PORT);
-        let server = format!("127.0.0.1:{port}");
-        sys_proxy::enable_sysproxy(app.clone(), server, None)
+            .last_proxy_endpoint();
+        let Some(proxy_endpoint) = endpoint else {
+            // No managed proxy endpoint: enabling the OS proxy would point it at
+            // an unmanaged default port with nothing listening.
+            //
+            // `error`, not `warn`: the frontend only surfaces `error`/`fatal`
+            // events as a toast, so a warning leaves the user clicking a menu
+            // item that silently refuses and does nothing.
+            emit_error!(
+                System,
+                SYS_PROXY_TOGGLE_FAILED,
+                "System proxy not enabled: no managed proxy endpoint is configured"
+            );
+            rebuild_tray_menu_from_state(app);
+            return;
+        };
+        sys_proxy::enable_sysproxy(app.clone(), proxy_endpoint.host_port(), None)
     };
 
     if let Err(e) = result {

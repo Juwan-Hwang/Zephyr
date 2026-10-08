@@ -6,13 +6,13 @@
  * and executes the corresponding UI actions.
  */
 
-import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections } from '../api.js';
-import { saveSetting } from './settings-helpers.js';
+import { listen, invoke, getCurrentWindow, closeAllConnections } from '../api.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { toggleSysProxy } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
+import { invalidateSettingsCache } from './cache.js';
 import { updateModeUI } from './modes.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -568,8 +568,16 @@ async function switchMode(/** @type {string} */ mode) {
     const lang = localStorage.getItem('lang') || 'en';
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
-        await patchConfig({ mode });
-        await saveSetting('mode', mode);
+        // Route through the backend so the user-mode generation bump happens
+        // under the restore lock; an in-flight fallback restore must not
+        // overwrite the user's choice. The backend persists the accepted mode
+        // to settings.json itself.
+        await invoke('switch_mode', { mode });
+        // The backend writes settings.json, so drop the cached snapshot: readers
+        // such as proxies.js / console-home.js take the mode from
+        // `getSettingsCached()` and would otherwise keep the previous value
+        // until the cache TTL expires.
+        invalidateSettingsCache();
         await closeAllConnections();
         const modeNames = /** @type {Record<string, string>} */ ({ rule: t.modeRule || 'Rule', global: t.modeGlobal || 'Global', direct: t.modeDirect || 'Direct' });
         showNotification(`${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`, 'success');
@@ -579,6 +587,10 @@ async function switchMode(/** @type {string} */ mode) {
         updateTrayMenu().catch(() => {});
     } catch (err) {
         showNotification(`${t.modeSwitchFailed || 'Mode switch failed'}: ${err}`, 'error');
+        // The backend can apply the mode to the core and still fail (e.g. the
+        // settings write failed after the core PUT), so reconcile the buttons
+        // with the live core instead of leaving the previous mode highlighted.
+        import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
     } finally {
         _actionLock = false;
     }
