@@ -38,13 +38,68 @@ pub struct ConfigInfo {
     pub user_agent: Option<String>,
 }
 
+/// The protocol a managed proxy listener speaks.
+///
+/// An enum rather than a string so the HTTP-only decisions (the system proxy
+/// action) cannot be broken by a typo or a drifting literal: a `!= "http"`
+/// comparison against a misspelled value would silently accept SOCKS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyScheme {
+    /// `mixed-port` / `port`: an HTTP (or mixed) listener.
+    Http,
+    /// `socks-port`: a SOCKS listener, which cannot serve HTTP proxy requests.
+    Socks5h,
+}
+
+impl ProxyScheme {
+    /// URL scheme for this protocol, as it appears in proxy URLs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Socks5h => "socks5h",
+        }
+    }
+
+    /// Whether this protocol can serve HTTP proxy requests, which is what the
+    /// system proxy settings require.
+    #[must_use]
+    pub const fn serves_http(self) -> bool {
+        matches!(self, Self::Http)
+    }
+}
+
+/// The managed proxy endpoint: the port the core listens on plus the scheme that
+/// listener actually speaks.
+///
+/// The scheme is not cosmetic. `mixed-port`/`port` speak HTTP, but a
+/// configuration that exposes only `socks-port` speaks SOCKS, and advertising
+/// such an endpoint as `http://` produces a proxy setting that cannot connect —
+/// the copy-env variables and the system proxy would both point HTTP traffic at
+/// a SOCKS listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProxyEndpoint {
+    /// The configured listener port.
+    pub port: u16,
+    /// The protocol the matched listener speaks.
+    pub scheme: ProxyScheme,
+}
+
+impl ProxyEndpoint {
+    /// The endpoint as `host:port`, the form system proxy settings take.
+    #[must_use]
+    pub fn host_port(self) -> String {
+        format!("127.0.0.1:{}", self.port)
+    }
+}
+
 pub struct CoreData {
     process: Option<Child>,
     last_secret: String,
     last_config_path: Option<String>,
     last_custom_args: Option<Vec<String>>,
     last_port: Option<u16>,
-    last_proxy_port: Option<u16>,
+    last_proxy_endpoint: Option<ProxyEndpoint>,
     last_log_path: Option<String>,
     /// Monotonic time when mihomo process was spawned (None if not started).
     started_at: Option<std::time::Instant>,
@@ -65,7 +120,7 @@ impl CoreData {
             last_config_path: None,
             last_custom_args: None,
             last_port: None,
-            last_proxy_port: None,
+            last_proxy_endpoint: None,
             last_log_path: None,
             started_at: None,
         }
@@ -99,8 +154,8 @@ impl CoreData {
         self.last_port
     }
     #[must_use]
-    pub const fn last_proxy_port(&self) -> Option<u16> {
-        self.last_proxy_port
+    pub const fn last_proxy_endpoint(&self) -> Option<ProxyEndpoint> {
+        self.last_proxy_endpoint
     }
     #[must_use]
     pub fn last_log_path(&self) -> Option<&str> {
@@ -122,8 +177,8 @@ impl CoreData {
     pub const fn set_last_port(&mut self, p: Option<u16>) {
         self.last_port = p;
     }
-    pub const fn set_last_proxy_port(&mut self, p: Option<u16>) {
-        self.last_proxy_port = p;
+    pub const fn set_last_proxy_endpoint(&mut self, p: Option<ProxyEndpoint>) {
+        self.last_proxy_endpoint = p;
     }
     pub fn set_last_log_path(&mut self, p: Option<String>) {
         self.last_log_path = p;
@@ -200,6 +255,7 @@ pub use secure_io::write_file_secure;
 pub use subscription::{download_sub, download_sub_batch, fetch_text};
 pub use tun_manager::{
     disable_tun_cmd, grant_linux_tun_permission, init_tun_mode_from_config, is_tun_mode,
-    is_tun_toggling, kill_all_mihomo_as_root_cmd, release_tun_toggle, restart_core_as_root_cmd,
-    set_tun_enabled, set_tun_mode, smart_kill_all_mihomo_as_root, try_acquire_tun_toggle,
+    is_tun_toggling, kill_all_mihomo_as_root_cmd, kill_managed_root_mihomo_as_root,
+    last_root_core_exe, record_root_core_exe, release_tun_toggle, restart_core_as_root_cmd,
+    set_tun_enabled, set_tun_mode, try_acquire_tun_toggle,
 };
