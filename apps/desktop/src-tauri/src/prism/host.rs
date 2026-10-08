@@ -310,13 +310,25 @@ None => "Config saved. Failed to apply via core REST API (connection or response
     }
 
     fn get_core_info(&self) -> Result<CoreInfo, String> {
+        // One snapshot, so `is_running` and the connection details describe the
+        // same core instance. The TUN-mode check runs after the lock is released.
         let state = self.app.state::<MihomoState>();
         let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+        let started = lock.started_at().is_some();
+        let has_process = lock.process().is_some();
+        let last_port = lock.last_port();
+        let api_secret = lock.last_secret().to_owned();
+        drop(lock);
+        let is_running = crate::core_manager::core::subscription::core_running_from(
+            started,
+            has_process,
+            last_port.is_some(),
+        );
         Ok(CoreInfo {
             version: String::from("unknown"), // async get_core_version unavailable in sync trait
-            api_port: lock.last_port().unwrap_or(9090),
-            api_secret: lock.last_secret().to_owned(),
-            is_running: lock.process().is_some(),
+            api_port: last_port.unwrap_or(9090),
+            api_secret,
+            is_running,
         })
     }
 

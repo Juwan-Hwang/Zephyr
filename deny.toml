@@ -13,7 +13,6 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows
 # advisory IDs.
 # Review by: 2027-12-31
 ignore = [
-  "RUSTSEC-2026-0097",
   # gtk-rs GTK3 bindings — unmaintained; fix requires Tauri GTK4 migration
   "RUSTSEC-2024-0411",
   "RUSTSEC-2024-0412",
@@ -39,10 +38,8 @@ ignore = [
   # They remain in .cargo/audit.toml & osv-scanner.toml (those tools lack
   # an unmaintained setting).
 ]
-# RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
-#   Indirect dependency via clash-prism-script v0.1.3 (latest, still uses rand 0.8)
-#   Our code pins rand = "0.10.1" directly; fix requires clash-prism-script to upgrade rand
-#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
+# RUSTSEC-2026-0097: rand unsound with custom logger — RESOLVED
+#   All locked rand versions (0.8.6, 0.9.4, 0.10.1) are patched; waiver removed.
 #
 # RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki name constraints — RESOLVED
 #   Fixed by rustls-webpki 0.103.13 (>=0.103.12); waivers removed.
