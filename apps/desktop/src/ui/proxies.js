@@ -952,6 +952,10 @@ async function handleFailoverAction(action) {
                     await renderProxies();
                 } catch { /* ignore post-failover errors */ }
             })();
+        } else {
+            // Automatic failover: log the rejected switch rather than raising a
+            // notification, so a failing failover does not spam the user.
+            proxyLogger.warn('Failover switch was not applied');
         }
     } finally {
         _isFailovering = false;
