@@ -1,6 +1,64 @@
 use std::fs;
 use std::path::Path;
 
+/// [`write_file_secure`] through a sibling temporary file and a rename, so a
+/// concurrent reader sees either the old content or the new, never a truncated
+/// file. For files another thread may read while they are rewritten (profiles
+/// during an encryption batch).
+///
+/// Same error contract as `write_file_secure`: when only the permission step
+/// fails, the content is still published and the error is returned.
+pub fn write_file_secure_atomic(path: &Path, content: &str) -> Result<(), String> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    // Hidden, and not ending in `.yaml`, so profile listings and the batches
+    // never pick up a leftover from a crash. Unique per write so two writers to
+    // the same path cannot interleave in one temporary file.
+    let tmp = path.with_file_name(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    if let Err(e) = write_new_private_file(&tmp, content) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Failed to write to {path:?}: {e}"));
+    }
+    let secured = restrict_permissions(&tmp);
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Failed to write to {path:?}: {e}"));
+    }
+    // The rename is only durable once the directory entry is: without this a
+    // crash can bring the old file back after the caller was told it was saved.
+    #[cfg(unix)]
+    if let Some(dir) = path.parent().and_then(|p| fs::File::open(p).ok()) {
+        let _ = dir.sync_all();
+    }
+    secured
+}
+
+/// Create `path` (which must not exist) and write `content`, durably.
+///
+/// On Unix the file is created with mode 0600, so the content is never
+/// readable by other users, not even between the write and the later
+/// permission step. `sync_all` makes the data durable before the caller
+/// renames the file over the old one.
+fn write_new_private_file(path: &Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()
+}
+
 /// Write a file with restricted permissions (owner-only, equivalent to Unix 0600).
 ///
 /// On Unix: sets file mode to 0600.
@@ -10,7 +68,12 @@ use std::path::Path;
 /// Callers can distinguish "secure write succeeded" from "file written but insecure".
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
+    restrict_permissions(path)
+}
 
+/// Owner-only permissions for an existing file (the second half of
+/// [`write_file_secure`]).
+fn restrict_permissions(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
