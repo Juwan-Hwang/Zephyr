@@ -4,11 +4,10 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
-import { saveSetting } from './settings-helpers.js';
+import { invoke, closeAllConnections, switchProxy } from '../api.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { showNotification } from './notifications.js';
-import { translations, currentLang } from '../i18n.js';
+import { translations, currentLang, t as tFunc } from '../i18n.js';
 import { Bus, Events } from './events.js';
 import { modesLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
@@ -41,19 +40,20 @@ export function initModeSelector() {
                 } catch (e) { modesLogger.warn("Failed to capture node for inheritance", e); }
 
                 // 2. Switch mode (hot-reload via REST API — instant)
-                await patchConfig({ mode });
+                // Routed through the backend so the user-mode generation bump
+                // happens under the restore lock; otherwise an in-flight
+                // fallback restore could overwrite the user's choice. The
+                // backend persists the accepted mode to settings.json itself.
+                await invoke('switch_mode', { mode });
                 updateModeUI(mode);
 
-                // 3. Persist to settings.json + close connections in background
-                // (persist is fire-and-forget; patchConfig success is the source of truth)
-                saveSetting('mode', mode).catch((e) =>
-                    modesLogger.warn("Failed to persist mode change", e)
-                );
+                // 3. Close existing connections (fire-and-forget)
                 closeAllConnections().catch((e) =>
                     modesLogger.warn("Failed to close connections", e)
                 );
 
                 // 4. Inherit node in target mode
+                let inheritanceFailed = false;
                 if (nodeToInherit && mode !== 'direct') {
                     const preferredGroupName = appStore.get('uiGroupName') || null;
                     const resultAfter = await fetchProxyGroups({ preferredGroupName });
@@ -61,14 +61,30 @@ export function initModeSelector() {
                         // Use uiGroupName from resolver for accurate group targeting
                         const targetGroup = resultAfter.uiGroupName || resultAfter.mainGroup;
                         if (targetGroup) {
-                            await switchProxy(targetGroup, nodeToInherit);
-                            appStore.set('uiGroupName', targetGroup);
+                            // A `false` result means the reserved GLOBAL selection
+                            // was rejected (or a non-reserved group PUT failed):
+                            // do not book it as inherited, and do not claim an
+                            // unqualified success either.
+                            const inheritedOk = await switchProxy(targetGroup, nodeToInherit);
+                            if (inheritedOk) {
+                                appStore.set('uiGroupName', targetGroup);
+                            } else {
+                                modesLogger.warn('Node inheritance switch was not applied');
+                                inheritanceFailed = true;
+                            }
                         }
                     }
                 }
 
                 import('./proxies.js').then(m => m.renderProxies());
-                showNotification(t.configSuccess, 'success');
+                // The mode switch itself succeeded, so report partial success
+                // instead of an unqualified success when the node was not carried
+                // over to the new mode.
+                if (inheritanceFailed) {
+                    showNotification(tFunc('configPartialSuccess'), 'warning');
+                } else {
+                    showNotification(t.configSuccess, 'success');
+                }
 
                 appStore.set('isNetworkUpdating', false);
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
