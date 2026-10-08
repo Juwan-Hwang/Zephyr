@@ -300,12 +300,24 @@ describe('getProxies', () => {
 });
 
 describe('switchProxy', () => {
+    it('routes GLOBAL switches through the backend IPC', async () => {
+        // Tauri IPC is unavailable in the test environment, so the GLOBAL path
+        // fails closed and never issues a direct HTTP PUT to the core.
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('fetch', fetchSpy);
+
+        const result = await switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(false);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+    });
+
     it('returns true on success', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: true,
         }));
 
-        const result = await switchProxy('GLOBAL', 'Auto');
+        const result = await switchProxy('Proxy', 'Auto');
         expect(result).toBe(true);
         vi.unstubAllGlobals();
     });
@@ -317,7 +329,7 @@ describe('switchProxy', () => {
             statusText: 'Not Found',
         }));
 
-        await expect(switchProxy('GLOBAL', 'Bad')).rejects.toThrow();
+        await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
 });
