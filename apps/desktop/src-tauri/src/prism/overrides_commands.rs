@@ -74,15 +74,7 @@ pub async fn override_create(
         }
 
         // 2. Download content
-        let proxy_port = {
-            let settings_state = state.app.state::<crate::SettingsState>();
-            let lock = settings_state
-                .0
-                .lock()
-                .map_err(|e| format!("Lock failed: {e}"))?;
-            lock.mixed_port
-        };
-        match download_remote_content(download_url, proxy_port).await {
+        match download_remote_content(&state.app, download_url).await {
             Ok(content) => {
                 // Validate content is not HTML / binary
                 validate_override_content(&content)?;
@@ -707,20 +699,8 @@ pub async fn override_refresh_remote(
         .ok_or("No URL set for remote override")?
         .clone();
 
-    // Get the mixed proxy port from Settings (NOT the API port from MihomoState).
-    // MihomoState.last_port is the external-controller API port (e.g. 9090),
-    // which cannot proxy HTTP traffic. We need the actual mixed-port.
-    let proxy_port = {
-        let settings_state = state.app.state::<crate::SettingsState>();
-        let lock = settings_state
-            .0
-            .lock()
-            .map_err(|e| format!("Lock failed: {e}"))?;
-        lock.mixed_port
-    };
-
     // Download with proxy, falling back to direct if proxy is unavailable
-    let content = download_remote_content(&url, proxy_port).await?;
+    let content = download_remote_content(&state.app, &url).await?;
 
     // Update content
     overrides_store::write_content(&state, &id, &content)?;
@@ -934,12 +914,12 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
     Ok(all_logs)
 }
 
-/// Download remote content with optional proxy and automatic direct fallback.
+/// Download remote content directly first, falling back to managed core proxy if direct connection fails.
 ///
 /// Uses the unified `fetch_url_content` function from `fetch_util` for consistent
 /// security measures (SSRF protection, DNS pinning, redirect validation).
-async fn download_remote_content(url: &str, proxy_port: Option<u16>) -> Result<String, String> {
-    let mut content = fetch_url_content(url, proxy_port).await?;
+async fn download_remote_content(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
+    let mut content = fetch_url_content(url, Some(app)).await?;
     // Strip UTF-8 BOM in-place to avoid interfering with content detection
     if content.starts_with('\u{feff}') {
         content.drain(..'\u{feff}'.len_utf8());
