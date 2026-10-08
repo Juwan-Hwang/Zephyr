@@ -9,7 +9,7 @@ use tauri_plugin_dialog::DialogExt as _;
 use super::core_process::ensure_app_storage;
 use super::crypto::{
     cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
-    write_profile_file, ConfigMetadata,
+    save_profile_file, ConfigMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -345,6 +345,17 @@ fn cleanup_dangling_last_config(
     }
 }
 
+/// Remove a profile under the profile-transform guard, so the encryption batch
+/// cannot read the file before the removal and write it back afterwards.
+fn remove_profile_file(path: &std::path::Path) -> Result<(), String> {
+    let transform_guard = crate::PROFILE_CRYPTO_TRANSFORM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"));
+    drop(transform_guard);
+    result
+}
+
 #[tauri::command]
 #[allow(private_interfaces)]
 pub async fn delete_config(
@@ -377,7 +388,7 @@ pub async fn delete_config(
         let yml_path = paths.profiles_dir.join(&yml_name);
 
         if yml_path.exists() {
-            fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+            remove_profile_file(&yml_path)?;
             {
                 let _guard = lock_metadata();
                 let mut metadata = load_metadata(&paths);
@@ -392,12 +403,12 @@ pub async fn delete_config(
 
     // Delete the file first, then update metadata
     // This ensures metadata consistency: if file deletion fails, metadata stays intact
-    fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+    remove_profile_file(&target_path)?;
 
     // Verify deletion (Windows may report success but file remains if locked)
     if target_path.exists() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+        remove_profile_file(&target_path)?;
 
         if target_path.exists() {
             return Err("File could not be deleted (locked by another process?)".to_owned());
@@ -503,15 +514,16 @@ fn write_config_file_inner(
     if config_file_name == "run_config.yaml" {
         write_file_secure(&resolved_path, &content)?;
     } else {
-        let encrypt = {
-            let settings_state = app.state::<crate::SettingsState>();
-            let settings = settings_state
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            settings.encrypt_configs
-        };
-        write_profile_file(&resolved_path, &content, encrypt)?;
+        // Reading the flag and writing the file under the same guard is what
+        // makes the save safe: `patch_settings`' encryption batch holds this
+        // lock while it rewrites every profile, so without it a save could land
+        // between the batch's read of this file and its write of it, and the
+        // batch would then overwrite the saved content with its stale copy.
+        //
+        // Taken *before* the settings lock, matching `patch_settings`, which
+        // reads the authoritative value under that lock while holding this one.
+        // The reverse order would deadlock the two.
+        save_profile_file(&app, &resolved_path, &content)?;
     }
 
     Ok("Config saved".to_owned())
@@ -595,6 +607,12 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     // Rename file + update metadata under lock to prevent cleanup_metadata_cache
     // from removing the metadata entry while the file is temporarily absent.
     {
+        // The encryption batch rewrites every profile it read, so a rename that
+        // lands between its read and write would leave a stale copy at the old
+        // name. Taken before the metadata lock, matching the profile writers.
+        let _transform_guard = crate::PROFILE_CRYPTO_TRANSFORM
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _guard = lock_metadata();
         // Re-validate under lock: a concurrent command may have created new_path
         // between the pre-lock check and here.
