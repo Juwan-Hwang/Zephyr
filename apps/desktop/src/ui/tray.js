@@ -301,6 +301,12 @@ export async function initTrayEventListeners() {
                 updateTrayMenu(true).catch(() => {});
                 // Refresh tray again after a short delay to ensure mihomo has updated `now`
                 setTimeout(() => updateTrayMenu(true).catch(() => {}), 500);
+            } else {
+                // A GLOBAL selection is routed through the backend and reported
+                // as a rejected request instead of a thrown error, so surface it
+                // instead of failing silently on a user-initiated switch.
+                trayLogger.warn('Tray proxy switch was not applied');
+                showNotification(tFunc('notifSwitchFailed'), 'error');
             }
         } catch (err) {
             trayLogger.error('Failed to switch proxy from tray', err);
