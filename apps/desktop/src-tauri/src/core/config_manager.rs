@@ -9,7 +9,7 @@ use tauri_plugin_dialog::DialogExt as _;
 use super::core_process::ensure_app_storage;
 use super::crypto::{
     cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
-    write_profile_file, ConfigMetadata,
+    save_profile_file, ConfigMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -503,15 +503,16 @@ fn write_config_file_inner(
     if config_file_name == "run_config.yaml" {
         write_file_secure(&resolved_path, &content)?;
     } else {
-        let encrypt = {
-            let settings_state = app.state::<crate::SettingsState>();
-            let settings = settings_state
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            settings.encrypt_configs
-        };
-        write_profile_file(&resolved_path, &content, encrypt)?;
+        // Reading the flag and writing the file under the same guard is what
+        // makes the save safe: `patch_settings`' encryption batch holds this
+        // lock while it rewrites every profile, so without it a save could land
+        // between the batch's read of this file and its write of it, and the
+        // batch would then overwrite the saved content with its stale copy.
+        //
+        // Taken *before* the settings lock, matching `patch_settings`, which
+        // reads the authoritative value under that lock while holding this one.
+        // The reverse order would deadlock the two.
+        save_profile_file(&app, &resolved_path, &content)?;
     }
 
     Ok("Config saved".to_owned())
