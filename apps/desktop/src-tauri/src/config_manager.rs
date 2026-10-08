@@ -4,7 +4,7 @@
 //! This module only contains Tauri-specific glue ([`AppHandle`], [`State`], reqwest hot-reload).
 
 use crate::core_manager::ensure_app_storage;
-use crate::core_manager::{read_profile_file, MihomoState};
+use crate::core_manager::MihomoState;
 #[allow(unused_imports)]
 use crate::emit_warn;
 use serde_json::Value as JsonValue;
@@ -91,29 +91,29 @@ pub async fn update_config(
         if profile_name != "run_config.yaml" {
             let profile_path = paths.profiles_dir.join(profile_name);
             if profile_path.exists() {
-                if let Ok(profile_content) = read_profile_file(&profile_path) {
-                    let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
-                        .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
-                    if let Ok(mut profile_yaml) =
-                        serde_yaml::from_str::<YamlValue>(&profile_content)
-                    {
+                let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
+                    .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
+                // One read-modify-write under the profile-transform guard, so a
+                // concurrent save or encryption batch cannot land in between;
+                // the profile keeps its current encryption form.
+                let edited = crate::core_manager::update_profile_file(
+                    &app,
+                    &profile_path,
+                    |profile_content| {
+                        let mut profile_yaml =
+                            serde_yaml::from_str::<YamlValue>(profile_content).ok()?;
                         remove_dangerous_keys(&mut profile_yaml, false);
-                        if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
-                            remove_dangerous_keys(&mut profile_yaml, false);
-                            if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                                if let Err(e) = crate::core_manager::write_file_secure(
-                                    &profile_path,
-                                    &new_profile_content,
-                                ) {
-                                    emit_warn!(
-                                        Config,
-                                        CONFIG_PARSE_FAILED,
-                                        "Failed to update profile {profile_name}: {e}"
-                                    );
-                                }
-                            }
-                        }
-                    }
+                        merge_yaml(&mut profile_yaml, &patch_yaml, 0).ok()?;
+                        remove_dangerous_keys(&mut profile_yaml, false);
+                        serde_yaml::to_string(&profile_yaml).ok()
+                    },
+                );
+                if let Err(e) = edited {
+                    emit_warn!(
+                        Config,
+                        CONFIG_PARSE_FAILED,
+                        "Failed to update profile {profile_name}: {e}"
+                    );
                 }
             }
         }
