@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use tauri::Manager as _;
+
 use super::secure_io::write_file_secure;
 use super::AppPaths;
 
@@ -369,6 +371,17 @@ pub fn read_profile_file(path: &Path) -> Result<String, String> {
 }
 
 /// Write a profile file, encrypting if `encrypt` is true.
+///
+/// Every caller must hold `crate::PROFILE_CRYPTO_TRANSFORM` for the whole
+/// read-flag-and-write sequence, and must keep holding it until the content is
+/// at its final path. The encryption batch rewrites every profile in the
+/// directory, so a write that is not covered by that guard can land between the
+/// batch's read of a file and its write of it, and be overwritten with what the
+/// batch read.
+///
+/// The guard deliberately is not taken here: this function is called from
+/// inside sequences that already hold it, and `std::sync::Mutex` is not
+/// reentrant — taking it here would deadlock those callers against themselves.
 pub fn write_profile_file(path: &Path, content: &str, encrypt: bool) -> Result<(), String> {
     let data = if encrypt {
         obfuscate_string(content)?
@@ -376,6 +389,74 @@ pub fn write_profile_file(path: &Path, content: &str, encrypt: bool) -> Result<(
         content.to_owned()
     };
     write_file_secure(path, &data)
+}
+
+/// Write one profile with the current `encrypt_configs` setting, under the
+/// profile-transform guard.
+///
+/// For callers that write a single file and hold neither lock. The guard is
+/// taken before the settings lock, matching every other profile writer.
+pub fn save_profile_file(app: &tauri::AppHandle, path: &Path, content: &str) -> Result<(), String> {
+    let transform_guard = crate::lock_profile_transform();
+    // A poisoned settings lock means a settings patch panicked part-way, so
+    // `encrypt_configs` may not be the value that was persisted: refuse rather
+    // than write the profile in the wrong form.
+    let Some(encrypt) = authoritative_encrypt_configs(app) else {
+        drop(transform_guard);
+        return Err("Failed to save profile: the encryption setting could not be read".to_owned());
+    };
+    let result = write_profile_file(path, content, encrypt);
+    drop(transform_guard);
+    result
+}
+
+/// Read-modify-write one profile as a single step under the profile-transform
+/// guard.
+///
+/// `edit` receives the decrypted content and returns the new content, or
+/// `None` to leave the file untouched. Holding the guard across the read and
+/// the write keeps a concurrent single-file save or an encryption batch from
+/// landing in between and being overwritten. Returns whether the file was
+/// written.
+pub fn update_profile_file(
+    app: &tauri::AppHandle,
+    path: &Path,
+    edit: impl FnOnce(&str) -> Option<String>,
+) -> Result<bool, String> {
+    let transform_guard = crate::lock_profile_transform();
+    let result = read_profile_file(path).and_then(|current| {
+        let Some(updated) = edit(&current) else {
+            return Ok(false);
+        };
+        let encrypt = authoritative_encrypt_configs(app).ok_or_else(|| {
+            "Failed to update profile: the encryption setting could not be read".to_owned()
+        })?;
+        write_profile_file(path, &updated, encrypt).map(|()| true)
+    });
+    drop(transform_guard);
+    result
+}
+
+/// The currently authoritative `encrypt_configs` value.
+///
+/// Read under the settings lock, so a caller that has already acquired the
+/// profile-transform guard sees the value that actually won, rather than the one
+/// its own patch happened to persist. Without this, a patch whose write was
+/// superseded while it waited for the transform lock would still run its own
+/// transform and undo the newer one.
+///
+/// `None` means the value could not be read, which is *not* the same as `false`.
+/// The caller must skip the transform in that case: assuming `false` would
+/// decrypt every profile even when the persisted setting says `encrypt_configs:
+/// true`, leaving the files in plaintext while the flag claims they are
+/// encrypted.
+#[must_use]
+pub fn authoritative_encrypt_configs(app: &tauri::AppHandle) -> Option<bool> {
+    app.state::<crate::SettingsState>()
+        .0
+        .lock()
+        .ok()
+        .map(|guard| guard.encrypt_configs)
 }
 
 /// Encrypt all plaintext profile YAML files in `profiles_dir`.

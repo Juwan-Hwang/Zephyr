@@ -4,15 +4,16 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
-import { saveSetting } from './settings-helpers.js';
+import { invoke, closeAllConnections, switchProxy, getProxies } from '../api.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
+import { invalidateSettingsCache } from './cache.js';
 import { Bus, Events } from './events.js';
 import { modesLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
+import { COMMANDS } from '@zephyr/shared';
 
 export function initModeSelector() {
     const buttons = document.querySelectorAll('[data-mode]');
@@ -41,19 +42,23 @@ export function initModeSelector() {
                 } catch (e) { modesLogger.warn("Failed to capture node for inheritance", e); }
 
                 // 2. Switch mode (hot-reload via REST API — instant)
-                await patchConfig({ mode });
+                // Routed through the backend so the user-mode generation bump
+                // happens under the restore lock; otherwise an in-flight
+                // fallback restore could overwrite the user's choice. The
+                // backend persists the accepted mode to settings.json itself.
+                await invoke(COMMANDS.SWITCH_MODE, { mode });
+                // The backend writes settings.json, so drop the cached snapshot:
+                // other readers take the mode from `getSettingsCached()`.
+                invalidateSettingsCache();
                 updateModeUI(mode);
 
-                // 3. Persist to settings.json + close connections in background
-                // (persist is fire-and-forget; patchConfig success is the source of truth)
-                saveSetting('mode', mode).catch((e) =>
-                    modesLogger.warn("Failed to persist mode change", e)
-                );
+                // 3. Close existing connections (fire-and-forget)
                 closeAllConnections().catch((e) =>
                     modesLogger.warn("Failed to close connections", e)
                 );
 
                 // 4. Inherit node in target mode
+                let inherited = true;
                 if (nodeToInherit && mode !== 'direct') {
                     const preferredGroupName = appStore.get('uiGroupName') || null;
                     const resultAfter = await fetchProxyGroups({ preferredGroupName });
@@ -61,14 +66,48 @@ export function initModeSelector() {
                         // Use uiGroupName from resolver for accurate group targeting
                         const targetGroup = resultAfter.uiGroupName || resultAfter.mainGroup;
                         if (targetGroup) {
-                            await switchProxy(targetGroup, nodeToInherit);
-                            appStore.set('uiGroupName', targetGroup);
+                            // The mode switch already succeeded, so a failed
+                            // inheritance must not fail the whole action. Both
+                            // shapes mean "not applied": a `false` result is the
+                            // reserved GLOBAL selection being rejected by the
+                            // backend, while a plain (non-reserved) group PUT
+                            // raises ApiError — apiFetch normalises every
+                            // non-2xx into a throw, so switchProxy never returns
+                            // false for those.
+                            try {
+                                inherited = await switchProxy(targetGroup, nodeToInherit);
+                                if (inherited) {
+                                    appStore.set('uiGroupName', targetGroup);
+                                } else {
+                                    // switchProxy already logged the backend's
+                                    // rejection reason for this shape.
+                                    modesLogger.warn('Node inheritance switch was not applied');
+                                }
+                            } catch (e) {
+                                inherited = false;
+                                modesLogger.warn('Node inheritance switch threw', e);
+                            }
                         }
+                    } else if (!(await activeLeafMatches(resultAfter?.current, nodeToInherit))) {
+                        // The previous node is not present in the target group, so
+                        // it cannot carry over and the group keeps its default
+                        // selection. That is not full success — reporting it as
+                        // such would tell the user their node was kept while it
+                        // silently changed. (When the group already routes to
+                        // the same node through a nested group, nothing changed.)
+                        inherited = false;
+                        modesLogger.warn('Node to inherit is not available in the target group');
                     }
                 }
 
                 import('./proxies.js').then(m => m.renderProxies());
-                showNotification(t.configSuccess, 'success');
+                if (inherited) {
+                    showNotification(t.configSuccess, 'success');
+                } else {
+                    // Part success is not full success: tell the user the node
+                    // did not carry over instead of booking it as applied.
+                    showNotification(`${t.configSuccess} — ${t.notifSwitchFailed}`, 'warning');
+                }
 
                 appStore.set('isNetworkUpdating', false);
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -76,6 +115,11 @@ export function initModeSelector() {
                 Bus.emit(Events.MODE_CHANGED, mode);
             } catch (err) {
                 showNotification(toError(err).toString(), 'error');
+                // The backend can apply the mode to the core and still fail
+                // (e.g. the settings write failed after the core PUT), so
+                // reconcile the buttons with the live core instead of leaving
+                // the previous mode highlighted.
+                import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
                 appStore.set('isNetworkUpdating', false);
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
             }
@@ -103,5 +147,25 @@ export function updateModeUI(mode) {
                 b.classList.add('text-[var(--text-secondary)]');
             }
         });
+    }
+}
+
+/**
+ * Whether the target group's selection already routes to the same node as the
+ * previous selection, resolving nested groups down to their active leaf.
+ * @param {string|null|undefined} current
+ * @param {string|null|undefined} previous
+ * @returns {Promise<boolean>}
+ */
+async function activeLeafMatches(current, previous) {
+    if (!current || !previous) return false;
+    try {
+        const [{ resolveLeafNode }, data] = await Promise.all([import('./proxies.js'), getProxies()]);
+        const proxyMap = /** @type {{proxies?: Record<string, any>}} */ (data)?.proxies;
+        if (!proxyMap) return false;
+        return resolveLeafNode(current, proxyMap) === resolveLeafNode(previous, proxyMap);
+    } catch (e) {
+        modesLogger.warn('Failed to resolve active node for inheritance check', e);
+        return false;
     }
 }

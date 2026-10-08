@@ -11,6 +11,8 @@ use tokio::net::TcpStream;
 use std::os::unix::fs::PermissionsExt as _;
 
 use super::secure_io::write_file_secure;
+#[cfg(target_os = "macos")]
+use crate::backend_event::lock_best_effort;
 use crate::backend_event::{codes, lock_critical, redact_error_message, BackendModule};
 #[allow(unused_imports)]
 use crate::{emit_error, emit_info, emit_warn};
@@ -26,8 +28,14 @@ const HEALTH_CHECK_MAX_RETRIES: u32 = 20;
 const HEALTH_CHECK_INITIAL_INTERVAL_MS: u64 = 50;
 const HEALTH_CHECK_MAX_INTERVAL_MS: u64 = 1000;
 #[cfg(target_os = "macos")]
-use super::tun_manager::{is_tun_mode, restart_core_as_root};
-use super::{AppPaths, CoreData, CoreStartResult, MihomoState, CORE_STARTING};
+#[cfg(target_os = "macos")]
+use super::tun_manager::{
+    get_tun_log_path, has_managed_root_mihomo, is_tun_mode,
+    kill_managed_root_mihomo_as_root_verified, restart_core_as_root, set_tun_mode,
+};
+use super::{
+    AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint, ProxyScheme, CORE_STARTING,
+};
 
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
@@ -182,6 +190,9 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
     let url = format!("http://127.0.0.1:{port}/connections");
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
+        // Loopback drain request must never be routed through an ambient
+        // (environment) proxy.
+        .no_proxy()
         .build()
     {
         Ok(c) => c,
@@ -699,10 +710,13 @@ fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
         .unwrap_or(DEFAULT_API_PORT)
 }
 
-/// Parse the proxy port from YAML config.
-/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend).
-/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
-fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
+/// Extract the configured proxy endpoint: port plus the scheme that listener
+/// speaks.
+/// Checks `mixed-port`, `port`, `socks-port` in order without defaulting.
+#[must_use]
+pub fn extract_configured_proxy_endpoint_from_yaml(
+    yaml_val: &serde_yaml::Value,
+) -> Option<ProxyEndpoint> {
     let parse_u16 = |val: &serde_yaml::Value| -> Option<u16> {
         val.as_u64()
             .and_then(|p| u16::try_from(p).ok())
@@ -713,9 +727,50 @@ fn parse_proxy_port(yaml_val: &serde_yaml::Value) -> u16 {
     yaml_val
         .get("mixed-port")
         .and_then(parse_u16)
-        .or_else(|| yaml_val.get("port").and_then(parse_u16))
-        .or_else(|| yaml_val.get("socks-port").and_then(parse_u16))
-        .unwrap_or(DEFAULT_MIXED_PORT)
+        .map(ProxyEndpoint::http)
+        .or_else(|| {
+            yaml_val
+                .get("port")
+                .and_then(parse_u16)
+                .map(ProxyEndpoint::http)
+        })
+        .or_else(|| {
+            yaml_val
+                .get("socks-port")
+                .and_then(parse_u16)
+                .map(ProxyEndpoint::socks5h)
+        })
+}
+
+/// Extract configured proxy endpoint from raw YAML content string.
+#[must_use]
+pub fn extract_configured_proxy_endpoint(yaml_content: &str) -> Option<ProxyEndpoint> {
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+    extract_configured_proxy_endpoint_from_yaml(&yaml_val)
+}
+
+/// Extract the configured proxy port from a parsed YAML value, if present.
+/// Checks `mixed-port`, `port`, `socks-port` in order without defaulting.
+#[must_use]
+pub fn extract_configured_proxy_port_from_yaml(yaml_val: &serde_yaml::Value) -> Option<u16> {
+    extract_configured_proxy_endpoint_from_yaml(yaml_val).map(|e| e.port)
+}
+
+/// Extract configured proxy port from raw YAML content string.
+#[must_use]
+pub fn extract_configured_proxy_port(yaml_content: &str) -> Option<u16> {
+    let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+    extract_configured_proxy_port_from_yaml(&yaml_val)
+}
+
+/// Parse the managed proxy endpoint from YAML config.
+/// Checks `mixed-port`, `port`, `socks-port` in order (same logic as frontend),
+/// keeping the scheme the matched listener speaks.
+/// Supports both integer (`mixed-port: 7890`) and string (`mixed-port: "7890"`) formats.
+/// Returns `None` when the configuration exposes no proxy endpoint: an unmanaged
+/// default port must never be stored or advertised.
+fn parse_proxy_endpoint(yaml_val: &serde_yaml::Value) -> Option<ProxyEndpoint> {
+    extract_configured_proxy_endpoint_from_yaml(yaml_val)
 }
 
 fn validate_custom_args(custom_args: &[String]) -> Result<Vec<String>, String> {
@@ -798,7 +853,7 @@ pub fn prepare_runtime_config(
     content: &str,
     secret: &str,
     prefs: Option<&GlobalPreferences>,
-) -> Option<(String, u16, u16)> {
+) -> Option<(String, u16, Option<ProxyEndpoint>)> {
     let mut yaml_val = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
     if !yaml_val.is_mapping() {
         return None;
@@ -927,20 +982,23 @@ pub fn prepare_runtime_config(
 
     // Parse proxy_port AFTER all overrides are applied so it reflects
     // any user-overridden values (mixed_port, socks_port, http_port).
-    let proxy_port = parse_proxy_port(&yaml_val);
+    let proxy_endpoint = parse_proxy_endpoint(&yaml_val);
 
     let result = serde_yaml::to_string(&yaml_val).ok()?;
 
-    Some((result, config_port, proxy_port))
+    Some((result, config_port, proxy_endpoint))
 }
 
-fn build_minimal_runtime_config(secret: &str) -> (String, u16, u16) {
+fn build_minimal_runtime_config(secret: &str) -> (String, u16, Option<ProxyEndpoint>) {
     (
         format!(
             "mixed-port: {DEFAULT_MIXED_PORT}\nmode: rule\nlog-level: info\nunified-delay: true\ntcp-concurrent: true\nkeep-alive-interval: 30\nkeep-alive-idle: 600\nfind-process-mode: always\nprofile:\n  store-fake-ip: true\nexternal-controller: 127.0.0.1:9090\nsecret: {secret}\nproxies: []\nproxy-groups:\n  - name: GLOBAL\n    type: select\n    proxies:\n      - DIRECT\nrules:\n  - MATCH,DIRECT\n"
         ),
         DEFAULT_API_PORT,
-        DEFAULT_MIXED_PORT,
+        Some(ProxyEndpoint {
+            port: DEFAULT_MIXED_PORT,
+            scheme: ProxyScheme::Http,
+        }),
     )
 }
 
@@ -950,7 +1008,7 @@ fn select_runtime_config(
     preferred_path: &Path,
     secret: &str,
     prefs: Option<&GlobalPreferences>,
-) -> Result<(Option<String>, String, u16, u16), String> {
+) -> Result<(Option<String>, String, u16, Option<ProxyEndpoint>), String> {
     let preferred_content = super::crypto::read_profile_file(preferred_path)
         .map_err(|e| format!("Failed to read config: {e}"))?;
     if let Some((final_config, config_port, proxy_port)) =
@@ -1023,8 +1081,12 @@ fn select_runtime_config(
 }
 
 pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
+    find_core_exe(&ensure_app_storage(app)?.core_dir)
+}
+
+/// The installed core binary in `core_dir` (or its legacy name).
+fn find_core_exe(core_dir: &Path) -> Result<PathBuf, String> {
     let binary_name = core_binary_name();
-    let core_dir = ensure_app_storage(app)?.core_dir;
     let core_path = core_dir.join(binary_name);
     if core_path.exists() {
         return Ok(core_path);
@@ -1043,6 +1105,27 @@ pub fn get_core_exe_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err(format!(
         "Could not find {binary_name} (or legacy {legacy_name}) in app data core directory"
     ))
+}
+
+/// The executable path that identifies this app's managed core for root-process
+/// scans and privileged cleanup.
+///
+/// Prefers the executable recorded when the root core was started (the binary
+/// may since have been replaced), then the installed binary, and finally the
+/// path the binary is installed to even when the file is currently missing:
+/// a running process keeps reporting that path, and the privileged script
+/// derives the core directory from it to verify legacy launches. Only an
+/// unresolvable app data directory yields `None`, and the app cannot start
+/// without one.
+#[must_use]
+pub fn managed_core_exe_path(app: &AppHandle) -> Option<PathBuf> {
+    // `resolve_app_paths`, not `ensure_app_storage`: this runs several times per
+    // start/stop, and a failing legacy-asset migration there would yield `None`
+    // and make the root-core cleanup paths skip the managed core.
+    super::tun_manager::last_root_core_exe().or_else(|| {
+        let core_dir = resolve_app_paths(app).ok()?.core_dir;
+        Some(find_core_exe(&core_dir).unwrap_or_else(|_| core_dir.join(core_binary_name())))
+    })
 }
 
 pub(super) fn generate_secret() -> String {
@@ -1294,44 +1377,64 @@ async fn spawn_with_cache_retry(
     Ok((child, actual_log_path))
 }
 
-/// Perform an HTTP health check against the mihomo API.
+/// A single authenticated `GET /version` probe, without the retry loop.
 ///
-/// Tries to connect via raw TCP and checks for HTTP 200/401 responses.
-/// Returns `Ok(())` if the core responds within the retry limit.
-async fn health_check(port: u16) -> Result<(), String> {
-    let mut is_healthy = false;
+/// [`authenticated_health_check`] is a one-shot-after-start check: it retries with
+/// backoff so it can wait out a slow boot. That is wrong inside a polling loop
+/// that is already retrying, because each call would then consume the whole
+/// budget on its own.
+pub(crate) async fn authenticated_health_check_once(
+    port: u16,
+    secret: &str,
+    timeout: std::time::Duration,
+) -> bool {
+    let attempt = async {
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).await.ok()?;
+        let request = format!(
+            "GET /version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {secret}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.ok()?;
+        let mut response = [0u8; 256];
+        let n = stream.read(&mut response).await.ok()?;
+        let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
+        let ok = resp_str.starts_with("HTTP/1.1 200") || resp_str.starts_with("HTTP/1.0 200");
+        ok.then_some(())
+    };
+
+    tokio::time::timeout(timeout, attempt)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// Perform an authenticated HTTP health check against the mihomo API.
+///
+/// Sends `GET /version` with `Authorization: Bearer <secret>` and accepts only HTTP 200.
+/// Returns `Ok(())` if the core responds with 200 OK within the retry limit.
+///
+/// The secret is what makes this probe trustworthy: an unauthenticated probe
+/// cannot tell our own core apart from whatever else happens to be listening on
+/// the port, so a spawn whose child failed to bind would be reported as a
+/// successful start.
+async fn authenticated_health_check(port: u16, secret: &str) -> Result<(), String> {
     let mut interval = std::time::Duration::from_millis(HEALTH_CHECK_INITIAL_INTERVAL_MS);
     let max_interval = std::time::Duration::from_millis(HEALTH_CHECK_MAX_INTERVAL_MS);
 
     for _ in 0..HEALTH_CHECK_MAX_RETRIES {
-        if let Ok(mut stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
-            let request =
-                format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(request.as_bytes()).await.is_ok() {
-                let mut response = [0u8; 256];
-                if let Ok(n) = stream.read(&mut response).await {
-                    let resp_str = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
-                    if resp_str.starts_with("HTTP/1.1 200")
-                        || resp_str.starts_with("HTTP/1.1 401")
-                        || resp_str.starts_with("HTTP/1.0 200")
-                        || resp_str.starts_with("HTTP/1.0 401")
-                    {
-                        is_healthy = true;
-                        break;
-                    }
-                }
-            }
+        if authenticated_health_check_once(port, secret, std::time::Duration::from_millis(500))
+            .await
+        {
+            return Ok(());
         }
-        let sleep_dur = interval;
+        tokio::time::sleep(interval).await;
         interval = (interval * 2).min(max_interval);
-        tokio::time::sleep(sleep_dur).await;
     }
 
-    if is_healthy {
-        Ok(())
-    } else {
-        Err("Core started but health check failed. Check the logs for details.".to_owned())
-    }
+    Err(
+        "Core started but authenticated health check failed. Check the logs for details."
+            .to_owned(),
+    )
 }
 
 /// Notify the network coordinator that a fresh core instance was started.
@@ -1365,6 +1468,36 @@ async fn notify_core_started(app: &AppHandle) {
             );
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn store_child_in_core_state(
+    state: &MihomoState,
+    child: std::process::Child,
+    resolved_secret: String,
+    active_config_name: Option<String>,
+    safe_custom_args: Vec<String>,
+    port: u16,
+    proxy_endpoint: Option<ProxyEndpoint>,
+    log_path: &std::path::Path,
+    started_at: std::time::Instant,
+) -> Result<(), (std::process::Child, String)> {
+    let mut lock = match lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED) {
+        Ok(guard) => guard,
+        Err(e) => return Err((child, e)),
+    };
+    lock.set_process(Some(child));
+    lock.set_last_secret(resolved_secret);
+    lock.set_last_config_path(active_config_name);
+    lock.set_last_custom_args(Some(safe_custom_args));
+    lock.set_last_port(Some(port));
+    // `None` means the active configuration exposes no managed proxy endpoint;
+    // storing an unmanaged default would point the OS proxy at a dead port.
+    lock.set_last_proxy_endpoint(proxy_endpoint);
+    lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
+    lock.set_started_at(Some(started_at));
+    drop(lock);
+    Ok(())
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -1409,6 +1542,123 @@ pub async fn start_core_inner(
         }
     }
     let _guard = ResetGuard;
+
+    #[cfg(target_os = "macos")]
+    struct RunConfigRestoreGuard {
+        run_config_path: PathBuf,
+        prev_content: Option<Vec<u8>>,
+        active: bool,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl RunConfigRestoreGuard {
+        fn new(run_config_path: PathBuf, prev_content: Option<Vec<u8>>) -> Self {
+            Self {
+                run_config_path,
+                prev_content,
+                active: true,
+            }
+        }
+
+        fn disarm(&mut self) {
+            self.active = false;
+        }
+
+        fn disable_tun_in_prev_content(&mut self) {
+            if let Some(prev) = &self.prev_content {
+                if let Ok(prev_str) = std::str::from_utf8(prev) {
+                    if let Ok(disabled) =
+                        zephyr_core::config::tun::update_tun_in_yaml(prev_str, false)
+                    {
+                        self.prev_content = Some(disabled.into_bytes());
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for RunConfigRestoreGuard {
+        fn drop(&mut self) {
+            if self.active {
+                if let Some(prev) = &self.prev_content {
+                    if let Err(write_err) =
+                        write_file_secure(&self.run_config_path, &String::from_utf8_lossy(prev))
+                    {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to restore previous run config in drop guard: {write_err}"
+                        );
+                    }
+                } else if self.run_config_path.exists() {
+                    if let Err(err) = std::fs::remove_file(&self.run_config_path) {
+                        emit_warn!(
+                            Config,
+                            CONFIG_WRITE_FAILED,
+                            "Failed to remove newly written run config in drop guard: {err}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // A macOS root TUN core has no `Child` handle (`record_root_tun_state`
+    // clears it), so the same-config shortcut below cannot see it and a
+    // repeated start would go through the privileged restart (another
+    // administrator prompt). Reuse the recorded root core when it still answers
+    // an authenticated probe; otherwise fall through and restart it.
+    // Only when TUN is still the recorded preference: a start after TUN was
+    // turned off must reach the cleanup path below instead.
+    #[cfg(target_os = "macos")]
+    if !force.unwrap_or(false)
+        && super::tun_manager::is_tun_mode()
+        && app
+            .state::<crate::SettingsState>()
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .tun_enabled
+            == Some(true)
+    {
+        let recorded = {
+            let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            let same_root_core = lock.process().is_none()
+                && lock.started_at().is_some()
+                && lock
+                    .last_config_path()
+                    .is_some_and(|current| current == config_path);
+            let info = if same_root_core {
+                lock.last_port().map(|port| {
+                    (
+                        port,
+                        lock.last_secret().to_owned(),
+                        lock.last_config_path().map(std::borrow::ToOwned::to_owned),
+                    )
+                })
+            } else {
+                None
+            };
+            drop(lock);
+            info
+        };
+        if let Some((port, recorded_secret, active_config)) = recorded {
+            if authenticated_health_check_once(
+                port,
+                &recorded_secret,
+                std::time::Duration::from_secs(2),
+            )
+            .await
+            {
+                return Ok(CoreStartResult {
+                    secret: recorded_secret,
+                    port,
+                    active_config,
+                });
+            }
+        }
+    }
 
     // Check if core is already running with the SAME config (under CORE_STARTING protection).
     // If the requested config differs from the current one, we must restart to apply it.
@@ -1456,54 +1706,117 @@ pub async fn start_core_inner(
         drain_connections_if_alive(port, &secret).await;
     }
 
-    // Check if TUN mode is active via flag (memory-based, not from config file)
+    // In macOS TUN mode, the running mihomo is root-owned and cannot be killed by
+    // non-root kill_mihomo, and holds the port until restart_core_as_root runs.
+    // Skipping unprivileged kill avoids a 7-second dead delay on TUN restart.
     #[cfg(target_os = "macos")]
-    if is_tun_mode() {
-        let secret = restart_core_as_root(&app, true).await?;
-        // Record uptime for the TUN start path (restart_core_as_root spawns
-        // mihomo as root; the normal spawn path below is never reached).
-        // Best-effort: if the lock fails, mihomo is already running — don't
-        // fail the entire start just because we couldn't record the timestamp.
-        if let Ok(mut lock) = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
-        {
-            // Clear the stale Child handle: restart_core_as_root killed the
-            // old process and spawned a new root-owned one that is NOT tracked
-            // by Child (it's managed externally via killall).  Without this,
-            // get_core_uptime() would see the dead Child, call try_wait(),
-            // detect exit, and incorrectly clear started_at + ports.
-            lock.set_process(None);
-            lock.set_last_secret(secret.clone());
-            lock.set_last_config_path(Some(config_path.clone()));
-            lock.set_last_port(Some(DEFAULT_API_PORT));
-            // proxy_port is not yet parsed (select_runtime_config runs later
-            // in the normal path); clear any stale value from a prior config.
-            lock.set_last_proxy_port(None);
-            lock.set_started_at(Some(std::time::Instant::now()));
-        } else {
-            emit_warn!(
-                Core,
-                CORE_LOCK_FAILED,
-                "TUN start: failed to acquire lock to record started_at — uptime will be unavailable until next restart"
-            );
-        }
-        // For TUN mode, use the config_path as-is to match the frontend's requested name.
-        // Do NOT strip extension here, as normal mode returns full filename with extension.
-        // Notify the network coordinator that a fresh core instance was started.
-        // The new process has no rules applied, so the coordinator's applied_state
-        // is now stale and must be re-evaluated.
-        notify_core_started(&app).await;
-        return Ok(CoreStartResult {
-            secret,
-            port: DEFAULT_API_PORT,
-            active_config: Some(config_path),
-        });
-    }
+    let tun_active = {
+        // `SettingsState` is managed during setup, before any core start. The
+        // profile is consulted only when no TUN preference was ever recorded.
+        let tun_pref = app
+            .state::<crate::SettingsState>()
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .tun_enabled;
+        let tun_enabled = match tun_pref {
+            Some(enabled) => enabled,
+            None => {
+                // Read the same file the start below resolves to: the bare
+                // file name inside the profiles directory, or the first
+                // available profile when it is missing (as resolve_profile_path
+                // does), never a caller-given absolute path.
+                super::resolve_app_paths(&app)
+                    .ok()
+                    .and_then(|paths| {
+                        let name = sanitize_config_file_name(config_path.clone()).ok()?;
+                        let requested = paths.profiles_dir.join(name);
+                        let profile = if requested.exists() {
+                            requested
+                        } else {
+                            first_available_profile(&paths)?
+                        };
+                        super::crypto::read_profile_file(&profile).ok()
+                    })
+                    .map(|c| zephyr_core::config::tun::extract_tun_enabled_from_yaml(&c))
+                    .unwrap_or(false)
+            }
+        };
+        if !tun_enabled {
+            // Prefer the recorded root-core executable (survives binary
+            // replacement/removal), falling back to the current managed path.
+            let managed_exe = managed_core_exe_path(&app);
+            // Detect a surviving app-owned root core (the configured managed
+            // executable or a legacy managed `mihomo`) independently of the
+            // process-local flag: a stale core on a custom port would otherwise
+            // keep the configured port busy.
+            //
+            // A *confirmed* match (executable path) is unambiguously ours. The
+            // predicate also counts legacy candidates, whose working directory
+            // cannot be read without privileges, so an unrelated root mihomo
+            // started with the same `-d . -f run_config.yaml` shape can trigger
+            // one privileged attempt here. That attempt never kills it — the
+            // script re-verifies the working directory as root and skips it —
+            // and its outcome no longer fails the caller; keeping the candidate
+            // in the trigger is what lets cores launched by older app versions
+            // (reported by `ps comm` as a bare `mihomo`, unmatched by path) be
+            // cleaned up instead of holding the ports forever.
+            // The ps scan is blocking, so it runs on a blocking task.
+            let exe_for_scan = managed_exe.clone();
+            let managed_alive = tokio::task::spawn_blocking(move || {
+                has_managed_root_mihomo(exe_for_scan.as_deref())
+            })
+            .await
+            .unwrap_or(false);
 
-    // Kill any existing mihomo processes before starting a new one
-    // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
-    tokio::task::spawn_blocking(kill_mihomo)
-        .await
-        .map_err(|e| format!("Kill task failed: {e}"))?;
+            let should_clean_root = is_tun_mode() || managed_alive;
+
+            if should_clean_root {
+                if managed_alive {
+                    // Kill only the managed PIDs via the privileged helper;
+                    // never a broad killall by name. The verified variant
+                    // confirms the process is gone, so the TUN flag is only
+                    // cleared when cleanup actually succeeded.
+                    let kill_res = tokio::task::spawn_blocking(move || {
+                        kill_managed_root_mihomo_as_root_verified(managed_exe.as_deref())
+                    })
+                    .await;
+                    match kill_res {
+                        Ok(Ok(())) => set_tun_mode(false),
+                        Ok(Err(e)) => {
+                            emit_warn!(Core, CORE_STOP_FAILED, "Root mihomo cleanup failed: {e}");
+                            return Err(format!(
+                                "Cannot start core: root mihomo cleanup failed: {e}"
+                            ));
+                        }
+                        Err(e) => return Err(format!("Root TUN cleanup task failed: {e}")),
+                    }
+                } else {
+                    set_tun_mode(false);
+                }
+            } else if is_tun_mode() {
+                set_tun_mode(false);
+            }
+            false
+        } else {
+            tun_enabled
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let tun_active = false;
+
+    if !tun_active {
+        // Kill any existing mihomo processes before starting a new one
+        // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
+        tokio::task::spawn_blocking(kill_mihomo)
+            .await
+            .map_err(|e| format!("Kill task failed: {e}"))?;
+    }
+    // TUN-active starts deliberately keep any tracked child (and user-owned
+    // orphans) alive at this point: the privileged restart script terminates
+    // every mihomo process itself once the user authorizes it. Cleaning up
+    // before authorization would leave the app without any core when the user
+    // cancels, so the tracked child is reaped only after the script has run.
 
     let paths = ensure_app_storage(&app)?;
 
@@ -1514,7 +1827,9 @@ pub async fn start_core_inner(
 
     // Wait for port to be truly free (max 5s)
     #[cfg(target_os = "macos")]
-    wait_for_port_free(DEFAULT_API_PORT).await;
+    if !tun_active {
+        wait_for_port_free(DEFAULT_API_PORT).await;
+    }
 
     let exe_path = get_core_exe_path(&app)?;
 
@@ -1557,13 +1872,19 @@ pub async fn start_core_inner(
         );
     }
 
-    let app_clone = app.clone();
-    tokio::task::spawn_blocking(move || {
-        let state = app_clone.state::<MihomoState>();
-        stop_core_inner(&app_clone, &state)
-    })
-    .await
-    .map_err(|e| format!("Failed to stop core: {e}"))??;
+    if !tun_active {
+        let app_clone = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let state = app_clone.state::<MihomoState>();
+            stop_core_inner(&app_clone, &state)
+        })
+        .await
+        .map_err(|e| format!("Failed to stop core: {e}"))??;
+    }
+    // When tun_active is true, stop_core_inner is skipped to preserve the root
+    // TUN daemon across preflight. Any tracked unprivileged child is likewise
+    // left running until root authorization succeeds: the privileged script
+    // terminates it, and the deferred reap below releases it.
 
     let resolved_secret = secret.unwrap_or_else(generate_secret);
 
@@ -1586,6 +1907,16 @@ pub async fn start_core_inner(
     )?;
 
     let run_config_path = paths.core_dir.join("run_config.yaml");
+    #[cfg(target_os = "macos")]
+    let prev_run_config = match std::fs::read(&run_config_path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return Err(format!("Failed to backup existing run_config.yaml: {e}"));
+        }
+    };
+    #[cfg(target_os = "macos")]
+    let mut run_config_guard = RunConfigRestoreGuard::new(run_config_path.clone(), prev_run_config);
     write_file_secure(&run_config_path, &final_config)?;
 
     // Preflight: validate config with `mihomo -t` before spawning the process.
@@ -1595,7 +1926,7 @@ pub async fn start_core_inner(
         let exe_path_clone = exe_path.clone();
         let core_dir_clone = paths.core_dir.clone();
         let safe_custom_args_clone = safe_custom_args.clone();
-        let output = tokio::task::spawn_blocking(move || {
+        let preflight_res = tokio::task::spawn_blocking(move || {
             let mut cmd = Command::new(&exe_path_clone);
             #[cfg(target_os = "windows")]
             use std::os::windows::process::CommandExt as _;
@@ -1609,9 +1940,17 @@ pub async fn start_core_inner(
             }
             cmd.output()
         })
-        .await
-        .map_err(|e| format!("Preflight check task panicked: {e}"))?
-        .map_err(|e| format!("Preflight check failed to execute: {e}"))?;
+        .await;
+
+        let output = match preflight_res {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => {
+                return Err(format!("Preflight check failed to execute: {e}"));
+            }
+            Err(e) => {
+                return Err(format!("Preflight check task panicked: {e}"));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1652,8 +1991,356 @@ pub async fn start_core_inner(
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn record_root_tun_state(
+        lock: &mut CoreData,
+        secret: String,
+        active_config_name: Option<String>,
+        port: u16,
+        proxy_endpoint: Option<ProxyEndpoint>,
+    ) {
+        lock.set_process(None);
+        lock.set_last_secret(secret);
+        lock.set_last_config_path(active_config_name);
+        lock.set_last_custom_args(None);
+        lock.set_last_port(Some(port));
+        lock.set_last_proxy_endpoint(proxy_endpoint);
+        lock.set_last_log_path(Some(get_tun_log_path()));
+        lock.set_started_at(Some(std::time::Instant::now()));
+    }
+
+    /// Adopt a surviving root mihomo as this app's TUN core after a privileged
+    /// cleanup could not stop it.
+    ///
+    /// Both callers are about to return an error, so this function has to do
+    /// everything the caller therefore will not: record the root core
+    /// executable, record `tun_enabled` (macOS startup reads that flag to choose
+    /// the TUN path, so leaving it stale would start the next launch on the
+    /// non-TUN path while a root TUN core holds the ports), reap the tracked
+    /// child the script already terminated, and point `MihomoState` at the
+    /// process that is actually running so a later stop performs the privileged
+    /// cleanup.
+    ///
+    /// Recording the executable matters for the same reason: this app is
+    /// tracking a live root core, so every later cleanup path (`stop_core`,
+    /// `disable_tun`, app exit) needs to know which binary that is. Falling back
+    /// to `get_core_exe_path` there fails, or names a different file, once the
+    /// managed binary has been replaced or removed — and then the root core
+    /// survives the cleanup it was supposed to get.
+    #[cfg(target_os = "macos")]
+    async fn adopt_surviving_root_tun_core(
+        app: &AppHandle,
+        state: &MihomoState,
+        secret: &str,
+        active_config_name: &Option<String>,
+        config_port: u16,
+        proxy_endpoint: Option<ProxyEndpoint>,
+    ) {
+        record_running_root_core_exe(app);
+        set_tun_mode(true);
+        if let Err(err) = super::tun_manager::sync_tun_settings(app, true) {
+            emit_warn!(
+                Config,
+                CONFIG_PERSIST_FAILED,
+                "Failed to record tun_enabled after adopting root TUN core: {err}"
+            );
+        }
+        // The script already terminated any tracked child; reap it before
+        // replacing the tracked state so it does not linger as a zombie.
+        reap_tracked_child(app).await;
+        if let Ok(mut lock) = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+        {
+            record_root_tun_state(
+                &mut lock,
+                secret.to_owned(),
+                active_config_name.clone(),
+                config_port,
+                proxy_endpoint,
+            );
+        }
+    }
+
+    /// Remember which binary the root core we are tracking actually runs.
+    ///
+    /// `restart_core_as_root` records this on its success path only, but this app can
+    /// end up tracking a live root core it did *not* start successfully (a surviving
+    /// core, or one adopted after a failed cleanup). Without recording it here,
+    /// [`last_root_core_exe`] stays `None` or points at an earlier start's binary,
+    /// and later cleanup (`stop_core`, `disable_tun`, app exit) has to guess via
+    /// `get_core_exe_path` — which fails, or names a different file, once the managed
+    /// binary has been replaced or removed while this root core is still running.
+    ///
+    /// Every caller runs right after the privileged script launched
+    /// `get_core_exe_path`, so that path is the live core's binary and always
+    /// replaces whatever an earlier start recorded.
+    #[cfg(target_os = "macos")]
+    fn record_running_root_core_exe(app: &AppHandle) {
+        if let Ok(path) = get_core_exe_path(app) {
+            super::tun_manager::record_root_core_exe(&path);
+        }
+    }
+
+    /// Error text for a caller that failed while a root TUN core is still
+    /// running. The caller treats the error as "nothing is running", so the
+    /// message has to say otherwise.
+    #[cfg(target_os = "macos")]
+    fn adopted_root_tun_core_error(err: &dyn std::fmt::Display) -> String {
+        format!(
+            "{err} (a root TUN core is still running and is now tracked; \
+             stopping the core will clean it up)"
+        )
+    }
+
+    /// Reap the tracked child (if any) without holding the state lock across the
+    /// blocking wait. Used on the TUN start path once the privileged script has
+    /// terminated every mihomo process, including the tracked child.
+    #[cfg(target_os = "macos")]
+    async fn reap_tracked_child(app: &AppHandle) {
+        let tracked = {
+            let state = app.state::<MihomoState>();
+            let mut guard = lock_best_effort(&state.0);
+            guard.take_process()
+        };
+        if let Some(child) = tracked {
+            let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn cleanup_tun_failure_and_persist(
+        app: &AppHandle,
+        state: &MihomoState,
+        run_config_guard: &mut RunConfigRestoreGuard,
+    ) {
+        run_config_guard.disable_tun_in_prev_content();
+        set_tun_mode(false);
+        // macOS startup reads this flag to choose the TUN path; recorded even
+        // when the settings write fails so the fallback restart is non-TUN
+        // (a failed write is already reported as a warning).
+        let _ = super::tun_manager::record_tun_disabled(app);
+        let tracked = if let Ok(mut lock) =
+            lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+        {
+            // The privileged script already terminated any tracked child; reap it
+            // so it does not linger as a zombie before the state is cleared.
+            let tracked = lock.take_process();
+            clear_stopped_core_state(&mut lock);
+            tracked
+        } else {
+            None
+        };
+        if let Some(child) = tracked {
+            // `terminate_child_process` sends SIGTERM, sleeps up to 500ms and
+            // then blocks in `child.wait()`. The privileged script does not
+            // always reach its kill step — the PID scan runs before the
+            // authorization dialog, and `ScriptRanStartTimeout` can fire
+            // before that — so this path is reached with the child still alive,
+            // and blocking an async worker for up to half a second would stall
+            // every other task on it. Same `spawn_blocking` treatment as
+            // `reap_tracked_child`.
+            let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        }
+    }
+
+    // Check if TUN mode is active via flag captured at start of startup
+    #[cfg(target_os = "macos")]
+    if tun_active {
+        let secret = match restart_core_as_root(&app, true).await {
+            Ok(s) => s,
+            Err(e) => {
+                let script_ran = e.script_ran();
+                // Scope the liveness check to this app's managed core, and only
+                // to the executable-confirmed set: an unverified legacy
+                // candidate may be a foreign root core (another install), and
+                // adopting it as the app's TUN core would be wrong.
+                // Prefer the recorded root-core executable (survives binary
+                // replacement/removal), falling back to the current managed path.
+                let managed_exe = managed_core_exe_path(&app);
+                let has_root = tokio::task::spawn_blocking(move || {
+                    super::tun_manager::has_confirmed_root_mihomo(managed_exe.as_deref())
+                })
+                .await
+                .unwrap_or(false);
+                if !script_ran {
+                    // Authorization never reached the privileged script, so
+                    // nothing was killed: no root core and no tracked child
+                    // were touched. Preserve the tracked child (the user's
+                    // still-running core) and its state, restore the previous
+                    // run config via the guard, and surface the error.
+                    return Err(e.to_string());
+                }
+                let mut surviving_core_verified = false;
+                if has_root
+                    && config_port > 0
+                    && authenticated_health_check(config_port, &resolved_secret)
+                        .await
+                        .is_ok()
+                {
+                    surviving_core_verified = true;
+                }
+                if surviving_core_verified {
+                    // Newly started root core is actually running and responding; disarm guard and sync state.
+                    // The script already terminated any tracked child; reap it before
+                    // replacing the tracked state.
+                    reap_tracked_child(&app).await;
+                    run_config_guard.disarm();
+                    // This root core is being tracked even though
+                    // `restart_core_as_root` reported failure, so remember its
+                    // executable here too — later cleanup depends on it.
+                    record_running_root_core_exe(&app);
+                    set_tun_mode(true);
+                    if let Ok(mut lock) =
+                        lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)
+                    {
+                        record_root_tun_state(
+                            &mut lock,
+                            resolved_secret.clone(),
+                            active_config_name.clone(),
+                            config_port,
+                            proxy_port,
+                        );
+                    }
+                    notify_core_started(&app).await;
+                    let app_reconcile = app.clone();
+                    tokio::spawn(async move {
+                        let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile)
+                            .await;
+                    });
+                    return Ok(CoreStartResult {
+                        secret: resolved_secret,
+                        port: config_port,
+                        active_config: active_config_name,
+                    });
+                } else if has_root {
+                    // Script ran (old root was killed), so the surviving root uses the new config.
+                    // Scope the privileged kill to this app's managed core so an
+                    // unrelated root mihomo service is never terminated.
+                    // Prefer the recorded root-core executable (survives binary
+                    // replacement/removal), falling back to the current managed path.
+                    let managed_exe = managed_core_exe_path(&app);
+                    let kill_res = tokio::task::spawn_blocking(move || {
+                        kill_managed_root_mihomo_as_root_verified(managed_exe.as_deref())
+                    })
+                    .await;
+                    let killed = matches!(&kill_res, Ok(Ok(())));
+                    if killed {
+                        cleanup_tun_failure_and_persist(&app, &state, &mut run_config_guard).await;
+                        return Err(e.to_string());
+                    }
+                    #[cfg(target_os = "macos")]
+                    run_config_guard.disarm();
+                    // The surviving root core is the app's TUN core: adopt it so
+                    // a later stop performs the privileged cleanup instead of
+                    // deleting run_config while the root core keeps running.
+                    adopt_surviving_root_tun_core(
+                        &app,
+                        &state,
+                        &resolved_secret,
+                        &active_config_name,
+                        config_port,
+                        proxy_port,
+                    )
+                    .await;
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "Root TUN core adopted after failed restart: {e}"
+                    );
+                    return Err(adopted_root_tun_core_error(&e));
+                } else {
+                    cleanup_tun_failure_and_persist(&app, &state, &mut run_config_guard).await;
+                }
+                return Err(e.to_string());
+            }
+        };
+
+        // The privileged script has now terminated every mihomo process,
+        // including any tracked unprivileged child. Reap it so its resources
+        // are released and `MihomoState` no longer references a dead process.
+        reap_tracked_child(&app).await;
+
+        if config_port > 0 {
+            if let Err(e) = authenticated_health_check(config_port, &secret).await {
+                // Scope the privileged kill to this app's managed core so an
+                // unrelated root mihomo service is never terminated.
+                // Prefer the recorded root-core executable (survives binary
+                // replacement/removal), falling back to the current managed path.
+                let managed_exe = managed_core_exe_path(&app);
+                let kill_res = tokio::task::spawn_blocking(move || {
+                    kill_managed_root_mihomo_as_root_verified(managed_exe.as_deref())
+                })
+                .await;
+                let killed = matches!(&kill_res, Ok(Ok(())));
+                if killed {
+                    cleanup_tun_failure_and_persist(&app, &state, &mut run_config_guard).await;
+                } else {
+                    // Privileged cleanup could not stop root mihomo; it remains
+                    // running with the new config. Disarm the restore guard so
+                    // on-disk run_config.yaml stays in sync with the live core,
+                    // then adopt the survivor exactly as the failed-restart
+                    // branch above does — otherwise `tun_enabled` would still
+                    // describe "no TUN core" while one holds the ports.
+                    #[cfg(target_os = "macos")]
+                    run_config_guard.disarm();
+                    adopt_surviving_root_tun_core(
+                        &app,
+                        &state,
+                        &secret,
+                        &active_config_name,
+                        config_port,
+                        proxy_port,
+                    )
+                    .await;
+                }
+                if let Ok(Err(err)) = kill_res {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to clean up root mihomo process after health check failure: {err}"
+                    );
+                }
+                emit_error!(
+                    Core,
+                    CORE_START_FAILED,
+                    "Health check failed for root core on port {config_port}: {e}"
+                );
+                if killed {
+                    return Err(e);
+                }
+                return Err(adopted_root_tun_core_error(&e));
+            }
+        }
+
+        // Record uptime for the TUN start path after health check succeeds (restart_core_as_root spawns
+        // mihomo with root privileges, bypassing regular process tracker).
+        // Best-effort lock ensures state is recorded without blocking or holding
+        // a !Send MutexGuard across any async yield point.
+        {
+            let mut lock = lock_best_effort(&state.0);
+            record_root_tun_state(
+                &mut lock,
+                secret.clone(),
+                active_config_name.clone(),
+                config_port,
+                proxy_port,
+            );
+        }
+        notify_core_started(&app).await;
+        let app_reconcile = app.clone();
+        tokio::spawn(async move {
+            let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
+        });
+        #[cfg(target_os = "macos")]
+        run_config_guard.disarm();
+        return Ok(CoreStartResult {
+            secret,
+            port: config_port,
+            active_config: active_config_name,
+        });
+    }
+
     // Spawn mihomo (stdout/stderr redirected to log file internally)
-    let (mut child, log_path) = spawn_with_cache_retry(
+    let (child, log_path) = spawn_with_cache_retry(
         &exe_path,
         &safe_custom_args,
         &paths.core_dir,
@@ -1681,33 +2368,42 @@ pub async fn start_core_inner(
     // Use config port directly, rely on health check to verify
     let port = config_port;
 
-    // HTTP Health Check via raw TCP
-    health_check(port).await?;
+    // HTTP Health Check via raw TCP. Authenticated, so a listener that merely
+    // holds the port (a foreign mihomo/clash instance, or a leftover root core)
+    // cannot make a failed start look healthy: it would still hold the port the
+    // new child needed, which would then surface as API errors against the
+    // wrong core.
+    if let Err(e) = authenticated_health_check(port, &resolved_secret).await {
+        let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        return Err(e);
+    }
 
     // Note: MSL was set to 1000ms in root shell during TUN start if applicable.
     // Non-TUN mode does not need low MSL, and changing it requires root anyway.
 
-    {
-        let mut lock = match lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED) {
-            Ok(l) => l,
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(e);
-            }
-        };
-        lock.set_process(Some(child));
-        lock.set_last_secret(resolved_secret.clone());
-        lock.set_last_config_path(active_config_name.clone());
-        lock.set_last_custom_args(Some(safe_custom_args));
-        lock.set_last_port(Some(port));
-        lock.set_last_proxy_port(Some(proxy_port));
-        lock.set_last_log_path(Some(log_path.to_string_lossy().into_owned()));
-        lock.set_started_at(Some(started_at));
+    if let Err((untracked_child, e)) = store_child_in_core_state(
+        &state,
+        child,
+        resolved_secret.clone(),
+        active_config_name.clone(),
+        safe_custom_args,
+        port,
+        proxy_port,
+        &log_path,
+        started_at,
+    ) {
+        let _ = tokio::task::spawn_blocking(move || terminate_child_process(untracked_child)).await;
+        return Err(e);
     }
-    // `lock` is now out of scope — the MutexGuard is fully dropped before any `.await`.
 
     notify_core_started(&app).await;
+    let app_reconcile = app.clone();
+    tokio::spawn(async move {
+        let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
+    });
+
+    #[cfg(target_os = "macos")]
+    run_config_guard.disarm();
 
     Ok(CoreStartResult {
         secret: resolved_secret,
@@ -1759,11 +2455,105 @@ fn clear_stopped_core_state(lock: &mut CoreData) {
     lock.set_started_at(None);
     lock.set_process(None);
     lock.set_last_port(None);
-    lock.set_last_proxy_port(None);
+    lock.set_last_proxy_endpoint(None);
+}
+
+/// Terminate a spawned child process and its entire process group on Unix,
+/// or force kill on non-Unix platforms.
+fn terminate_child_process(mut child_process: std::process::Child) {
+    #[cfg(unix)]
+    {
+        // Kill the entire process group (mihomo + any child processes it spawned).
+        // Negative PID signals the process group whose ID equals |pid|.
+        #[allow(clippy::cast_possible_wrap)]
+        let pid = child_process.id() as libc::pid_t;
+        let mut killed_group = false;
+        if pid > 1 {
+            let pgid = -pid;
+            // Safety: libc::kill is a well-defined POSIX syscall. Negative pgid
+            // signals the process group, which is standard POSIX behavior.
+            if unsafe { libc::kill(pgid, libc::SIGTERM) } == 0 {
+                // Wait up to 500ms for the process group to exit gracefully.
+                // This ensures ports are released before we return, preventing
+                // port binding conflicts on restart.
+                for _ in 0..5 {
+                    if let Ok(Some(_)) = child_process.try_wait() {
+                        // Safety: signal 0 performs error checking without sending a signal,
+                        // used here to check if all processes in the process group have exited.
+                        if unsafe { libc::kill(pgid, 0) } != 0 {
+                            killed_group = true;
+                            break;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                if !killed_group {
+                    // Safety: same as above — force-kill the process group.
+                    let _ = unsafe { libc::kill(pgid, libc::SIGKILL) };
+                    let _ = child_process.wait();
+                    killed_group = true;
+                }
+            }
+        }
+        // Fallback: if process group kill failed or pid <= 1, kill the child directly
+        if !killed_group {
+            let _ = child_process.kill();
+            let _ = child_process.wait();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Force kill the process (cross-platform safe)
+        let _ = child_process.kill();
+        let _ = child_process.wait();
+    }
 }
 
 /// Internal: stop the core process (no rate limiter reset).
 pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let root_kill_err = {
+        let mut err = None;
+        if super::tun_manager::is_tun_mode() {
+            // Scope the privileged cleanup to this app's managed core: an
+            // unrelated root mihomo service must never be terminated, and it
+            // must not keep the app's own cleanup state alive either.
+            // Prefer the executable recorded when the root core was started:
+            // the managed binary may have been replaced or removed while it runs.
+            let managed_exe = managed_core_exe_path(app);
+            if super::tun_manager::has_managed_root_mihomo(managed_exe.as_deref()) {
+                if let Err(e) = super::tun_manager::kill_managed_root_mihomo_as_root_verified(
+                    managed_exe.as_deref(),
+                ) {
+                    emit_warn!(
+                        Core,
+                        CORE_STOP_FAILED,
+                        "Failed to kill root mihomo process on stop: {e}"
+                    );
+                    err = Some(format!("Failed to kill root mihomo process on stop: {e}"));
+                }
+            }
+            // The kill itself still covers unverified legacy candidates (the
+            // privileged script verifies their working directory as root), but
+            // the *decisions* below use the executable-confirmed set only: a
+            // foreign root core that matches the legacy argv pattern cannot be
+            // told apart without privileges, and it must not keep the app's own
+            // cleanup state alive or turn a stop into an error.
+            if !super::tun_manager::has_confirmed_root_mihomo(managed_exe.as_deref()) {
+                super::tun_manager::set_tun_mode(false);
+            }
+        }
+        err
+    };
+
+    #[cfg(target_os = "macos")]
+    let still_running_root = super::tun_manager::is_tun_mode() && {
+        let managed_exe = managed_core_exe_path(app);
+        super::tun_manager::has_confirmed_root_mihomo(managed_exe.as_deref())
+    };
+    #[cfg(not(target_os = "macos"))]
+    let still_running_root = false;
+
     // Take the child process
     let child = {
         let mut lock = state
@@ -1771,57 +2561,26 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
             .lock()
             .map_err(|e| format!("Failed to lock state: {e}"))?;
         let child = lock.take_process();
-        clear_stopped_core_state(&mut lock);
+        if !still_running_root {
+            clear_stopped_core_state(&mut lock);
+        }
         drop(lock);
         child
     };
 
-    if let Some(mut child_process) = child {
-        #[cfg(unix)]
-        {
-            // Kill the entire process group (mihomo + any child processes it spawned).
-            // Negative PID signals the process group whose ID equals |pid|.
-            #[allow(clippy::cast_possible_wrap)]
-            let pid = child_process.id() as libc::pid_t;
-            let mut killed_group = false;
-            if pid > 1 {
-                let pgid = -pid;
-                // Safety: libc::kill is a well-defined POSIX syscall. Negative pgid
-                // signals the process group, which is standard POSIX behavior.
-                if unsafe { libc::kill(pgid, libc::SIGTERM) } == 0 {
-                    // Wait up to 500ms for the process group to exit gracefully.
-                    // This ensures ports are released before we return, preventing
-                    // port binding conflicts on restart.
-                    for _ in 0..5 {
-                        if let Ok(Some(_)) = child_process.try_wait() {
-                            killed_group = true;
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    if !killed_group {
-                        // Safety: same as above — force-kill the process group.
-                        let _ = unsafe { libc::kill(pgid, libc::SIGKILL) };
-                        let _ = child_process.wait();
-                        killed_group = true;
-                    }
-                }
-            }
-            // Fallback: if process group kill failed or pid <= 1, kill the child directly
-            if !killed_group {
-                let _ = child_process.kill();
-                let _ = child_process.wait();
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            // Force kill the process (cross-platform safe)
-            let _ = child_process.kill();
-            let _ = child_process.wait();
-        }
+    if let Some(child_process) = child {
+        terminate_child_process(child_process);
     }
 
-    cleanup_run_config(app);
+    if !still_running_root {
+        cleanup_run_config(app);
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(err) = root_kill_err {
+        return Err(err);
+    }
+
     Ok(())
 }
 
@@ -1937,7 +2696,7 @@ mod tests {
             prepare_runtime_config(config, "new-secret", None).unwrap();
 
         assert_eq!(api_port, 7897);
-        assert_eq!(proxy_port, DEFAULT_MIXED_PORT);
+        assert_eq!(proxy_port, None);
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
         assert!(prepared.contains("secret: new-secret"));
         assert!(!prepared.contains("secret: old"));
@@ -1967,7 +2726,13 @@ mod tests {
         assert!(result.is_some());
         let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 9090);
-        assert_eq!(proxy_port, 7890);
+        assert_eq!(
+            proxy_port,
+            Some(ProxyEndpoint {
+                port: 7890,
+                scheme: ProxyScheme::Http
+            })
+        );
         assert!(config.contains("external-controller: 127.0.0.1:9090"));
         assert!(config.contains("secret: mysecret"));
         assert!(config.contains("unified-delay: true"));
@@ -1985,7 +2750,13 @@ mod tests {
         assert!(result.is_some());
         let (config, port, proxy_port) = result.unwrap();
         assert_eq!(port, 8080);
-        assert_eq!(proxy_port, 7890);
+        assert_eq!(
+            proxy_port,
+            Some(ProxyEndpoint {
+                port: 7890,
+                scheme: ProxyScheme::Http
+            })
+        );
         assert!(config.contains("external-controller: 127.0.0.1:8080"));
     }
 
@@ -2481,6 +3252,63 @@ mod tests {
         assert!(
             secret.chars().all(|c| c.is_ascii_alphanumeric()),
             "secret must be alphanumeric"
+        );
+    }
+
+    #[test]
+    fn test_extract_configured_proxy_port() {
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: 7890"),
+            Some(7890)
+        );
+        assert_eq!(extract_configured_proxy_port("port: 7891"), Some(7891));
+        assert_eq!(
+            extract_configured_proxy_port("socks-port: 7892"),
+            Some(7892)
+        );
+        assert_eq!(
+            extract_configured_proxy_port("mixed-port: '9090'"),
+            Some(9090)
+        );
+        assert_eq!(extract_configured_proxy_port("other: 1234"), None);
+        assert_eq!(extract_configured_proxy_port("invalid yaml ::::"), None);
+        assert_eq!(extract_configured_proxy_port("mixed-port: 0"), None);
+    }
+
+    #[test]
+    fn test_extract_configured_proxy_endpoint() {
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: 7890"),
+            Some(ProxyEndpoint::http(7890))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("port: 7891"),
+            Some(ProxyEndpoint::http(7891))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("socks-port: 7892"),
+            Some(ProxyEndpoint::socks5h(7892))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: '9090'"),
+            Some(ProxyEndpoint::http(9090))
+        );
+        assert_eq!(extract_configured_proxy_endpoint("other: 1234"), None);
+        assert_eq!(extract_configured_proxy_endpoint("invalid yaml ::::"), None);
+        assert_eq!(extract_configured_proxy_endpoint("mixed-port: 0"), None);
+        // A disabled `mixed-port` must fall through to the next configured
+        // listener rather than being selected as port 0: `parse_u16` rejects
+        // zero, so the `or_else` chain continues to `port` and then
+        // `socks-port`. Pinned explicitly, because "no endpoint at all" (the
+        // assertion above) and "the wrong listener" look identical from outside
+        // but are very different failures.
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: 0\nsocks-port: 7892"),
+            Some(ProxyEndpoint::socks5h(7892))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: 0\nport: 7891"),
+            Some(ProxyEndpoint::http(7891))
         );
     }
 }
