@@ -1316,8 +1316,16 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
+                // Reset the proxy mode preference explicitly. A full-snapshot save
+                // can no longer clear it: the backend keeps the authoritative mode
+                // (`switch_mode` owns live changes) so a stale snapshot carrying
+                // `mode: null` cannot revert a concurrent user choice. Clearing it
+                // is therefore an explicit partial update.
+                await trackResult('mode', async () => {
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { mode: null } });
+                });
+
                 // Reset global preference overrides (injected into runtime YAML)
-                settings.mode = null;
                 settings.tun_enabled = null;
                 settings.mixed_port = null;
                 settings.socks_port = null;

@@ -130,14 +130,43 @@ fn current_platform_tags() -> Result<(&'static str, &'static str), String> {
     Ok((os_tag, arch_tag))
 }
 
-fn build_github_client() -> Result<reqwest::Client, String> {
-    let version = env!("CARGO_PKG_VERSION");
-    reqwest::Client::builder()
-        .user_agent(format!("Zephyr/{version}"))
+/// The managed core's configured proxy endpoint (port + scheme), if the core is
+/// running and its configuration is readable before a short deadline.
+///
+/// Used to relay update traffic through the app's own core: environment proxies
+/// are never trusted (unrelated local software can set `ALL_PROXY`), while this
+/// core is managed by the app and already carries its other traffic.
+async fn managed_proxy_endpoint(app: &tauri::AppHandle) -> Option<(u16, &'static str)> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    core_manager::core::fetch_util::read_active_runtime_config(Some(app), deadline)
+        .await
+        .and_then(|(endpoint, _ranges)| endpoint)
+}
+
+/// Build the GitHub client used by every update/asset request.
+///
+/// Ambient and environment proxies are never used — they were removed from the
+/// download paths because an untrusted local proxy can hijack traffic (and an
+/// `ALL_PROXY` value for the loopback drain request). The app's own managed
+/// core is the opposite: it is user-configured and processes this app's
+/// traffic already, so when it is running its configured mixed/SOCKS listener
+/// carries update traffic too. Without this, a user whose network can only
+/// reach GitHub through their proxy cannot update at all.
+async fn build_github_client(app: Option<&tauri::AppHandle>) -> Result<reqwest::Client, String> {
+    let managed_proxy = match app {
+        Some(app_handle) => managed_proxy_endpoint(app_handle).await,
+        None => None,
+    };
+    let mut builder = reqwest::Client::builder()
+        .user_agent(format!("Zephyr/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())
+        .no_proxy();
+    if let Some((port, scheme)) = managed_proxy {
+        let proxy_url = format!("{scheme}://127.0.0.1:{port}");
+        builder = builder.proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?);
+    }
+    builder.build().map_err(|e| e.to_string())
 }
 
 /// Emit a download status event with component identification.
@@ -338,8 +367,8 @@ fn construct_release_from_tag(tag: &str) -> Result<GithubRelease, String> {
     })
 }
 
-async fn fetch_latest_release() -> Result<GithubRelease, String> {
-    let client = build_github_client()?;
+async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRelease, String> {
+    let client = build_github_client(app).await?;
 
     // ── Dual-source racing: REST API vs Atom Feed ──
     //
@@ -438,7 +467,11 @@ fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(),
 ///    REST API path succeeds.  Zero network I/O; bypasses rate limiting.
 /// 2. **REST API fallback** — fetches `/releases/tags/{version}` and extracts
 ///    the `digest` field.  Subject to 60 req/hour unauthenticated rate limit.
-async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
+async fn get_expected_sha256(
+    app: Option<&tauri::AppHandle>,
+    version: &str,
+    asset_name: &str,
+) -> Result<String, String> {
     // ── 1. Check digest cache ──
     if let Ok(cache) = DIGEST_CACHE.lock() {
         if let Some((cached_tag, digests)) = &*cache {
@@ -453,7 +486,7 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
     }
 
     // ── 2. Fall back to REST API ──
-    let client = build_github_client()?;
+    let client = build_github_client(app).await?;
     let api_url = format!("https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}");
 
     let response = client
@@ -502,7 +535,7 @@ async fn download_release_asset(
         return Err("Untrusted download URL: only github.com is allowed".to_owned());
     }
 
-    let client = build_github_client()?;
+    let client = build_github_client(Some(window.app_handle())).await?;
     emit_download_status_ext(window, Some(component), "Downloading from GitHub...", 24);
 
     let response = client
@@ -840,12 +873,20 @@ pub struct ClientVersions {
 }
 
 #[command]
-pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
-    let client = reqwest::Client::builder()
+pub async fn get_latest_client_versions(app: tauri::AppHandle) -> Result<ClientVersions, String> {
+    // Same policy as the other update traffic: no ambient proxies, but the
+    // app's own managed core relays the request when it is running.
+    let mut builder = reqwest::Client::builder()
         .user_agent("Zephyr/Update-Checker")
         .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+        .no_proxy();
+    if let Some((port, scheme)) = managed_proxy_endpoint(&app).await {
+        builder = builder.proxy(
+            reqwest::Proxy::all(format!("{scheme}://127.0.0.1:{port}"))
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
 
     let verge_res = match client
         .get("https://api.github.com/repos/clash-verge-rev/clash-verge-rev/releases/latest")
@@ -900,8 +941,8 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
 }
 
 #[command]
-pub async fn get_latest_version() -> Result<UpdateInfo, String> {
-    let release = fetch_latest_release().await?;
+pub async fn get_latest_version(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let release = fetch_latest_release(Some(&app)).await?;
     let asset = select_release_asset(&release.assets)?;
     let version = release.tag_name;
 
@@ -1043,7 +1084,7 @@ async fn update_core_inner(
         "Verifying file integrity...",
         82,
     );
-    let expected_hash = get_expected_sha256(&version, &asset_name).await?;
+    let expected_hash = get_expected_sha256(Some(app), &version, &asset_name).await?;
     verify_sha256(&archive_path, &expected_hash).inspect_err(|e| {
         let _ = std::fs::remove_file(&archive_path);
         let _ = e;
@@ -1074,8 +1115,30 @@ async fn update_core_inner(
         92,
     );
 
-    // Stop core and wait for it to fully exit
-    let _ = core_manager::stop_core_inner(app, &state);
+    // Stop core and wait for it to fully exit. A failed stop must abort the
+    // update: replacing the executable underneath a running (on macOS a
+    // root-owned) core would leave the old binary executing while the updater
+    // reports success, and the subsequent restart would then fail on the ports
+    // it still holds. The extracted binary is removed first, so an aborted
+    // update does not leave a full core binary behind in the core directory.
+    //
+    // The stop blocks — on macOS TUN mode it waits up to 30 s for the
+    // administrator prompt and then polls for up to 8 s more — so it runs on a
+    // blocking task like every other caller (`stop_core`, `start_core_inner`)
+    // instead of parking a tokio worker for the whole wait. A panicked blocking
+    // task is reported through the same channel as a failed stop, so the
+    // extracted binary is cleaned up either way.
+    let app_for_stop = app.clone();
+    let stop_res = tokio::task::spawn_blocking(move || {
+        let stop_state = app_for_stop.state::<MihomoState>();
+        core_manager::stop_core_inner(&app_for_stop, &stop_state)
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("Failed to stop core: {e}")));
+    if let Err(e) = stop_res {
+        let _ = std::fs::remove_file(&temp_exe_path);
+        return Err(e);
+    }
 
     // Wait for the process to fully exit (give it some time)
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -1234,7 +1297,7 @@ pub async fn update_core(
 pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let app = window.app_handle();
     let paths = core_manager::ensure_app_storage(app)?;
-    let client = build_github_client()?;
+    let client = build_github_client(Some(app)).await?;
 
     let geoip_url =
         "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat";
@@ -1547,8 +1610,8 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
 
 /// Check for the latest Zephyr client version.
 #[command]
-pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
-    let client = build_github_client()?;
+pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUpdateInfo, String> {
+    let client = build_github_client(Some(&app)).await?;
 
     let response = client
         .get(ZEPHYR_RELEASE_API)
@@ -1596,7 +1659,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         5,
     );
 
-    let info = get_latest_client_version().await?;
+    let info = get_latest_client_version(window.app_handle().clone()).await?;
 
     // Compare with current version
     let current = env!("CARGO_PKG_VERSION");
@@ -1667,7 +1730,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         94,
     );
 
-    let sig_client = build_github_client()?;
+    let sig_client = build_github_client(Some(window.app_handle())).await?;
     let sig_response = sig_client.get(&minisig_url).send().await.map_err(|e| {
         let _ = std::fs::remove_file(&dest_path);
         format!("Failed to download signature: {e}. Installer deleted for security.")
