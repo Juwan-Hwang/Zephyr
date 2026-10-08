@@ -362,8 +362,10 @@ pub fn rule_import_file(
 /// Import rules from a remote URL.
 ///
 /// Validates the URL scheme and resolves DNS to prevent SSRF attacks.
-/// The resolved IP is pinned to prevent DNS rebinding between validation
-/// and the actual HTTP request. Response body is limited to 10 MB.
+/// On the direct route the resolved IP is pinned to prevent DNS rebinding
+/// between validation and the request. The managed-proxy fallback cannot pin:
+/// the proxy resolves the host itself, so that route relies on the proxy's own
+/// resolution. Response body is limited to 10 MB.
 ///
 /// Rate-limited: 5 calls per 10 seconds.
 pub async fn rule_import_url(
@@ -374,7 +376,7 @@ pub async fn rule_import_url(
     state.check_rate_limit("rule_import_url")?;
 
     // Use unified fetch function for consistent security measures
-    let raw = fetch_url_content(&url, None).await?;
+    let raw = fetch_url_content(&url, Some(&state.app)).await?;
 
     let content = normalize_to_prism_yaml(&raw);
     if content.is_empty() {
