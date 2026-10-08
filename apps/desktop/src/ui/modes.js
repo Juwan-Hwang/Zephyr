@@ -4,7 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
+import { invoke, closeAllConnections, switchProxy } from '../api.js';
 import { saveSetting } from './settings-helpers.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { showNotification } from './notifications.js';
@@ -41,7 +41,10 @@ export function initModeSelector() {
                 } catch (e) { modesLogger.warn("Failed to capture node for inheritance", e); }
 
                 // 2. Switch mode (hot-reload via REST API — instant)
-                await patchConfig({ mode });
+                // Routed through the backend so the user-mode generation bump
+                // happens under the restore lock; otherwise an in-flight
+                // fallback restore could overwrite the user's choice.
+                await invoke('switch_mode', { mode });
                 updateModeUI(mode);
 
                 // 3. Persist to settings.json + close connections in background
