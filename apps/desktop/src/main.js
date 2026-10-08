@@ -196,6 +196,53 @@ function initReactiveBindings() {
 //  Helper: Start core and configure API endpoints
 // ═══════════════════════════════════════════════════════════════════
 
+/** Prefix of a `start_core` error from the macOS root TUN start path. */
+const TUN_START_FAILED_MARKER = 'tun_start_failed';
+
+/**
+ * A failed root TUN start (macOS) must not leave the app with no core. The
+ * backend marks that failure with TUN_START_FAILED_MARKER; any other error is
+ * rethrown untouched, so it never changes the saved TUN preference. TUN off is
+ * recorded (the backend may already have done so; the session takes the
+ * non-TUN path even if the write fails) and the start is retried once. If the
+ * retry fails too, it was not a TUN problem: the preference read before the
+ * first start (true or unset) is put back and the original error is thrown.
+ * @param {any} settings settings read before the first start
+ * @param {Record<string, unknown>} startArgs
+ * @param {unknown} startErr
+ */
+async function retryStartWithoutTun(settings, startArgs, startErr) {
+  if (typeof startErr !== 'string' || !startErr.startsWith(TUN_START_FAILED_MARKER)) {
+    throw startErr;
+  }
+  await invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: false }).catch((e) => {
+    apiLogger.warn('[Zephyr] saving TUN off before the retry failed', e);
+  });
+  apiLogger.warn('[Zephyr] TUN start failed; retrying without TUN', startErr);
+  let coreResult;
+  try {
+    coreResult = await invoke(COMMANDS.START_CORE, startArgs);
+  } catch (retryErr) {
+    apiLogger.warn('[Zephyr] start without TUN failed too', retryErr);
+    // `tun_enabled` only accepts null through PATCH_SETTINGS (the reset).
+    const restore = settings.tun_enabled === true
+      ? invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: true })
+      : invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
+    await restore.catch((e) => {
+      apiLogger.warn('[Zephyr] restoring the TUN preference failed', e);
+    });
+    throw startErr;
+  }
+  // The detail is in the log above; the toast says what happened.
+  const lang = localStorage.getItem('lang') || 'en';
+  /** @type {Record<string, string>} */
+  const tt = /** @type {Record<string, string>} */ (
+    /** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en
+  );
+  showNotification(tt.tunStartFailed, 'warning');
+  return coreResult;
+}
+
 /**
  * Start the mihomo core, apply early UI settings, and configure API endpoints.
  * Returns true on success, false on failure (error already shown to user).
@@ -230,12 +277,13 @@ async function startCoreAndConfigure() {
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
     apiLogger.info(`[Zephyr] calling start_core (config=${configPath})`);
-    const coreResult = await invoke(COMMANDS.START_CORE, {
-      configPath,
-      test: false,
-      customArgs,
-      secret: null,
-    });
+    const startArgs = { configPath, customArgs, secret: null };
+    let coreResult;
+    try {
+      coreResult = await invoke(COMMANDS.START_CORE, startArgs);
+    } catch (startErr) {
+      coreResult = await retryStartWithoutTun(settings, startArgs, startErr);
+    }
     apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
 
     // If start_core silently fell back (requested config doesn't exist),

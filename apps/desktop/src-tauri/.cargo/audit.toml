@@ -7,9 +7,23 @@
 # Ignored advisories are fully suppressed from cargo-audit output.
 
 [advisories]
+# RUSTSEC-2026-0097: rand unsound with custom logger — RESOLVED
+#   All locked rand versions (0.8.6, 0.9.4, 0.10.1) are patched; waiver removed.
+#
+# RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki name constraints — RESOLVED
+#   Fixed by rustls-webpki 0.103.13 (>=0.103.12); waivers removed.
+#
+# RUSTSEC-2024-0411..0420: gtk-rs GTK3 unmaintained
+#   Indirect dep via Tauri's webkit2gtk on Linux; fix requires Tauri GTK4 migration
+#
+# RUSTSEC-2024-0429: glib 0.18.x unsound VariantStrIter
+#   Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
+#
+# RUSTSEC-2025-0141: bincode unmaintained (transitive dep)
+# RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive dep)
+# RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
+# RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 ignore = [
-  "RUSTSEC-2026-0097",
-  # gtk-rs GTK3 bindings — unmaintained; fix requires Tauri GTK4 migration
   "RUSTSEC-2024-0411",
   "RUSTSEC-2024-0412",
   "RUSTSEC-2024-0413",
@@ -23,14 +37,14 @@ ignore = [
   # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
   # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
   "RUSTSEC-2024-0429",
-  "RUSTSEC-2025-0141",  # bincode unmaintained
-  "RUSTSEC-2024-0370",  # proc-macro-error unmaintained
-  "RUSTSEC-2024-0436",  # paste unmaintained
-  "RUSTSEC-2025-0075",  # unic-char-range unmaintained
-  "RUSTSEC-2025-0080",  # unic-common unmaintained
-  "RUSTSEC-2025-0081",  # unic-char-property unmaintained
-  "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
-  "RUSTSEC-2025-0100",  # unic-ucd-ident unmaintained
+  "RUSTSEC-2025-0141",
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
   # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
   # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
   "RUSTSEC-2026-0258",

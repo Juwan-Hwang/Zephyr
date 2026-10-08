@@ -6,10 +6,8 @@
 # Ignored advisories are fully suppressed from cargo-audit output.
 
 [advisories]
-# RUSTSEC-2026-0097: rand 0.8 unsound with custom logger using rand::rng()
-#   Indirect dependency via tauri ecosystem (phf_generator -> kuchikiki -> tauri-utils -> tauri v2)
-#   Our code pins rand = "0.10.1" directly; fix requires upstream tauri/kuchikiki to upgrade phf
-#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0097.html
+# RUSTSEC-2026-0097: rand unsound with custom logger — RESOLVED
+#   All locked rand versions (0.8.6, 0.9.4, 0.10.1) are patched; waiver removed.
 #
 # RUSTSEC-2026-0098 / RUSTSEC-2026-0099: rustls-webpki name constraints — RESOLVED
 #   Fixed by rustls-webpki 0.103.13 (>=0.103.12); waivers removed.
@@ -25,7 +23,6 @@
 # RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
 # RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 ignore = [
-  "RUSTSEC-2026-0097",
   "RUSTSEC-2024-0411",
   "RUSTSEC-2024-0412",
   "RUSTSEC-2024-0413",
