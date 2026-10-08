@@ -4,7 +4,7 @@
 //! This module only contains Tauri-specific glue ([`AppHandle`], [`State`], reqwest hot-reload).
 
 use crate::core_manager::ensure_app_storage;
-use crate::core_manager::{read_profile_file, MihomoState};
+use crate::core_manager::MihomoState;
 #[allow(unused_imports)]
 use crate::emit_warn;
 use serde_json::Value as JsonValue;
@@ -91,29 +91,42 @@ pub async fn update_config(
         if profile_name != "run_config.yaml" {
             let profile_path = paths.profiles_dir.join(profile_name);
             if profile_path.exists() {
-                if let Ok(profile_content) = read_profile_file(&profile_path) {
-                    let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
-                        .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
-                    if let Ok(mut profile_yaml) =
-                        serde_yaml::from_str::<YamlValue>(&profile_content)
-                    {
-                        remove_dangerous_keys(&mut profile_yaml, false);
-                        if merge_yaml(&mut profile_yaml, &patch_yaml, 0).is_ok() {
+                let patch_yaml: YamlValue = serde_yaml::to_value(&patch)
+                    .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
+                // One read-modify-write under the profile-transform guard, so a
+                // concurrent save or encryption batch cannot land in between;
+                // the profile keeps its current encryption form. The guard is a
+                // std mutex an encryption batch can hold for a while, so the
+                // edit runs on the blocking pool instead of a runtime worker.
+                let blocking_app = app.clone();
+                let edited = tokio::task::spawn_blocking(move || {
+                    crate::core_manager::update_profile_file(
+                        &blocking_app,
+                        &profile_path,
+                        |profile_content| {
+                            let mut profile_yaml =
+                                serde_yaml::from_str::<YamlValue>(profile_content).ok()?;
                             remove_dangerous_keys(&mut profile_yaml, false);
-                            if let Ok(new_profile_content) = serde_yaml::to_string(&profile_yaml) {
-                                if let Err(e) = crate::core_manager::write_file_secure(
-                                    &profile_path,
-                                    &new_profile_content,
-                                ) {
-                                    emit_warn!(
-                                        Config,
-                                        CONFIG_PARSE_FAILED,
-                                        "Failed to update profile {profile_name}: {e}"
-                                    );
-                                }
-                            }
-                        }
-                    }
+                            merge_yaml(&mut profile_yaml, &patch_yaml, 0).ok()?;
+                            remove_dangerous_keys(&mut profile_yaml, false);
+                            serde_yaml::to_string(&profile_yaml).ok()
+                        },
+                    )
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("profile update task failed: {e}")));
+                match edited {
+                    Ok(true) => {}
+                    Ok(false) => emit_warn!(
+                        Config,
+                        CONFIG_PARSE_FAILED,
+                        "Profile {profile_name} was not updated: it could not be parsed or merged"
+                    ),
+                    Err(e) => emit_warn!(
+                        Config,
+                        CONFIG_PARSE_FAILED,
+                        "Failed to update profile {profile_name}: {e}"
+                    ),
                 }
             }
         }
@@ -161,6 +174,13 @@ pub async fn update_config(
             let status = res.status();
             if status.is_success() {
                 hot_reload_success = true;
+                // The reload may have moved or removed the proxy listener; the
+                // tray's system-proxy toggle and env copy read this endpoint.
+                let endpoint =
+                    crate::core_manager::core::core_process::extract_configured_proxy_endpoint_from_yaml(
+                        &current_yaml,
+                    );
+                crate::backend_event::lock_best_effort(&state.0).set_last_proxy_endpoint(endpoint);
             } else {
                 let text = res.text().await.unwrap_or_default();
                 emit_warn!(

@@ -3,13 +3,13 @@ use crate::{persist_settings, SettingsState};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Manager as _, State};
+use tauri::{AppHandle, Manager as _};
 use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
     cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
-    write_profile_file, ConfigMetadata,
+    save_profile_file, ConfigMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -259,12 +259,8 @@ fn strip_yaml_ext(name: &str) -> &str {
 
 /// 删除配置后检查 `last_config` 是否悬空（指向已删除的文件）。
 /// 如果是，重置为第一个可用配置；如果没有任何配置，置为 `None`。
-fn cleanup_dangling_last_config(
-    app: &AppHandle,
-    state: &State<'_, SettingsState>,
-    paths: &super::AppPaths,
-    deleted_name: &str,
-) {
+fn cleanup_dangling_last_config(app: &AppHandle, paths: &super::AppPaths, deleted_name: &str) {
+    let state = app.state::<SettingsState>();
     // 判断 last_config 是否指向已删除的配置（规范化 + strip 扩展名后比较）
     // 提取为闭包便于两段锁内复用，避免 TOCTOU 竞态时第二段锁无条件覆盖并发更新
     let is_same_config = |lc: &str| -> bool {
@@ -302,34 +298,35 @@ fn cleanup_dangling_last_config(
     });
 
     // 第二段持锁：再次确认 last_config 仍指向已删除的配置才覆盖，避免并发修改被丢弃
-    let (settings_clone, updated) = {
+    // 写盘也在锁内完成：锁外写入的旧快照可能晚于更新的快照落盘，把它覆盖回去
+    let settings_clone = {
         let mut settings_guard = state
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if settings_guard
+        if !settings_guard
             .last_config
             .as_deref()
             .is_some_and(is_same_config)
         {
-            settings_guard.last_config = new_config;
-            (settings_guard.clone(), true)
-        } else {
-            (settings_guard.clone(), false)
+            return;
         }
+        let mut next = settings_guard.clone();
+        next.last_config = new_config;
+        if let Err(e) = persist_settings(app, &next) {
+            // Persist-then-publish: memory keeps matching settings.json.
+            drop(settings_guard);
+            crate::emit_warn!(
+                Config,
+                CONFIG_PERSIST_FAILED,
+                "Failed to persist settings after last_config cleanup: {e}"
+            );
+            return;
+        }
+        *settings_guard = next.clone();
+        drop(settings_guard);
+        next
     };
-
-    if !updated {
-        return;
-    }
-
-    if let Err(e) = persist_settings(app, &settings_clone) {
-        crate::emit_warn!(
-            Config,
-            CONFIG_PERSIST_FAILED,
-            "Failed to persist settings after last_config cleanup: {e}"
-        );
-    }
     if let Some(name) = &settings_clone.last_config {
         crate::emit_info!(
             Config,
@@ -345,13 +342,45 @@ fn cleanup_dangling_last_config(
     }
 }
 
+/// Remove a profile under the profile-transform guard, so the encryption batch
+/// cannot read the file before the removal and write it back afterwards.
+fn remove_profile_file(path: &std::path::Path) -> Result<(), String> {
+    let transform_guard = crate::lock_profile_transform();
+    let result = fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"));
+    drop(transform_guard);
+    result
+}
+
+/// [`remove_profile_file`] on the blocking pool: the profile-transform guard is a
+/// std mutex an encryption batch can hold for a while, so waiting for it must
+/// not stall a Tokio worker (same rule as `update_config`).
+async fn remove_profile_file_blocking(path: &std::path::Path) -> Result<(), String> {
+    let owned = path.to_path_buf();
+    tokio::task::spawn_blocking(move || remove_profile_file(&owned))
+        .await
+        .map_err(|e| format!("Profile delete task failed: {e}"))?
+}
+
+/// [`cleanup_dangling_last_config`] on the blocking pool: it waits for the std
+/// settings mutex and writes `settings.json` under it, neither of which may
+/// stall a Tokio worker.
+async fn cleanup_dangling_last_config_blocking(
+    app: &AppHandle,
+    paths: &super::AppPaths,
+    deleted_name: &str,
+) -> Result<(), String> {
+    let owned_app = app.clone();
+    let owned_paths = paths.clone();
+    let owned_name = deleted_name.to_owned();
+    tokio::task::spawn_blocking(move || {
+        cleanup_dangling_last_config(&owned_app, &owned_paths, &owned_name);
+    })
+    .await
+    .map_err(|e| format!("last_config cleanup task failed: {e}"))
+}
+
 #[tauri::command]
-#[allow(private_interfaces)]
-pub async fn delete_config(
-    app: AppHandle,
-    state: State<'_, SettingsState>,
-    name: String,
-) -> Result<String, String> {
+pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
     // Ensure the name has a .yaml extension
@@ -377,14 +406,14 @@ pub async fn delete_config(
         let yml_path = paths.profiles_dir.join(&yml_name);
 
         if yml_path.exists() {
-            fs::remove_file(&yml_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+            remove_profile_file_blocking(&yml_path).await?;
             {
                 let _guard = lock_metadata();
                 let mut metadata = load_metadata(&paths);
                 metadata.configs.remove(&yml_name);
                 save_metadata(&paths, &metadata)?;
             }
-            cleanup_dangling_last_config(&app, &state, &paths, &yml_name);
+            cleanup_dangling_last_config_blocking(&app, &paths, &yml_name).await?;
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
@@ -392,12 +421,12 @@ pub async fn delete_config(
 
     // Delete the file first, then update metadata
     // This ensures metadata consistency: if file deletion fails, metadata stays intact
-    fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+    remove_profile_file_blocking(&target_path).await?;
 
     // Verify deletion (Windows may report success but file remains if locked)
     if target_path.exists() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        fs::remove_file(&target_path).map_err(|e| format!("Failed to delete file: {e}"))?;
+        remove_profile_file_blocking(&target_path).await?;
 
         if target_path.exists() {
             return Err("File could not be deleted (locked by another process?)".to_owned());
@@ -419,7 +448,7 @@ pub async fn delete_config(
 
     // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
     // 避免悬空指针导致下次冷启动加载到错误的配置。
-    cleanup_dangling_last_config(&app, &state, &paths, &clean_name);
+    cleanup_dangling_last_config_blocking(&app, &paths, &clean_name).await?;
 
     Ok(format!("Config {name} deleted"))
 }
@@ -455,26 +484,32 @@ pub fn read_config_file(app: AppHandle, config_path: String) -> Result<String, S
     }
 }
 
+/// Async so Tauri does not run it on the main thread: a profile save waits for
+/// the profile-transform guard, which an encryption batch holds while it
+/// rewrites every profile. The work runs on the blocking pool.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn write_config_file(
+pub async fn write_config_file(
     app: AppHandle,
     config_path: String,
     content: String,
 ) -> Result<String, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        write_config_file_inner(app, config_path, content)
-    }))
-    .map_err(|payload| {
-        let msg = crate::backend_event::panic_to_string(payload);
-        crate::emit_error!(
-            Config,
-            CONFIG_PANIC_GUARD,
-            "Panic in write_config_file: {msg}"
-        );
-        format!("Internal error in write_config_file: {msg}")
+    tokio::task::spawn_blocking(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            write_config_file_inner(app, config_path, content)
+        }))
+        .map_err(|payload| {
+            let msg = crate::backend_event::panic_to_string(payload);
+            crate::emit_error!(
+                Config,
+                CONFIG_PANIC_GUARD,
+                "Panic in write_config_file: {msg}"
+            );
+            format!("Internal error in write_config_file: {msg}")
+        })
+        .and_then(std::convert::identity)
     })
-    .and_then(std::convert::identity)
+    .await
+    .map_err(|e| format!("Config save task failed: {e}"))?
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -503,15 +538,16 @@ fn write_config_file_inner(
     if config_file_name == "run_config.yaml" {
         write_file_secure(&resolved_path, &content)?;
     } else {
-        let encrypt = {
-            let settings_state = app.state::<crate::SettingsState>();
-            let settings = settings_state
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            settings.encrypt_configs
-        };
-        write_profile_file(&resolved_path, &content, encrypt)?;
+        // Reading the flag and writing the file under the same guard is what
+        // makes the save safe: `patch_settings`' encryption batch holds this
+        // lock while it rewrites every profile, so without it a save could land
+        // between the batch's read of this file and its write of it, and the
+        // batch would then overwrite the saved content with its stale copy.
+        //
+        // Taken *before* the settings lock, matching `patch_settings`, which
+        // reads the authoritative value under that lock while holding this one.
+        // The reverse order would deadlock the two.
+        save_profile_file(&app, &resolved_path, &content)?;
     }
 
     Ok("Config saved".to_owned())
@@ -550,9 +586,25 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Async for the same reason as [`write_config_file`]: the rename waits for the
+/// profile-transform guard, so it runs on the blocking pool, not the main thread.
 #[tauri::command]
+pub async fn rename_config(
+    app: AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || rename_config_blocking(app, old_name, new_name))
+        .await
+        .map_err(|e| format!("Config rename task failed: {e}"))?
+}
+
 #[allow(clippy::needless_pass_by_value)]
-pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Result<String, String> {
+fn rename_config_blocking(
+    app: AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
     // Sanitize old name
@@ -595,6 +647,10 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
     // Rename file + update metadata under lock to prevent cleanup_metadata_cache
     // from removing the metadata entry while the file is temporarily absent.
     {
+        // The encryption batch rewrites every profile it read, so a rename that
+        // lands between its read and write would leave a stale copy at the old
+        // name. Taken before the metadata lock, matching the profile writers.
+        let _transform_guard = crate::lock_profile_transform();
         let _guard = lock_metadata();
         // Re-validate under lock: a concurrent command may have created new_path
         // between the pre-lock check and here.
@@ -677,10 +733,11 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
             dirty = true;
         }
 
+        // Persist under the lock: a snapshot written after releasing it could
+        // land after a newer one and revert it on disk. Memory keeps the
+        // migrated keys even if the write fails, since the file is renamed.
         if dirty {
-            let settings = guard.clone();
-            drop(guard);
-            if let Err(e) = crate::persist_settings(&app, &settings) {
+            if let Err(e) = crate::persist_settings(&app, &guard) {
                 emit_error!(
                     Config,
                     CONFIG_SAVE_FAILED,
@@ -688,6 +745,7 @@ pub fn rename_config(app: AppHandle, old_name: String, new_name: String) -> Resu
                 );
             }
         }
+        drop(guard);
     }
 
     // Sync runtime MihomoState.last_config_path
