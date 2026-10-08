@@ -23,6 +23,7 @@ import {
     openPrismFolder,
     setSecret,
     setBaseUrl,
+    getConfig,
 } from '../api.js';
 import { setWsSecret, setWsBaseUrl, forceReconnect } from '../websocket.js';
 import { translations, setLanguage } from '../i18n.js';
@@ -62,6 +63,7 @@ import { navigateTo } from './navigation.js';
 import { initCustomDropdown } from './dropdown.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies.js';
+import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
@@ -1176,6 +1178,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         save: () => save(),
     });
 
+    /**
+     * Mode the core falls back to when no preference is stored: the value the
+     * generated runtime config carries (`mode: rule`).
+     * @type {string}
+     */
+    const DEFAULT_PROXY_MODE = 'rule';
+
     // ---- Restore defaults ----
     if (restoreDefaultsBtn) {
         restoreDefaultsBtn.onclick = async () => {
@@ -1316,9 +1325,101 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
+                // Reset the proxy mode preference explicitly. A full-snapshot save
+                // can no longer clear it: the backend keeps the authoritative mode
+                // (`switch_mode` owns live changes) so a stale snapshot carrying
+                // `mode: null` cannot revert a concurrent user choice. Clearing it
+                // is therefore an explicit partial update, and the live core is
+                // brought to the default through `switch_mode` below.
+
+                await trackResult('mode', async () => {
+                    // Decide from the *live core* mode, not from the stored
+                    // preference. A stored `null` only means the mode was never
+                    // switched through `switch_mode`; the core can still be
+                    // running in another mode because the profile's own YAML sets
+                    // one, or because a fallback GLOBAL restore is still pending.
+                    // Reading the stored flag would therefore report success while
+                    // leaving the core on something other than the default.
+                    let coreOnDefaultMode = false;
+                    try {
+                        /** @type {any} */
+                        const liveConfig = await getConfig();
+                        coreOnDefaultMode = liveConfig?.mode === DEFAULT_PROXY_MODE;
+                    } catch (err) {
+                        // Cannot tell, so assume the reset is needed: leaving the
+                        // core on a non-default mode is the outcome Restore
+                        // Defaults exists to undo.
+                        settingsLogger.warn('[RestoreDefaults] could not read the live core mode; resetting it anyway', err);
+                    }
+
+                    // Live core first, then the stored preference.
+                    //
+                    // `switch_mode` persists the accepted mode itself, so doing it
+                    // afterwards would write `mode: "rule"` back over the `null`
+                    // this restore is meant to leave — the preference would no
+                    // longer be cleared, and the next Restore Defaults would read
+                    // it as set and skip the live switch. It also keeps the
+                    // failure honest: if the switch does not apply, the stored
+                    // preference has not already been cleared behind it, so there
+                    // is no window where settings say "default" while the core is
+                    // still on something else.
+                    if (!coreOnDefaultMode) {
+                        // `switch_mode` is invoked by name here, matching
+                        // modes.js: it has no entry in the shared COMMANDS map.
+                        await invoke(COMMANDS.SWITCH_MODE, { mode: DEFAULT_PROXY_MODE });
+                        invalidateSettingsCache();
+                        updateModeUI(DEFAULT_PROXY_MODE);
+                    }
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { mode: null } });
+                });
+
+                // Same for TUN: the backend keeps the authoritative value (the TUN
+                // commands apply changes to the running core first), so a stale
+                // snapshot cannot revert a concurrent toggle. Resetting it is an
+                // explicit partial update.
+                await trackResult('tun_enabled', async () => {
+                    // Live core first, then the stored preference — the same
+                    // order the mode reset above uses, and for the same reason:
+                    // clearing only the preference would leave the core routing
+                    // through TUN while `settings.json` says the default, and
+                    // macOS startup reads that flag to pick the TUN path.
+                    //
+                    // TUN is the case where I would rather not touch the live
+                    // core: disabling it means a root restart, which on macOS
+                    // raises the administrator dialog as a side effect of
+                    // "Restore Defaults". Doing nothing is worse — it reports a
+                    // reset that did not happen — so the core is disabled when it
+                    // is actually on, and a failure is reported rather than
+                    // swallowed.
+                    let tunOn = false;
+                    try {
+                        tunOn = Boolean(appStore.get('isTunEnabled'));
+                    } catch (err) {
+                        settingsLogger.warn('[RestoreDefaults] could not read the TUN toggle state', err);
+                    }
+                    if (tunOn) {
+                        await invoke(COMMANDS.DISABLE_CMD);
+                        // `disable_tun_cmd` stops the root core on macOS and only
+                        // rewrites `run_config.yaml` elsewhere — neither leaves
+                        // the core running without TUN. Without this the reset
+                        // would report success with no core at all (macOS) or
+                        // with TUN still active (Windows/Linux). This mirrors the
+                        // TUN toggle in tun.js: disable, then bring the core
+                        // back up on the updated config.
+                        const afterDisable = await invoke(COMMANDS.GET_SETTINGS);
+                        const configName = afterDisable.last_config || 'config.yaml';
+                        const customArgs = afterDisable.custom_args || [];
+                        await restartCore(configName, customArgs);
+                        await postRestartRecovery(configName);
+                    }
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
+                    if (tunOn) {
+                        appStore.set('isTunEnabled', false);
+                        Bus.emit(Events.CONFIG_UPDATED);
+                    }
+                });
+
                 // Reset global preference overrides (injected into runtime YAML)
-                settings.mode = null;
-                settings.tun_enabled = null;
                 settings.mixed_port = null;
                 settings.socks_port = null;
                 settings.http_port = null;

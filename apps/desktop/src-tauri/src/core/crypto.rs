@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use tauri::Manager as _;
+
 use super::secure_io::write_file_secure;
 use super::AppPaths;
 
@@ -376,6 +378,25 @@ pub fn write_profile_file(path: &Path, content: &str, encrypt: bool) -> Result<(
         content.to_owned()
     };
     write_file_secure(path, &data)
+}
+
+/// The currently authoritative `encrypt_configs` value.
+///
+/// Read under the settings lock, so a caller that has already acquired the
+/// profile-transform guard sees the value that actually won, rather than the one
+/// its own patch happened to persist. Without this, a patch whose write was
+/// superseded while it waited for the transform lock would still run its own
+/// transform and undo the newer one.
+///
+/// `None` means the value could not be read, which is *not* the same as `false`.
+/// The caller must skip the transform in that case: assuming `false` would
+/// decrypt every profile even when the persisted setting says `encrypt_configs:
+/// true`, leaving the files in plaintext while the flag claims they are
+/// encrypted.
+#[must_use]
+pub fn authoritative_encrypt_configs(app: &tauri::AppHandle) -> Option<bool> {
+    app.try_state::<crate::SettingsState>()
+        .and_then(|state| state.0.lock().ok().map(|guard| guard.encrypt_configs))
 }
 
 /// Encrypt all plaintext profile YAML files in `profiles_dir`.
