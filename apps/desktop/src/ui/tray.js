@@ -210,7 +210,12 @@ export async function initTrayEventListeners() {
     const unlisten2 = await listen('tray-tun-changed', async (event) => {
         /** @type {any} */
         const ev = event;
-        if (appStore.get('isNetworkUpdating')) return;
+        // `toggle_tun` took the backend toggle lock before emitting; a dropped
+        // event must hand it back or every later tray toggle is ignored.
+        if (appStore.get('isNetworkUpdating')) {
+            invoke(COMMANDS.RELEASE_TUN_TOGGLE).catch(() => {});
+            return;
+        }
 
         const enabled = ev.payload;
         const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById('tun-proxy-toggle'));
@@ -301,6 +306,12 @@ export async function initTrayEventListeners() {
                 updateTrayMenu(true).catch(() => {});
                 // Refresh tray again after a short delay to ensure mihomo has updated `now`
                 setTimeout(() => updateTrayMenu(true).catch(() => {}), 500);
+            } else {
+                // A GLOBAL selection is routed through the backend and reported
+                // as a rejected request instead of a thrown error, so surface it
+                // instead of failing silently on a user-initiated switch.
+                trayLogger.warn('Tray proxy switch was not applied');
+                showNotification(tr('notifSwitchFailed', 'Failed to switch node'), 'error');
             }
         } catch (err) {
             trayLogger.error('Failed to switch proxy from tray', err);
@@ -429,10 +440,11 @@ export function resolveEnvFormat(format) {
  * Generate proxy environment variable strings for various shell formats.
  * @param {string} format - Shell format: bash, fish, cmd, powershell, nushell
  * @param {number} port - Proxy port number
+ * @param {'http' | 'socks5h'} [scheme] - URL scheme the listener speaks
  * @returns {string} Formatted env var string ready to copy
  */
-export function generateProxyEnvVars(format, port = 7890) {
-    const proxy = `http://127.0.0.1:${port}`;
+export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
+    const proxy = `${scheme}://127.0.0.1:${port}`;
     const normalized = typeof format === 'string' ? format.toLowerCase() : undefined;
     switch (normalized) {
         case 'bash':
