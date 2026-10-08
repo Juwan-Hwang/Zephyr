@@ -14,7 +14,7 @@ use tauri::{
     AppHandle, Manager as _,
 };
 
-use crate::core_manager::{MihomoState, DEFAULT_MIXED_PORT};
+use crate::core_manager::MihomoState;
 use crate::sys_proxy;
 
 /// Tray menu state for tracking check states
@@ -316,7 +316,7 @@ fn copy_proxy_env_to_clipboard(app: &AppHandle) -> Result<(), String> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .last_proxy_port()
-        .unwrap_or(DEFAULT_MIXED_PORT);
+        .ok_or_else(|| "No managed proxy endpoint is configured; nothing to copy".to_owned())?;
 
     // Resolve format: fall back to platform-appropriate default if empty
     let resolved_format = resolve_proxy_format(&format);
@@ -412,9 +412,19 @@ fn toggle_sys_proxy(app: &AppHandle) {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .last_proxy_port()
-            .unwrap_or(DEFAULT_MIXED_PORT);
-        let server = format!("127.0.0.1:{port}");
+            .last_proxy_port();
+        let Some(proxy_port) = port else {
+            // No managed proxy endpoint: enabling the OS proxy would point it at
+            // an unmanaged default port with nothing listening.
+            emit_warn!(
+                System,
+                SYS_PROXY_TOGGLE_FAILED,
+                "System proxy not enabled: no managed proxy endpoint is configured"
+            );
+            rebuild_tray_menu_from_state(app);
+            return;
+        };
+        let server = format!("127.0.0.1:{proxy_port}");
         sys_proxy::enable_sysproxy(app.clone(), server, None)
     };
 

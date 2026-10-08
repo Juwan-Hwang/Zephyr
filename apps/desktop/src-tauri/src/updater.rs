@@ -136,6 +136,9 @@ fn build_github_client() -> Result<reqwest::Client, String> {
         .user_agent(format!("Zephyr/{version}"))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
+        // Ambient/environment proxies (including SOCKS via the `socks` feature)
+        // must never route update downloads: fallback proxies are app-managed only.
+        .no_proxy()
         .build()
         .map_err(|e| e.to_string())
 }
@@ -844,6 +847,8 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
     let client = reqwest::Client::builder()
         .user_agent("Zephyr/Update-Checker")
         .timeout(std::time::Duration::from_secs(10))
+        // Ambient/environment proxies must never route update checks.
+        .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
 
