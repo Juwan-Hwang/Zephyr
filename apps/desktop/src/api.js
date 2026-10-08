@@ -572,6 +572,13 @@ export async function switchProxy(group, name) {
       method: 'PUT',
       body: JSON.stringify({ name }),
     });
+    if (res.ok && typeof group === 'string' && group.toLowerCase() === 'global') {
+      try {
+        await invoke('notify_user_node_changed');
+      } catch {
+        // Best-effort notification; skip if IPC unavailable or fails
+      }
+    }
     return res.ok;
   } catch (err) {
     if (err instanceof ApiError) throw err;
