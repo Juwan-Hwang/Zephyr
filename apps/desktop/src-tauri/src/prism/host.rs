@@ -310,13 +310,16 @@ None => "Config saved. Failed to apply via core REST API (connection or response
     }
 
     fn get_core_info(&self) -> Result<CoreInfo, String> {
+        // TUN-aware (a macOS root TUN core has no `Child` handle); evaluated
+        // before taking the lock, which the check acquires itself.
+        let is_running = crate::core_manager::core::subscription::is_core_running(&self.app);
         let state = self.app.state::<MihomoState>();
         let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         Ok(CoreInfo {
             version: String::from("unknown"), // async get_core_version unavailable in sync trait
             api_port: lock.last_port().unwrap_or(9090),
             api_secret: lock.last_secret().to_owned(),
-            is_running: lock.process().is_some(),
+            is_running,
         })
     }
 
