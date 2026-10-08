@@ -1,7 +1,7 @@
 //! Subscription auto-update scheduler.
 //! Runs in background and checks each subscription's individual interval.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +17,17 @@ use crate::{emit_error, emit_info, emit_warn};
 /// Download timeout per subscription (15 seconds).
 const DOWNLOAD_TIMEOUT_SECS: u64 = 15;
 
+/// Consecutive update passes to defer while a global-mode restore marker stays
+/// unreconciled.
+///
+/// Deferring one pass is right: downloading on top of an unresolved restore
+/// applies a configuration the user is about to be moved out of. Deferring
+/// *every* pass is not — a restore that keeps failing (a non-global restore
+/// leaves `orig_mode` set, so the marker is rewritten and the next pass times
+/// out again) would stop scheduled and manual updates indefinitely. The limit
+/// trades a bounded number of skipped passes for updates that always resume.
+const MAX_RESTORE_DEFERRED_PASSES: usize = 3;
+
 /// Scheduler state shared between the task and external control.
 pub struct SchedulerState {
     /// Whether the scheduler is running.
@@ -25,6 +36,10 @@ pub struct SchedulerState {
     shutdown: AtomicBool,
     /// Guard to prevent concurrent `trigger_auto_update` calls.
     trigger_guard: AtomicBool,
+    /// Consecutive passes deferred because a global-mode restore marker could
+    /// not be reconciled. Bounds how long a restore that keeps failing can hold
+    /// updates up; see [`MAX_RESTORE_DEFERRED_PASSES`].
+    restore_deferred: AtomicUsize,
 }
 
 impl SchedulerState {
@@ -34,6 +49,7 @@ impl SchedulerState {
             running: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
             trigger_guard: AtomicBool::new(false),
+            restore_deferred: AtomicUsize::new(0),
         }
     }
 
@@ -65,6 +81,28 @@ impl SchedulerState {
     pub fn release_trigger(&self) {
         self.trigger_guard.store(false, Ordering::SeqCst);
     }
+
+    /// Record a deferred pass and report how many have happened in a row.
+    ///
+    /// Reset by [`SchedulerState::clear_restore_deferred`] whenever
+    /// reconciliation returns something other than `TimedOut` — including
+    /// `CoreUnavailable` (the core is not running; downloads still run) and
+    /// `Busy` (a fallback holds the lock and restores itself). So this counts
+    /// consecutive timeouts, not only full failures.
+    ///
+    /// Shared by the scheduler loop and the manual `trigger_auto_update` command,
+    /// since both go through `check_and_update_subscriptions`: a manual "update
+    /// now" while the marker stays unreconciled consumes part of the budget. That
+    /// only shortens the time before updates resume, never changes what happens
+    /// once the bound is passed.
+    pub fn note_restore_deferred(&self) -> usize {
+        self.restore_deferred.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Clear the consecutive-deferral count after a successful reconciliation.
+    pub fn clear_restore_deferred(&self) {
+        self.restore_deferred.store(0, Ordering::SeqCst);
+    }
 }
 
 impl Default for SchedulerState {
@@ -91,6 +129,18 @@ pub fn start_scheduler(app: AppHandle) -> Arc<SchedulerState> {
 
 /// Main scheduler loop - checks each subscription individually.
 async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
+    // Reconcile and restore any un-restored global mode or GLOBAL selection marker left from an abrupt shutdown.
+    // Core is not running yet on startup, so CoreUnavailable is expected and silent.
+    if super::subscription::reconcile_global_mode_restore(&app).await
+        == super::subscription::ReconcileResult::TimedOut
+    {
+        emit_warn!(
+            Core,
+            CORE_GLOBAL_RESTORE_FAILED,
+            "Timed out during global mode restore reconciliation on startup"
+        );
+    }
+
     let mut check_interval = interval(Duration::from_secs(60)); // Check every minute
     check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -154,6 +204,74 @@ async fn check_and_update_subscriptions(
     app: &AppHandle,
     state: &Arc<SchedulerState>,
 ) -> Result<usize, String> {
+    // Reconcile any un-restored global mode marker before triggering new subscription downloads.
+    //
+    // A core that is simply not running leaves the marker for a later pass and
+    // downloads must still run, so that is not an error. A *timeout* is
+    // different: the marker is still on disk, which means the previous GLOBAL
+    // mode and node selection may still be in force. Downloading now would apply
+    // a configuration on top of a state the user is about to be moved out of, so
+    // this pass is deferred — the next tick retries the reconciliation and, once
+    // it succeeds, downloads proceed.
+    //
+    // `Busy` is not deferred: it means a fallback is in flight or the lock wait
+    // expired, and that operation performs the restore itself.
+    if super::subscription::reconcile_global_mode_restore_with_deadline(
+        app,
+        std::time::Instant::now() + std::time::Duration::from_millis(500),
+    )
+    .await
+        == super::subscription::ReconcileResult::TimedOut
+    {
+        // A restore that keeps failing must not hold updates hostage. A failed
+        // non-global restore leaves `orig_mode` set, so reconciliation rewrites
+        // the marker and reports `TimedOut` again on the next pass — an
+        // unbounded deferral would mean scheduled and manual updates stop
+        // working for as long as the restore keeps failing.
+        //
+        // The marker is *not* cleared here: abandoning it is a decision about
+        // routing, and fallback routing may still be active. Updates simply
+        // resume against whatever the live core is currently doing, which is the
+        // behaviour that predates the deferral, and the next pass retries the
+        // reconciliation as usual.
+        let deferred = state.note_restore_deferred();
+        if deferred <= MAX_RESTORE_DEFERRED_PASSES {
+            emit_warn!(
+                Core,
+                CORE_GLOBAL_RESTORE_FAILED,
+                "Global mode restore marker not reconciled in time; deferring this scheduled update pass"
+            );
+            return Err(
+                "Deferred subscription update: global mode restore marker is still pending"
+                    .to_owned(),
+            );
+        }
+        if deferred == MAX_RESTORE_DEFERRED_PASSES + 1 {
+            // Reported once, at error level, when the bound is first passed: the
+            // timeout condition persists, so repeating it on every tick would
+            // bury every other error in the log. The counter is deliberately not
+            // reset here — it only resets on a successful reconcile — so later
+            // passes take the `warn` arm and the error does not recur until the
+            // state actually recovers.
+            emit_error!(
+                Core,
+                CORE_GLOBAL_RESTORE_FAILED,
+                "Global mode restore marker still unreconciled after {MAX_RESTORE_DEFERRED_PASSES} \
+                 deferred passes; proceeding with updates rather than blocking them indefinitely"
+            );
+        } else {
+            // Past the bound: updates are already proceeding every pass, so this
+            // is a reminder rather than the turning point.
+            emit_warn!(
+                Core,
+                CORE_GLOBAL_RESTORE_FAILED,
+                "Global mode restore marker still unreconciled; continuing updates"
+            );
+        }
+    } else {
+        state.clear_restore_deferred();
+    }
+
     let paths = ensure_app_storage(app)?;
     let metadata = load_metadata(&paths);
 

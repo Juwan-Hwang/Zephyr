@@ -9,10 +9,16 @@ import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery } from './lifecycle.js';
+
+// Invoked by name, matching `switch_mode` in modes.js: this one has no entry in
+// the shared COMMANDS map. It records the TUN preference only, for callers that
+// have already applied TUN to the running core themselves — `patch_settings`
+// now rejects a non-null `tun_enabled`, which is the owner-path split this
+// command exists to serve.
+const RECORD_TUN_ENABLED = COMMANDS.RECORD_TUN_ENABLED;
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -64,12 +70,15 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
-                        await saveSetting('tun_enabled', true);
                     } catch (authErr) {
                         tunLogger.error('authErr', authErr);
                         if (authErr === 'canceled') {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
-                        } else if (authErr === 'root_start_failed') {
+                        } else if (typeof authErr === 'string' && authErr.startsWith('root_start_failed')) {
+                            // The backend prefixes the marker and appends the
+                            // detail, so this must be a prefix match: the script
+                            // has already killed the user's core, and this branch
+                            // is what runs the recovery for it.
                             showNotification(t.tunStartFailed || 'TUN failed to start, recovering...', 'error');
                             await recoverFromRootStartFailure();
                         } else {
@@ -82,11 +91,30 @@ export function initTunToggle() {
                         }
                         return;
                     }
+                    // Recording the preference is a separate step from the
+                    // privileged restart, and must not be reported as an
+                    // authorization failure: if the write fails after the root TUN
+                    // core is already running, the core *is* in TUN mode while
+                    // `settings.json` still says otherwise. Unchecking the toggle
+                    // would then make the UI disagree with the running core, and
+                    // the stale flag would send the next start down the non-TUN
+                    // path — which re-prompts for administrator rights to kill the
+                    // core this very toggle just started.
+                    try {
+                        await invoke(RECORD_TUN_ENABLED, { enable: true });
+                    } catch (recordErr) {
+                        tunLogger.error('failed to record tun_enabled after root restart', recordErr);
+                        showNotification(
+                            t.tunPrefSaveFailed || 'TUN is active, but the preference could not be saved',
+                            'warning'
+                        );
+                    }
                 } else {
                     try {
                         await invoke(COMMANDS.SET_TUN_ENABLED, { enable: false });
                         await invoke(COMMANDS.DISABLE_CMD);
-                        await saveSetting('tun_enabled', false);
+                        // `set_tun_enabled` persists the preference itself; a
+                        // separate settings write would be redundant.
                         await new Promise(r => setTimeout(r, 1500));
 
                         const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -102,7 +130,6 @@ export function initTunToggle() {
             } else {
                 // Non-macOS: use API to update config
                 await patchConfig({ tun: { enable } });
-                await saveSetting('tun_enabled', enable);
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
@@ -110,6 +137,26 @@ export function initTunToggle() {
                 const typedConfig = /** @type {{tun?: {enable?: boolean}}} */ (config);
                 if (typedConfig?.tun?.enable !== enable) {
                     throw new Error(t.tunRejected || "Core rejected TUN mode change");
+                }
+                // Recorded only now that the core has confirmed the change.
+                // Writing it earlier would leave `settings.json` holding a value
+                // the core refused, and `start_core_inner` injects that flag into
+                // every later `run_config.yaml` — so each start would try to bring
+                // TUN up again, on a platform where the user may have declined the
+                // permission prompt or where the core lacks the rights.
+                //
+                // A preference-write failure at this point must not roll the UI
+                // back either: the core has already made the change, so reverting
+                // the toggle would make it disagree with the running core. Same
+                // handling as the macOS branch.
+                try {
+                    await invoke(RECORD_TUN_ENABLED, { enable });
+                } catch (recordErr) {
+                    tunLogger.error('failed to record tun_enabled after core confirmed TUN', recordErr);
+                    showNotification(
+                        t.tunPrefSaveFailed || 'TUN is active, but the preference could not be saved',
+                        'warning'
+                    );
                 }
             }
 
@@ -154,7 +201,25 @@ export function initTunToggle() {
                     if (permissionGranted) {
                         try {
                             showNotification(t.tunLinuxPermissionGranted || 'Permission granted. Restarting core...', 'success');
-                            await saveSetting('tun_enabled', true);
+                            // The core is about to come up with TUN in its config;
+                            // record the preference through its owner command.
+                            //
+                            // Its own `try`, like the other paths: a failure here
+                            // would fall through to `catch (retryErr)`, which
+                            // reports "TUN mode failed" and runs a fallback
+                            // restart — but the permission was granted and the
+                            // core was never stopped, so that would restart a
+                            // healthy core and blame it for a preference-write
+                            // failure.
+                            try {
+                                await invoke(RECORD_TUN_ENABLED, { enable: true });
+                            } catch (recordErr) {
+                                tunLogger.error('failed to record tun_enabled after permission grant', recordErr);
+                                showNotification(
+                                    t.tunPrefSaveFailed || 'TUN is active, but the preference could not be saved',
+                                    'warning'
+                                );
+                            }
                             try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
                             const settings = await invoke(COMMANDS.GET_SETTINGS);
                             const currentConfig = settings.last_config || 'config.yaml';
@@ -177,7 +242,19 @@ export function initTunToggle() {
                             return;
                         } catch (retryErr) {
                             tunLogger.error('TUN retry failed after permission grant', retryErr);
-                            await saveSetting('tun_enabled', false);
+                            // The retry did not bring TUN up, so record the
+                            // preference as off rather than leaving it at the
+                            // value written before the attempt.
+                            //
+                            // Its own `try`, because a failure here would skip the
+                            // fallback restart below: STOP_CORE already ran, so
+                            // the core would simply stay stopped and the user
+                            // would see no error for it.
+                            try {
+                                await invoke(RECORD_TUN_ENABLED, { enable: false });
+                            } catch (recordErr) {
+                                tunLogger.error('failed to record tun_enabled=false after retry failure', recordErr);
+                            }
                             try {
                                 const settings = await invoke(COMMANDS.GET_SETTINGS);
                                 const currentConfig = settings.last_config || 'config.yaml';
