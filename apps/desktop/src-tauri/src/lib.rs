@@ -796,7 +796,23 @@ fn patch_settings(
                 };
             }
             patch_field!(theme);
-            patch_field!(mode);
+            if let Some(v) = map.get("mode") {
+                if let Ok(val) = serde_json::from_value::<Option<String>>(v.clone()) {
+                    let mode_changed = guard.mode != val;
+                    guard.mode = val;
+                    modified = true;
+                    if mode_changed {
+                        core_manager::core::subscription::notify_user_mode_changed();
+                    }
+                } else {
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "failed to deserialize field 'mode': {:?}",
+                        v
+                    );
+                }
+            }
             patch_field!(tun_enabled);
             patch_field!(mixed_port);
             patch_field!(socks_port);
@@ -1237,6 +1253,11 @@ fn write_frontend_log(level: String, source: String, message: String) -> Result<
 #[allow(clippy::needless_pass_by_value)]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+#[tauri::command]
+fn notify_user_node_changed() {
+    core_manager::core::subscription::notify_user_node_changed();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1702,6 +1723,7 @@ invalidate_heartbeat(window.app_handle());
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            notify_user_node_changed,
             heartbeat,
 write_frontend_log,
             // Prism Engine commands

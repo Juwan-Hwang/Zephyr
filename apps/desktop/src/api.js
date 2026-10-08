@@ -568,6 +568,7 @@ export async function getProxiesMerged(existingData) {
  */
 export async function switchProxy(group, name) {
   try {
+    invoke('notify_user_node_changed').catch(() => {});
     const res = await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
       method: 'PUT',
       body: JSON.stringify({ name }),

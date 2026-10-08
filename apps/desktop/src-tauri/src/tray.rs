@@ -381,6 +381,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             }
             // Handle proxy switching (prefix: proxy_)
             else if let Some(proxy_name) = id.strip_prefix("proxy_") {
+                crate::core_manager::core::subscription::notify_user_node_changed();
                 let parts: Vec<&str> = proxy_name.splitn(2, ':').collect();
                 if parts.len() == 2 {
                     if let (Some(group), Some(proxy)) = (parts.first(), parts.get(1)) {
