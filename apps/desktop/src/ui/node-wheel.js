@@ -7,6 +7,7 @@
 import { getProxies, switchProxy, abortLatencyTests, closeAllConnections } from '../api.js';
 import { nodeWheelLogger } from '../utils/logger.js';
 import { t } from '../i18n.js';
+import { showNotification } from './notifications.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { sortProxiesByLatency, syncCoreConfig, renderProxies } from './proxies.js';
 import { appStore } from './state.js';
@@ -159,6 +160,15 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
             }
         })();
     } else {
+        // A GLOBAL selection is routed through the backend and reported as a
+        // rejected request instead of a thrown error, so surface it here rather
+        // than failing silently on a user-initiated switch.
+        // A newer switch owns the display now; reporting this one as failed
+        // would describe the wrong selection.
+        nodeWheelLogger.warn('Node switch was not applied');
+        if (_switchSessionCounter === currentSession) {
+            showNotification(t('notifSwitchFailed'), 'error');
+        }
         syncCoreConfig().catch(() => {});
     }
 }

@@ -38,8 +38,8 @@ use core_manager::{
     encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_uptime,
     get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
     is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
-    open_config_folder, open_log_folder, read_config_file, rename_config, restart_core_as_root_cmd,
-    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
+    open_config_folder, open_log_folder, read_config_file, record_tun_enabled, rename_config,
+    restart_core_as_root_cmd, set_tun_enabled, start_core, stop_core, update_config_url,
     update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
@@ -734,19 +734,86 @@ fn get_settings(state: tauri::State<SettingsState>) -> Settings {
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::significant_drop_tightening)]
 fn save_settings(
     app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
-    {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        *guard = settings.clone();
-    }
-    persist_settings(&app, &settings)
+    // The incoming snapshot's `mode` is never read here (it is replaced by the
+    // authoritative value below), so validating it could only reject a save
+    // without protecting anything: a hand-edited or legacy `settings.json`
+    // spelling (`"Global"`) is handed back by `get_settings`, carried into the
+    // next full snapshot, and would then fail *every* later save even though the
+    // persisted mode is kept unchanged. Mode validation lives in `patch_settings`
+    // and `switch_mode`, the only paths that can actually write the field.
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("Settings lock failed: {e}"))?;
+    // Preserve the authoritative mode unconditionally: `switch_mode` owns live
+    // mode changes (it applies the change to the live core first), so a
+    // full-snapshot save must never overwrite it — not even with `mode: null`,
+    // which a snapshot simply carries when no mode has been persisted yet
+    // (fresh install) or when it was read before a concurrent switch. Honoring
+    // that null would silently revert the user's choice on the next start.
+    // Clearing the preference is an explicit reset and goes through
+    // `patch_settings` with an explicit `mode: null`.
+    let mut next = settings;
+    next.mode.clone_from(&guard.mode);
+    // `tun_enabled` is owned the same way `mode` is: the TUN commands apply the
+    // change to the running core first, so a full-snapshot save must not carry a
+    // stale value back over it. macOS startup reads this to choose the TUN path,
+    // so losing it can start the core on the wrong path.
+    next.tun_enabled = guard.tun_enabled;
+    // `encrypt_configs` is owned by `patch_settings`, which runs the profile
+    // encrypt/decrypt transform with it. Taking it from a full snapshot would
+    // flip the flag with no transform, leaving the flag and the profile files
+    // disagreeing.
+    next.encrypt_configs = guard.encrypt_configs;
+    let snapshot = next.clone();
+    // Persist before publishing the snapshot in memory, so a failed write cannot
+    // leave memory holding settings that `settings.json` does not (and vice
+    // versa). The lock is still held, so the ordering is also safe against
+    // `switch_mode`'s persistence: no stale snapshot can land before this one.
+    persist_settings(&app, &snapshot)?;
+    *guard = next;
+    drop(guard);
+    Ok(())
+}
+
+/// Serializes the `encrypt_configs` profile transform *and* every profile write.
+///
+/// Held across the whole encrypt/decrypt batch, and *not* the settings lock —
+/// the transform does file I/O and can take a while, while the settings lock
+/// guards the in-memory snapshot. The transform must not run without some such
+/// guard: it is the only step whose effect is not captured by the persisted
+/// value, so two concurrent patches could otherwise apply the transforms in the
+/// opposite order to their persisted values and leave the profiles encrypted
+/// under `encrypt_configs: false`.
+///
+/// Profile *writes* take it too, and that is not redundant: without it a save
+/// can land between the batch's read of a file and its write of it, and the
+/// batch then overwrites the just-saved content with what it read.
+///
+/// Always acquire this *before* the settings lock, never after. Both callers
+/// follow that order — the transform reads the authoritative value under the
+/// settings lock while holding this guard — so acquiring it the other way round
+/// would deadlock the two against each other.
+pub(crate) static PROFILE_CRYPTO_TRANSFORM: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`PROFILE_CRYPTO_TRANSFORM`], recovering it if poisoned.
+///
+/// The mutex guards no data: it only serializes profile writers against the
+/// encryption batch. A holder that panicked can leave profiles in mixed forms,
+/// but every reader detects the form per file and every writer re-reads the
+/// authoritative setting, so nothing the next holder relies on is broken.
+/// Refusing instead would fail every later profile save for the rest of the
+/// process.
+pub(crate) fn lock_profile_transform() -> std::sync::MutexGuard<'static, ()> {
+    PROFILE_CRYPTO_TRANSFORM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Atomically patch a subset of settings fields.
@@ -754,7 +821,7 @@ fn save_settings(
 /// existing settings under the Mutex lock, then persists.
 /// This avoids the Read-Modify-Write race condition of GET + SAVE.
 /// Only valid field types are applied; malformed values are ignored and
-/// deserialization failures are logged to stderr.
+/// Deserialization failures are logged to stderr.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, clippy::cognitive_complexity)]
 fn patch_settings(
@@ -762,120 +829,301 @@ fn patch_settings(
     state: tauri::State<SettingsState>,
     patch: serde_json::Value,
 ) -> Result<(), String> {
-    let updated = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        let mut modified = false;
-        if let serde_json::Value::Object(map) = &patch {
-            // Validate encrypt_configs before mutating state to prevent inconsistent in-memory state
-            if let Some(v) = map.get("encrypt_configs") {
-                if matches!(serde_json::from_value::<bool>(v.clone()), Ok(true))
-                    && !is_machine_key_persisted()
-                {
-                    return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
-                }
+    let mut lock_guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("Settings lock failed: {e}"))?;
+    // Work on a copy and publish it only once the write succeeds. Publishing
+    // first meant a failed `persist_settings` left memory holding settings that
+    // `settings.json` did not, so the next read and the next save disagreed.
+    let mut guard = lock_guard.clone();
+    let mut modified = false;
+    if let serde_json::Value::Object(map) = &patch {
+        // Validate encrypt_configs before mutating state to prevent inconsistent in-memory state
+        if let Some(v) = map.get("encrypt_configs") {
+            if matches!(serde_json::from_value::<bool>(v.clone()), Ok(true))
+                && !is_machine_key_persisted()
+            {
+                return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
             }
-            macro_rules! patch_field {
-                ($field:ident) => {
-                    if let Some(v) = map.get(stringify!($field)) {
-                        if let Ok(val) = serde_json::from_value(v.clone()) {
-                            guard.$field = val;
-                            modified = true;
-                        } else {
-                            emit_warn!(
-                                Core,
-                                CORE_START_FAILED,
-                                "failed to deserialize field '{}': {:?}",
-                                stringify!($field),
-                                v
-                            );
+        }
+        // A non-null mode is refused here rather than silently dropped the
+        // way `save_settings` drops it: applying a settings-only value would
+        // desynchronize the persisted preference from the live core.
+        if let Some(v) = map.get("mode") {
+            if !v.is_null() {
+                match serde_json::from_value::<String>(v.clone()) {
+                    Ok(val) => {
+                        if !matches!(val.as_str(), "rule" | "global" | "direct") {
+                            return Err(format!("Invalid mode: {val}"));
                         }
                     }
-                };
+                    Err(_) => {
+                        return Err("Invalid mode: expected string or null".to_owned());
+                    }
+                }
+                // Reject here rather than after the field patches below: the
+                // whole patch is refused, so applying any other field first
+                // would leave memory out of sync with `settings.json`.
+                return Err(
+                    "Mode changes must go through switch_mode; use null to reset the preference"
+                        .to_owned(),
+                );
             }
-            patch_field!(theme);
-            patch_field!(mode);
-            patch_field!(tun_enabled);
-            patch_field!(mixed_port);
-            patch_field!(socks_port);
-            patch_field!(http_port);
-            patch_field!(ipv6);
-            patch_field!(allow_lan);
-            patch_field!(unified_delay);
-            patch_field!(dns_rewrite_enabled);
-            patch_field!(theme_mode);
-            patch_field!(app_opacity);
-            patch_field!(node_scroll);
-            patch_field!(failover_enabled);
-            patch_field!(network_optim_auto_apply);
-            patch_field!(encrypt_configs);
-            patch_field!(log_app_enabled);
-            patch_field!(log_core_enabled);
-            patch_field!(log_retention_days);
-            patch_field!(log_max_file_mb);
-            patch_field!(copy_env_format);
-            // Validate home_page_mode: only accept 'minimal', 'console', or null (reset to default)
-            if let Some(v) = map.get("home_page_mode") {
-                if v.is_null() {
-                    guard.home_page_mode = None;
-                    modified = true;
-                } else if let Ok(val) = serde_json::from_value::<String>(v.clone()) {
-                    if val == "minimal" || val == "console" {
-                        guard.home_page_mode = Some(val);
+        }
+        macro_rules! patch_field {
+            ($field:ident) => {
+                if let Some(v) = map.get(stringify!($field)) {
+                    if let Ok(val) = serde_json::from_value(v.clone()) {
+                        guard.$field = val;
                         modified = true;
                     } else {
                         emit_warn!(
                             Core,
                             CORE_START_FAILED,
-                            "rejected invalid home_page_mode: {:?}",
-                            val
+                            "failed to deserialize field '{}': {:?}",
+                            stringify!($field),
+                            v
                         );
                     }
+                }
+            };
+        }
+        patch_field!(theme);
+        // A non-null mode was already rejected during validation, so only an
+        // explicit null (Restore Defaults) reaches here: it is an intentional
+        // preference reset, not a live mode change. Live mode changes go
+        // through `switch_mode`, which applies the change to the core and
+        // bumps `USER_MODE_GENERATION` under the restore lock; a
+        // settings-only value would desynchronize the persisted preference
+        // from the live core.
+        if let Some(v) = map.get("mode") {
+            debug_assert!(v.is_null());
+            guard.mode = None;
+            modified = true;
+        }
+        // `tun_enabled` is owned the same way `mode` is: the TUN commands apply the
+        // change to the running core (and to `run_config.yaml`) before recording
+        // it, so a settings-only value could persist a flag that disagrees with
+        // what the core is actually doing. macOS startup reads this flag to
+        // choose the TUN path.
+        //
+        // A non-null value is refused before any field is applied, so that a
+        // rejected patch cannot leave half of it in memory. `null` is the
+        // explicit Restore Defaults reset and is applied here.
+        if let Some(v) = map.get("tun_enabled") {
+            if !v.is_null() {
+                return Err(
+                    "TUN changes must go through the TUN commands; use null to reset the preference"
+                        .to_owned(),
+                );
+            }
+            guard.tun_enabled = None;
+            modified = true;
+        }
+        patch_field!(mixed_port);
+        patch_field!(socks_port);
+        patch_field!(http_port);
+        patch_field!(ipv6);
+        patch_field!(allow_lan);
+        patch_field!(unified_delay);
+        patch_field!(dns_rewrite_enabled);
+        patch_field!(theme_mode);
+        patch_field!(app_opacity);
+        patch_field!(node_scroll);
+        patch_field!(failover_enabled);
+        patch_field!(network_optim_auto_apply);
+        patch_field!(encrypt_configs);
+        patch_field!(log_app_enabled);
+        patch_field!(log_core_enabled);
+        patch_field!(log_retention_days);
+        patch_field!(log_max_file_mb);
+        patch_field!(copy_env_format);
+        // Validate home_page_mode: only accept 'minimal', 'console', or null (reset to default)
+        if let Some(v) = map.get("home_page_mode") {
+            if v.is_null() {
+                guard.home_page_mode = None;
+                modified = true;
+            } else if let Ok(val) = serde_json::from_value::<String>(v.clone()) {
+                if val == "minimal" || val == "console" {
+                    guard.home_page_mode = Some(val);
+                    modified = true;
                 } else {
                     emit_warn!(
                         Core,
                         CORE_START_FAILED,
-                        "rejected non-string home_page_mode: {:?}",
-                        v
+                        "rejected invalid home_page_mode: {:?}",
+                        val
                     );
                 }
-            }
-        }
-        if !modified {
-            return Ok(());
-        }
-
-        // Handle encrypt_configs toggle: batch encrypt/decrypt profile files
-        if patch.get("encrypt_configs").is_some() {
-            let paths = ensure_app_storage(&app)
-                .map_err(|e| format!("Failed to resolve app paths: {e}"))?;
-            if guard.encrypt_configs {
-                if let Err(e) = encrypt_all_profiles(&paths.profiles_dir) {
-                    emit_warn!(
-                        Core,
-                        CORE_START_FAILED,
-                        "Failed to encrypt some profiles: {e}"
-                    );
-                }
-            } else if let Err(e) = decrypt_all_profiles(&paths.profiles_dir) {
+            } else {
                 emit_warn!(
                     Core,
                     CORE_START_FAILED,
-                    "Failed to decrypt some profiles: {e}"
+                    "rejected non-string home_page_mode: {:?}",
+                    v
                 );
             }
         }
+    }
+    if !modified {
+        return Ok(());
+    }
 
-        // Handle log_app_enabled toggle: initialize writer or deactivate persistence
-        if patch.get("log_app_enabled").is_some() {
-            if guard.log_app_enabled {
-                let paths = ensure_app_storage(&app)
-                    .map_err(|e| format!("Failed to resolve app paths: {e}"))?;
-                let app_log_dir = paths.app_data_dir.join("logs").join("app");
+    let snapshot = guard;
+
+    // Handle encrypt_configs toggle: the profile directory is resolved *before*
+    // the write below, not after. `ensure_app_storage` can fail, and reaching it
+    // once `encrypt_configs` is already persisted would leave the setting
+    // describing the opposite state with the profiles still in the previous one
+    // — the exact disagreement that persisting before transforming exists to
+    // avoid. Resolving early leaves the transform itself as the only remaining
+    // step, and it cannot fail on the path.
+    let resolved_profiles_dir = if patch.get("encrypt_configs").is_some() {
+        Some(
+            ensure_app_storage(&app)
+                .map_err(|e| format!("Failed to resolve app paths: {e}"))?
+                .profiles_dir,
+        )
+    } else {
+        None
+    };
+
+    // Same reasoning for the app log directory. Returning after `settings.json`
+    // has already been written would report a failed save for values that *were*
+    // saved, and would skip the `log_core_enabled` / `log_max_file_mb` effects
+    // below — leaving the app logging under the old limits while the settings
+    // say otherwise. Resolving here makes the only remaining failure mode the
+    // one that has not happened yet.
+    let resolved_app_log_dir = if patch.get("log_app_enabled").is_some() && snapshot.log_app_enabled
+    {
+        Some(
+            ensure_app_storage(&app)
+                .map_err(|e| format!("Failed to resolve app paths: {e}"))?
+                .app_data_dir
+                .join("logs")
+                .join("app"),
+        )
+    } else {
+        None
+    };
+
+    // Persist while still holding the settings lock, so the disk write and
+    // the in-memory publication are atomic with respect to `switch_mode`'s
+    // persistence: a stale snapshot can never land after a newer mode.
+    // Publishing only after a successful write keeps memory and
+    // `settings.json` from diverging when the write fails.
+    persist_settings(&app, &snapshot)?;
+    *lock_guard = snapshot.clone();
+    drop(lock_guard);
+
+    // Side effects run only after the new value is durably stored, and outside
+    // the settings lock (the profile transforms touch files and can take a
+    // while).
+    //
+    // Order matters most for `encrypt_configs`: encrypting the profiles before
+    // the write would, on a failed write, leave encrypted files on disk while
+    // `encrypt_configs` still reads false — so the next start would not decrypt
+    // them. Everything below reads from the persisted snapshot rather than the
+    // working copy for the same reason.
+
+    // Handle encrypt_configs toggle: batch encrypt/decrypt profile files.
+    //
+    // A labelled block rather than early returns: the value is already
+    // persisted by this point, so bailing out of the whole command would skip
+    // every later side effect. A patch carrying `encrypt_configs` together with
+    // `log_app_enabled` / `log_core_enabled` / `log_max_file_mb` would persist
+    // the log settings without ever applying them to the running writer, and
+    // report success — the app keeps logging under the old limits until restart.
+    // Each skip below therefore abandons only the transform.
+    if patch.get("encrypt_configs").is_some() {
+        'transform: {
+            // Serialized separately from the settings lock. Running the transform
+            // outside that lock (above) is what allows two concurrent patches to
+            // apply the transforms in the opposite order to their persisted values:
+            // an enable patch could persist `true`, pause, and have a disable patch
+            // persist `false` and decrypt first — leaving the setting `false` with
+            // the profiles still encrypted, which the next start would then refuse
+            // to decrypt.
+            let transform_guard = lock_profile_transform();
+            // Re-read the authoritative value under the transform lock: a later
+            // patch may already have applied the opposite toggle while this one was
+            // waiting, and running the stale transform would put the files back out
+            // of step with the flag.
+            //
+            // `None` (settings lock poisoned) must skip the transform rather
+            // than default to `false`: that would decrypt every profile even when
+            // the persisted setting says they are encrypted.
+            let Some(authoritative) =
+                crate::core_manager::core::crypto::authoritative_encrypt_configs(&app)
+            else {
+                drop(transform_guard);
+                emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_FAILED,
+                    "Profile encryption transform skipped: the current value could not be read"
+                );
+                break 'transform;
+            };
+            let Some(profiles_dir) = resolved_profiles_dir else {
+                // Unreachable: guarded by the same condition that resolved the path
+                // above. Handled rather than unwrapped so a future divergence
+                // cannot skip the transform and leave the files disagreeing with the
+                // persisted flag.
+                drop(transform_guard);
+                emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_FAILED,
+                    "Profile encryption transform skipped: the profile directory was not resolved"
+                );
+                break 'transform;
+            };
+            let result = if authoritative {
+                encrypt_all_profiles(&profiles_dir)
+            } else {
+                decrypt_all_profiles(&profiles_dir)
+            };
+            drop(transform_guard);
+            match result {
+                Err(e) if authoritative => {
+                    emit_warn!(
+                        Config,
+                        CONFIG_ENCRYPT_FAILED,
+                        "Failed to encrypt some profiles: {e}"
+                    );
+                }
+                Err(e) => {
+                    emit_warn!(
+                        Config,
+                        CONFIG_DECRYPT_FAILED,
+                        "Failed to decrypt some profiles: {e}"
+                    );
+                }
+                Ok(()) => {}
+            }
+        }
+    }
+
+    // Handle log_app_enabled toggle: initialize writer or deactivate persistence.
+    // Labelled for the same reason as the transform block above: every path here
+    // has to reach the log_core_enabled and log_max_file_mb blocks below.
+    if patch.get("log_app_enabled").is_some() {
+        'app_log: {
+            if snapshot.log_app_enabled {
+                // Resolved before the persist above; the guard that produced it
+                // is the same condition, so this cannot be `None` here. Handled
+                // rather than unwrapped so a future divergence skips only the
+                // writer instead of aborting the remaining side effects.
+                let Some(app_log_dir) = resolved_app_log_dir else {
+                    emit_warn!(
+                        Core,
+                        CORE_START_FAILED,
+                        "App log writer not initialized: the log directory was not resolved"
+                    );
+                    break 'app_log;
+                };
                 if !backend_event::is_app_log_active() {
-                    backend_event::init_app_log_writer(app_log_dir, guard.log_max_file_mb);
+                    backend_event::init_app_log_writer(app_log_dir, snapshot.log_max_file_mb);
                 } else {
                     backend_event::set_app_log_active(true);
                 }
@@ -883,23 +1131,26 @@ fn patch_settings(
                 backend_event::set_app_log_active(false);
             }
         }
+    }
 
-        // Handle log_core_enabled toggle
-        if patch.get("log_core_enabled").is_some() {
-            core_manager::core::LOG_CORE_ENABLED
-                .store(guard.log_core_enabled, std::sync::atomic::Ordering::Relaxed);
-        }
+    // Handle log_core_enabled toggle
+    if patch.get("log_core_enabled").is_some() {
+        core_manager::core::LOG_CORE_ENABLED.store(
+            snapshot.log_core_enabled,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 
-        // Update max file size if changed
-        if patch.get("log_max_file_mb").is_some() {
-            core_manager::core::LOG_MAX_FILE_MB
-                .store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
-            backend_event::set_app_log_max_file_mb(guard.log_max_file_mb);
-        }
+    // Update max file size if changed
+    if patch.get("log_max_file_mb").is_some() {
+        core_manager::core::LOG_MAX_FILE_MB.store(
+            snapshot.log_max_file_mb,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        backend_event::set_app_log_max_file_mb(snapshot.log_max_file_mb);
+    }
 
-        guard.clone()
-    };
-    persist_settings(&app, &updated)
+    Ok(())
 }
 
 /// Atomically update a single proxy selection entry in settings.
@@ -910,7 +1161,6 @@ fn patch_settings(
 #[allow(clippy::needless_pass_by_value)]
 fn update_proxy_selection(
     app: tauri::AppHandle,
-    state: tauri::State<SettingsState>,
     profile_name: String,
     node_name: String,
     group_name: Option<String>,
@@ -929,15 +1179,9 @@ fn update_proxy_selection(
         "group": group_name,
     })
     .to_string();
-    let settings = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.last_proxy_selection.insert(safe_name, value);
-        guard.clone()
-    };
-    persist_settings(&app, &settings)
+    commit_settings(&app, |s| {
+        s.last_proxy_selection.insert(safe_name, value);
+    })
 }
 
 /// Atomically update the primary group preference for a profile.
@@ -945,7 +1189,6 @@ fn update_proxy_selection(
 #[allow(clippy::needless_pass_by_value)]
 fn update_primary_group_preference(
     app: tauri::AppHandle,
-    state: tauri::State<SettingsState>,
     profile_name: String,
     group_name: String,
 ) -> Result<(), String> {
@@ -954,15 +1197,9 @@ fn update_primary_group_preference(
     if safe_name.len() > 256 || group_name.len() > 256 {
         return Err("Profile name or group name too long".to_owned());
     }
-    let settings = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.primary_group_preference.insert(safe_name, group_name);
-        guard.clone()
-    };
-    persist_settings(&app, &settings)
+    commit_settings(&app, |s| {
+        s.primary_group_preference.insert(safe_name, group_name);
+    })
 }
 
 /// Atomically update the subscription User-Agent in settings.
@@ -971,47 +1208,54 @@ fn update_primary_group_preference(
 #[allow(clippy::needless_pass_by_value)]
 fn update_subscription_user_agent(
     app: tauri::AppHandle,
-    state: tauri::State<SettingsState>,
     user_agent: Option<String>,
 ) -> Result<(), String> {
-    let settings = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.subscription_user_agent = user_agent.filter(|s| !s.is_empty());
-        guard.clone()
-    };
-    persist_settings(&app, &settings)
+    commit_settings(&app, |s| {
+        s.subscription_user_agent = user_agent.filter(|ua| !ua.is_empty());
+    })
 }
 
 /// Atomically update the last active config name in settings.
 /// Avoids the Read-Modify-Write race condition of `GET_SETTINGS` → modify → `SAVE_SETTINGS`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn update_last_config(
-    app: tauri::AppHandle,
-    state: tauri::State<SettingsState>,
-    config_name: String,
-) -> Result<(), String> {
+fn update_last_config(app: tauri::AppHandle, config_name: String) -> Result<(), String> {
     let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(config_name)
         .map_err(|e| e.to_string())?;
     if safe_name.len() > 256 {
         return Err("Config name too long".to_owned());
     }
-    let settings = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        guard.last_config = Some(safe_name);
-        guard.clone()
-    };
-    persist_settings(&app, &settings)
+    commit_settings(&app, |s| {
+        s.last_config = Some(safe_name);
+    })
+}
+
+/// Apply `mutate` to a copy of the settings, persist it, and publish it to
+/// memory, all while holding the settings lock.
+///
+/// Every settings writer must persist under the lock: a snapshot written after
+/// the lock is released can land on disk after a newer one (a TUN or mode
+/// change, say) and silently revert it for the next launch. Publishing only
+/// after a successful write keeps memory and `settings.json` from diverging.
+pub(crate) fn commit_settings(
+    app: &tauri::AppHandle,
+    mutate: impl FnOnce(&mut Settings),
+) -> Result<(), String> {
+    let state = app.state::<SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("Settings lock failed: {e}"))?;
+    let mut next = guard.clone();
+    mutate(&mut next);
+    persist_settings(app, &next)?;
+    *guard = next;
+    drop(guard);
+    Ok(())
 }
 
 /// Persist settings to settings.json (without touching in-memory state).
-/// Used by `rename_config` to persist `last_config` changes.
+/// Callers must hold the settings lock across this call (see `commit_settings`).
 ///
 /// NOTE: Settings are stored as plaintext JSON. Do NOT add sensitive fields
 /// (tokens, passwords, API keys) to the `Settings` struct — use `crypto.rs`
@@ -1113,15 +1357,8 @@ pub(crate) fn recreate_main_window(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn get_tray_status(app: tauri::AppHandle) -> String {
-    // Check if core is running
-    let state = app.state::<MihomoState>();
-    let core_running = state
-        .0
-        .lock()
-        .map(|guard| guard.process().is_some())
-        .unwrap_or(false);
-
-    if !core_running {
+    // TUN-aware: a macOS root TUN core has no `Child` handle.
+    if !core_manager::core::subscription::is_core_running(&app) {
         // Core not running, return default state
         return "default".to_owned();
     }
@@ -1239,6 +1476,31 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
 
+/// Switch the GLOBAL proxy group selection on behalf of the user.
+///
+/// Runs the selection change under the restore lock together with the
+/// user-change generation bump, so an in-flight fallback restore cannot
+/// overwrite the user's choice.
+#[tauri::command]
+async fn switch_global_node(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_global_node(&app, &name).await
+}
+
+/// Switch the proxy mode on behalf of the user.
+///
+/// Runs the mode change under the restore lock together with the user-mode
+/// generation bump, so an in-flight fallback restore cannot overwrite the
+/// user's choice.
+#[tauri::command]
+async fn switch_mode(
+    app: tauri::AppHandle,
+    mode: String,
+    clear_preference: Option<bool>,
+) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_mode(&app, &mode, clear_preference == Some(true))
+        .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Expose portable mode status to the frontend
 #[tauri::command]
@@ -1254,12 +1516,7 @@ fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<f64, String> {
     if !(0.5..=2.0).contains(&scale) {
         return Err("Scale must be between 0.5 and 2.0".to_owned());
     }
-    let settings_state = app.state::<SettingsState>();
-    let mut settings = settings_state.0.lock().map_err(|e| e.to_string())?;
-    settings.ui_scale = scale;
-    let settings_clone = settings.clone();
-    drop(settings);
-    persist_settings(&app, &settings_clone)?;
+    commit_settings(&app, |s| s.ui_scale = scale)?;
     Ok(scale)
 }
 
@@ -1502,6 +1759,41 @@ pub fn run() {
                 }
             }
 
+            // `patch_settings` persists `encrypt_configs: true` before it encrypts
+            // the profiles, so a crash or a failed write in that batch leaves
+            // plaintext files under an enabled setting. Finish the batch on every
+            // start: it skips files that are already encrypted, so this is a
+            // cheap no-op once the profiles agree with the setting.
+            let encrypt_configs = app
+                .state::<SettingsState>()
+                .0
+                .lock()
+                .is_ok_and(|guard| guard.encrypt_configs);
+            if encrypt_configs {
+                let profiles_dir = paths.profiles_dir;
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let transform_guard = lock_profile_transform();
+                    // Re-read under the transform lock, as `patch_settings` does: a
+                    // disable patch may have persisted `false` and decrypted the
+                    // profiles while this thread waited for the guard.
+                    if crate::core_manager::core::crypto::authoritative_encrypt_configs(&app_handle)
+                        != Some(true)
+                    {
+                        return;
+                    }
+                    let result = encrypt_all_profiles(&profiles_dir);
+                    drop(transform_guard);
+                    if let Err(e) = result {
+                        emit_warn!(
+                            Config,
+                            CONFIG_ENCRYPT_FAILED,
+                            "Failed to encrypt leftover plaintext profiles at startup: {e}"
+                        );
+                    }
+                });
+            }
+
             // Initialize Prism Engine extension
             app.manage(prism::PrismState::new(app.handle()));
 
@@ -1611,7 +1903,7 @@ invalidate_heartbeat(window.app_handle());
                                         zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut yaml_value, false);
                                         let sanitized_content = serde_yaml::to_string(&yaml_value)
                                             .unwrap_or(content);
-                                        if core_manager::write_file_secure(&target_path, &sanitized_content)
+                                        if core_manager::save_profile_file(app, &target_path, &sanitized_content)
                                             .is_ok()
                                         {
                                             imported_count += 1;
@@ -1676,6 +1968,7 @@ invalidate_heartbeat(window.app_handle());
             fetch_text,
             restart_core_as_root_cmd,
             set_tun_enabled,
+            record_tun_enabled,
             kill_all_mihomo_as_root_cmd,
             disable_tun_cmd,
             grant_linux_tun_permission,
@@ -1702,6 +1995,8 @@ invalidate_heartbeat(window.app_handle());
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            switch_global_node,
+            switch_mode,
             heartbeat,
 write_frontend_log,
             // Prism Engine commands
@@ -1842,8 +2137,36 @@ write_frontend_log,
                     scheduler_state.shutdown();
                 }
                 kill_mihomo();
-                // Smart kill: only prompts for password if there's actually a root mihomo running
-                let _ = smart_kill_all_mihomo_as_root();
+                // Clean up only this app's managed core (root- and user-owned):
+                // an unrelated root mihomo service must survive the app exit.
+                // Prefer the executable recorded when the root core was started
+                // (the binary may have been replaced or removed since), falling
+                // back to the current managed path.
+                //
+                // Gate on the executable-confirmed set only: at quit there is no
+                // later start that would benefit from cleaning up a core launched
+                // by an older app version, while an unverified legacy candidate
+                // (a foreign root core) would put an administrator dialog — up to
+                // 30s of blocking — in front of the user for a process this script
+                // would refuse to kill anyway.
+                //
+                // macOS only: a root core is a macOS concept here. The path
+                // comes from `managed_core_exe_path`, which prefers the recorded
+                // root-core executable and otherwise resolves the install path
+                // without creating storage or migrating legacy assets, so a
+                // failing migration cannot make exit skip a leftover root core.
+                #[cfg(target_os = "macos")]
+                {
+                    let root_core_exe =
+                        core_manager::core::core_process::managed_core_exe_path(handle);
+                    if core_manager::core::tun_manager::has_confirmed_root_mihomo(
+                        root_core_exe.as_deref(),
+                    ) {
+                        let _ = core_manager::core::tun_manager::kill_managed_root_mihomo_as_root(
+                            root_core_exe.as_deref(),
+                        );
+                    }
+                }
             }
             tauri::RunEvent::Resumed => {
                 // System woke up from sleep. The mihomo core's TCP connections
