@@ -62,6 +62,7 @@ import { navigateTo } from './navigation.js';
 import { initCustomDropdown } from './dropdown.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies.js';
+import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
@@ -1176,6 +1177,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         save: () => save(),
     });
 
+    /**
+     * Mode the core falls back to when no preference is stored: the value the
+     * generated runtime config carries (`mode: rule`).
+     * @type {string}
+     */
+    const DEFAULT_PROXY_MODE = 'rule';
+
     // ---- Restore defaults ----
     if (restoreDefaultsBtn) {
         restoreDefaultsBtn.onclick = async () => {
@@ -1316,9 +1324,63 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
+                // Reset the proxy mode preference explicitly. A full-snapshot save
+                // can no longer clear it: the backend keeps the authoritative mode
+                // (`switch_mode` owns live changes) so a stale snapshot carrying
+                // `mode: null` cannot revert a concurrent user choice. Clearing it
+                // is therefore an explicit partial update.
+                // Whether the core is on a mode that was explicitly chosen. Read before
+                // clearing: with no stored preference the running mode is
+                // whatever `switch_mode` last applied, and forcing it back to the
+                // default would be a change nobody asked for.
+                //
+                // Defaults to `true` (apply the reset) and is only narrowed when a
+                // read *succeeds* and confirms nothing is stored. A failed read is
+                // not evidence that no preference exists — assuming so would skip
+                // the live switch and reintroduce exactly the live-versus-persisted
+                // divergence this restore exists to remove.
+                let noStoredMode = false;
+                try {
+                    /** @type {any} */
+                    const before = await invoke(COMMANDS.GET_SETTINGS);
+                    if (before) {
+                        noStoredMode = !before.mode;
+                    }
+                } catch (err) {
+                    settingsLogger.warn('[RestoreDefaults] could not read the current mode preference; resetting the live mode anyway', err);
+                }
+
+                await trackResult('mode', async () => {
+                    // Live core first, then the stored preference.
+                    //
+                    // `switch_mode` persists the accepted mode itself, so doing it
+                    // afterwards would write `mode: "rule"` back over the `null`
+                    // this restore is meant to leave — the preference would no
+                    // longer be cleared, and the next Restore Defaults would read
+                    // it as set and skip the live switch. It also keeps the
+                    // failure honest: if the switch does not apply, the stored
+                    // preference has not already been cleared behind it, so there
+                    // is no window where settings say "default" while the core is
+                    // still on something else.
+                    if (!noStoredMode) {
+                        // `switch_mode` is invoked by name here, matching
+                        // modes.js: it has no entry in the shared COMMANDS map.
+                        await invoke('switch_mode', { mode: DEFAULT_PROXY_MODE });
+                        invalidateSettingsCache();
+                        updateModeUI(DEFAULT_PROXY_MODE);
+                    }
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { mode: null } });
+                });
+
+                // Same for TUN: the backend keeps the authoritative value (the TUN
+                // commands apply changes to the running core first), so a stale
+                // snapshot cannot revert a concurrent toggle. Resetting it is an
+                // explicit partial update.
+                await trackResult('tun_enabled', async () => {
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
+                });
+
                 // Reset global preference overrides (injected into runtime YAML)
-                settings.mode = null;
-                settings.tun_enabled = null;
                 settings.mixed_port = null;
                 settings.socks_port = null;
                 settings.http_port = null;
