@@ -27,11 +27,12 @@ pub use sanitizer::{
     sanitize_config_file_name, url_decode_complete, validate_path_within_dir,
 };
 pub use subscription::{
-    classify_sub_error, extract_name_from_rules, is_private_host, is_private_ip,
-    parse_content_disposition_filename, percent_decode, quote_short_id_values,
-    redact_url_in_string, try_decode_base64_content, validate_public_host_addrs,
-    validate_subscription_name, validate_subscription_url_with_ip, BatchUpdateItem,
-    BatchUpdateResult, MAX_RESPONSE_SIZE,
+    classify_sub_error, extract_name_from_rules, is_literal_private_host, is_mihomo_fake_ip,
+    is_private_host, is_private_ip, is_single_label_host, parse_content_disposition_filename,
+    percent_decode, quote_short_id_values, redact_url_in_string, try_decode_base64_content,
+    validate_public_host_addrs, validate_subscription_name, validate_subscription_url_basic,
+    validate_subscription_url_with_ip, BatchUpdateItem, BatchUpdateResult, PublicHostAddrError,
+    MAX_RESPONSE_SIZE,
 };
 pub use types::{
     AppPaths, ConfigInfo, ConfigMetadata, NetworkOptimStatus, ProfilesMetadata, ReadLogResult,

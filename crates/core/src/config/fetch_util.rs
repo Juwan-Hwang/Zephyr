@@ -4,8 +4,65 @@
 //! Only pure data types and validation functions are here;
 //! `build_http_client()` and `fetch_url_content()` stay in src-tauri (reqwest-dependent).
 
-use super::subscription::{is_private_host, is_private_ip};
+use super::subscription::{
+    is_mihomo_fake_ip, is_private_host, is_private_ip, is_single_label_host,
+};
 use crate::error::AppError;
+
+pub const SSRF_BLOCK_MARKER: &str = "[SSRF_BLOCKED]";
+
+/// Validate an HTTP redirect hop to protect against SSRF.
+///
+/// Permits redirects to the same `allowed_private_host` configured for direct downloads,
+/// while rejecting any redirect to unauthorized private networks, single-label hosts,
+/// or synthetic fake-IP addresses.
+pub fn check_redirect_target(
+    url: &url::Url,
+    allowed_private_host: Option<&str>,
+) -> Result<(), String> {
+    let scheme = url.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("Invalid redirect scheme: {scheme}"));
+    }
+
+    let host = match url.host_str() {
+        Some(h) => h,
+        None => return Err("Redirect URL has no host".to_owned()),
+    };
+
+    fn normalize_host(h: &str) -> &str {
+        let trimmed = h.trim().trim_end_matches('.');
+        trimmed
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(trimmed)
+    }
+
+    let same_allowed = allowed_private_host
+        .is_some_and(|a| normalize_host(a).eq_ignore_ascii_case(normalize_host(host)));
+
+    if !same_allowed && (is_private_host(host) || is_single_label_host(host)) {
+        return Err(format!(
+            "{SSRF_BLOCK_MARKER} Redirect to private host blocked: {host}"
+        ));
+    }
+
+    let clean_host = host.trim_matches(['[', ']'].as_slice());
+    if let Ok(ip) = clean_host.parse::<std::net::IpAddr>() {
+        if is_mihomo_fake_ip(ip) {
+            return Err(format!(
+                "{SSRF_BLOCK_MARKER} Redirect to fake IP blocked: {host}"
+            ));
+        }
+        if !same_allowed && is_private_ip(ip) {
+            return Err(format!(
+                "{SSRF_BLOCK_MARKER} Redirect to private IP blocked: {host}"
+            ));
+        }
+    }
+
+    Ok(())
+}
 
 /// Configuration for HTTP client building.
 ///
@@ -47,10 +104,17 @@ pub struct UrlValidationResult {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn format_host_port(host: String, port: u16) -> String {
-    if host.contains(':') {
-        format!("[{host}]:{port}")
+    let host_str = host.as_str();
+    let unbracketed = if host_str.starts_with('[') && host_str.ends_with(']') && host_str.len() >= 2
+    {
+        &host_str[1..host_str.len() - 1]
     } else {
-        format!("{host}:{port}")
+        host_str
+    };
+    if unbracketed.contains(':') {
+        format!("[{unbracketed}]:{port}")
+    } else {
+        format!("{unbracketed}:{port}")
     }
 }
 
@@ -83,7 +147,8 @@ pub fn validate_url_basic(url: String) -> Result<UrlValidationResult, AppError> 
         .port()
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
-    // Check if user explicitly entered a private/local host
+    // Explicit private IPs, localhost, and private-suffix hostnames (.local, .lan, etc.)
+    // are classified as user-entered private destinations.
     let user_entered_private = is_private_host(&host);
 
     Ok(UrlValidationResult {
@@ -139,8 +204,13 @@ mod tests {
             "example.com:443"
         );
         assert_eq!(format_host_port("::1".to_owned(), 80), "[::1]:80");
+        assert_eq!(format_host_port("[::1]".to_owned(), 80), "[::1]:80");
         assert_eq!(
             format_host_port("2001:db8::1".to_owned(), 443),
+            "[2001:db8::1]:443"
+        );
+        assert_eq!(
+            format_host_port("[2001:db8::1]".to_owned(), 443),
             "[2001:db8::1]:443"
         );
     }
@@ -203,5 +273,41 @@ mod tests {
             }
         };
         assert!(msg.contains("SSRF protection"));
+    }
+
+    #[test]
+    fn test_check_redirect_target_allowed_private_host() {
+        let u1 = url::Url::parse("http://nas.lan/sub/").unwrap();
+        assert!(check_redirect_target(&u1, Some("nas.lan")).is_ok());
+
+        let u2 = url::Url::parse("http://nas.lan./sub/").unwrap();
+        assert!(check_redirect_target(&u2, Some("nas.lan")).is_ok());
+
+        let u3 = url::Url::parse("http://192.168.1.1/sub/").unwrap();
+        assert!(check_redirect_target(&u3, Some("192.168.1.1")).is_ok());
+
+        // Redirect to a different private host is blocked
+        let u_diff = url::Url::parse("http://other.lan/sub/").unwrap();
+        let res = check_redirect_target(&u_diff, Some("nas.lan"));
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains(SSRF_BLOCK_MARKER));
+
+        // Redirect to a different private IP is blocked
+        let u_diff_ip = url::Url::parse("http://192.168.1.2/sub/").unwrap();
+        let res_ip = check_redirect_target(&u_diff_ip, Some("192.168.1.1"));
+        assert!(res_ip.is_err());
+        assert!(res_ip.unwrap_err().contains(SSRF_BLOCK_MARKER));
+
+        // Redirect to public host is allowed
+        let u_pub = url::Url::parse("https://example.com/sub/").unwrap();
+        assert!(check_redirect_target(&u_pub, None).is_ok());
+
+        // Redirect to fake-IP is always blocked even if nominally specified
+        let u_fake = url::Url::parse("http://198.18.0.1/sub/").unwrap();
+        let res_fake = check_redirect_target(&u_fake, Some("198.18.0.1"));
+        assert!(res_fake.is_err());
+        assert!(res_fake
+            .unwrap_err()
+            .contains("Redirect to fake IP blocked"));
     }
 }
