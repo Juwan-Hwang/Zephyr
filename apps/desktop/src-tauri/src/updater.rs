@@ -136,6 +136,9 @@ fn build_github_client() -> Result<reqwest::Client, String> {
         .user_agent(format!("Zephyr/{version}"))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
+        // Ambient/environment proxies (including SOCKS via the `socks` feature)
+        // must never route update downloads: fallback proxies are app-managed only.
+        .no_proxy()
         .build()
         .map_err(|e| e.to_string())
 }
@@ -844,6 +847,8 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
     let client = reqwest::Client::builder()
         .user_agent("Zephyr/Update-Checker")
         .timeout(std::time::Duration::from_secs(10))
+        // Ambient/environment proxies must never route update checks.
+        .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -1074,8 +1079,12 @@ async fn update_core_inner(
         92,
     );
 
-    // Stop core and wait for it to fully exit
-    let _ = core_manager::stop_core_inner(app, &state);
+    // Stop core and wait for it to fully exit. A failed stop must abort the
+    // update: replacing the executable underneath a running (on macOS a
+    // root-owned) core would leave the old binary executing while the updater
+    // reports success, and the subsequent restart would then fail on the ports
+    // it still holds.
+    core_manager::stop_core_inner(app, &state)?;
 
     // Wait for the process to fully exit (give it some time)
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
