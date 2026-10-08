@@ -263,9 +263,18 @@ mod tests {
                     .expect("Record failed");
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            // The flush runs on the background writer and ends with fsync +
+            // rename, which can take well over 200 ms on a loaded CI runner:
+            // poll for the (atomically renamed) file instead of a fixed sleep.
+            let data_path = temp_dir.path().join("smart_history.json");
+            for _ in 0..100 {
+                if data_path.exists() {
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
 
-            assert!(temp_dir.path().join("smart_history.json").exists());
+            assert!(data_path.exists());
 
             let config = SmartStateConfig::new(temp_dir.path());
             let state2 = SmartState::init(config)
@@ -285,11 +294,15 @@ mod tests {
             state.record("node1", 100.0, true).expect("Record failed");
             state.record("node2", 200.0, false).expect("Record failed");
 
-            // Wait for WAL to be written (background task processes immediately)
-            // Need enough time for async channel send + WAL write + fsync
-            // Also wait for WAL file to exist
-            for _ in 0..20 {
-                if temp_dir.path().join("smart_history.wal").exists() {
+            // The WAL file is created when the writer starts, before any record
+            // is appended, so its existence alone proves nothing: wait until both
+            // records are on disk, then require recovery to see them.
+            let wal_path = temp_dir.path().join("smart_history.wal");
+            for _ in 0..100 {
+                let lines = std::fs::read_to_string(&wal_path)
+                    .map(|s| s.matches('\n').count())
+                    .unwrap_or(0);
+                if lines >= 2 {
                     break;
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -300,13 +313,8 @@ mod tests {
                 .await
                 .expect("Failed to init state");
 
-            // Should recover from WAL or memory
-            // Note: If WAL doesn't exist, data might be lost (expected behavior)
-            // The test verifies that if WAL exists, recovery works
-            if temp_dir.path().join("smart_history.wal").exists() {
-                assert!(state2.get_history("node1").is_some());
-                assert!(state2.get_history("node2").is_some());
-            }
+            assert!(state2.get_history("node1").is_some());
+            assert!(state2.get_history("node2").is_some());
         }
 
         #[tokio::test]
