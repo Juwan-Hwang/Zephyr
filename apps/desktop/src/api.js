@@ -568,6 +568,15 @@ export async function getProxiesMerged(existingData) {
  */
 export async function switchProxy(group, name) {
   try {
+    // GLOBAL switches go through the backend so the user-change generation is
+    // bumped under the restore lock; otherwise an in-flight fallback restore
+    // could silently overwrite the user's selection. Only the reserved GLOBAL
+    // group (exact name) uses this path; user-defined groups named e.g.
+    // "Global" keep the direct HTTP PUT.
+    if (group === 'GLOBAL') {
+      await invoke('switch_global_node', { name });
+      return true;
+    }
     const res = await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
       method: 'PUT',
       body: JSON.stringify({ name }),
@@ -575,6 +584,11 @@ export async function switchProxy(group, name) {
     return res.ok;
   } catch (err) {
     if (err instanceof ApiError) throw err;
+    // The backend rejects with a plain Error carrying the real reason (e.g.
+    // "Subscription update in progress, please try again", "GLOBAL proxy group
+    // no longer contains node '<name>'"). Callers only see the boolean, so keep
+    // the reason in the log instead of dropping it.
+    apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
     return false;
   }
 }

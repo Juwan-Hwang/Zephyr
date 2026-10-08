@@ -4,8 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, switchProxy } from '../api.js';
-import { saveSetting } from './settings-helpers.js';
+import { invoke, closeAllConnections, switchProxy } from '../api.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
@@ -41,14 +40,14 @@ export function initModeSelector() {
                 } catch (e) { modesLogger.warn("Failed to capture node for inheritance", e); }
 
                 // 2. Switch mode (hot-reload via REST API — instant)
-                await patchConfig({ mode });
+                // Routed through the backend so the user-mode generation bump
+                // happens under the restore lock; otherwise an in-flight
+                // fallback restore could overwrite the user's choice. The
+                // backend persists the accepted mode to settings.json itself.
+                await invoke('switch_mode', { mode });
                 updateModeUI(mode);
 
-                // 3. Persist to settings.json + close connections in background
-                // (persist is fire-and-forget; patchConfig success is the source of truth)
-                saveSetting('mode', mode).catch((e) =>
-                    modesLogger.warn("Failed to persist mode change", e)
-                );
+                // 3. Close existing connections (fire-and-forget)
                 closeAllConnections().catch((e) =>
                     modesLogger.warn("Failed to close connections", e)
                 );
@@ -61,8 +60,15 @@ export function initModeSelector() {
                         // Use uiGroupName from resolver for accurate group targeting
                         const targetGroup = resultAfter.uiGroupName || resultAfter.mainGroup;
                         if (targetGroup) {
-                            await switchProxy(targetGroup, nodeToInherit);
-                            appStore.set('uiGroupName', targetGroup);
+                            // A `false` result means the reserved GLOBAL selection
+                            // was rejected (or a non-reserved group PUT failed):
+                            // do not book it as inherited.
+                            const inheritedOk = await switchProxy(targetGroup, nodeToInherit);
+                            if (inheritedOk) {
+                                appStore.set('uiGroupName', targetGroup);
+                            } else {
+                                modesLogger.warn('Node inheritance switch was not applied');
+                            }
                         }
                     }
                 }
@@ -76,6 +82,11 @@ export function initModeSelector() {
                 Bus.emit(Events.MODE_CHANGED, mode);
             } catch (err) {
                 showNotification(toError(err).toString(), 'error');
+                // The backend can apply the mode to the core and still fail
+                // (e.g. the settings write failed after the core PUT), so
+                // reconcile the buttons with the live core instead of leaving
+                // the previous mode highlighted.
+                import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
                 appStore.set('isNetworkUpdating', false);
                 if (container) container.classList.remove('opacity-50', 'cursor-not-allowed');
             }
