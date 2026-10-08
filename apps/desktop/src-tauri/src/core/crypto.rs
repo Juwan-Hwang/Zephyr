@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use super::secure_io::write_file_secure;
+use tauri::Manager as _;
+
+use super::secure_io::{write_file_secure, write_file_secure_atomic};
 use super::AppPaths;
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -369,13 +371,85 @@ pub fn read_profile_file(path: &Path) -> Result<String, String> {
 }
 
 /// Write a profile file, encrypting if `encrypt` is true.
+///
+/// Every caller must hold `crate::PROFILE_CRYPTO_TRANSFORM` for the whole
+/// read-flag-and-write sequence, and must keep holding it until the content is
+/// at its final path. The encryption batch rewrites every profile in the
+/// directory, so a write that is not covered by that guard can land between the
+/// batch's read of a file and its write of it, and be overwritten with what the
+/// batch read.
+///
+/// The guard deliberately is not taken here: this function is called from
+/// inside sequences that already hold it, and `std::sync::Mutex` is not
+/// reentrant — taking it here would deadlock those callers against themselves.
 pub fn write_profile_file(path: &Path, content: &str, encrypt: bool) -> Result<(), String> {
-    let data = if encrypt {
+    // A session-only key is gone at the next start, so a profile encrypted with
+    // it could never be read again. Write plaintext instead, matching the
+    // startup reconciliation, which also leaves profiles plaintext in that case.
+    let data = if encrypt && is_machine_key_persisted() {
         obfuscate_string(content)?
     } else {
         content.to_owned()
     };
-    write_file_secure(path, &data)
+    // Atomic: profiles are read without the transform guard (core start,
+    // listings), so an in-place truncate-and-write could be read half-done.
+    write_file_secure_atomic(path, &data)
+}
+
+/// Write one profile with the current `encrypt_configs` setting, under the
+/// profile-transform guard.
+///
+/// For callers that write a single file and hold neither lock. The guard is
+/// taken before the settings lock, matching every other profile writer.
+pub fn save_profile_file(app: &tauri::AppHandle, path: &Path, content: &str) -> Result<(), String> {
+    let transform_guard = crate::lock_profile_transform();
+    let result = write_profile_file(path, content, authoritative_encrypt_configs(app));
+    drop(transform_guard);
+    result
+}
+
+/// Read-modify-write one profile as a single step under the profile-transform
+/// guard.
+///
+/// `edit` receives the decrypted content and returns the new content, or
+/// `None` to leave the file untouched. Holding the guard across the read and
+/// the write keeps a concurrent single-file save or an encryption batch from
+/// landing in between and being overwritten. Returns whether the file was
+/// written.
+pub fn update_profile_file(
+    app: &tauri::AppHandle,
+    path: &Path,
+    edit: impl FnOnce(&str) -> Option<String>,
+) -> Result<bool, String> {
+    let transform_guard = crate::lock_profile_transform();
+    let result = read_profile_file(path).and_then(|current| {
+        let Some(updated) = edit(&current) else {
+            return Ok(false);
+        };
+        write_profile_file(path, &updated, authoritative_encrypt_configs(app)).map(|()| true)
+    });
+    drop(transform_guard);
+    result
+}
+
+/// The currently authoritative `encrypt_configs` value.
+///
+/// Read under the settings lock, so a caller that has already acquired the
+/// profile-transform guard sees the value that actually won, rather than the one
+/// its own patch happened to persist. Without this, a patch whose write was
+/// superseded while it waited for the transform lock would still run its own
+/// transform and undo the newer one.
+///
+/// A poisoned lock is recovered: every settings writer edits a clone and
+/// publishes it only after `persist_settings` succeeds, so a panicking holder
+/// cannot leave a half-applied `encrypt_configs` behind.
+#[must_use]
+pub fn authoritative_encrypt_configs(app: &tauri::AppHandle) -> bool {
+    app.state::<crate::SettingsState>()
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .encrypt_configs
 }
 
 /// Encrypt all plaintext profile YAML files in `profiles_dir`.
@@ -412,7 +486,7 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         }
         match obfuscate_string(&content) {
             Ok(encrypted) => {
-                if let Err(e) = write_file_secure(&path, &encrypted) {
+                if let Err(e) = write_file_secure_atomic(&path, &encrypted) {
                     crate::emit_warn!(
                         Config,
                         CONFIG_ENCRYPT_WRITE_FAILED,
@@ -474,7 +548,7 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         }
         match deobfuscate_string(&content) {
             Ok(decrypted) => {
-                if let Err(e) = write_file_secure(&path, &decrypted) {
+                if let Err(e) = write_file_secure_atomic(&path, &decrypted) {
                     crate::emit_warn!(
                         Config,
                         CONFIG_DECRYPT_WRITE_FAILED,
@@ -630,34 +704,12 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     let data = serde_json::to_string_pretty(&obf_meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
 
-    // Atomic write: write to a temp file in the same directory, then rename.
-    // `rename` is atomic on the same filesystem — readers see either the old
-    // or the new file, never a partial write. If the process crashes between
-    // the temp write and the rename, the old metadata.json is untouched.
-    let temp_path = paths.profiles_dir.join("metadata.json.tmp");
-    write_file_secure(&temp_path, &data)?;
-
-    // Rename can fail on Windows if an external process (e.g. antivirus)
-    // has the file open. Such handles are transient — retry before falling
-    // back to a non-atomic direct write.
-    let mut rename_err = None;
-    for attempt in 0..3 {
-        match std::fs::rename(&temp_path, &meta_path) {
-            Ok(()) => {
-                rename_err = None;
-                break;
-            }
-            Err(e) => {
-                rename_err = Some(e);
-                if attempt < 2 {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-            }
-        }
-    }
-
-    if let Some(e) = rename_err {
-        let _ = std::fs::remove_file(&temp_path);
+    // Durable atomic replace (temp file fsync, rename, directory fsync):
+    // readers see either the old or the new file, and a power loss cannot
+    // leave an empty metadata.json that load_metadata would read as "no
+    // subscriptions". A transient handle that outlives the rename retries
+    // falls back to a non-atomic direct write below.
+    if let Err(e) = write_file_secure_atomic(&meta_path, &data) {
         // Keep a recoverable copy: an interrupted direct write truncates
         // metadata.json, and load_metadata would then silently degrade to
         // an empty default that the next save persists. Refuse the
