@@ -9,10 +9,16 @@ import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
-import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery } from './lifecycle.js';
+
+// Invoked by name, matching `switch_mode` in modes.js: this one has no entry in
+// the shared COMMANDS map. It records the TUN preference only, for callers that
+// have already applied TUN to the running core themselves — `patch_settings`
+// now rejects a non-null `tun_enabled`, which is the owner-path split this
+// command exists to serve.
+const RECORD_TUN_ENABLED = 'record_tun_enabled';
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -64,7 +70,9 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
-                        await saveSetting('tun_enabled', true);
+                        // The privileged restart already wrote TUN into run_config.yaml;
+                        // record the preference through its owner command.
+                        await invoke(RECORD_TUN_ENABLED, { enable: true });
                     } catch (authErr) {
                         tunLogger.error('authErr', authErr);
                         if (authErr === 'canceled') {
@@ -86,7 +94,8 @@ export function initTunToggle() {
                     try {
                         await invoke(COMMANDS.SET_TUN_ENABLED, { enable: false });
                         await invoke(COMMANDS.DISABLE_CMD);
-                        await saveSetting('tun_enabled', false);
+                        // `set_tun_enabled` persists the preference itself; a
+                        // separate settings write would be redundant.
                         await new Promise(r => setTimeout(r, 1500));
 
                         const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -102,7 +111,9 @@ export function initTunToggle() {
             } else {
                 // Non-macOS: use API to update config
                 await patchConfig({ tun: { enable } });
-                await saveSetting('tun_enabled', enable);
+                // The config is already live from `patchConfig`; only the
+                // preference still needs recording.
+                await invoke(RECORD_TUN_ENABLED, { enable });
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
@@ -154,7 +165,9 @@ export function initTunToggle() {
                     if (permissionGranted) {
                         try {
                             showNotification(t.tunLinuxPermissionGranted || 'Permission granted. Restarting core...', 'success');
-                            await saveSetting('tun_enabled', true);
+                            // The core is about to come up with TUN in its config;
+                            // record the preference through its owner command.
+                            await invoke(RECORD_TUN_ENABLED, { enable: true });
                             try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
                             const settings = await invoke(COMMANDS.GET_SETTINGS);
                             const currentConfig = settings.last_config || 'config.yaml';
@@ -177,7 +190,10 @@ export function initTunToggle() {
                             return;
                         } catch (retryErr) {
                             tunLogger.error('TUN retry failed after permission grant', retryErr);
-                            await saveSetting('tun_enabled', false);
+                            // The retry did not bring TUN up, so record the
+                            // preference as off rather than leaving it at the
+                            // value written before the attempt.
+                            await invoke(RECORD_TUN_ENABLED, { enable: false });
                             try {
                                 const settings = await invoke(COMMANDS.GET_SETTINGS);
                                 const currentConfig = settings.last_config || 'config.yaml';
