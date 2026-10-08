@@ -230,12 +230,23 @@ async function startCoreAndConfigure() {
     const configPath = settings.last_config || 'config.yaml';
     const customArgs = settings.custom_args || [];
     apiLogger.info(`[Zephyr] calling start_core (config=${configPath})`);
-    const coreResult = await invoke(COMMANDS.START_CORE, {
-      configPath,
-      test: false,
-      customArgs,
-      secret: null,
-    });
+    const startArgs = { configPath, customArgs, secret: null };
+    let coreResult;
+    try {
+      coreResult = await invoke(COMMANDS.START_CORE, startArgs);
+    } catch (startErr) {
+      // A failed root TUN start (macOS) cleans up and turns the TUN preference
+      // off before returning the error. Retry once without TUN instead of
+      // leaving the app with no core; any other failure is reported as before.
+      // TUN comes from the saved preference or, when that is unset, from the
+      // profile, so re-read unless TUN was already off.
+      if (settings.tun_enabled === false) throw startErr;
+      const after = await invoke(COMMANDS.GET_SETTINGS).catch(() => null);
+      if (after?.tun_enabled !== false) throw startErr;
+      apiLogger.warn('[Zephyr] TUN start failed; retrying without TUN', startErr);
+      coreResult = await invoke(COMMANDS.START_CORE, startArgs);
+      showNotification(`${startErr}`, 'warning');
+    }
     apiLogger.info(`[Zephyr] start_core: +${(performance.now() - tStartCore).toFixed(0)}ms`);
 
     // If start_core silently fell back (requested config doesn't exist),
