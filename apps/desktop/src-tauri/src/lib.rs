@@ -39,8 +39,8 @@ use core_manager::{
     get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
     is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
     open_config_folder, open_log_folder, read_config_file, rename_config, restart_core_as_root_cmd,
-    set_tun_enabled, smart_kill_all_mihomo_as_root, start_core, stop_core, update_config_url,
-    update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
+    set_tun_enabled, start_core, stop_core, update_config_url, update_subscription_interval,
+    update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -734,19 +734,38 @@ fn get_settings(state: tauri::State<SettingsState>) -> Settings {
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::significant_drop_tightening)]
 fn save_settings(
     app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
     settings: Settings,
 ) -> Result<(), String> {
-    {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("Settings lock failed: {e}"))?;
-        *guard = settings.clone();
+    if let Some(m) = &settings.mode {
+        if !matches!(m.as_str(), "rule" | "global" | "direct") {
+            return Err(format!("Invalid mode: {m}"));
+        }
     }
-    persist_settings(&app, &settings)
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("Settings lock failed: {e}"))?;
+    // Preserve the authoritative mode: `switch_mode` owns live mode changes
+    // (it applies the change to the live core first), so a full-snapshot save
+    // carrying a stale mode must not overwrite it. An explicit `None`
+    // (Restore Defaults) is honored as an intentional reset.
+    let mut next = settings;
+    if next.mode.is_some() {
+        next.mode = std::mem::take(&mut guard.mode);
+    }
+    let snapshot = next.clone();
+    *guard = next;
+    // Persist while holding the settings lock so the in-memory update and the
+    // disk write are atomic with respect to `switch_mode`'s persistence: a
+    // stale snapshot can never land after a newer mode. (persist_settings
+    // performs plain file I/O and takes no locks.)
+    persist_settings(&app, &snapshot)?;
+    drop(guard);
+    Ok(())
 }
 
 /// Atomically patch a subset of settings fields.
@@ -777,6 +796,21 @@ fn patch_settings(
                     return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart.".to_owned());
                 }
             }
+            // Validate mode before mutating state to match save_settings validation
+            if let Some(v) = map.get("mode") {
+                if !v.is_null() {
+                    match serde_json::from_value::<String>(v.clone()) {
+                        Ok(val) => {
+                            if !matches!(val.as_str(), "rule" | "global" | "direct") {
+                                return Err(format!("Invalid mode: {val}"));
+                            }
+                        }
+                        Err(_) => {
+                            return Err("Invalid mode: expected string or null".to_owned());
+                        }
+                    }
+                }
+            }
             macro_rules! patch_field {
                 ($field:ident) => {
                     if let Some(v) = map.get(stringify!($field)) {
@@ -796,7 +830,22 @@ fn patch_settings(
                 };
             }
             patch_field!(theme);
-            patch_field!(mode);
+            // NOTE: mode is not settable through the settings path: live mode
+            // changes go through `switch_mode`, which applies the change to the
+            // core and bumps `USER_MODE_GENERATION` under the restore lock. A
+            // settings-only mode value would desynchronize the persisted
+            // preference from the live core. An explicit null (Restore Defaults)
+            // remains an intentional preference reset.
+            if let Some(v) = map.get("mode") {
+                if !v.is_null() {
+                    return Err(
+                        "Mode changes must go through switch_mode; use null to reset the preference"
+                            .to_owned(),
+                    );
+                }
+                guard.mode = None;
+                modified = true;
+            }
             patch_field!(tun_enabled);
             patch_field!(mixed_port);
             patch_field!(socks_port);
@@ -1237,6 +1286,26 @@ fn write_frontend_log(level: String, source: String, message: String) -> Result<
 #[allow(clippy::needless_pass_by_value)]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+/// Switch the GLOBAL proxy group selection on behalf of the user.
+///
+/// Runs the selection change under the restore lock together with the
+/// user-change generation bump, so an in-flight fallback restore cannot
+/// overwrite the user's choice.
+#[tauri::command]
+async fn switch_global_node(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_global_node(&app, &name).await
+}
+
+/// Switch the proxy mode on behalf of the user.
+///
+/// Runs the mode change under the restore lock together with the user-mode
+/// generation bump, so an in-flight fallback restore cannot overwrite the
+/// user's choice.
+#[tauri::command]
+async fn switch_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    core_manager::core::subscription::user_switch_mode(&app, &mode).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1702,6 +1771,8 @@ invalidate_heartbeat(window.app_handle());
             // OS notification command (rate-limited wrapper)
             rate_limited_send_notification,
             get_app_version,
+            switch_global_node,
+            switch_mode,
             heartbeat,
 write_frontend_log,
             // Prism Engine commands
@@ -1842,8 +1913,16 @@ write_frontend_log,
                     scheduler_state.shutdown();
                 }
                 kill_mihomo();
-                // Smart kill: only prompts for password if there's actually a root mihomo running
-                let _ = smart_kill_all_mihomo_as_root();
+                // Clean up only this app's managed core (root- and user-owned):
+                // an unrelated root mihomo service must survive the app exit.
+                // Prefer the executable recorded when the root core was started
+                // (the binary may have been replaced or removed since), falling
+                // back to the current managed path.
+                let root_core_exe = core_manager::core::tun_manager::last_root_core_exe()
+                    .or_else(|| core_manager::core::core_process::get_core_exe_path(handle).ok());
+                let _ = core_manager::core::tun_manager::kill_managed_root_mihomo_as_root(
+                    root_core_exe.as_deref(),
+                );
             }
             tauri::RunEvent::Resumed => {
                 // System woke up from sleep. The mihomo core's TCP connections

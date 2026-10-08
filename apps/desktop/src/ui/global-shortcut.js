@@ -6,8 +6,7 @@
  * and executes the corresponding UI actions.
  */
 
-import { listen, invoke, getCurrentWindow, patchConfig, closeAllConnections } from '../api.js';
-import { saveSetting } from './settings-helpers.js';
+import { listen, invoke, getCurrentWindow, closeAllConnections } from '../api.js';
 import { showNotification } from './notifications.js';
 import { translations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
@@ -568,8 +567,11 @@ async function switchMode(/** @type {string} */ mode) {
     const lang = localStorage.getItem('lang') || 'en';
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
-        await patchConfig({ mode });
-        await saveSetting('mode', mode);
+        // Route through the backend so the user-mode generation bump happens
+        // under the restore lock; an in-flight fallback restore must not
+        // overwrite the user's choice. The backend persists the accepted mode
+        // to settings.json itself.
+        await invoke('switch_mode', { mode });
         await closeAllConnections();
         const modeNames = /** @type {Record<string, string>} */ ({ rule: t.modeRule || 'Rule', global: t.modeGlobal || 'Global', direct: t.modeDirect || 'Direct' });
         showNotification(`${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`, 'success');
