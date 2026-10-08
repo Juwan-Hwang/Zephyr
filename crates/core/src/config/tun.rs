@@ -9,6 +9,16 @@ use yaml::Value as YamlValue;
 
 use crate::error::AppError;
 
+/// Proxy mode a profile sets at top level (`mode:`), lowercased, when it is one
+/// the app supports (`rule`, `global`, `direct`). `None` when the key is missing
+/// or invalid, in which case mihomo runs `rule`.
+#[must_use]
+pub fn extract_mode_from_yaml(content: &str) -> Option<String> {
+    let yaml_val: yaml::Value = yaml::from_str(content).ok()?;
+    let mode = yaml_val.get("mode")?.as_str()?.to_ascii_lowercase();
+    matches!(mode.as_str(), "rule" | "global" | "direct").then_some(mode)
+}
+
 /// Extract secret from YAML config content using the YAML parser.
 /// This avoids issues with line-by-line parsing (multi-line strings, comments, etc.).
 #[cfg_attr(feature = "uniffi", uniffi::export)]
@@ -101,6 +111,24 @@ pub fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, AppErro
     })
 }
 
+/// Set the top-level controller `secret` in YAML config content.
+///
+/// Only the root key changes: a nested `secret:` inside a proxy, provider or
+/// listener block is left alone, and `serde_yaml` quotes the value as needed.
+pub fn set_secret_in_yaml(content: &str, secret: &str) -> Result<String, AppError> {
+    let mut yaml_val = yaml::from_str::<YamlValue>(content)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse YAML config: {e}")))?;
+    yaml_val
+        .as_mapping_mut()
+        .ok_or_else(|| AppError::ConfigError("YAML root is not a mapping".to_owned()))?
+        .insert(
+            YamlValue::String("secret".to_owned()),
+            YamlValue::String(secret.to_owned()),
+        );
+    yaml::to_string(&yaml_val)
+        .map_err(|e| AppError::ConfigError(format!("Failed to serialize YAML: {e}")))
+}
+
 /// Inject TUN file descriptor into YAML config content for Android VPN Service.
 ///
 /// On Android, mihomo cannot create its own TUN device (netlink is banned).
@@ -179,6 +207,21 @@ pub fn extract_tun_enabled_from_yaml(content: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_extract_mode_from_yaml() {
+        assert_eq!(
+            extract_mode_from_yaml("mode: Global\n").as_deref(),
+            Some("global")
+        );
+        assert_eq!(
+            extract_mode_from_yaml("mode: direct\nport: 1\n").as_deref(),
+            Some("direct")
+        );
+        assert_eq!(extract_mode_from_yaml("port: 1\n"), None);
+        assert_eq!(extract_mode_from_yaml("mode: script\n"), None);
+        assert_eq!(extract_mode_from_yaml("tun:\n  mode: global\n"), None);
+    }
+
     // Helper to extract dns-hijack values from YAML string
     fn extract_dns_hijack(content: &str) -> Option<Vec<String>> {
         let yaml_val = yaml::from_str::<YamlValue>(content).ok()?;
@@ -193,6 +236,24 @@ mod tests {
             .iter()
             .map(|v| v.as_str().map(std::borrow::ToOwned::to_owned))
             .collect()
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_only_touches_top_level() {
+        let content = "secret: old\nproxies:\n  - name: a\n    secret: nested\n";
+        let out = set_secret_in_yaml(content, "a#b: c").expect("secret update should succeed");
+        assert_eq!(extract_secret_from_yaml(&out).as_deref(), Some("a#b: c"));
+        let val: YamlValue = yaml::from_str(&out).expect("output should parse");
+        let nested = val
+            .get("proxies")
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("secret"))
+            .and_then(YamlValue::as_str);
+        assert_eq!(nested, Some("nested"));
+        let added =
+            set_secret_in_yaml("mixed-port: 7890\n", "s1").expect("secret insert should succeed");
+        assert_eq!(extract_secret_from_yaml(&added).as_deref(), Some("s1"));
+        assert!(set_secret_in_yaml("- a\n", "s").is_err());
     }
 
     #[test]
