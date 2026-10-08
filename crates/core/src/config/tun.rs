@@ -101,6 +101,24 @@ pub fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, AppErro
     })
 }
 
+/// Set the top-level controller `secret` in YAML config content.
+///
+/// Only the root key changes: a nested `secret:` inside a proxy, provider or
+/// listener block is left alone, and `serde_yaml` quotes the value as needed.
+pub fn set_secret_in_yaml(content: &str, secret: &str) -> Result<String, AppError> {
+    let mut yaml_val = yaml::from_str::<YamlValue>(content)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse YAML config: {e}")))?;
+    yaml_val
+        .as_mapping_mut()
+        .ok_or_else(|| AppError::ConfigError("YAML root is not a mapping".to_owned()))?
+        .insert(
+            YamlValue::String("secret".to_owned()),
+            YamlValue::String(secret.to_owned()),
+        );
+    yaml::to_string(&yaml_val)
+        .map_err(|e| AppError::ConfigError(format!("Failed to serialize YAML: {e}")))
+}
+
 /// Inject TUN file descriptor into YAML config content for Android VPN Service.
 ///
 /// On Android, mihomo cannot create its own TUN device (netlink is banned).
@@ -193,6 +211,24 @@ mod tests {
             .iter()
             .map(|v| v.as_str().map(std::borrow::ToOwned::to_owned))
             .collect()
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_only_touches_top_level() {
+        let content = "secret: old\nproxies:\n  - name: a\n    secret: nested\n";
+        let out = set_secret_in_yaml(content, "a#b: c").expect("secret update should succeed");
+        assert_eq!(extract_secret_from_yaml(&out).as_deref(), Some("a#b: c"));
+        let val: YamlValue = yaml::from_str(&out).expect("output should parse");
+        let nested = val
+            .get("proxies")
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("secret"))
+            .and_then(YamlValue::as_str);
+        assert_eq!(nested, Some("nested"));
+        let added =
+            set_secret_in_yaml("mixed-port: 7890\n", "s1").expect("secret insert should succeed");
+        assert_eq!(extract_secret_from_yaml(&added).as_deref(), Some("s1"));
+        assert!(set_secret_in_yaml("- a\n", "s").is_err());
     }
 
     #[test]

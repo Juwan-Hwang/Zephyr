@@ -575,12 +575,21 @@ function setActiveNode(card, _container) {
  * Re-exported for use by other modules.
  */
 export async function syncCoreConfig() {
+    // A mode switch that lands while this GET is in flight owns the newer
+    // value; writing this (older) response afterwards would roll the store
+    // and the tray back to the previous mode.
+    const modeBeforeFetch = appStore.get('currentOutboundMode');
     const config = await getConfig();
     if (!config) return;
 
     // Sync Mode
-    if ((/** @type {any} */ (config)).mode) {
-        updateModeUI((/** @type {any} */ (config)).mode);
+    if ((/** @type {any} */ (config)).mode && appStore.get('currentOutboundMode') === modeBeforeFetch) {
+        const liveMode = String((/** @type {any} */ (config)).mode).toLowerCase();
+        updateModeUI(liveMode);
+        // The store drives the tray menu's mode indicator; reconciling only
+        // the buttons would leave the tray on a stale mode after a switch
+        // that the core applied but the backend then reported as failed.
+        appStore.set('currentOutboundMode', liveMode);
     }
 
     // Sync TUN
@@ -1102,6 +1111,10 @@ async function handleFailoverAction(action) {
                     await renderProxies();
                 } catch { /* ignore post-failover errors */ }
             })();
+        } else {
+            // Automatic failover: log the rejected switch rather than raising a
+            // notification, so a failing failover does not spam the user.
+            proxyLogger.warn('Failover switch was not applied');
         }
     } finally {
         _isFailovering = false;
