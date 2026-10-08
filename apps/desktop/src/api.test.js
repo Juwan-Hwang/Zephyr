@@ -300,12 +300,82 @@ describe('getProxies', () => {
 });
 
 describe('switchProxy', () => {
+    it('never falls back to a direct HTTP PUT for GLOBAL switches', async () => {
+        // Without IPC the GLOBAL path fails closed. Re-import api.js after
+        // stubbing, since the bridge is captured at module load.
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('fetch', fetchSpy);
+        vi.stubGlobal('__TAURI_INTERNALS__', undefined);
+        vi.resetModules();
+        const api = await import('./api.js');
+
+        const result = await api.switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(false);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+        vi.resetModules();
+    });
+
+    it('invokes switch_global_node when IPC is available', async () => {
+        // Provide IPC before importing api.js (the bridge is captured at module
+        // load), then verify the command name and arguments.
+        const invokeSpy = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: invokeSpy,
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+
+        const result = await api.switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(true);
+        expect(invokeSpy).toHaveBeenCalledWith('switch_global_node', { name: 'Auto' });
+
+        // A user-defined group named "Global" is not the reserved GLOBAL group
+        // and keeps the direct HTTP path.
+        const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
+        vi.stubGlobal('fetch', fetchSpy);
+        const otherResult = await api.switchProxy('Global', 'Node1');
+        expect(otherResult).toBe(true);
+        expect(fetchSpy).toHaveBeenCalled();
+        expect(invokeSpy).toHaveBeenCalledTimes(1);
+
+        vi.unstubAllGlobals();
+        vi.resetModules();
+    });
+
+    it('reports a rejected backend GLOBAL switch as false', async () => {
+        // The backend rejects with a plain Error carrying the real reason (e.g.
+        // "Subscription update in progress", "GLOBAL proxy group no longer
+        // contains node '<name>'"). `switchProxy` is boolean-returning, so the
+        // contract callers rely on is `false` plus no HTTP fallback.
+        const invokeSpy = vi.fn().mockRejectedValue(new Error('GLOBAL proxy group no longer contains node \'Auto\''));
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: invokeSpy,
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('fetch', fetchSpy);
+
+        const result = await api.switchProxy('GLOBAL', 'Auto');
+        expect(result).toBe(false);
+        expect(invokeSpy).toHaveBeenCalledWith('switch_global_node', { name: 'Auto' });
+        // Never retried as a direct PUT: that would bypass the restore lock.
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        vi.unstubAllGlobals();
+        vi.resetModules();
+    });
+
     it('returns true on success', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: true,
         }));
 
-        const result = await switchProxy('GLOBAL', 'Auto');
+        const result = await switchProxy('Proxy', 'Auto');
         expect(result).toBe(true);
         vi.unstubAllGlobals();
     });
@@ -317,7 +387,7 @@ describe('switchProxy', () => {
             statusText: 'Not Found',
         }));
 
-        await expect(switchProxy('GLOBAL', 'Bad')).rejects.toThrow();
+        await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
 });
