@@ -69,6 +69,14 @@ export const CRYPTO = Object.freeze({
 
 export const TUN = Object.freeze({
     SET_TUN_ENABLED: "set_tun_enabled",
+    // Live mode and node owners. `patch_settings` rejects a non-null `mode`, so
+    // these are the only way to change either.
+    SWITCH_MODE: "switch_mode",
+    SWITCH_GLOBAL_NODE: "switch_global_node",
+    // Records the TUN preference only, for flows that have already applied TUN
+    // to the running core themselves (privileged macOS restart, non-macOS config
+    // patch, Linux permission-gated restart, failure rollback).
+    RECORD_TUN_ENABLED: "record_tun_enabled",
     RELEASE_TUN_TOGGLE: "release_tun_toggle",
     RESTART_AS_ROOT: "restart_core_as_root_cmd",
     KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",

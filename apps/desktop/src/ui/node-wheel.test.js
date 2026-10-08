@@ -23,6 +23,7 @@ vi.mock('./cache.js', () => ({
     getSettingsCached: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('./proxy-memory.js', () => ({ saveProxySelection: vi.fn() }));
+vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
 
 const GROUPS = {
     uiGroupName: 'Proxy',
