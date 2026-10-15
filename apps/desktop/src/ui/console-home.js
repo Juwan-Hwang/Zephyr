@@ -30,6 +30,7 @@ import { bind } from './bind.js';
 import { subscribeToEvents, getExtLogEvents } from '../modules/backend-events.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { createLogger } from '../utils/logger.js';
+import { createCssVarCache } from '../utils/css-var-cache.js';
 import { showNotification } from './notifications.js';
 import { t, applyTranslations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -82,9 +83,16 @@ function fmtBytes(bytes) {
     return bytes + ' B';
 }
 
+/**
+ * Theme variables read by the chart. Resolving them through getComputedStyle
+ * on every repaint forced a style recalc per traffic tick; the cache is
+ * dropped on theme events and whenever <html>'s class/style changes.
+ */
+const _cssVars = createCssVarCache();
+
 /** @param {string} name */
 function cssVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return _cssVars.get(name);
 }
 
 /** @param {number} v */
@@ -120,6 +128,8 @@ let isActive = false;
 let lastTrafficTsMsTotal = null;
 /** @type {number | null} Timestamp (ms) of the last traffic sample for session totals (reset on activate). */
 let lastTrafficTsMsSession = null;
+/** @type {number} Pending requestAnimationFrame id for traffic chart repaint (0 = none). */
+let trafficRaf = 0;
 /** @type {number} Counter for periodic uptime re-sync. */
 let uptimeSyncCounter = 0;
 
@@ -151,10 +161,22 @@ function on(el, event, handler, options) {
 function setupCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    const targetW = Math.max(1, Math.round(rect.width * dpr));
+    const targetH = Math.max(1, Math.round(rect.height * dpr));
     const ctx = canvas.getContext('2d');
     if (!ctx) return { ctx: /** @type {any} */ (null), w: 0, h: 0 };
+    // Assigning canvas.width/height reallocates the backing store and
+    // invalidates layout even when the value is unchanged, so only resize
+    // when the size really changed; otherwise just clear the bitmap
+    // (resizing would have cleared it implicitly).
+    // Each assignment reallocates, so touch only the dimension that changed.
+    const resized = canvas.width !== targetW || canvas.height !== targetH;
+    if (canvas.width !== targetW) canvas.width = targetW;
+    if (canvas.height !== targetH) canvas.height = targetH;
+    if (!resized) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { ctx, w: rect.width, h: rect.height };
 }
@@ -1647,10 +1669,26 @@ function _buildConsoleHome(container) {
         if (!isActive) return;
 
         renderNumbers();
-        drawChart($('dz-chart'));
-        drawSpark($('dz-spark-down'), 'down', '175,82,222');
-        drawSpark($('dz-spark-up'), 'up', '56,189,248');
+        // Paint the canvases on the next animation frame. Bursts of samples
+        // collapse into a single paint, and nothing is drawn while the
+        // webview is not rendering frames; the next sample repaints from the
+        // full history, so the visible chart is unchanged.
+        if (!trafficRaf) {
+            trafficRaf = requestAnimationFrame(() => {
+                trafficRaf = 0;
+                if (!isActive) return;
+                drawChart($('dz-chart'));
+                drawSpark($('dz-spark-down'), 'down', '175,82,222');
+                drawSpark($('dz-spark-up'), 'up', '56,189,248');
+            });
+        }
     }));
+    _cleanups.push(() => { if (trafficRaf) { cancelAnimationFrame(trafficRaf); trafficRaf = 0; } });
+
+    // ── Theme: drop cached CSS variables used by the chart ──
+    _cssVars.invalidate();
+    _cleanups.push(Bus.on(Events.THEME_MODE_CHANGED, () => _cssVars.invalidate()));
+    _cleanups.push(Bus.on(Events.THEME_CHANGED, () => _cssVars.invalidate()));
 
     // ── Log stream ──
     loadInitialLogs();
