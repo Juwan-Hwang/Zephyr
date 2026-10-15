@@ -84,7 +84,7 @@ const PAGE_HTML = `
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
-            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
+            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
         </div>
         <!-- Close All / Clear All Button -->
         <button id="close-all-conns-btn" class="btn-danger">
@@ -103,19 +103,19 @@ const PAGE_HTML = `
 <div id="conn-stats-bar" class="glass-card p-4 relative z-10 shrink-0 grid grid-cols-4 gap-4">
     <div class="flex flex-col items-center justify-center">
         <span id="stat-total" class="text-xl font-extralight text-[var(--text-primary)] tabular-nums">0</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="totalConn">Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="totalConn">Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-dl-total" class="text-lg font-semibold text-download tabular-nums">0 B</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="dlTotal">↓ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-ul-total" class="text-lg font-semibold text-upload tabular-nums">0 B</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="ulTotal">↑ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-active" class="text-lg font-semibold text-emerald-400 tabular-nums">0</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="activeConn">Active</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="activeConn">Active</span>
     </div>
 </div>
 
@@ -124,11 +124,13 @@ const PAGE_HTML = `
     <!-- Tab Bar + Table Header -->
     <div class="shrink-0">
         <!-- Tabs -->
-        <div class="flex items-center px-4 pt-3 pb-0 gap-1">
-            <button type="button" id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
-            <button type="button" id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
+        <div class="flex items-center px-4 pt-4 pb-1 gap-2">
+            <div class="seg-tabs" role="tablist">
+                <button type="button" id="conn-tab-active" role="tab" aria-selected="true" class="conn-tab seg-tab active" data-i18n="activeTab">Active</button>
+                <button type="button" id="conn-tab-closed" role="tab" aria-selected="false" class="conn-tab seg-tab" data-i18n="closedTab">Closed</button>
+            </div>
             <div class="flex-1"></div>
-            <span id="closed-count-badge" class="hidden text-2xs text-[var(--text-tertiary)] tabular-nums"></span>
+            <span id="closed-count-badge" class="hidden text-xs text-[var(--text-muted)] tabular-nums pe-1"></span>
         </div>
         <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
         <div class="conn-grid conn-head" id="conn-table-header">
@@ -152,16 +154,16 @@ const PAGE_HTML = `
     <!-- List Body -->
     <div id="connections-list" class="flex-1 overflow-y-auto custom-scrollbar py-1 pb-1 space-y-0.5 px-2">
         <!-- Empty State (Active) -->
-        <div id="connections-empty" class="flex flex-col items-center justify-center h-full py-16 gap-3">
+        <div id="connections-empty" class="empty-state">
             <svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="17" r="4"/><path d="M4 17l6-6-6-6"/><path d="M13 11h8"/></svg>
-            <p class="text-sm text-[var(--text-tertiary)]" data-i18n="noConnections">No active connections</p>
-            <p class="text-2xs text-[var(--text-tertiary)]" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
+            <p class="text-sm font-medium text-[var(--text-secondary)]" data-i18n="noConnections">No active connections</p>
+            <p class="text-xs text-[var(--text-muted)] max-w-xs" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
         </div>
         <!-- Empty State (Closed) -->
-        <div id="connections-closed-empty" class="hidden flex flex-col items-center justify-center h-full py-16 gap-3">
+        <div id="connections-closed-empty" class="empty-state hidden">
             <svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            <p class="text-sm text-[var(--text-tertiary)]" data-i18n="noClosedConns">No closed connections yet</p>
-            <p class="text-2xs text-[var(--text-tertiary)]" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
+            <p class="text-sm font-medium text-[var(--text-secondary)]" data-i18n="noClosedConns">No closed connections yet</p>
+            <p class="text-xs text-[var(--text-muted)] max-w-xs" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
         </div>
     </div>
 </div>
@@ -292,10 +294,10 @@ function switchConnTab(tab) {
     }
 
     if (tab === 'active') {
-        activeTab?.classList.add('text-accent', 'border-accent', 'font-bold', 'active');
-        activeTab?.classList.remove('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
-        closedTab?.classList.remove('text-accent', 'border-accent', 'font-bold', 'active');
-        closedTab?.classList.add('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
+        activeTab?.classList.add('active');
+        closedTab?.classList.remove('active');
+        activeTab?.setAttribute('aria-selected', 'true');
+        closedTab?.setAttribute('aria-selected', 'false');
 
         if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-danger';
@@ -304,10 +306,10 @@ function switchConnTab(tab) {
             if (actionText) { actionText.textContent = t.closeAll || 'Close All'; actionText.setAttribute('data-i18n', 'closeAll'); }
         }
     } else {
-        closedTab?.classList.add('text-accent', 'border-accent', 'font-bold', 'active');
-        closedTab?.classList.remove('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
-        activeTab?.classList.remove('text-accent', 'border-accent', 'font-bold', 'active');
-        activeTab?.classList.add('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
+        closedTab?.classList.add('active');
+        activeTab?.classList.remove('active');
+        closedTab?.setAttribute('aria-selected', 'true');
+        activeTab?.setAttribute('aria-selected', 'false');
 
         if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-warning';
@@ -496,14 +498,24 @@ const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 // Rendering
 // ============================================
 
+/** @type {{ active: HTMLElement | null, closed: HTMLElement | null }} */
+const emptyTemplates = { active: null, closed: null };
+
 /**
  * @param {any[]} connections
  * @param {string} mode
  */
 function renderConnectionList(connections, mode) {
     const container = document.getElementById('connections-list');
-    const emptyState = document.getElementById('connections-empty');
-    const closedEmptyState = document.getElementById('connections-closed-empty');
+    // The empty-state templates live inside the list and are wiped by the first
+    // render that has rows; keep detached copies so either tab can show its
+    // empty state later (the closed tab used to stay blank).
+    const liveActive = document.getElementById('connections-empty');
+    const liveClosed = document.getElementById('connections-closed-empty');
+    if (liveActive) emptyTemplates.active = /** @type {HTMLElement} */ (liveActive.cloneNode(true));
+    if (liveClosed) emptyTemplates.closed = /** @type {HTMLElement} */ (liveClosed.cloneNode(true));
+    const emptyState = emptyTemplates.active;
+    const closedEmptyState = emptyTemplates.closed;
     if (!container) return;
 
     let filtered = connections;
@@ -987,42 +999,40 @@ function showConnDetail(conn, mode) {
         <!-- Header -->
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pe-4">
-                <h3 class="text-lg font-light text-[var(--text-primary)] truncate">${host}</h3>
-                <p class="text-xs text-[var(--text-secondary)] mt-1 font-mono truncate">${id}</p>
+                <h3 class="dialog-title truncate">${host}</h3>
+                <p class="text-2xs text-[var(--text-muted)] mt-0.5 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-sm bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" aria-label="Close" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
 
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
-            <span class="inline-flex px-2.5 py-1 rounded-sm text-xs font-semibold ${ruleColorClass}">${rule}</span>
+            <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ruleColorClass}">${rule}</span>
             <span class="text-xs text-[var(--text-secondary)] truncate">${chains}</span>
         </div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
-                <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-download/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--radius-md)] p-3 border border-[var(--zephyr-border-subtle)]">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-[var(--text-muted)] font-medium">${t.dlSpeedLabel || 'Download Speed'}</span>
                 </div>
                 <span class="text-sm font-semibold text-download tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${t.totalLabel || 'Total'}</span>
+                    <span class="text-xs text-[var(--text-secondary)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
-                <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-upload/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--radius-md)] p-3 border border-[var(--zephyr-border-subtle)]">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-[var(--text-muted)] font-medium">${t.ulSpeedLabel || 'Upload Speed'}</span>
                 </div>
                 <span class="text-sm font-semibold text-upload tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-ul-total">${ulTotal}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${t.totalLabel || 'Total'}</span>
+                    <span class="text-xs text-[var(--text-secondary)] tabular-nums" id="detail-ul-total">${ulTotal}</span>
                 </div>
             </div>
         </div>

@@ -1184,36 +1184,9 @@ html:not(.dark) .form-control:focus {
    Connections Page - Tab Styles
    ============================================ */
 
-.conn-tab {
-  cursor: pointer;
-  user-select: none;
-  position: relative;
-  background: transparent;
-  border: none;
-  outline: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-weight: 400;
-  margin: 0 0.5rem;
-  padding: 0.5rem 1rem;
-  padding-bottom: 0.5rem;
-  transition: color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out);
-}
-
-.conn-tab:hover:not(.active) {
-  color: var(--text-primary);
-  background: transparent;
-}
-
-.conn-tab.active {
-  color: var(--text-primary);
-  font-weight: 600;
-  border-bottom-color: var(--accent-primary);
-}
 .conn-tab:focus-visible {
   outline: 2px solid var(--accent-primary);
-  outline-offset: -2px;
-  border-radius: 6px;
+  outline-offset: 1px;
 }
 
 /* ── Connections table: 4 columns, two lines per row ── */
@@ -1518,33 +1491,6 @@ button:focus-visible:not(:disabled, [disabled]),
 /* ============================================
    Logs Page Styles
    ============================================ */
-
-/* ── Log Tab Buttons ── */
-.log-tab-btn {
-    color: var(--text-muted, rgba(161, 161, 170, 1));
-    cursor: pointer;
-}
-.log-tab-btn:hover {
-    color: var(--text-primary, rgba(244, 244, 245, 1));
-    background: var(--zephyr-bg-muted);
-}
-.log-tab-btn.active {
-    color: var(--text-primary, rgba(244, 244, 245, 1));
-    background: var(--zephyr-bg-muted);
-    font-weight: 600;
-}
-html:not(.dark) .log-tab-btn {
-    color: rgba(113, 113, 122, 1);
-}
-html:not(.dark) .log-tab-btn:hover {
-    color: rgba(24, 24, 27, 1);
-    background: rgba(0, 0, 0, 0.05);
-}
-html:not(.dark) .log-tab-btn.active {
-    color: rgba(24, 24, 27, 1);
-    background: rgba(0, 0, 0, 0.08);
-    font-weight: 600;
-}
 
 /* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
 .log-level-btn {
@@ -2241,4 +2187,57 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
    stays inside the hero (its 140px list starts 4px under the hero's top edge
    instead of being centred on the pill and poking 30px above the card). */
 #node-wheel-dropdown.node-wheel-dropdown { transform-origin: 50% 19%; }
+
+/* Segmented tabs (logs, rule library): one 32px pill track, raised thumb —
+   the same selected look as the settings segmented controls */
+.seg-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 2px;
+  height: 32px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-subtle);
+}
+.seg-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.seg-tab:hover { color: var(--text-primary); }
+.seg-tab.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+
+/* Empty states: centred in the space they have, one rhythm everywhere */
+.empty-state {
+  flex: 1;
+  min-height: 240px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.empty-state.hidden { display: none; }
 
