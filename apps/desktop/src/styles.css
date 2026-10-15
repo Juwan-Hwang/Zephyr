@@ -2266,6 +2266,23 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
 }
 html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 
+/* Rule library: groups read as quiet section labels (like settings), files
+   sit flush on the page edge; groups are 24px apart */
+.rl-group + .rl-group { margin-top: 24px; }
+.rl-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: var(--zephyr-radius-control);
+  cursor: pointer;
+  transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.rl-group-header > div { min-width: 0; }
+.rl-group-header:hover { background: var(--zephyr-bg-muted); }
+
 /* Empty states: centred in the space they have, one rhythm everywhere */
 .empty-state {
   flex: 1;

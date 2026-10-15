@@ -374,12 +374,18 @@
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="ruleLibraryTitle">Rule Library</h2>
-                        <span id="rl-status" class="text-xs px-2 py-0.5 rounded-full bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)]"></span>
-                        <span id="rl-stats" class="text-xs text-[var(--text-muted)]"></span>
+                        <span id="rl-status" class="inline-flex items-center h-6 text-xs px-2.5 rounded-full bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] whitespace-nowrap"></span>
+                        <span id="rl-stats" class="text-xs text-[var(--text-muted)] tabular-nums whitespace-nowrap truncate"></span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" id="rl-btn-new-group" class="px-3 py-1.5 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryNewGroup">New Group</button>
-                        <button type="button" id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryImport">Import Rules</button>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="rl-btn-new-group" class="btn-ghost">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
+                            <span data-i18n="ruleLibraryNewGroup">New Group</span>
+                        </button>
+                        <button type="button" id="rl-btn-import" class="btn-accent">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span data-i18n="ruleLibraryImport">Import Rules</span>
+                        </button>
                     </div>
                 </header>
                 <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 space-y-4 relative z-10">
