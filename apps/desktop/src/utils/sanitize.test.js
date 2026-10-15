@@ -1,25 +1,60 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, sanitizeHtml } from './sanitize.js';
+import { escapeHtml, escapeAttr, sanitizeHtml } from './sanitize.js';
 
 describe('escapeHtml', () => {
     it('escapes < and >', () => {
-        expect(escapeHtml('<script>alert("xss")</script>')).toBe('&lt;script&gt;alert("xss")&lt;/script&gt;');
+        expect(escapeHtml('<script>alert(1)</script>')).toBe('&lt;script&gt;alert(1)&lt;/script&gt;');
     });
     it('escapes &', () => expect(escapeHtml('a & b')).toBe('a &amp; b'));
-    it('does not escape double quotes (textContent/innerHTML round-trip)', () => {
-        // The browser's innerHTML does not escape double quotes in text nodes,
-        // because they are not special in text content context.
-        expect(escapeHtml('"hello"')).toBe('"hello"');
+    it('escapes double quotes', () => expect(escapeHtml('"hello"')).toBe('&quot;hello&quot;'));
+    it('escapes single quotes', () => expect(escapeHtml("it's")).toBe('it&#39;s'));
+    it('escapes all five significant characters', () => {
+        expect(escapeHtml('<div class="test">&"content\'</div>'))
+            .toBe('&lt;div class=&quot;test&quot;&gt;&amp;&quot;content&#39;&lt;/div&gt;');
     });
-    it('does not escape single quotes (textContent/innerHTML round-trip)', () => {
-        // Same as double quotes — single quotes are safe in text nodes.
-        expect(escapeHtml("it's")).toBe("it's");
+    it('does not double-unescape existing entities', () => {
+        expect(escapeHtml('&amp;&lt;')).toBe('&amp;amp;&amp;lt;');
     });
     it('handles empty string', () => expect(escapeHtml('')).toBe(''));
     it('handles string without special chars', () => expect(escapeHtml('hello world')).toBe('hello world'));
-    it('escapes <, >, & (quotes are NOT escaped by textContent/innerHTML round-trip)', () => {
-        expect(escapeHtml('<div class="test">&"content\'</div>'))
-            .toBe('&lt;div class="test"&gt;&amp;"content\'&lt;/div&gt;');
+    it('returns empty string for non-string input', () => {
+        expect(escapeHtml(/** @type {any} */ (null))).toBe('');
+        expect(escapeHtml(/** @type {any} */ (undefined))).toBe('');
+        expect(escapeHtml(/** @type {any} */ (42))).toBe('');
+    });
+    it('does not Unicode-normalize the input (full-width and compatibility characters are preserved)', () => {
+        expect(escapeHtml('香港０１｜ＩＰＬＣ')).toBe('香港０１｜ＩＰＬＣ');
+        expect(escapeHtml('ﬁ ① ㎏')).toBe('ﬁ ① ㎏');
+        // Full-width angle brackets are not HTML-significant and stay as-is.
+        expect(escapeHtml('＜b＞')).toBe('＜b＞');
+    });
+    it('cannot break out of a double-quoted attribute', () => {
+        const payload = '" style="position:fixed;inset:0" x="';
+        const host = document.createElement('div');
+        // eslint-disable-next-line no-unsanitized/property -- test: verifies escaping
+        host.innerHTML = `<button data-id="${escapeHtml(payload)}">x</button>`;
+        const btn = /** @type {HTMLElement} */ (host.firstElementChild);
+        expect(btn.getAttribute('style')).toBeNull();
+        expect(btn.dataset.id).toBe(payload);
+    });
+    it('cannot break out of a single-quoted attribute', () => {
+        const payload = "' onclick='alert(1)";
+        const host = document.createElement('div');
+        // eslint-disable-next-line no-unsanitized/property -- test: verifies escaping
+        host.innerHTML = `<button title='${escapeHtml(payload)}'>x</button>`;
+        const btn = /** @type {HTMLElement} */ (host.firstElementChild);
+        expect(btn.getAttribute('onclick')).toBeNull();
+        expect(btn.title).toBe(payload);
+    });
+});
+
+describe('escapeAttr', () => {
+    it('is equivalent to escapeHtml', () => {
+        const input = '<a href="x">it\'s & more</a>';
+        expect(escapeAttr(input)).toBe(escapeHtml(input));
+    });
+    it('returns empty string for non-string input', () => {
+        expect(escapeAttr(/** @type {any} */ (null))).toBe('');
     });
 });
 

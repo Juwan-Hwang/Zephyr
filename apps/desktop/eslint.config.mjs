@@ -9,7 +9,7 @@ import globals from 'globals';
 
 const _UNSAFE_PROPERTIES = new Set(['innerHTML', 'outerHTML']);
 const _UNSAFE_METHODS = new Set(['insertAdjacentHTML', 'write', 'writeln']);
-const _BASE_ESCAPE = new Set(['html', 'safeHtml', 'escapeHtml', 'sanitizeHtml', 'esc', '_esc']);
+const _BASE_ESCAPE = new Set(['html', 'safeHtml', 'escapeHtml', 'escapeAttr', 'sanitizeHtml', '_esc']);
 
 function _isTriviallySafe(node) {
     if (node.type === 'Literal') return true;
