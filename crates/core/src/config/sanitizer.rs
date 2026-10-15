@@ -7,6 +7,104 @@ use std::path::Path;
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
 const MAX_YAML_DEPTH: usize = 100;
 
+/// Top-level mihomo keys that open or expose an additional control surface.
+///
+/// The desktop app manages the controller itself (it pins `external-controller`
+/// to loopback and injects its own `secret`), so none of these keys is ever
+/// legitimately supplied by a subscription, an imported profile, or a patch:
+///
+/// - `external-controller-unix` / `external-controller-pipe`: the REST API over a
+///   unix socket / named pipe, which mihomo serves **without** checking `secret`.
+/// - `external-controller-tls`: a second (TLS) listener for the REST API that can
+///   bind to any address.
+/// - `external-controller-cors`: relaxes the browser origin checks on the API.
+/// - `external-doh-server`: a `DoH` endpoint on the controller that does not check
+///   `secret`.
+/// - `external-ui`, `external-ui-url`, `external-ui-name`: serve (and download)
+///   arbitrary web UI content from the controller origin.
+pub const CONTROL_PLANE_KEYS: &[&str] = &[
+    "external-controller-unix",
+    "external-controller-pipe",
+    "external-controller-tls",
+    "external-controller-cors",
+    "external-doh-server",
+    "external-ui",
+    "external-ui-url",
+    "external-ui-name",
+];
+
+/// YAML merge key. `serde_yaml` keeps it as a plain key, but mihomo's YAML
+/// decoder resolves it, so keys hidden inside a top-level merge source still
+/// land at the top level of the effective config.
+const YAML_MERGE_KEY: &str = "<<";
+
+/// The string a mapping key resolves to, looking through explicit YAML tags.
+///
+/// mihomo's YAML decoder resolves `!!str external-controller-unix` (or a
+/// custom-tagged scalar) to the plain key, so a key that `serde_yaml` keeps as
+/// [`serde_yaml::Value::Tagged`] must be matched by its inner string too.
+#[allow(clippy::wildcard_enum_match_arm)]
+pub(crate) fn resolved_key_str(key: &serde_yaml::Value) -> Option<&str> {
+    match key {
+        serde_yaml::Value::String(s) => Some(s.as_str()),
+        serde_yaml::Value::Tagged(tagged) => resolved_key_str(&tagged.value),
+        _ => None,
+    }
+}
+
+/// Remove every entry whose (tag-resolved) key is one of `names`.
+pub(crate) fn remove_keys_resolved(map: &mut serde_yaml::Mapping, names: &[&str]) {
+    map.retain(|k, _| resolved_key_str(k).is_none_or(|s| !names.contains(&s)));
+}
+
+/// Remove [`CONTROL_PLANE_KEYS`] from a top-level mapping, following any
+/// `<<` merge sources (which mihomo flattens into the same mapping).
+fn strip_control_plane_mapping(map: &mut serde_yaml::Mapping, depth: usize) {
+    remove_keys_resolved(map, CONTROL_PLANE_KEYS);
+    for (key, merge_source) in map.iter_mut() {
+        if resolved_key_str(key) == Some(YAML_MERGE_KEY) {
+            strip_control_plane_merge_source(merge_source, depth + 1);
+        }
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn strip_control_plane_merge_source(value: &mut serde_yaml::Value, depth: usize) {
+    if depth > MAX_YAML_DEPTH {
+        *value = serde_yaml::Value::Null;
+        return;
+    }
+    match value {
+        serde_yaml::Value::Mapping(map) => strip_control_plane_mapping(map, depth),
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq.iter_mut() {
+                strip_control_plane_merge_source(item, depth + 1);
+            }
+        }
+        serde_yaml::Value::Tagged(tagged) => {
+            strip_control_plane_merge_source(&mut tagged.value, depth + 1);
+        }
+        _ => {}
+    }
+}
+
+/// Remove keys that open unauthenticated or otherwise unmanaged controller
+/// surfaces (see [`CONTROL_PLANE_KEYS`]) from the root of a mihomo config.
+///
+/// These keys are only meaningful at the top level of a config, so only the
+/// root mapping (and any `<<` merge sources attached to it) is touched.
+/// `external-controller` and `secret` are intentionally left alone: they are
+/// managed by [`crate::config::merge::restore_security_settings`] and the
+/// desktop runtime-config preparation.
+#[allow(clippy::wildcard_enum_match_arm)]
+pub fn remove_control_plane_keys(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(map) => strip_control_plane_mapping(map, 0),
+        serde_yaml::Value::Tagged(tagged) => remove_control_plane_keys(&mut tagged.value),
+        _ => {}
+    }
+}
+
 #[inline]
 const fn decode_hex_digit(byte: u8) -> Option<u8> {
     match byte {
@@ -36,33 +134,33 @@ fn remove_dangerous_keys_internal(
             // Always remove script-related keys globally
             // script: can execute arbitrary JavaScript
             // script-path: can load external script files
-            for key in ["script", "script-path"] {
-                map.remove(serde_yaml::Value::String(key.to_owned()));
-            }
+            remove_keys_resolved(map, &["script", "script-path"]);
 
             // Remove Clash-for-Windows legacy keys that have no effect in mihomo
             // but could be used to inject unexpected behavior
-            for key in [
-                "cfw-bypass",
-                "cfw-bypass-domain",
-                "cfw-profiles-path",
-                "cfw-conn-break-strategy",
-                "prepend-proxy-groups",
-                "append-proxy-groups",
-            ] {
-                map.remove(serde_yaml::Value::String(key.to_owned()));
-            }
+            remove_keys_resolved(
+                map,
+                &[
+                    "cfw-bypass",
+                    "cfw-bypass-domain",
+                    "cfw-profiles-path",
+                    "cfw-conn-break-strategy",
+                    "prepend-proxy-groups",
+                    "append-proxy-groups",
+                ],
+            );
 
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
-            let is_provider = map.contains_key(serde_yaml::Value::String("type".to_owned()))
-                && (map.contains_key(serde_yaml::Value::String("url".to_owned()))
-                    || map.contains_key(serde_yaml::Value::String("path".to_owned())));
+            // (keys are matched through explicit tags such as `!!str path`,
+            // which mihomo resolves to the plain key).
+            let has_key = |name: &str| map.keys().any(|k| resolved_key_str(k) == Some(name));
+            let is_provider = has_key("type") && (has_key("url") || has_key("path"));
 
             // Remove 'path' only in provider context to prevent path traversal
             // while allowing legitimate 'path' fields elsewhere
             if in_provider_context || is_provider {
-                map.remove(serde_yaml::Value::String("path".to_owned()));
+                remove_keys_resolved(map, &["path"]);
             }
 
             // Recursively process all values in the mapping
@@ -88,16 +186,21 @@ pub fn remove_dangerous_keys(value_json: String) -> Result<String, crate::error:
     let mut value: serde_yaml::Value = serde_yaml::from_str(&value_json)
         .map_err(|e| crate::error::AppError::ParseError(format!("Invalid YAML: {e}")))?;
     remove_dangerous_keys_internal(&mut value, false, 0);
+    remove_control_plane_keys(&mut value);
     serde_yaml::to_string(&value)
         .map_err(|e| crate::error::AppError::ParseError(format!("YAML serialization failed: {e}")))
 }
 
 /// Non-FFI version that works directly with `serde_yaml::Value` (for internal use).
+///
+/// `value` is treated as the root of a config document, so top-level
+/// control-plane keys ([`CONTROL_PLANE_KEYS`]) are removed as well.
 pub fn remove_dangerous_keys_internal_pub(
     value: &mut serde_yaml::Value,
     in_provider_context: bool,
 ) {
     remove_dangerous_keys_internal(value, in_provider_context, 0);
+    remove_control_plane_keys(value);
 }
 
 /// Complete URL decoding for path traversal detection
@@ -287,6 +390,52 @@ pub fn validate_path_within_dir(
 mod tests {
     use super::*;
 
+    fn root_keys(value: &serde_yaml::Value) -> Vec<String> {
+        value
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(|k| resolved_key_str(k).map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn test_control_plane_keys_removed_when_explicitly_tagged() {
+        let yaml = "!!str external-controller-unix: /tmp/mihomo.sock\n\
+                    !custom external-doh-server: /dns-query\n\
+                    !!str script: evil.js\n\
+                    port: 7890\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        assert_eq!(root_keys(&value), vec!["port".to_owned()]);
+    }
+
+    #[test]
+    fn test_control_plane_keys_removed_from_tagged_merge_source() {
+        let yaml = "base: &base\n  external-controller-pipe: \\\\.\\pipe\\mihomo\n\
+                    !!merge <<: *base\n\
+                    port: 7890\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_control_plane_keys(&mut value);
+        let (_, merge_source) = value
+            .as_mapping()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| resolved_key_str(k) == Some(YAML_MERGE_KEY))
+            .unwrap();
+        let source = if let serde_yaml::Value::Tagged(t) = merge_source {
+            &t.value
+        } else {
+            merge_source
+        };
+        assert!(!source
+            .as_mapping()
+            .unwrap()
+            .contains_key(serde_yaml::Value::String(
+                "external-controller-pipe".to_owned()
+            )));
+    }
+
     #[test]
     fn test_sanitize_config_file_name_valid() {
         assert_eq!(
@@ -360,5 +509,214 @@ proxy-providers:
             .unwrap();
         assert!(!provider.contains_key(serde_yaml::Value::String("path".to_owned())));
         assert!(provider.contains_key(serde_yaml::Value::String("type".to_owned())));
+    }
+
+    fn top_level_keys(value: &serde_yaml::Value) -> Vec<String> {
+        value
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_owned))
+            .collect()
+    }
+
+    /// Resolve `<<` merge keys the way mihomo's decoder does, including merge
+    /// sources that themselves carry `<<` (`apply_merge` is single-level).
+    fn resolve_merges(value: &mut serde_yaml::Value) {
+        for _ in 0..16 {
+            if value.get(YAML_MERGE_KEY).is_none() {
+                break;
+            }
+            value.apply_merge().unwrap();
+        }
+        assert!(
+            value.get(YAML_MERGE_KEY).is_none(),
+            "merge chain did not converge"
+        );
+    }
+
+    fn assert_control_key_stripped(key: &str, value_yaml: &str) {
+        let yaml = format!(
+            "external-controller: 127.0.0.1:9090\nsecret: s3cret\nmixed-port: 7890\n{key}: {value_yaml}\n"
+        );
+        // Internal (desktop) entry point.
+        let mut value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let keys = top_level_keys(&value);
+        assert!(!keys.iter().any(|k| k == key), "{key} survived: {keys:?}");
+        assert_eq!(
+            value.get("external-controller").unwrap().as_str().unwrap(),
+            "127.0.0.1:9090"
+        );
+        assert_eq!(value.get("secret").unwrap().as_str().unwrap(), "s3cret");
+        assert_eq!(value.get("mixed-port").unwrap().as_i64().unwrap(), 7890);
+
+        // FFI entry point.
+        let out = remove_dangerous_keys(yaml).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let keys = top_level_keys(&value);
+        assert!(
+            !keys.iter().any(|k| k == key),
+            "{key} survived FFI: {keys:?}"
+        );
+        assert_eq!(
+            value.get("external-controller").unwrap().as_str().unwrap(),
+            "127.0.0.1:9090"
+        );
+        assert_eq!(value.get("secret").unwrap().as_str().unwrap(), "s3cret");
+        assert_eq!(value.get("mixed-port").unwrap().as_i64().unwrap(), 7890);
+    }
+
+    #[test]
+    fn test_tagged_provider_path_is_removed() {
+        let yaml = "proxy-providers:\n  p:\n    type: http\n    url: https://example.com/p.yaml\n    !!str path: ../../etc/evil.yaml\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let provider = value
+            .get("proxy-providers")
+            .and_then(|v| v.get("p"))
+            .and_then(serde_yaml::Value::as_mapping)
+            .unwrap();
+        assert!(
+            provider.keys().all(|k| resolved_key_str(k) != Some("path")),
+            "tagged path survived: {provider:?}"
+        );
+        assert!(provider.contains_key("url"));
+    }
+
+    #[test]
+    fn test_tagged_type_marks_provider() {
+        let yaml = "proxy-providers:\n  p:\n    !!str type: file\n    path: ../../etc/evil.yaml\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let provider = value
+            .get("proxy-providers")
+            .and_then(|v| v.get("p"))
+            .and_then(serde_yaml::Value::as_mapping)
+            .unwrap();
+        assert!(
+            !provider.contains_key("path"),
+            "path survived: {provider:?}"
+        );
+    }
+
+    #[test]
+    fn test_strips_external_controller_unix() {
+        assert_control_key_stripped("external-controller-unix", "/tmp/mihomo.sock");
+    }
+
+    #[test]
+    fn test_strips_external_controller_pipe() {
+        assert_control_key_stripped("external-controller-pipe", r"'\\.\pipe\mihomo'");
+    }
+
+    #[test]
+    fn test_strips_external_controller_tls() {
+        assert_control_key_stripped("external-controller-tls", "0.0.0.0:9443");
+    }
+
+    #[test]
+    fn test_strips_external_controller_cors() {
+        assert_control_key_stripped(
+            "external-controller-cors",
+            "{allow-origins: ['*'], allow-private-network: true}",
+        );
+    }
+
+    #[test]
+    fn test_strips_external_doh_server() {
+        assert_control_key_stripped("external-doh-server", "/dns-query");
+    }
+
+    #[test]
+    fn test_strips_external_ui() {
+        assert_control_key_stripped("external-ui", "/tmp/ui");
+    }
+
+    #[test]
+    fn test_strips_external_ui_url() {
+        assert_control_key_stripped("external-ui-url", "https://example.com/ui.zip");
+    }
+
+    #[test]
+    fn test_strips_external_ui_name() {
+        assert_control_key_stripped("external-ui-name", "evil");
+    }
+
+    #[test]
+    fn test_control_plane_key_list_is_covered() {
+        // Guard: every blacklisted key has a dedicated regression test above.
+        assert_eq!(CONTROL_PLANE_KEYS.len(), 8);
+    }
+
+    #[test]
+    fn test_strips_control_plane_keys_from_merge_sources() {
+        let yaml = r"
+base: &base
+  external-controller-unix: /tmp/a.sock
+  external-doh-server: /dns-query
+nested: &nested
+  <<: *base
+  external-ui: /tmp/ui
+<<: [*nested, {external-controller-pipe: '\\.\pipe\x', log-level: info}]
+mixed-port: 7890
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        // Sanity: without sanitizing, resolving the merge exposes the keys.
+        let mut unsanitized = value.clone();
+        resolve_merges(&mut unsanitized);
+        let unsanitized_keys = top_level_keys(&unsanitized);
+        for key in [
+            "external-controller-unix",
+            "external-controller-pipe",
+            "external-doh-server",
+        ] {
+            assert!(
+                unsanitized_keys.iter().any(|k| k == key),
+                "fixture lacks {key}"
+            );
+        }
+
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let out = serde_yaml::to_string(&value).unwrap();
+        // Applying the merge (as mihomo does) must not resurface any control key.
+        let mut merged: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        resolve_merges(&mut merged);
+        let keys = top_level_keys(&merged);
+        for key in CONTROL_PLANE_KEYS {
+            assert!(
+                !keys.iter().any(|k| k == key),
+                "{key} survived merge: {keys:?}"
+            );
+        }
+        assert!(keys.iter().any(|k| k == "log-level"));
+        assert!(keys.iter().any(|k| k == "mixed-port"));
+    }
+
+    #[test]
+    fn test_control_plane_like_keys_below_root_are_untouched() {
+        // Only the root mapping is a mihomo config; nested data is left alone.
+        let yaml = r"
+proxies:
+  - name: p
+    type: ss
+    server: 1.2.3.4
+    port: 8388
+    external-ui: keep-me
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let proxy = value.get("proxies").unwrap().get(0).unwrap();
+        assert_eq!(
+            proxy.get("external-ui").unwrap().as_str().unwrap(),
+            "keep-me"
+        );
+    }
+
+    #[test]
+    fn test_remove_control_plane_keys_ignores_non_mapping_root() {
+        let mut value = serde_yaml::Value::String("external-ui".to_owned());
+        remove_control_plane_keys(&mut value);
+        assert_eq!(value.as_str().unwrap(), "external-ui");
     }
 }
