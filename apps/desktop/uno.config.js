@@ -36,7 +36,7 @@ export default defineConfig({
       indigo:    'var(--zephyr-color-indigo-500)',
     },
     fontSize: {
-      '2xs': ['0.625rem', { lineHeight: '1.4' }],
+      '2xs': ['0.6875rem', { lineHeight: '1.4' }],
     },
   },
 

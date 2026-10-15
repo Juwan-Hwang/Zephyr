@@ -710,7 +710,6 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'dns_rewrite_enabled', // dns-shared.js, settings.js
         'theme_mode',        // settings.js, theme.js
         'app_opacity',       // settings.js, theme.js
-        'node_scroll',       // settings.js, proxies.js
         'hide_timeout_nodes', // settings.js
         'failover_enabled',   // settings.js
         'network_optim_auto_apply', // settings.js
@@ -742,6 +741,9 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
             'last_proxy_selection',
             'primary_group_preference',
             'subscription_user_agent',
+            // Legacy: long node names now always marquee on hover, so the old toggle is gone.
+            // The Rust field stays so existing settings files keep deserializing; its value is ignored.
+            'node_scroll',
         ]);
         const unexpected = unread.filter(f => !knownUnread.has(f));
 

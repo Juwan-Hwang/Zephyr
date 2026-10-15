@@ -84,6 +84,95 @@ const TRANSPORT_MAP = Object.freeze({
     'RELAY': '-'
 });
 
+/** Short, human-friendly protocol labels shown in the card's bottom row.
+ * @type {Record<string, string>}
+ */
+const PROTOCOL_ABBR = Object.freeze({
+    'SHADOWSOCKS': 'SS',
+    'SHADOWSOCKSR': 'SSR',
+    'TROJAN': 'Trojan',
+    'VMESS': 'VMess',
+    'VLESS': 'VLESS',
+    'HYSTERIA': 'Hy',
+    'HYSTERIA2': 'Hy2',
+    'TUIC': 'TUIC',
+    'JUICITY': 'Juicity',
+    'WIREGUARD': 'WG',
+    'SNELL': 'Snell',
+    'ANYTLS': 'AnyTLS',
+    'SOCKS5': 'SOCKS5',
+    'HTTP': 'HTTP',
+    'SSH': 'SSH',
+    'DIRECT': 'Direct',
+    'REJECT': 'Reject',
+});
+
+/** Proxy types that are groups (their card shows the group's current node). */
+const GROUP_TYPES = new Set(['SELECTOR', 'URLTEST', 'FALLBACK', 'LOADBALANCE', 'RELAY', 'SMART']);
+
+/**
+ * Bucket a latency value into a status tier used by the card's status dot.
+ * Thresholds mirror getDelayColorClass(): <200 good, <500 ok, otherwise bad.
+ * @param {number|null|undefined} delay
+ * @returns {'good'|'ok'|'bad'|'none'}
+ */
+export function getDelayTier(delay) {
+    if (delay == null) return 'none';
+    if (isInvalidDelay(delay)) return 'bad';
+    if (delay < 200) return 'good';
+    if (delay < 500) return 'ok';
+    return 'bad';
+}
+
+/**
+ * Update a card's status dot to match its latest latency.
+ * @param {Element|null|undefined} card
+ * @param {number|null|undefined} delay - null means "not tested yet"
+ */
+function setCardDelayTier(card, delay) {
+    const dot = card?.querySelector('.delay-dot');
+    if (dot instanceof HTMLElement) dot.dataset.tier = getDelayTier(delay);
+}
+
+/**
+ * Resolve the node a group currently routes to (following nested groups) and its latest delay.
+ * @param {any} data - proxies payload
+ * @param {string} groupName
+ * @returns {{ node: string|null, delay: number|null }}
+ */
+function resolveGroupNow(data, groupName) {
+    let name = data?.proxies?.[groupName]?.now || null;
+    const seen = new Set([groupName]);
+    while (name && !seen.has(name)) {
+        seen.add(name);
+        const p = data?.proxies?.[name];
+        if (!p || !GROUP_TYPES.has(String(p.type || '').toUpperCase()) || !p.now) break;
+        name = p.now;
+    }
+    const leaf = name ? data?.proxies?.[name] : null;
+    const hist = leaf?.history;
+    const delay = (hist && hist.length > 0) ? hist[hist.length - 1].delay : null;
+    return { node: name, delay };
+}
+
+/** Lazily measured hover marquee for long node names (always on; reduced motion keeps the ellipsis). */
+/** @param {HTMLElement} card */
+function startNameMarquee(card) {
+    const box = card.querySelector('.node-name');
+    const text = box?.firstElementChild;
+    if (!(box instanceof HTMLElement) || !(text instanceof HTMLElement)) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const overflow = text.scrollWidth - text.clientWidth;
+    if (overflow <= 1) return;
+    box.style.setProperty('--marquee-shift', `${overflow + 12}px`);
+    box.style.setProperty('--marquee-duration', `${Math.max(2.4, (overflow + 12) / 28).toFixed(2)}s`);
+    box.classList.add('is-marquee');
+}
+/** @param {HTMLElement} card */
+function stopNameMarquee(card) {
+    card.querySelector('.node-name')?.classList.remove('is-marquee');
+}
+
 // --- State ---
 
 /** @type {number|null} */
@@ -371,10 +460,17 @@ function showLatencyLoadingForAllCards() {
 
 // --- Active Node Styling ---
 
-const ACTIVE_CARD_CLASSES = [
-    'bg-white/15', 'border-accent/40', 'shadow-accent/20', 'ring-1', 'ring-accent/30',
-];
+const ACTIVE_CARD_CLASSES = ['proxy-card--selected'];
 const INACTIVE_HOVER_CLASS = 'hover:bg-[var(--zephyr-bg-muted)]';
+
+/** Small accent check badge marking the selected card (decorative; selection is exposed via aria-selected). */
+function createActiveCheck() {
+    const badge = document.createElement('span');
+    badge.className = 'active-dot proxy-check';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>'; // nosemgrep: js-innerhtml-assignment — static markup
+    return badge;
+}
 
 /** @type {HTMLElement|null} Cached reference to the currently active card */
 let _activeCard = null;
@@ -409,9 +505,7 @@ function setActiveNode(card, _container) {
     card.classList.remove(INACTIVE_HOVER_CLASS);
 
     if (!card.querySelector('.active-dot')) {
-        const activeDot = document.createElement('div');
-        activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
-        card.appendChild(activeDot);
+        card.appendChild(createActiveCheck());
     }
 
     // Update new wrapper
@@ -651,6 +745,7 @@ export function initProxyControls() {
                         if (delay > 0) {
                             updatedLatVal.textContent = `${delay}ms`;
                             updatedLatVal.className = `text-xs tabular-nums font-semibold ${getDelayColorClass(delay)}`;
+                            setCardDelayTier(card, delay);
                             if (card) {
                                 (/** @type {HTMLElement} */ (card)).dataset.latency = String(delay);
                                 setProxyPendingState(/** @type {HTMLElement} */ (card), false);
@@ -658,6 +753,7 @@ export function initProxyControls() {
                         } else {
                             updatedLatVal.textContent = /** @type {any} */ (translations)[currentLang].timeout || 'Timeout';
                             updatedLatVal.className = 'text-xs tabular-nums font-semibold text-[var(--text-tertiary)]';
+                            setCardDelayTier(card, DELAY_INFINITE);
                             if (card) {
                                 (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
                                 setProxyPendingState(/** @type {HTMLElement} */ (card), false);
@@ -1594,20 +1690,26 @@ async function updateProxiesInPlace(container, proxies, data, current) {
             (/** @type {HTMLElement} */ (card)).dataset.baseOrder = `${index}`;
             (/** @type {HTMLElement} */ (card)).dataset.selected = isSelected ? '1' : '0';
 
-            const delayColor = getDelayColorClass(lastDelay);
+            let shownDelay = lastDelay;
+            if (GROUP_TYPES.has(String(proxy?.type || '').toUpperCase())) {
+                const groupNow = resolveGroupNow(data, name);
+                if (shownDelay === null) shownDelay = groupNow.delay;
+                const meta = card.querySelector('[data-group-now]');
+                if (meta && groupNow.node) meta.textContent = `→ ${groupNow.node}`;
+            }
+            const delayColor = getDelayColorClass(shownDelay);
             const latVal = card.querySelector('[id^="latency-"]');
             if (latVal && wrapper.dataset.pending !== '1') {
                 latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
-                latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
+                latVal.textContent = !isInvalidDelay(shownDelay) ? `${shownDelay}ms` : (shownDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
+                setCardDelayTier(card, shownDelay);
             }
 
             if (isSelected) {
                 ACTIVE_CARD_CLASSES.forEach(cls => card.classList.add(cls));
                 card.classList.remove(INACTIVE_HOVER_CLASS);
                 if (!card.querySelector('.active-dot')) {
-                    const activeDot = document.createElement('div');
-                    activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
-                    card.appendChild(activeDot);
+                    card.appendChild(createActiveCheck());
                 }
             } else {
                 ACTIVE_CARD_CLASSES.forEach(cls => card.classList.remove(cls));
@@ -1648,7 +1750,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
     const fragment = document.createDocumentFragment();
 
     const createCard = (/** @type {HTMLElement} */ wrapper) => {
-        const { proxies: virtProxies, data: virtData, current: virtCurrent, isTestingLatency: _isTestingLatency, mainGroup: _virtMainGroup, nodeScroll: isScrollingEnabled } = /** @type {any} */ (_virtState.get(container));
+        const { proxies: virtProxies, data: virtData, current: virtCurrent, isTestingLatency: _isTestingLatency, mainGroup: _virtMainGroup } = /** @type {any} */ (_virtState.get(container));
         const index = parseInt((/** @type {HTMLElement} */ (wrapper)).dataset.index || '0', 10);
         const name = virtProxies[index];
         const proxy = (/** @type {any} */ (virtData)).proxies[name];
@@ -1660,7 +1762,6 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             return placeholder;
         }
         const isSelected = name === virtCurrent;
-        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
         let latFromWrapper = null;
         const _latency = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
@@ -1672,8 +1773,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         card.dataset.baseOrder = `${index}`;
         card.dataset.selected = isSelected ? '1' : '0';
         // Use h-full to maintain 96px height, use absolute positioning for badge
-        card.className = `p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-standard)] group h-full w-full
-            ${isSelected ? 'bg-white/15 border-accent/40 shadow-accent/20 ring-1 ring-accent/30' : 'hover:bg-[var(--zephyr-bg-muted)]'}`;
+        card.className = `proxy-card p-4 glass-card movie-card-base cursor-pointer flex flex-col gap-3 relative group h-full w-full
+            ${isSelected ? 'proxy-card--selected' : INACTIVE_HOVER_CLASS}`;
 
         let lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         // Only use latFromWrapper if proxy has no history AND latFromWrapper is valid (not DELAY_INFINITE)
@@ -1681,64 +1782,58 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             lastDelay = latFromWrapper;
         }
 
+        const upperType = String(proxy.type || '').toUpperCase();
+        const isGroup = GROUP_TYPES.has(upperType);
+        // Group cards show where the group routes to right now; use that node's delay when the group has none of its own.
+        const groupNow = isGroup ? resolveGroupNow(virtData, name) : null;
+        if (isGroup && lastDelay === null && groupNow && groupNow.delay !== null) {
+            lastDelay = groupNow.delay;
+        }
+
         const delayColor = getDelayColorClass(lastDelay);
 
         (/** @type {HTMLElement} */ (card)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
         (/** @type {HTMLElement} */ (card)).dataset.estimate = (/** @type {HTMLElement} */ (card)).dataset.latency;
 
-        // --- Top row: name + type badge ---
+        // --- Top row: the node name owns the whole row ---
         const top = document.createElement('div');
-        top.className = 'flex items-center justify-between pointer-events-none w-full gap-2';
+        top.className = 'flex items-center pointer-events-none w-full min-w-0 pe-5';
 
         const nameContainer = document.createElement('div');
-        const isScrolling = isScrollingEnabled && name.length > 12;
-        nameContainer.className = `flex-1 text-sm font-semibold text-[var(--text-primary)] tracking-tight transition-colors duration-[var(--zephyr-time-standard)] ${isScrolling ? 'scrolling-text-container pointer-events-auto' : 'overflow-hidden'}`;
-        if (isScrolling && prefersReducedMotion) {
-            nameContainer.setAttribute('tabindex', '0');
-            nameContainer.setAttribute('role', 'region');
-            nameContainer.setAttribute('aria-label', name);
-        }
-
+        nameContainer.className = 'node-name flex-1 min-w-0 text-sm font-semibold text-[var(--text-primary)] tracking-tight';
         const nameSpan = document.createElement('span');
-        if (isScrollingEnabled && name.length > 12) {
-            nameSpan.classList.add('scrolling-text');
-        } else {
-            nameSpan.classList.add('truncate', 'block');
-        }
+        nameSpan.className = 'node-name-text';
         nameSpan.textContent = name;
+        nameContainer.title = name;
         nameContainer.appendChild(nameSpan);
-
-        const typeSpan = document.createElement('span');
-        typeSpan.className = 'type-badge';
-        typeSpan.textContent = proxy.type;
-
         top.appendChild(nameContainer);
-        top.appendChild(typeSpan);
 
-        // --- Bottom row: Transport protocol indicator + latency ---
-        const transport = TRANSPORT_MAP[(proxy.type || '').toUpperCase()] || 'TCP';
-
+        // --- Bottom row: status dot + protocol (or group target) + latency ---
         const bottom = document.createElement('div');
-        bottom.className = 'flex items-end justify-between mt-auto pointer-events-none';
+        bottom.className = 'flex items-end justify-between gap-2 mt-auto pointer-events-none min-w-0';
         const left = document.createElement('div');
-        left.className = 'flex items-center gap-2';
-        const dot = document.createElement('div');
-        // All indicators use green color as requested
-        const dotColor = 'bg-green-500';
-        dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
-dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40%, transparent)";
-        const transportText = document.createElement('span');
-        transportText.className = 'text-2xs text-[var(--text-muted)] font-medium';
-        transportText.textContent = transport;
+        left.className = 'flex items-center gap-2 min-w-0';
+        const dot = document.createElement('span');
+        dot.className = 'delay-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        dot.dataset.tier = isPending ? 'none' : getDelayTier(lastDelay);
+        const metaText = document.createElement('span');
+        metaText.className = 'proxy-meta text-2xs text-[var(--text-muted)] font-medium truncate';
+        if (isGroup) {
+            metaText.textContent = groupNow?.node ? `→ ${groupNow.node}` : (PROTOCOL_ABBR[upperType] || proxy.type || '');
+            metaText.dataset.groupNow = '1';
+        } else {
+            const abbr = PROTOCOL_ABBR[upperType] || proxy.type || '';
+            const transport = TRANSPORT_MAP[upperType] || 'TCP';
+            const showUdp = proxy.udp && transport !== '-';
+            metaText.textContent = showUdp ? `${abbr} · UDP` : abbr;
+        }
+        metaText.title = proxy.type || '';
         left.appendChild(dot);
-        left.appendChild(transportText);
+        left.appendChild(metaText);
 
         const right = document.createElement('div');
-        right.className = 'flex flex-col items-end';
-        const latLabel = document.createElement('span');
-        latLabel.className = 'text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider mb-0.5';
-        latLabel.setAttribute('data-latency-label', 'true');
-        latLabel.textContent = /** @type {any} */ (translations)[currentLang].latency || 'Latency';
+        right.className = 'flex items-end shrink-0';
 
         const latVal = document.createElement('span');
         latVal.id = `latency-${CSS.escape(name)}`;
@@ -1751,16 +1846,16 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
             latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
         }
-        right.appendChild(latLabel);
         right.appendChild(latVal);
 
         bottom.appendChild(left);
         bottom.appendChild(right);
 
+        card.addEventListener('pointerenter', () => startNameMarquee(card));
+        card.addEventListener('pointerleave', () => stopNameMarquee(card));
+
         if (isSelected) {
-            const activeDot = document.createElement('div');
-            activeDot.className = 'active-dot absolute top-2 end-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-[var(--zephyr-bg-elevated)] shadow-lg animate-pulse';
-            card.appendChild(activeDot);
+            card.appendChild(createActiveCheck());
         }
 
         card.appendChild(top);
@@ -1860,6 +1955,8 @@ dot.style.boxShadow = "0 0 8px color-mix(in srgb, var(--zephyr-color-success) 40
         const card = createCard(wrapper);
         setProxyPendingState(card, appStore.get('isTestingLatency'));
         wrapper.appendChild(card);
+        wrapper.addEventListener('focus', () => startNameMarquee(card));
+        wrapper.addEventListener('blur', () => stopNameMarquee(card));
         setup3DEffect(card);
 
         fragment.appendChild(wrapper);
@@ -2093,7 +2190,7 @@ export async function renderProxies() {
     }
 
     // Store virtual data for lazy card creation
-    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup: uiGroupName, nodeScroll: !!settings?.node_scroll });
+    _virtState.set(container, { proxies, data, current, isTestingLatency: appStore.get('isTestingLatency'), mainGroup: uiGroupName });
 
     // --- In-place update path ---
     if (await updateProxiesInPlace(container, proxies, data, current)) {

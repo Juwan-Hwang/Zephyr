@@ -41,6 +41,7 @@
   --radius-button: var(--zephyr-button-radius);
   --radius-input: var(--zephyr-input-radius);
   --radius-card: var(--zephyr-card-radius);
+  --radius-card-compact: 16px;
   --radius-panel: var(--zephyr-panel-radius);
   --radius-modal: var(--zephyr-modal-radius);
   --radius-nav: var(--zephyr-radius-md);
@@ -78,8 +79,27 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 
 /* ── Custom Utilities (原 @utility → 普通 CSS 类) ── */
 .text-2xs {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   line-height: 1.4;
+}
+
+/* ── CJK typography floor ──
+   Latin-only micro labels (units, protocol abbreviations) may stay at 11px, but anything
+   that can render Chinese/Japanese/Korean is lifted to at least 12px, and the
+   English-style uppercase tracking is dropped because it only spreads Han glyphs apart. */
+:lang(zh) .text-2xs, :lang(ja) .text-2xs, :lang(ko) .text-2xs,
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  font-size: 0.75rem;
+}
+:lang(zh) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ja) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ko) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  letter-spacing: normal;
 }
 
 /* ── Button System ── */
@@ -194,11 +214,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 
 /* 极简滚动动画 */
-@keyframes text-scroll {
-    0% { transform: translateX(0); }
-    15% { transform: translateX(0); }
-    85% { transform: translateX(calc(var(--rtl-sign, 1) * (-100% + 120px))); }
-    100% { transform: translateX(calc(var(--rtl-sign, 1) * (-100% + 120px))); }
+@keyframes node-marquee {
+    0%, 12% { transform: translateX(0); }
+    88%, 100% { transform: translateX(calc(var(--rtl-sign, 1) * -1 * var(--marquee-shift, 0px))); }
 }
 
 button,
@@ -209,10 +227,25 @@ input[type="range"],
     cursor: pointer !important;
 }
 
-.scrolling-text-container {
+/* Proxy card node name: ellipsis at rest, measured marquee on hover/focus (always on). */
+.node-name {
     overflow: hidden;
-    mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 80%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 80%, transparent 100%);
+}
+.node-name-text {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.node-name.is-marquee {
+    mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+}
+.node-name.is-marquee .node-name-text {
+    overflow: visible;
+    text-overflow: clip;
+    width: max-content;
+    animation: node-marquee var(--marquee-duration, 4s) linear infinite alternate;
 }
 
 /* Hide scrollbar on node wheel dropdown */
@@ -223,15 +256,6 @@ input[type="range"],
     -ms-overflow-style: none;
 }
 
-.scrolling-text {
-    display: inline-block;
-    white-space: nowrap;
-    padding-inline-end: 20px;
-}
-
-.group:hover .scrolling-text {
-    animation: text-scroll 4s linear infinite alternate;
-}
 
 :root {
   color-scheme: light dark;
@@ -676,6 +700,55 @@ html:not(.dark) #setting-lang-menu {
   border: 1px solid var(--zephyr-border-subtle);
   text-transform: uppercase;
   flex-shrink: 0;
+}
+
+/* --- Proxy node cards (dense 96px cards: compact radius, selection, delay tier) --- */
+.proxy-card.glass-card {
+  border-radius: var(--radius-card-compact, 16px);
+}
+html .proxy-card.proxy-card--selected.glass-card,
+html .proxy-card.proxy-card--selected.glass-card:hover {
+  border-color: var(--accent-primary);
+  /* 1px border + 0.5px inset ring = 1.5px accent stroke without shifting layout */
+  box-shadow: inset 0 0 0 0.5px var(--accent-primary), var(--zephyr-shadow-sm);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.proxy-check {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 10px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-primary);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  pointer-events: none;
+}
+.proxy-check svg {
+  width: 10px;
+  height: 10px;
+}
+.delay-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--zephyr-text-muted) 55%, transparent);
+}
+.delay-dot[data-tier="good"] {
+  background: var(--zephyr-color-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-success) 45%, transparent);
+}
+.delay-dot[data-tier="ok"] {
+  background: var(--zephyr-color-warning);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-warning) 45%, transparent);
+}
+.delay-dot[data-tier="bad"] {
+  background: var(--zephyr-color-danger);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-danger) 40%, transparent);
 }
 
 /* --- Score Badge (Smart Proxy) --- */
@@ -1242,13 +1315,9 @@ button:focus-visible:not(:disabled, [disabled]),
   .nav-btn .icon,
   .p-draw, .p-shaft, .p-prompt, .p-check, .p-head, .p-fold, .p-book, .p-cursor,
   .c-node, .gear,
-  .scrolling-text,
+  .node-name-text,
   #connections-empty svg {
     animation: none !important;
-  }
-  /* Allow manual scrolling when scroll animation is disabled (WCAG 2.2.2) */
-  .scrolling-text-container {
-    overflow-x: auto !important;
   }
 }
 
@@ -1543,16 +1612,18 @@ html.dark #fullscreen-editor-output {
 
 /* ── KPI indicator strip ── */
 .dz-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; flex-shrink: 0; min-width: 0; }
-.dz-kpi { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; transition: transform .21s ease-out; }
-.dz-kpi:hover { transform: translateY(-2px); }
+.dz-kpi { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; min-width: 0; }
 .dz-kpi-top { display: flex; align-items: center; justify-content: space-between; }
-.dz-kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
+.dz-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
 .dz-kpi-icon { width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .dz-kpi-icon svg { width: 12px; height: 12px; }
 .dz-kpi-value { display: flex; align-items: baseline; gap: 4px; }
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
-.dz-kpi-value span { font-size: 10px; font-weight: 600; color: var(--zephyr-text-muted); }
-.dz-kpi-foot { font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dz-kpi-value span { font-size: 11px; font-weight: 600; color: var(--zephyr-text-muted); }
+.dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Keep footer text clear of the sparkline drawn in the bottom corner */
+.dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
+.dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
@@ -1563,14 +1634,14 @@ html.dark #fullscreen-editor-output {
 .dz-card-title { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); }
 .dz-card-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: dz-pulse 2s ease-in-out infinite; }
 .dz-legend { display: flex; align-items: center; gap: 14px; }
-.dz-legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--zephyr-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.dz-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--zephyr-text-muted); text-transform: uppercase; letter-spacing: .05em; }
 .dz-legend-swatch { width: 8px; height: 8px; border-radius: 3px; }
 .dz-chart-wrap { height: 216px; position: relative; overflow: hidden; }
 .dz-chart-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .dz-chart-meta { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--zephyr-border-subtle); overflow: hidden; }
 .dz-chart-meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dz-chart-meta span, .dz-chart-meta b { white-space: nowrap; }
-.dz-chart-meta span { font-size: 10px; color: var(--zephyr-text-tertiary); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.dz-chart-meta span { font-size: 11px; color: var(--zephyr-text-tertiary); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
 .dz-chart-meta b { font-size: 13px; font-weight: 600; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; }
 
 /* Sidebar card stack */
@@ -1589,7 +1660,7 @@ html.dark #fullscreen-editor-output {
 .dz-node-wrap { position: relative; }
 .dz-node-sub span { cursor: copy; transition: color .21s ease-out; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dz-node-sub span:hover { color: var(--color-accent); }
-.dz-switch-node-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--zephyr-radius-full); border: 1px solid var(--zephyr-border-subtle); background: var(--zephyr-bg-muted); color: var(--zephyr-text-secondary); font-size: 10px; font-weight: 600; cursor: pointer; transition: all .21s ease-out; white-space: nowrap; }
+.dz-switch-node-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--zephyr-radius-full); border: 1px solid var(--zephyr-border-subtle); background: var(--zephyr-bg-muted); color: var(--zephyr-text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; transition: all .21s ease-out; white-space: nowrap; }
 .dz-switch-node-btn:hover, .dz-switch-node-btn.open { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
 .dz-switch-node-btn svg { width: 10px; height: 10px; transition: transform .21s ease-out; }
 .dz-switch-node-btn.open svg { transform: rotate(180deg); }
@@ -1607,13 +1678,13 @@ html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
 .dz-picker-node.active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
 .dz-picker-node-main { flex: 1; min-width: 0; }
 .dz-picker-node-name { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dz-picker-node-meta { font-size: 10px; color: var(--zephyr-text-tertiary); font-family: var(--font-mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-picker-node-meta { font-size: 11px; color: var(--zephyr-text-tertiary); font-family: var(--font-mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dz-picker-check { width: 14px; height: 14px; color: var(--color-accent); flex-shrink: 0; visibility: hidden; }
 .dz-picker-node.active .dz-picker-check { visibility: visible; }
 .dz-picker-sub-count { opacity: .55; font-weight: 500; margin-inline-start: 2px; }
 
 /* Connection sort button */
-.dz-sort-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 600; background: none; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: all .21s ease-out; white-space: nowrap; }
+.dz-sort-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 600; background: none; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: all .21s ease-out; white-space: nowrap; }
 .dz-sort-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
 .dz-sort-btn svg { width: 10px; height: 10px; }
 
@@ -1646,7 +1717,7 @@ html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
 .dz-mode-slider { position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc((100% - 8px)/3); border-radius: var(--radius-lg); box-shadow: var(--zephyr-shadow-sm); border: 1px solid var(--zephyr-border-default); transition: transform .3s cubic-bezier(0.16,1,0.3,1); }
 html.dark .dz-mode-slider { background: rgba(255,255,255,.09); }
 html:not(.dark) .dz-mode-slider { background: #fff; }
-.dz-mode-seg button { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color .21s; white-space: nowrap; overflow: hidden; }
+.dz-mode-seg button { position: relative; z-index: 1; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color .21s; white-space: nowrap; overflow: hidden; }
 .dz-mode-seg button.active { color: var(--color-accent); }
 
 /* ── Bottom three-column grid ── */
@@ -1657,12 +1728,12 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 .dz-conn-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; margin: 0 -6px; padding: 0 6px; }
 .dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background .15s; min-width: 0; }
 .dz-conn-row:hover { background: var(--zephyr-bg-subtle); }
-.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
+.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
 .dz-conn-info { flex: 1; min-width: 0; }
 .dz-conn-host { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dz-conn-chain { font-size: 10px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
+.dz-conn-chain { font-size: 11px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
 .dz-conn-speed { font-size: 11px; font-weight: 700; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; text-align: end; flex-shrink: 0; }
-.dz-conn-speed small { display: block; font-size: 9px; color: var(--zephyr-text-tertiary); font-weight: 500; }
+.dz-conn-speed small { display: block; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; }
 
 /* Subscription traffic */
 .dz-sub-used { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
@@ -1687,7 +1758,7 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 .dz-log-line { display: flex; align-items: baseline; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--zephyr-border-subtle); font-size: 10.5px; line-height: 1.5; min-width: max-content; }
 .dz-log-line:last-child { border-bottom: none; }
 .dz-log-time { color: var(--zephyr-text-tertiary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.dz-log-level { flex-shrink: 0; font-weight: 800; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; }
+.dz-log-level { flex-shrink: 0; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; }
 .dz-log-level.info { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 12%, transparent); }
 .dz-log-level.warn { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 12%, transparent); }
 .dz-log-level.error { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent); }
@@ -1737,9 +1808,20 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
     text-align: left;
 }
 
+/* CJK floor for console labels that can carry Chinese/Japanese/Korean text */
+:lang(zh) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ja) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ko) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span) {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+
 /* Responsive - switch to single-column on narrow viewports */
 @media (max-width: 1080px) {
-    .dz-kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    /* 2 + 3: download/upload are the primary metrics (3 of 6 columns each), the rest share the second row */
+    .dz-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .dz-kpi:nth-child(-n + 2) { grid-column: span 3; }
+    .dz-kpi:nth-child(n + 3) { grid-column: span 2; }
     .dz-grid-main, .dz-grid-bottom { grid-template-columns: minmax(0, 1fr); }
     /* Single-column: let sections take natural height, cap inner lists */
     .dz-grid-main { flex-shrink: 1; }

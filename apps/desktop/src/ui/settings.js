@@ -941,7 +941,6 @@ export async function initSettings() {
     /** @type {NodeListOf<HTMLElement>} */
     const themeCircles = document.querySelectorAll('[data-theme]');
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
-    const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
     const failoverToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-failover'));
     const encryptConfigsToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-encrypt-configs'));
@@ -1114,7 +1113,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
-    if (nodeScrollToggle) nodeScrollToggle.checked = !!settings.node_scroll;
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
     if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
     if (encryptConfigsToggle) encryptConfigsToggle.checked = settings.encrypt_configs || false;
@@ -1239,11 +1237,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         hideTimeoutToggle.dispatchEvent(new Event('change'));
                     }
                 }
-                if (nodeScrollToggle) {
-                    nodeScrollToggle.checked = false;
-                    settings.node_scroll = false;
-                    successItems.push('nodeScroll');
-                }
                 if (failoverToggle) {
                     failoverToggle.checked = false;
                     settings.failover_enabled = false;
@@ -1362,7 +1355,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     }
                 }
 
-                // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
+                // Re-render proxy list after settings are persisted
                 const proxyContainer = document.getElementById('proxies-list');
                 if (proxyContainer) proxyContainer.replaceChildren();
                 Bus.emit(Events.CONFIG_UPDATED);
@@ -1913,16 +1906,6 @@ appStore.set('isNetworkUpdating', false);
     // Theme circles are handled by initThemeSettings above
 
     // ---- Node scroll toggle ----
-    nodeScrollToggle?.addEventListener('change', () => {
-        if (!nodeScrollToggle) return;
-        saveSetting('node_scroll', nodeScrollToggle.checked).catch((e) =>
-            settingsLogger.warn("Failed to persist nodeScroll change", e)
-        );
-        // Clear the container to force full re-render (in-place update won't update CSS classes)
-        const container = document.getElementById('proxies-list');
-        if (container) container.replaceChildren();
-        Bus.emit(Events.CONFIG_UPDATED);
-    });
 
     // ---- Core version ----
     let currentCoreVersion = "";
