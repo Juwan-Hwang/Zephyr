@@ -215,6 +215,7 @@ export function destroyLogsPage() {
 
 function resetState() {
     stopPolling();
+    _fetchGen++;
     _offset = 0;
     _allLines = [];
     _filteredIndices = [];
@@ -485,9 +486,22 @@ function onScroll() {
 
 // ── Data Fetching ──────────────────────────────────────────────────────────
 
+/** Bumped by resetState(); results of reads started before a reset are dropped. */
+let _fetchGen = 0;
+/** Generation of the read currently in flight, or -1 when idle. */
+let _inFlightGen = -1;
+
 async function fetchLogs() {
+    // setInterval keeps firing while a slow read is pending; skip the tick
+    // instead of stacking concurrent reads that would append out of order.
+    const gen = _fetchGen;
+    if (_inFlightGen === gen) return;
+    _inFlightGen = gen;
     try {
         const result = await readCoreLog(_offset, 500);
+        // The page was reset while this read was pending: its offset and
+        // lines belong to the old state.
+        if (gen !== _fetchGen) return;
         if (!result || result.lines.length === 0) return;
 
         // Detect log rotation via backend signal or offset regression
@@ -520,6 +534,8 @@ async function fetchLogs() {
         }
     } catch {
         // Core not started yet or log file unavailable — ignore silently
+    } finally {
+        if (_inFlightGen === gen) _inFlightGen = -1;
     }
 }
 
