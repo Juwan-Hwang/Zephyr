@@ -13,6 +13,7 @@ import { saveSetting } from './settings-helpers.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery } from './lifecycle.js';
+import { renderTunStatus } from './tun-status.js';
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -51,6 +52,9 @@ export function initTunToggle() {
         if (spinner) spinner.classList.remove('hidden');
         if (statusText) {
             statusText.textContent = t.configuringTun;
+            // Keep the i18n key in step so a language switch mid-toggle
+            // re-translates "configuring" instead of the previous state.
+            statusText.dataset.i18n = 'configuringTun';
             statusText.classList.add('text-accent');
         }
 
@@ -76,10 +80,7 @@ export function initTunToggle() {
                             showNotification(t.tunAuthFailed || 'Authorization failed', 'error');
                         }
                         toggle.checked = false;
-                        if (statusText) {
-                            statusText.textContent = t.virtualAdapter;
-                            statusText.classList.remove('text-accent');
-                        }
+                        renderTunStatus(statusText, false);
                         return;
                     }
                 } else {
@@ -119,17 +120,11 @@ export function initTunToggle() {
 
             showNotification(t.configSuccess, 'success');
 
-            if (statusText) {
-                statusText.textContent = enable ? t.proxyActive : t.virtualAdapter;
-                if (!enable) statusText.classList.remove('text-accent');
-            }
+            renderTunStatus(statusText, enable);
         } catch (_err) {
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
-            if (statusText) {
-                statusText.textContent = t.virtualAdapter;
-                statusText.classList.remove('text-accent');
-            }
+            renderTunStatus(statusText, !enable);
 
             const isLinux = navigator.userAgent.toLowerCase().includes('linux');
             if (isLinux && enable) {
@@ -169,10 +164,7 @@ export function initTunToggle() {
 
                             appStore.set('isTunEnabled', true);
                             toggle.checked = true;
-                            if (statusText) {
-                                statusText.textContent = t.proxyActive;
-                                statusText.classList.add('text-accent');
-                            }
+                            renderTunStatus(statusText, true);
                             showNotification(t.configSuccess, 'success');
                             return;
                         } catch (retryErr) {
