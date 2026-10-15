@@ -169,6 +169,17 @@ function resolveGroupNow(data, groupName) {
     return { node: name, delay };
 }
 
+/**
+ * The delay a card is sorted by: its own last delay, or — for a group with no
+ * delay of its own — the delay of the node it routes to (the one its card shows).
+ * @param {any} data @param {string} name @param {any} proxy @param {number|null} lastDelay
+ * @returns {number|null}
+ */
+function groupSortDelay(data, name, proxy, lastDelay) {
+    if (lastDelay !== null || !GROUP_TYPES.has(String(proxy?.type || '').toUpperCase())) return lastDelay;
+    return resolveGroupNow(data, name).delay;
+}
+
 /** Lazily measured hover marquee for long node names (always on; reduced motion keeps the ellipsis). */
 /** @param {HTMLElement} card */
 function startNameMarquee(card) {
@@ -1695,7 +1706,8 @@ async function updateProxiesInPlace(container, proxies, data, current) {
         (/** @type {HTMLElement} */ (wrapper)).setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         if ((/** @type {HTMLElement} */ (wrapper)).dataset.pending !== '1') {
-            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
+            const sortDelay = groupSortDelay(data, name, proxy, lastDelay);
+            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(sortDelay) ? DELAY_INFINITE : sortDelay);
             (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
         }
 
@@ -1709,7 +1721,10 @@ async function updateProxiesInPlace(container, proxies, data, current) {
                 const groupNow = resolveGroupNow(data, name);
                 if (shownDelay === null) shownDelay = groupNow.delay;
                 const meta = card.querySelector('[data-group-now]');
-                if (meta && groupNow.node) meta.textContent = `→ ${groupNow.node}`;
+                if (meta) {
+                    const type = String(proxy?.type || '').toUpperCase();
+                    meta.textContent = groupNow.node ? `→ ${groupNow.node}` : (PROTOCOL_ABBR[type] || proxy?.type || '');
+                }
             }
             const delayColor = getDelayColorClass(shownDelay);
             const latVal = card.querySelector('[id^="latency-"]');
@@ -1961,7 +1976,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         wrapper.setAttribute('role', 'option');
         wrapper.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy?.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
-        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
+        const sortDelay = groupSortDelay(data, name, proxy, lastDelay);
+        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(sortDelay) ? DELAY_INFINITE : sortDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
         wrapper.style.height = 'auto';

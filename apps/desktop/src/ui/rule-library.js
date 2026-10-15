@@ -289,7 +289,7 @@ function renderRuleSets(container) {
                 </svg>
                 <p class="text-[var(--text-muted)] text-sm">${escapeHtml(t.ruleLibraryEmpty || 'No extension rules yet')}</p>
                 <p class="text-[var(--text-secondary)] text-xs max-w-sm text-center">${escapeHtml(t.ruleLibraryEmptyHint || '')}</p>
-                <div class="flex items-center gap-2 mt-2">
+                <div class="flex flex-wrap items-center justify-center gap-2 mt-2">
                     <button type="button" id="rl-btn-extract" class="btn-ghost">
                         ${escapeHtml(t.ruleLibraryExtract || 'Extract from Subscription')}
                     </button>

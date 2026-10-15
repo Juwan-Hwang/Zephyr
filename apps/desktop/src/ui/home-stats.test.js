@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../api.js', () => ({ getConnections: vi.fn() }));
+vi.mock('../api.js', () => ({ getConnections: vi.fn(), getProxiesMerged: vi.fn() }));
 vi.mock('./cache.js', () => ({ getProxiesCached: vi.fn() }));
 
 const { splitBytes, resolveLeaf } = await import('./home-stats.js');

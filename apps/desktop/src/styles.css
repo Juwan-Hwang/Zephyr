@@ -2268,6 +2268,9 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
   box-shadow: var(--zephyr-shadow-sm);
 }
 html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+/* Full-width tabs inside dialogs get a roomier 40px track */
+.seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
+.seg-tabs-lg .seg-tab { font-size: 13px; }
 
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */

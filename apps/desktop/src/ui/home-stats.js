@@ -6,7 +6,7 @@
  * the window is visible.
  */
 
-import { getConnections } from '../api.js';
+import { getConnections, getProxiesMerged } from '../api.js';
 import { getProxiesCached } from './cache.js';
 import { formatBytes, getDelayColorClass } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
@@ -81,17 +81,23 @@ async function tick() {
         logger.debug('connections poll failed', e);
     }
     try {
-        const nodeName = (document.getElementById('current-node-name')?.textContent || '').trim();
-        const res = /** @type {any} */ (await getProxiesCached());
+        // The pill shows a display label ("Auto - HK"); the real proxy-map key
+        // of the selected group lives in data-group.
+        const nodeEl = document.getElementById('current-node-name');
+        const nodeName = (nodeEl?.dataset.group || nodeEl?.textContent || '').trim();
+        const raw = /** @type {any} */ (await getProxiesCached());
+        // Provider-downloaded nodes are missing from the raw /proxies map.
+        const res = /** @type {any} */ (raw?.proxies ? await getProxiesMerged(raw) : raw);
         const proxies = res?.proxies || res || {};
         const leaf = nodeName ? resolveLeaf(proxies, nodeName) : null;
         const hist = Array.isArray(leaf?.history) ? leaf.history : [];
-        const delay = hist.length ? Number(hist[hist.length - 1]?.delay) || 0 : 0;
+        const delay = hist.length ? Number(hist.at(-1)?.delay) || 0 : 0;
+        const valid = delay > 0 && delay < 999999; // 999999+ means timeout
         const latEl = document.getElementById('home-stat-lat');
         if (latEl) {
-            latEl.textContent = delay > 0 ? String(delay) : '—';
+            latEl.textContent = valid ? String(delay) : '—';
             latEl.classList.remove(...DELAY_CLASSES);
-            if (delay > 0) latEl.classList.add(getDelayColorClass(delay));
+            if (valid) latEl.classList.add(getDelayColorClass(delay));
         }
         setText('home-stat-node', leaf?.name || nodeName || '—');
     } catch (e) {
@@ -107,10 +113,11 @@ async function tick() {
  */
 export function initHomeStats() {
     if (!document.getElementById('home-stats')) return () => {};
-    if (!timer) timer = setInterval(tick, POLL_MS);
-    const onVis = () => { if (!document.hidden) tick(); };
+    const run = () => { tick().catch(e => logger.debug('home stats tick failed', e)); };
+    if (!timer) timer = setInterval(run, POLL_MS);
+    const onVis = () => { if (!document.hidden) run(); };
     document.addEventListener('visibilitychange', onVis);
-    tick();
+    run();
     return () => {
         if (timer) clearInterval(timer);
         timer = null;

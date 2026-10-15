@@ -28,7 +28,8 @@ function syncTitles(header, compact) {
         const btn = /** @type {HTMLElement} */ (span.parentElement);
         if (!btn.querySelector(':scope > svg')) return; // text-only buttons keep their label
         if (compact) {
-            if (!btn.hasAttribute('title')) {
+            // Refresh our own tooltip too, so a language switch updates it.
+            if (!btn.hasAttribute('title') || btn.dataset.fitTitle) {
                 btn.setAttribute('title', (span.textContent || '').trim());
                 btn.dataset.fitTitle = '1';
             }
@@ -62,8 +63,8 @@ export function fitHeader(header) {
  */
 export function initHeaderFit() {
     if (typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') return () => {};
-    /** @type {WeakSet<Element>} */
-    const seen = new WeakSet();
+    /** @type {Set<HTMLElement>} */
+    const seen = new Set();
     /** @type {Set<HTMLElement>} */
     const pending = new Set();
     let frame = 0;
@@ -86,13 +87,22 @@ export function initHeaderFit() {
             if (h) schedule(/** @type {HTMLElement} */ (h));
         });
     });
+    const TEXT_OPTS = { childList: true, characterData: true, subtree: true };
     const attach = () => {
-        document.querySelectorAll('[data-page] > header').forEach(h => {
+        // Pages that re-render replace their header: stop watching detached ones.
+        const stale = [...seen].filter(h => !h.isConnected);
+        if (stale.length) {
+            stale.forEach(h => { seen.delete(h); resize.unobserve(h); pending.delete(h); });
+            text.disconnect();
+            seen.forEach(h => text.observe(h, TEXT_OPTS));
+        }
+        document.querySelectorAll('[data-page] > header').forEach(el => {
+            const h = /** @type {HTMLElement} */ (el);
             if (seen.has(h)) return;
             seen.add(h);
             resize.observe(h);
-            text.observe(h, { childList: true, characterData: true, subtree: true });
-            schedule(/** @type {HTMLElement} */ (h));
+            text.observe(h, TEXT_OPTS);
+            schedule(h);
         });
     };
     const pages = new MutationObserver(attach);
@@ -103,5 +113,6 @@ export function initHeaderFit() {
         resize.disconnect();
         text.disconnect();
         pages.disconnect();
+        seen.clear();
     };
 }

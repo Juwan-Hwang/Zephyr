@@ -19,6 +19,24 @@ function makeHeader(width, need) {
 }
 
 describe('page header fit', () => {
+    it('refreshes its own tooltip when the label is translated', () => {
+        const h = makeHeader(500, [620, 480, 300]);
+        fitHeader(h);
+        const btn = /** @type {HTMLElement} */ (h.querySelector('button'));
+        expect(btn.title).toBe('Refresh');
+        /** @type {HTMLElement} */ (btn.querySelector('span')).textContent = 'Обновить';
+        fitHeader(h);
+        expect(btn.title).toBe('Обновить');
+    });
+
+    it('leaves a tooltip set by other code alone', () => {
+        const h = makeHeader(500, [620, 480, 300]);
+        const btn = /** @type {HTMLElement} */ (h.querySelector('button'));
+        btn.title = 'Custom';
+        fitHeader(h);
+        expect(btn.title).toBe('Custom');
+    });
+
     it('keeps the full header when it fits', () => {
         const h = makeHeader(500, [480, 400, 300]);
         expect(fitHeader(h)).toBe(0);

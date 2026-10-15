@@ -539,6 +539,12 @@ function renderConnectionList(connections, mode) {
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
+            // The template was copied before any later language switch: translate it now.
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
+            clone.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = /** @type {HTMLElement} */ (el).dataset.i18n;
+                if (key && typeof t[key] === 'string') el.textContent = t[key];
+            });
             container.appendChild(clone);
         }
         return;
@@ -645,8 +651,9 @@ function updateSortIndicators() {
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
             setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
-            const ariaSort = isAsc ? 'ascending' : 'descending';
-            if (cell.getAttribute('aria-sort') !== ariaSort) cell.setAttribute('aria-sort', ariaSort);
+            // aria-sort only applies to column headers; these are buttons, so expose
+            // the active sort as pressed (the ▲/▼ in the label gives the direction).
+            if (cell.getAttribute('aria-pressed') !== 'true') cell.setAttribute('aria-pressed', 'true');
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--text-primary)';
@@ -658,7 +665,7 @@ function updateSortIndicators() {
         } else {
             // Inactive: colour comes from CSS (.conn-head); drop the inline active colour and clean text
             (/** @type {HTMLElement} */ (cell)).style.color = '';
-            cell.removeAttribute('aria-sort');
+            if (cell.getAttribute('aria-pressed') !== 'false') cell.setAttribute('aria-pressed', 'false');
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
