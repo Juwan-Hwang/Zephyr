@@ -2145,7 +2145,7 @@ html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-in
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.home-stat-value { display: flex; align-items: baseline; gap: 4px; min-width: 0; line-height: 28px; color: var(--text-primary); }
+.home-stat-value { display: flex; align-items: baseline; gap: 4px; min-width: 0; height: 28px; line-height: 28px; color: var(--text-primary); }
 .home-stat-value b {
   font-size: 22px;
   font-weight: 300;
@@ -2153,7 +2153,8 @@ html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-in
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.home-stat-value small { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+/* line-height 1 keeps the unit from stretching the row (it pushed the latency footnote 3px low) */
+.home-stat-value small { font-size: 11px; line-height: 1; font-weight: 600; color: var(--text-muted); }
 .home-stat-foot {
   display: block;
   height: 16px;
@@ -2331,3 +2332,63 @@ html:not(.dark) .toast { background: rgba(255, 255, 255, 0.86); -webkit-backdrop
 .toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .toast-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
 .toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Round-2 finish: long locales, RTL figures, wide windows
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page headers keep the title on one line; when the row runs out of room
+   (Russian/Spanish at 720px) ui/header-fit.js steps it down: icon-only
+   buttons first, then the secondary read-outs. Nothing spills past the edge. */
+[data-page] > header { gap: 16px; }
+[data-page] > header > * { flex-shrink: 0; }
+[data-page] > header h2 { white-space: nowrap; }
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* 14px icon + 2×8px + 1px borders = a 32px square, same height as before */
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) { padding-inline: 8px; min-width: 2rem; }
+header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
+
+/* Proxy group pill: one line, long group names end in an ellipsis */
+#proxy-group-trigger { white-space: nowrap; max-width: 16rem; }
+#proxy-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Connections table head: a long column name truncates inside its own column
+   instead of running into the next one */
+.conn-head .sortable { max-width: 100%; }
+
+/* Segmented controls (proxy mode, theme, home mode): a label that does not fit
+   its third ends in an ellipsis rather than touching its neighbour */
+#mode-selector-container > button,
+button[data-theme-mode],
+button[data-home-mode] {
+  display: block;
+  line-height: 26px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RTL: a figure and its unit read as one left-to-right token ("249.32 KB/s"),
+   while the cell itself keeps its right-to-left alignment */
+[dir="rtl"] .home-speed > .flex,
+[dir="rtl"] .home-stat-value { direction: ltr; }
+[dir="rtl"] .home-stat-value { justify-content: flex-end; }
+[dir="rtl"] .home-stat-foot { direction: ltr; text-align: right; }
+[dir="rtl"] :is(#conn-stats-bar span[id], .conn-num > .conn-main, .conn-num > .conn-sub) { direction: ltr; unicode-bidi: isolate; }
+
+/* Wide windows: settings rows stop at a readable measure (label and control
+   stay within one glance) and the column is centred under the title */
+@media (min-width: 1100px) {
+  [data-page="settings"] > * { width: 100%; max-width: 800px; margin-inline: auto; }
+}
