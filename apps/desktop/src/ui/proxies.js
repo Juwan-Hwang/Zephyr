@@ -27,6 +27,7 @@ import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.j
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
+import { renderTunStatus } from './tun-status.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -441,11 +442,7 @@ export async function syncCoreConfig() {
         const tunEnable = (/** @type {any} */ (config)).tun.enable;
         appStore.set('isTunEnabled', tunEnable);
         tunToggle.checked = tunEnable;
-        const statusText = document.getElementById('tun-status-text');
-        if (statusText) {
-            const t = /** @type {any} */ (translations)[currentLang];
-            statusText.textContent = tunEnable ? t.proxyActive : (t.proxyInactive || 'Virtual Adapter');
-        }
+        renderTunStatus(document.getElementById('tun-status-text'), Boolean(tunEnable));
         // updateTrayStatus is handled by the main ui.js module
         try {
             const { updateTrayStatus } = await import('./tray.js');
