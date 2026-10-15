@@ -80,20 +80,20 @@ const LEVEL_PRIORITY = Object.freeze({
 
 // ── Log Level Parser (regex compiled once, reused) ────────────────────────
 
-// mihomo format: level=info / level=warn / level=error / level=debug
-const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR)(?:\]|\b)/i;
+// mihomo format: level=info / level=warn / level=error / level=debug / level=fatal
+const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)(?:\]|\b)/i;
 
 /**
  * Extract log level from a line.
  * Supports both mihomo format (`level=info`) and bracket format (`[INFO]`).
  * @param {string} line
- * @returns {'debug'|'info'|'warn'|'error'}
+ * @returns {'debug'|'info'|'warn'|'error'|'fatal'}
  */
 function parseLogLevel(line) {
     const m = LEVEL_RE.exec(line);
     if (!m) return 'info';
     const lvl = m[1].toUpperCase();
-    return lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'} */ (lvl.toLowerCase());
+    return lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (lvl.toLowerCase());
 }
 
 // ── State ──────────────────────────────────────────────────────────────────

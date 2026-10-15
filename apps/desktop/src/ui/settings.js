@@ -381,9 +381,9 @@ function initLogSettingsModal() {
                 </div>
 
                 <!-- Tab switcher -->
-                <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-1">
-                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logAppTab || 'App Logs')}</button>
-                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
+                <div class="seg-tabs seg-tabs-lg w-full" role="tablist">
+                    <button id="log-tab-app" type="button" role="tab" aria-selected="true" class="seg-tab active flex-1 justify-center">${escapeHtml(t.logAppTab || 'App Logs')}</button>
+                    <button id="log-tab-core" type="button" role="tab" aria-selected="false" class="seg-tab flex-1 justify-center">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
                 </div>
 
                 <!-- App Logs Tab -->
@@ -397,14 +397,14 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
@@ -424,14 +424,14 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
@@ -488,12 +488,10 @@ function initLogSettingsModal() {
 
         const activateTab = (/** @type {HTMLElement} */ tab, /** @type {HTMLElement} */ p) => {
             [tabApp, tabCore].forEach(tb => {
-                tb.classList.remove('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
-                tb.classList.add('text-[var(--text-muted)]');
+                tb.classList.toggle('active', tb === tab);
+                tb.setAttribute('aria-selected', String(tb === tab));
             });
             [panelApp, panelCore].forEach(pn => { pn.style.display = 'none'; });
-            tab.classList.add('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
-            tab.classList.remove('text-[var(--text-muted)]');
             p.style.display = '';
         };
         activateTab(tabApp, panelApp);
@@ -2262,27 +2260,27 @@ appStore.set('isNetworkUpdating', false);
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
                             <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
                             <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
                             <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
                             <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
                             <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
                             <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono">
                         </div>
                     </div>

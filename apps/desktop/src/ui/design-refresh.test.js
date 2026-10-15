@@ -78,7 +78,9 @@ describe('Windows country-flag font', () => {
     it('CSP lets the app load its own fonts', () => {
         const conf = JSON.parse(fs.readFileSync(path.join(SRC, '../src-tauri/tauri.conf.json'), 'utf8'));
         const csp = String(conf.app.security.csp);
-        expect(csp).toMatch(/font-src 'self'|default-src 'self'/);
+        // font-src wins when present; default-src only applies without it.
+        const src = csp.match(/(?:^|;)\s*font-src\s+([^;]*)/)?.[1] ?? csp.match(/(?:^|;)\s*default-src\s+([^;]*)/)?.[1] ?? '';
+        expect(src).toMatch(/(?:^|\s)'self'(?:\s|$)/);
     });
 
     it('NOTICE credits Twemoji under CC-BY-4.0', () => {
