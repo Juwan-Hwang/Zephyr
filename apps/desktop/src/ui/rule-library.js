@@ -715,7 +715,7 @@ function getGroupBadgeColor(label) {
         'bg-emerald-500/15 text-emerald-400',
         'bg-amber-500/15 text-amber-400',
         'bg-rose-500/15 text-rose-400',
-        'bg-purple-500/15 text-purple-400',
+        'bg-teal-500/15 text-teal-400',
         'bg-orange/15 text-orange',
         'bg-blue-500/15 text-blue-400',
         'bg-pink/15 text-pink',

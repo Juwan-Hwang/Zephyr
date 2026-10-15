@@ -9,6 +9,7 @@
 
 import { detectSystemLanguage } from '../i18n.js';
 import { createLogger } from '../utils/logger.js';
+import { normalizeTheme } from './theme.js';
 
 const storeLogger = createLogger('Store', 'warn');
 
@@ -384,7 +385,7 @@ export const appStore = createStore('zephyr.app', {
     isTestingLatency: false,
 
     // UI state
-    currentTheme: lsGet('appTheme') || 'purple',
+    currentTheme: normalizeTheme(lsGet('appTheme')),
     currentLang: lsGet('lang') || detectSystemLanguage(),
     currentPage: 'home',
     homePageMode: 'minimal', // 'minimal' or 'console' — synced from settings.json
@@ -438,6 +439,16 @@ export const appStore = createStore('zephyr.app', {
         'isNetworkUpdating', 'isTestingLatency',
     ],
 });
+
+// Migrate removed theme presets (e.g. 'purple' -> 'blue') persisted in the
+// hydrated store or the legacy `appTheme` key. Custom hex themes are untouched.
+{
+    const hydratedTheme = appStore.get('currentTheme');
+    const migratedTheme = normalizeTheme(hydratedTheme);
+    if (migratedTheme !== hydratedTheme) appStore.set('currentTheme', migratedTheme);
+    const legacyTheme = lsGet('appTheme');
+    if (legacyTheme && normalizeTheme(legacyTheme) !== legacyTheme) lsSet('appTheme', normalizeTheme(legacyTheme));
+}
 
 /** Tray state (replaces the old sealed TrayState) */
 export const trayStore = createStore('zephyr.tray', {

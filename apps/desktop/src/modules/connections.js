@@ -105,11 +105,11 @@ const PAGE_HTML = `
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="totalConn">Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
-        <span id="stat-dl-total" class="text-lg font-semibold text-purple-400 tabular-nums">0 B</span>
+        <span id="stat-dl-total" class="text-lg font-semibold text-download tabular-nums">0 B</span>
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
-        <span id="stat-ul-total" class="text-lg font-semibold text-blue-400 tabular-nums">0 B</span>
+        <span id="stat-ul-total" class="text-lg font-semibold text-upload tabular-nums">0 B</span>
         <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
@@ -134,10 +134,10 @@ const PAGE_HTML = `
             <div class="sortable ps-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
             <div class="sortable text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="rule" data-i18n="ruleCol">Rule</div>
             <div class="sortable text-end pe-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-purple-500/70 uppercase tracking-widest cursor-pointer hover:text-purple-400 transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-purple-500/50 uppercase tracking-widest cursor-pointer hover:text-purple-300 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-blue-500/70 uppercase tracking-widest cursor-pointer hover:text-blue-400 transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
-            <div class="sortable text-end pe-2 text-[9px] font-bold text-blue-500/50 uppercase tracking-widest cursor-pointer hover:text-blue-300 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/70 uppercase tracking-widest cursor-pointer hover:text-download transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/50 uppercase tracking-widest cursor-pointer hover:text-download/80 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
+            <div class="sortable text-end pe-1 text-[9px] font-bold text-upload/70 uppercase tracking-widest cursor-pointer hover:text-upload transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
+            <div class="sortable text-end pe-2 text-[9px] font-bold text-upload/50 uppercase tracking-widest cursor-pointer hover:text-upload/80 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
         </div>
     </div>
     <!-- List Body -->
@@ -598,10 +598,10 @@ function updateSortIndicators() {
         // Each column's original color (matches the utility classes in PAGE_HTML)
         const originalColors = {
             host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
-            dlSpeed: 'color-mix(in srgb, var(--colors-purple-500) 70%, transparent)',
-            dlTotal: 'color-mix(in srgb, var(--colors-purple-500) 50%, transparent)',
-            ulSpeed: 'color-mix(in srgb, var(--colors-blue-500) 70%, transparent)',
-            ulTotal: 'color-mix(in srgb, var(--colors-blue-500) 50%, transparent)',
+            dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
+            dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
+            ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
+            ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
         };
         const origColor = (/** @type {Record<string, string>} */ (originalColors))[/** @type {string} */ (sortKey)] || '';
 
@@ -624,9 +624,9 @@ function updateSortIndicators() {
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
             } else if (sortKey.startsWith('dl')) {
-                (/** @type {HTMLElement} */ (cell)).style.color = '#c084fc';  /* purple-400: vivid violet */
+                (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-download)';  /* fixed blue download colour */
             } else {
-                (/** @type {HTMLElement} */ (cell)).style.color = '#60a5fa';  /* blue-400: vivid sky-blue */
+                (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-upload)';  /* fixed coral upload colour */
             }
         } else {
             // Inactive: restore original color and clean text
@@ -742,19 +742,19 @@ function buildConnectionRow(conn, mode) {
         </div>
         <!-- Download Speed -->
         <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:#c084fc; font-variant-numeric:tabular-nums; line-height:1;">${dlSpeed}</span>
+            <span style="font-size:10px; color:var(--zephyr-color-download); font-variant-numeric:tabular-nums; line-height:1;">${dlSpeed}</span>
         </div>
         <!-- Download Total -->
         <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:9px; color:rgba(192,132,252,0.5); font-variant-numeric:tabular-nums; line-height:1;">${dlTotal}</span>
+            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-download) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${dlTotal}</span>
         </div>
         <!-- Upload Speed -->
         <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:#60a5fa; font-variant-numeric:tabular-nums; line-height:1;">${ulSpeed}</span>
+            <span style="font-size:10px; color:var(--zephyr-color-upload); font-variant-numeric:tabular-nums; line-height:1;">${ulSpeed}</span>
         </div>
         <!-- Upload Total -->
         <div style="text-align:end; min-width:0; padding-inline-end:0.5rem;">
-            <span style="font-size:9px; color:rgba(96,165,250,0.5); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
+            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
         </div>
     </div>`;
 }
@@ -848,10 +848,10 @@ function showConnDetail(conn, mode) {
         <div class="grid grid-cols-2 gap-3 mb-5">
             <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-purple-500/70 dark:text-purple-400/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
+                    <span class="text-2xs text-download/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-purple-500 dark:text-purple-400 tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
+                <span class="text-sm font-semibold text-download tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                     <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
@@ -859,10 +859,10 @@ function showConnDetail(conn, mode) {
             </div>
             <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
                 <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-blue-500/70 dark:text-blue-400/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
+                    <span class="text-2xs text-upload/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                 </div>
-                <span class="text-sm font-semibold text-blue-500 dark:text-blue-400 tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
+                <span class="text-sm font-semibold text-upload tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
                     <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
                     <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-ul-total">${ulTotal}</span>

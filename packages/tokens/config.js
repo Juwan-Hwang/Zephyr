@@ -49,7 +49,6 @@ StyleDictionary.registerFormat({
       green:  { primary: '#34C759', rgb: '52, 199, 89' },
       orange: { primary: '#FF9500', rgb: '255, 149, 0' },
       pink:   { primary: '#FF2D55', rgb: '255, 45, 85' },
-      purple: { primary: '#AF52DE', rgb: '175, 82, 222' },
     };
 
     const lines = [];
@@ -360,7 +359,6 @@ StyleDictionary.registerFormat({
     val green = AccentTheme(Color(0xFF34C759), Color(0x3334C759), "52, 199, 89")
     val orange = AccentTheme(Color(0xFFFF9500), Color(0x33FF9500), "255, 149, 0")
     val pink = AccentTheme(Color(0xFFFF2D55), Color(0x33FF2D55), "255, 45, 85")
-    val purple = AccentTheme(Color(0xFFAF52DE), Color(0x33AF52DE), "175, 82, 222")
 }`;
 
     return `package com.zephyr.ui.theme
@@ -700,7 +698,6 @@ StyleDictionary.registerFormat({
     public static let green = AccentTheme(primary: Color(red: 0.204, green: 0.781, blue: 0.349), glow: Color(red: 0.204, green: 0.781, blue: 0.349, opacity: 0.2), rgb: "52, 199, 89")
     public static let orange = AccentTheme(primary: Color(red: 1.000, green: 0.584, blue: 0.000), glow: Color(red: 1.000, green: 0.584, blue: 0.000, opacity: 0.2), rgb: "255, 149, 0")
     public static let pink = AccentTheme(primary: Color(red: 1.000, green: 0.176, blue: 0.333), glow: Color(red: 1.000, green: 0.176, blue: 0.333, opacity: 0.2), rgb: "255, 45, 85")
-    public static let purple = AccentTheme(primary: Color(red: 0.686, green: 0.322, blue: 0.871), glow: Color(red: 0.686, green: 0.322, blue: 0.871, opacity: 0.2), rgb: "175, 82, 222")
 }`;
 
     return `import SwiftUI
