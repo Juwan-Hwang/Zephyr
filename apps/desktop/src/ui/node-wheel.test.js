@@ -151,6 +151,18 @@ describe('node quick-switch wheel', () => {
         expect(isShown(dom.dropdown)).toBe(false);
     });
 
+    it('a click on the pill while a hover-started open is loading does not cancel it', async () => {
+        const slow = deferred();
+        fetchProxyGroups.mockReturnValueOnce(slow.promise);
+        enter(dom.trigger);
+        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
+        dom.trigger.click();
+        slow.resolve(GROUPS);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(true);
+        expect(wheel.isNodeWheelOpen()).toBe(true);
+    });
+
     it('releases the open state when there is nothing to show, so the next hover can open', async () => {
         fetchProxyGroups.mockResolvedValueOnce(null);
         await hoverOpen();
