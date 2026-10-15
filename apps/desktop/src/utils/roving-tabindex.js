@@ -5,7 +5,8 @@
  * ArrowDown/ArrowUp move focus between items.
  * Home/End jump to first/last item.
  * Typeahead: typing characters jumps to the next matching item (500ms timeout).
- * MutationObserver automatically adapts to dynamic DOM changes.
+ * MutationObserver adapts when items are added/removed as direct children
+ * of the container (changes deeper inside an item are ignored).
  *
  * Usage:
  *   const roving = createRovingTabindex(container, {
@@ -191,8 +192,27 @@ export function createRovingTabindex(container, options = {}) {
         }
     }
 
+    /**
+     * Whether a mutation added or removed a navigable item. Item content
+     * (latency badges, scores) changes on every poll; resyncing every
+     * tabindex for those is wasted work, so only list changes count.
+     * @param {MutationRecord[]} records
+     */
+    function itemsChanged(records) {
+        for (const record of records) {
+            for (const list of [record.addedNodes, record.removedNodes]) {
+                for (const node of list) {
+                    if (!(node instanceof Element)) continue;
+                    if (node.matches(itemSelector) || node.querySelector(itemSelector)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     function setupObserver() {
-        observer = new MutationObserver(() => {
+        observer = new MutationObserver((records) => {
+            if (!itemsChanged(records)) return;
             const items = getItems();
             if (currentIndex >= items.length) {
                 currentIndex = items.length > 0 ? items.length - 1 : -1;
@@ -203,6 +223,8 @@ export function createRovingTabindex(container, options = {}) {
                 }
             }
         });
+        // Watch the subtree so items nested under wrappers are tracked too;
+        // the callback ignores mutations that do not add or remove an item.
         observer.observe(container, { childList: true, subtree: true });
     }
 
