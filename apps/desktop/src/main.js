@@ -64,6 +64,7 @@ import { showNotification } from './ui/notifications.js';
 import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
+import { initNavTooltips } from './ui/nav-tooltip.js';
 import { initProxyControls, syncCoreConfig, renderProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
@@ -461,6 +462,7 @@ async function initApp() {
         import('./ui/proxies.js').then(m => { if (m.stopProviderPoll) m.stopProviderPoll(); }).catch(() => {});
     },
   });
+  registerCleanup(initNavTooltips());
   initChart();
   initTrayEventListeners();
   await initProxyToggle();

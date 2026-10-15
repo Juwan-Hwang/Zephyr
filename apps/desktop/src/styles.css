@@ -912,6 +912,46 @@ html:not(.dark) .form-control:focus {
   100% { transform: scale(1); }
 }
 
+/* —— 侧栏图标提示：悬停 / 键盘聚焦时显示页面名（ui/nav-tooltip.js） —— */
+.nav-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-toast, 1100);
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: var(--zephyr-radius-control, 8px);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1.3;
+  color: var(--zephyr-text-primary);
+  background: color-mix(in srgb, var(--zephyr-bg-elevated) 82%, transparent);
+  border: 1px solid var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+  backdrop-filter: var(--glass-card);
+  -webkit-backdrop-filter: var(--glass-card);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-4px, -50%);
+  transition: opacity .16s var(--zephyr-easing-ease-out, ease-out),
+              transform .22s var(--nav-glide),
+              visibility 0s linear .16s;
+}
+.nav-tooltip[data-side="start"] { transform: translate(calc(-100% + 4px), -50%); }
+.nav-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+  transition-delay: 0s;
+}
+.nav-tooltip[data-side="start"].is-visible { transform: translate(-100%, -50%); }
+@media (prefers-reduced-motion: reduce) {
+  .nav-tooltip { transition: none; transform: translate(0, -50%); }
+  .nav-tooltip[data-side="start"] { transform: translate(-100%, -50%); }
+}
+
 /* ============================================
    Draw-On 引擎：pathLength=1 归一化，dashoffset 描绘（零漂移）
    ============================================ */
@@ -1492,7 +1532,7 @@ html.dark #fullscreen-editor-output {
 /* ── Page header: title + view switch ── */
 .dz-header { display: flex; align-items: flex-end; justify-content: space-between; flex-shrink: 0; min-width: 0; }
 .dz-header h1 { font-size: 24px; font-weight: 300; color: var(--zephyr-text-primary); margin: 0; letter-spacing: -0.01em; }
-.dz-header .dz-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; white-space: nowrap; }
+.dz-header .dz-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dz-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--zephyr-color-success); box-shadow: 0 0 8px var(--zephyr-color-success); animation: dz-pulse 2s ease-in-out infinite; }
 @keyframes dz-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -1506,8 +1546,8 @@ html.dark #fullscreen-editor-output {
 .dz-kpi-icon svg { width: 12px; height: 12px; }
 .dz-kpi-value { display: flex; align-items: baseline; gap: 4px; }
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
-.dz-kpi-value span { font-size: 10px; font-weight: 600; color: var(--zephyr-text-muted); text-transform: uppercase; }
-.dz-kpi-foot { font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.dz-kpi-value span { font-size: 10px; font-weight: 600; color: var(--zephyr-text-muted); }
+.dz-kpi-foot { font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
@@ -1622,7 +1662,7 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 /* Subscription traffic */
 .dz-sub-used { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
 .dz-sub-used b { font-size: 26px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.dz-sub-used span { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; }
+.dz-sub-used span { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 .dz-progress { height: 6px; border-radius: 3px; background: var(--zephyr-bg-muted); overflow: hidden; margin-top: 14px; }
 .dz-progress-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 65%, white)); position: relative; overflow: hidden; }
 .dz-progress-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 35%, transparent), transparent); animation: dz-shimmer 2.6s ease-in-out infinite; }

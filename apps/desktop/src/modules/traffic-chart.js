@@ -57,6 +57,13 @@ let _pendingRender = false;
 function _onVisibilityChange() {
   const wasHidden = !_isVisible;
   _isVisible = !document.hidden;
+  // Going hidden: drop any queued frame (including a colour-transition
+  // chain) and replay it once the document is visible again.
+  if (!wasHidden && !_isVisible && _chartFrameId !== null) {
+    cancelAnimationFrame(_chartFrameId);
+    _chartFrameId = null;
+    _pendingRender = true;
+  }
   // When becoming visible again, render any data that accumulated while hidden
   if (wasHidden && _isVisible && _pendingRender) {
     _pendingRender = false;
@@ -192,11 +199,12 @@ export function initChart() {
   ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  // Start listening for visibility changes (pause rendering when hidden)
+  // before the first render is scheduled, so it sees the current state.
+  _initVisibilityListener();
+
   // Immediately adopt the current theme colours
   updateChartTheme();
-
-  // Start listening for visibility changes (pause rendering when hidden)
-  _initVisibilityListener();
 
   // Clean up any pre-existing listeners
   if (_chartResizeHandler) {
@@ -349,6 +357,13 @@ export function updateChartTheme() {
  * @private
  */
 function scheduleRender() {
+  // Never request frames while the document is hidden — this also pauses
+  // the theme colour transition, which would otherwise keep re-queuing
+  // rAF callbacks. The visibility listener replays the render on return.
+  if (!_isVisible) {
+    _pendingRender = true;
+    return;
+  }
   if (_chartFrameId !== null) cancelAnimationFrame(_chartFrameId);
   _chartFrameId = requestAnimationFrame(() => {
     _chartFrameId = null;
@@ -368,13 +383,15 @@ function renderChart() {
   // Advance colour lerp
   tickColorTransition();
 
-  // If a transition is still in flight, schedule another frame
-  if (isColorTransitioning) {
-    scheduleRender();
-  }
-
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
+
+  // If a transition is still in flight, schedule another frame — unless the
+  // canvas is not laid out (e.g. its page is display:none). The resize
+  // observer re-schedules a render as soon as it gets a size again.
+  if (isColorTransitioning && width > 0 && height > 0) {
+    scheduleRender();
+  }
 
   ctx.clearRect(0, 0, width, height);
 
@@ -423,19 +440,7 @@ function drawArea(data, color, getY) {
   const getX = (/** @type {number} */ i) => (i / (MAX_DATA_POINTS - 1)) * width;
 
   ctx.beginPath();
-  ctx.moveTo(getX(0), getY(data[0]));
-
-  for (let i = 1; i < data.length; i++) {
-    const x1 = getX(i - 1);
-    const y1 = getY(data[i - 1]);
-    const x2 = getX(i);
-    const y2 = getY(data[i]);
-
-    // Quadratic Bézier for smooth interpolation
-    const xc = (x1 + x2) / 2;
-    const yc = (y1 + y2) / 2;
-    ctx.quadraticCurveTo(x1, y1, xc, yc);
-  }
+  traceSmoothCurve(ctx, data.map((v, i) => ({ x: getX(i), y: getY(v) })));
 
   // Stroke
   ctx.strokeStyle = rgba(color, 0.8);
@@ -449,9 +454,38 @@ function drawArea(data, color, getY) {
   gradient.addColorStop(0, rgba(color, 0.3));
   gradient.addColorStop(1, rgba(color, 0));
 
+  // Close the fill straight down from the newest point (where the curve now
+  // ends) and back along the baseline.
   ctx.lineTo(getX(data.length - 1), height);
   ctx.lineTo(getX(0), height);
   ctx.closePath();
   ctx.fillStyle = gradient;
   ctx.fill();
+}
+
+/**
+ * Trace a smooth curve through `points` onto the current path.
+ *
+ * Uses the midpoint quadratic-Bézier technique (each sample is a control
+ * point, each curve segment ends halfway to the next sample) and then
+ * finishes with a straight segment into the final sample. That last segment
+ * is collinear with the end tangent of the preceding Bézier, so the join is
+ * smooth, and the curve now actually reaches the newest data point instead
+ * of stopping at the midpoint of the last interval.
+ *
+ * @param {Pick<CanvasRenderingContext2D, 'moveTo' | 'lineTo' | 'quadraticCurveTo'>} target
+ * @param {Array<{ x: number, y: number }>} points
+ */
+export function traceSmoothCurve(target, points) {
+  if (points.length === 0) return;
+  target.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const cur = points[i];
+    target.quadraticCurveTo(prev.x, prev.y, (prev.x + cur.x) / 2, (prev.y + cur.y) / 2);
+  }
+  if (points.length > 1) {
+    const last = points[points.length - 1];
+    target.lineTo(last.x, last.y);
+  }
 }
