@@ -267,6 +267,12 @@ input[type="range"],
 #node-wheel-scroll {
     -ms-overflow-style: none;
 }
+/* Keyboard focus on a wheel node (options are tabindex=-1, so the global ring skips them) */
+#node-wheel-list [role="option"]:focus { outline: none; }
+#node-wheel-list [role="option"]:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
 
 
 :root {
