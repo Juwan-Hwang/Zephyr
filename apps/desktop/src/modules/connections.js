@@ -130,15 +130,23 @@ const PAGE_HTML = `
             <div class="flex-1"></div>
             <span id="closed-count-badge" class="hidden text-2xs text-[var(--text-tertiary)] tabular-nums"></span>
         </div>
-        <!-- Table Header (clickable for sort) -->
-        <div style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.625rem 1rem; user-select:none;" id="conn-table-header">
-            <div class="sortable ps-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
-            <div class="sortable text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="rule" data-i18n="ruleCol">Rule</div>
-            <div class="sortable text-end pe-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/70 uppercase tracking-widest cursor-pointer hover:text-download transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/50 uppercase tracking-widest cursor-pointer hover:text-download/80 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-upload/70 uppercase tracking-widest cursor-pointer hover:text-upload transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
-            <div class="sortable text-end pe-2 text-[9px] font-bold text-upload/50 uppercase tracking-widest cursor-pointer hover:text-upload/80 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
+        <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
+        <div class="conn-grid conn-head" id="conn-table-header">
+            <div class="conn-head-cell">
+                <span class="sortable" role="button" tabindex="0" data-sort="host" data-i18n="hostCol">Host</span>
+            </div>
+            <div class="conn-head-cell">
+                <span class="sortable" role="button" tabindex="0" data-sort="rule" data-i18n="ruleCol">Rule</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="chains" data-i18n="chainsCol">Chains</span>
+            </div>
+            <div class="conn-head-cell conn-num">
+                <span class="sortable" role="button" tabindex="0" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
+            </div>
+            <div class="conn-head-cell conn-num">
+                <span class="sortable" role="button" tabindex="0" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
+            </div>
         </div>
     </div>
     <!-- List Body -->
@@ -551,12 +559,13 @@ function renderConnectionList(connections, mode) {
     // resulting markup is identical to a full innerHTML rebuild.
     reconcileKeyedList(container, filtered, {
         getKey: (/** @type {any} */ conn) => String(conn.id ?? ''),
-        getSignature: (/** @type {any} */ conn) => buildConnectionRow(conn, mode, EMPTY_ROW_STATS),
+        getSignature: (/** @type {any} */ conn) => buildConnectionRow(conn, mode, EMPTY_ROW_STATS, false),
         create: (/** @type {any} */ conn) => createConnectionRowElement(conn, mode),
-        update: (el, /** @type {any} */ conn) => patchConnectionRowStats(el, resolveConnStats(conn, mode)),
+        update: (el, /** @type {any} */ conn) => patchConnectionRowStats(el, resolveConnStats(conn, mode), isConnIdle(conn, mode)),
     });
 
-    // One delegated listener per list element instead of one per row per render.
+    // One delegated listener per list element instead of one per row per render
+    // (click and keyboard activation of the role=button rows).
     bindRowClickDelegate(container);
 
     // Re-apply sort arrows (in case i18n or other code reset header text)
@@ -590,18 +599,6 @@ function getConnSortValue(conn, key, mode) {
 }
 
 /**
- * Each column's original header color (matches the utility classes in PAGE_HTML).
- * @type {Readonly<Record<string, string>>}
- */
-const SORT_HEADER_COLORS = Object.freeze({
-    host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
-    dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
-    dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
-    ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
-    ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
-});
-
-/**
  * Assign textContent only when it differs, so the per-poll header refresh
  * does not replace identical text nodes.
  * @param {Element} el
@@ -620,7 +617,6 @@ function updateSortIndicators() {
     if (!header) return;
     for (const cell of header.querySelectorAll('.sortable')) {
         const sortKey = /** @type {HTMLElement} */ (cell).dataset.sort;
-        const origColor = SORT_HEADER_COLORS[/** @type {string} */ (sortKey)] || '';
 
         if (connSortState && sortKey === connSortState.key) {
             // Active column: show text + arrow
@@ -637,17 +633,20 @@ function updateSortIndicators() {
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
             setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
+            const ariaSort = isAsc ? 'ascending' : 'descending';
+            if (cell.getAttribute('aria-sort') !== ariaSort) cell.setAttribute('aria-sort', ariaSort);
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
-                (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
+                (/** @type {HTMLElement} */ (cell)).style.color = 'var(--text-primary)';
             } else if (sortKey.startsWith('dl')) {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-download)';  /* fixed blue download colour */
             } else {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-upload)';  /* fixed coral upload colour */
             }
         } else {
-            // Inactive: restore original color and clean text
-            (/** @type {HTMLElement} */ (cell)).style.color = origColor;
+            // Inactive: colour comes from CSS (.conn-head); drop the inline active colour and clean text
+            (/** @type {HTMLElement} */ (cell)).style.color = '';
+            cell.removeAttribute('aria-sort');
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
@@ -676,6 +675,13 @@ function bindHeaderSortEvents() {
     const freshHeader = bindOnce(header);
     if (!freshHeader) return;
     for (const cell of freshHeader.querySelectorAll('.sortable')) {
+        cell.addEventListener('keydown', (/** @type {Event} */ e) => {
+            const key = /** @type {KeyboardEvent} */ (e).key;
+            if (key === 'Enter' || key === ' ') {
+                e.preventDefault();
+                /** @type {HTMLElement} */ (cell).click();
+            }
+        });
         cell.addEventListener('click', () => {
             const key = /** @type {HTMLElement} */ (cell).dataset.sort;
             if (!connSortState) {
@@ -707,6 +713,20 @@ function bindHeaderSortEvents() {
 /** Use escapeHtml from ../utils/sanitize.js */
 const _esc = /** @param {string} str */ (str) => escapeHtml(str);
 
+/** Class that dims an active row with no traffic right now. */
+const IDLE_ROW_CLASS = 'conn-row--idle';
+
+/**
+ * An active connection is idle when it moved no bytes since the last poll.
+ * @param {any} conn
+ * @param {string} mode
+ */
+function isConnIdle(conn, mode) {
+    if (mode === 'closed') return false;
+    const acc = connAccumulators[conn.id];
+    return !acc || (!(acc.dlSpeed > 0) && !(acc.ulSpeed > 0));
+}
+
 /** Stats placeholder used to compute a row's structural signature. */
 const EMPTY_ROW_STATS = Object.freeze({ dlSpeed: '', ulSpeed: '', dlTotal: '', ulTotal: '' });
 
@@ -715,8 +735,9 @@ const EMPTY_ROW_STATS = Object.freeze({ dlSpeed: '', ulSpeed: '', dlTotal: '', u
  * @param {string} mode
  * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} [stats]
  *   Display values for the four traffic cells; resolved from the connection when omitted.
+ * @param {boolean} [idle] Dim an active row with no traffic right now; resolved when omitted.
  */
-function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode)) {
+function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode), idle = isConnIdle(conn, mode)) {
     const id = _esc(conn.id ?? '');
     const meta = conn.metadata ?? {};
     const host = _esc(meta.host ?? '-');
@@ -727,62 +748,78 @@ function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode)) {
     const chains = (conn.chains ?? []).map(_esc).join(' → ');
 
     const ruleColorClass = getRuleColorClass(rule);
-    const processHtml = process
-        ? `<span class="text-xs text-[var(--text-muted)] truncate max-w-[120px] block">${process}</span>`
-        : '';
+    const ruleShort = _esc(shortRuleName(conn.rule || 'Match'));
+    const rulePayload = _esc(conn.rulePayload || '');
+    const ruleTitle = rulePayload ? `${rule}: ${rulePayload}` : rule;
 
     const { dlSpeed, ulSpeed, dlTotal, ulTotal } = stats;
 
-    const dimClass = mode === 'closed' ? 'opacity-60' : '';
-    // No inline close button — click row to open detail panel
+    // Closed rows and active rows with no traffic right now are dimmed so busy rows stand out.
+    // The idle class is patched in place on existing rows (see patchConnectionRowStats).
+    const rowClass = ['conn-row', 'conn-grid', 'group'];
+    if (mode === 'closed') rowClass.push('conn-row--closed');
+    else if (idle) rowClass.push(IDLE_ROW_CLASS);
 
-    // Subtitle: destination + process info under host
-    const destHtml = (destIP && destIP !== '-')
-        ? `<span class="text-2xs text-[var(--text-muted)] truncate block">→ ${destIP}:${destPort}</span>`
-        : '';
-    const subtitleHtml = process || destHtml
-        ? `<div class="flex items-center gap-2 mt-0.5">
-            ${processHtml}
-            ${destHtml}
-           </div>`
-        : '';
+    const subParts = [];
+    if (process) subParts.push(`<span class="conn-proc">${process}</span>`);
+    if (destIP && destIP !== '-') subParts.push(`<span class="conn-dest">${destIP}:${destPort}</span>`);
+    const subtitleHtml = subParts.length ? `<span class="conn-sub">${subParts.join('<span class="conn-sep" aria-hidden="true"> · </span>')}</span>` : '';
 
     return `
-    <div class="conn-row group hover:bg-[var(--zephyr-bg-muted)] transition-[color,border-color] duration-[var(--zephyr-time-micro)] items-center cursor-pointer border border-transparent hover:border-[var(--zephyr-border-subtle)] ${dimClass}" style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:var(--zephyr-radius-surface); align-items:center;" data-conn-id="${id}" data-mode="${mode}">
-        <!-- Host + Destination subtitle -->
-        <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding-inline-start:0.25rem;">
-            <span class="text-xs text-[var(--text-primary)] font-medium truncate" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${host}</span>
+    <div class="${rowClass.join(' ')}" role="button" tabindex="0" data-conn-id="${id}" data-mode="${mode}">
+        <div class="conn-cell">
+            <span class="conn-main conn-host">${host}</span>
             ${subtitleHtml}
         </div>
-        <!-- Rule -->
-        <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+        <div class="conn-cell">
+            <span class="conn-rule ${ruleColorClass}" title="${ruleTitle}">${ruleShort}</span>
+            <span class="conn-sub" title="${chains || '-'}">→ ${chains || '-'}</span>
         </div>
-        <!-- Chains -->
-        <div style="text-align:end; min-width:0;">
-            <span style="font-size:10px; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-inline-start:auto; max-width:100%;">${chains || '-'}</span>
+        <div class="conn-cell conn-num">
+            <span class="conn-main conn-rate conn-rate--down">${dlSpeed}</span>
+            <span class="conn-sub">${dlTotal}</span>
         </div>
-        <!-- Download Speed -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:var(--zephyr-color-download); font-variant-numeric:tabular-nums; line-height:1;">${dlSpeed}</span>
-        </div>
-        <!-- Download Total -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-download) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${dlTotal}</span>
-        </div>
-        <!-- Upload Speed -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:var(--zephyr-color-upload); font-variant-numeric:tabular-nums; line-height:1;">${ulSpeed}</span>
-        </div>
-        <!-- Upload Total -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.5rem;">
-            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
+        <div class="conn-cell conn-num">
+            <span class="conn-main conn-rate conn-rate--up">${ulSpeed}</span>
+            <span class="conn-sub">${ulTotal}</span>
         </div>
     </div>`;
 }
 
-/** Grid columns (0-based) holding ↓speed, ↓total, ↑speed, ↑total. */
-const STAT_COLUMNS = Object.freeze([3, 4, 5, 6]);
+/** Short display names for long mihomo rule types; the full name stays in the badge title. */
+const RULE_SHORT_NAMES = Object.freeze(/** @type {Record<string, string>} */ ({
+    domainsuffix: 'Suffix',
+    domainkeyword: 'Keyword',
+    domainregex: 'Regex',
+    domainwildcard: 'Wildcard',
+    ipcidr: 'CIDR',
+    ipcidr6: 'CIDR6',
+    'ip-cidr': 'CIDR',
+    'ip-cidr6': 'CIDR6',
+    ipsuffix: 'IP Suffix',
+    srcipcidr: 'Src CIDR',
+    processname: 'Process',
+    processpath: 'Path',
+    processnameregex: 'Process',
+    processpathregex: 'Path',
+    dstport: 'Port',
+    srcport: 'Src Port',
+    ruleset: 'RuleSet',
+}));
+
+/** @param {string} rule */
+export function shortRuleName(rule) {
+    const key = String(rule ?? '').toLowerCase();
+    return RULE_SHORT_NAMES[key] || String(rule ?? '');
+}
+
+/** Selectors for the ↓speed, ↓total, ↑speed, ↑total cells of a row. */
+const STAT_SELECTORS = Object.freeze([
+    '.conn-rate--down',
+    '.conn-rate--down + .conn-sub',
+    '.conn-rate--up',
+    '.conn-rate--up + .conn-sub',
+]);
 
 /** @type {WeakMap<Element, Element[]>} Cached stat <span>s per row element. */
 const _rowStatCells = new WeakMap();
@@ -809,8 +846,8 @@ function getRowStatCells(row) {
     let cells = _rowStatCells.get(row);
     if (!cells) {
         cells = [];
-        for (const col of STAT_COLUMNS) {
-            const span = row.children[col]?.firstElementChild;
+        for (const sel of STAT_SELECTORS) {
+            const span = row.querySelector(sel);
             if (span) cells.push(span);
         }
         _rowStatCells.set(row, cells);
@@ -819,35 +856,63 @@ function getRowStatCells(row) {
 }
 
 /**
- * Patch the four traffic cells of an existing row in place.
+ * Patch the four traffic cells and the idle dimming of an existing row in place.
  * @param {Element} row
  * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} stats
+ * @param {boolean} [idle]
  */
-function patchConnectionRowStats(row, stats) {
+function patchConnectionRowStats(row, stats, idle) {
     const cells = getRowStatCells(row);
     const values = [stats.dlSpeed, stats.dlTotal, stats.ulSpeed, stats.ulTotal];
     for (let i = 0; i < cells.length; i++) setTextIfChanged(cells[i], values[i]);
+    if (idle !== undefined && row.classList.contains(IDLE_ROW_CLASS) !== idle) {
+        row.classList.toggle(IDLE_ROW_CLASS, idle);
+    }
 }
 
 /** @type {WeakSet<Element>} List elements that already carry the delegated row click listener. */
 const _rowClickBound = new WeakSet();
 
 /**
- * Open the detail panel for a clicked row via a single listener on the list.
+ * @param {Element} container
+ * @param {EventTarget|null} target
+ * @returns {HTMLElement|null}
+ */
+function rowFromEvent(container, target) {
+    const el = target instanceof Element ? target : null;
+    const row = /** @type {HTMLElement|null} */ (el?.closest('.conn-row') ?? null);
+    return row && container.contains(row) ? row : null;
+}
+
+/** @param {HTMLElement} row */
+function openRowDetail(row) {
+    const connId = row.dataset.connId;
+    const connMode = row.dataset.mode;
+    const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
+    const conn = sourceList.find(c => c.id === connId);
+    if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
+}
+
+/**
+ * Open the detail panel for a clicked row (or a focused row on Enter/Space)
+ * via single listeners on the list.
  * @param {Element} container
  */
 function bindRowClickDelegate(container) {
     if (_rowClickBound.has(container)) return;
     _rowClickBound.add(container);
     container.addEventListener('click', (e) => {
-        const target = e.target instanceof Element ? e.target : null;
-        const row = /** @type {HTMLElement|null} */ (target?.closest('.conn-row') ?? null);
-        if (!row || !container.contains(row)) return;
-        const connId = row.dataset.connId;
-        const connMode = row.dataset.mode;
-        const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
-        const conn = sourceList.find(c => c.id === connId);
-        if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
+        const row = rowFromEvent(container, e.target);
+        if (row) openRowDetail(row);
+    });
+    container.addEventListener('keydown', (e) => {
+        const key = /** @type {KeyboardEvent} */ (e).key;
+        if (key !== 'Enter' && key !== ' ') return;
+        // Only the row itself, not a focusable control inside it.
+        const row = rowFromEvent(container, e.target);
+        if (!row || row !== e.target) return;
+        e.preventDefault();
+        openRowDetail(row);
     });
 }
 

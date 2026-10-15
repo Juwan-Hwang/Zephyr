@@ -1161,25 +1161,110 @@ html:not(.dark) .form-control:focus {
 
 .conn-tab.active {
   color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent-primary);
+}
+.conn-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+  border-radius: 6px;
 }
 
-/* Stats bar subtle animation on data change */
-#conn-stats-bar > div {
-  transition: transform var(--transition-standard);
+/* ── Connections table: 4 columns, two lines per row ── */
+.conn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1.7fr) minmax(84px, 1fr) minmax(84px, 1fr);
+  column-gap: 12px;
+  align-items: center;
 }
-
-#conn-stats-bar:hover > div {
-  transform: scale(1.03);
+.conn-head {
+  align-items: start;
+  padding: 8px 20px 8px 20px;
+  user-select: none;
+  border-bottom: 1px solid var(--zephyr-border-subtle);
 }
-
-/* Closed connection rows dimmed */
-#connections-list [data-conn-id].opacity-60 {
-  opacity: 0.55;
+.conn-head-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
-
-#connections-list [data-conn-id].opacity-60:hover {
-  opacity: 0.8;
+.conn-head .sortable {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--zephyr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
 }
+.conn-head .sortable.conn-head-sub {
+  font-weight: 500;
+  color: var(--zephyr-text-tertiary);
+}
+.conn-head .sortable:hover { color: var(--text-primary); }
+:lang(zh) .conn-head .sortable, :lang(ja) .conn-head .sortable, :lang(ko) .conn-head .sortable {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.conn-num { text-align: end; align-items: flex-end; }
+.conn-row {
+  padding: 8px 12px;
+  border-radius: var(--zephyr-radius-surface);
+  border: 1px solid transparent;
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.conn-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+.conn-main {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.conn-host { color: var(--text-primary); font-weight: 500; }
+.conn-rate { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.conn-rate--down { color: var(--zephyr-color-download); }
+.conn-rate--up { color: var(--zephyr-color-upload); }
+.conn-sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--zephyr-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+:lang(zh) .conn-sub, :lang(ja) .conn-sub, :lang(ko) .conn-sub { font-size: 12px; }
+.conn-rule {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-row--closed { opacity: .6; }
+.conn-row--idle { opacity: .55; }
+.conn-row--closed:hover, .conn-row--idle:hover, .conn-row:focus-visible { opacity: 1; }
 
 /* ============================================
    Connection Detail Panel
@@ -1189,7 +1274,7 @@ html:not(.dark) .form-control:focus {
 .conn-row {
   cursor: pointer;
   content-visibility: auto;
-  contain-intrinsic-size: 0 44px;
+  contain-intrinsic-size: 0 48px;
 }
 
 /* Proxy card wrapper: content-visibility for virtual scroll perf */

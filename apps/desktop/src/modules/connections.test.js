@@ -60,7 +60,7 @@ function hostOf(row) {
 }
 /** @param {HTMLElement} row */
 function dlTotalOf(row) {
-    return row.children[4].firstElementChild?.textContent;
+    return row.querySelector('.conn-rate--down + .conn-sub')?.textContent;
 }
 
 async function refresh() {
@@ -167,6 +167,35 @@ describe('connections page list rendering', () => {
         expect(panel).not.toBeNull();
         expect(panel?.querySelector('h3')?.textContent).toBe('a.example');
         expect(document.querySelectorAll('#conn-detail-panel')).toHaveLength(1);
+    });
+
+    it('opens the detail panel from the keyboard through the delegated listener', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        await refresh();
+        const row = rows()[0];
+        expect(row.getAttribute('role')).toBe('button');
+        expect(row.tabIndex).toBe(0);
+        const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+        row.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true);
+        expect(document.querySelectorAll('#conn-detail-panel')).toHaveLength(1);
+    });
+
+    it('patches idle dimming in place when traffic starts', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 100)] });
+        initConnectionsPage();
+        await flush();
+        const [row] = rows();
+        expect(row.classList.contains('conn-row--idle')).toBe(true);
+
+        vi.setSystemTime(Date.now() + 2000);
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 5000)] });
+        await refresh();
+        expect(rows()[0]).toBe(row);
+        expect(row.classList.contains('conn-row--idle')).toBe(false);
+        expect(row.querySelector('.conn-rate--down')?.textContent).not.toBe('');
     });
 
     it('keeps sorted order and moves rows when the order changes', async () => {
