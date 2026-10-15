@@ -60,11 +60,11 @@
     }
   },
   "transition": {
-    "micro":    { "value": "{time.micro} {easing.ease-in}" },
+    "micro":    { "value": "{time.micro} {easing.ease-out}" },
     "standard": { "value": "{time.standard} {easing.ease-out}" },
-    "fast":     { "value": "{time.fast} {easing.spring}" },
-    "dropdown": { "value": "{time.dropdown} {easing.ease-in}" },
-    "page":     { "value": "{time.page} {easing.smooth}" }
+    "slow":     { "value": "{time.slow} {easing.spring}" },
+    "dropdown": { "value": "{time.dropdown} {easing.ease-out}" },
+    "page":     { "value": "{time.page} {easing.ease-in-out}" }
   },
   "glass": {
     "blur": { "value": "blur(16px)" }

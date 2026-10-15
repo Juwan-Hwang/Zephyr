@@ -276,36 +276,21 @@ input[type="range"],
   /* Brightness control for glass effects */
   --brightness: 0.95;
 
-  /* ── Motion system (desktop) ──
-     Three durations + two curves. Everything interactive uses these:
-       fast 120ms  → press / hover
-       base 200ms  → expand / toggle / switch
-       slow 320ms  → page / large panels
-     The shared token names are remapped here so existing var(--zephyr-time-*)
-     call sites pick up the new scale ("fast" was 0.4s, slower than "standard"). */
-  --motion-fast: 120ms;
-  --motion-base: 200ms;
-  --motion-slow: 320ms;
-  --motion-ease-out: cubic-bezier(.2, .8, .2, 1);
-  --motion-ease-in-out: cubic-bezier(.4, 0, .2, 1);
-  --zephyr-time-micro: var(--motion-fast);
-  --zephyr-time-standard: var(--motion-base);
-  --zephyr-time-fast: var(--motion-slow);
-  --zephyr-time-dropdown: var(--motion-base);
-  --zephyr-time-page: var(--motion-slow);
-  --zephyr-easing-ease-out: var(--motion-ease-out);
-  --zephyr-easing-ease-in: var(--motion-ease-in-out);
-  --zephyr-easing-smooth: var(--motion-ease-in-out);
-  --zephyr-transition-micro: var(--motion-fast) var(--motion-ease-out);
-  --zephyr-transition-standard: var(--motion-base) var(--motion-ease-out);
-  --zephyr-transition-fast: var(--motion-slow) var(--zephyr-easing-spring);
-  --zephyr-transition-dropdown: var(--motion-base) var(--motion-ease-out);
-  --zephyr-transition-page: var(--motion-slow) var(--motion-ease-in-out);
+  /* ── Motion system ──
+     Three durations + two curves, sourced from packages/tokens:
+       fast 120ms  → press / hover            (--zephyr-time-micro)
+       base 200ms  → expand / toggle / switch (--zephyr-time-standard)
+       slow 320ms  → page / large panels      (--zephyr-time-slow) */
+  --motion-fast: var(--zephyr-time-micro);
+  --motion-base: var(--zephyr-time-standard);
+  --motion-slow: var(--zephyr-time-slow);
+  --motion-ease-out: var(--zephyr-easing-ease-out);
+  --motion-ease-in-out: var(--zephyr-easing-ease-in-out);
 
   /* Transition system — reference zephyr tokens */
   --transition-micro: var(--zephyr-transition-micro);
   --transition-standard: var(--zephyr-transition-standard);
-  --transition-fast: var(--zephyr-transition-fast);
+  --transition-slow: var(--zephyr-transition-slow);
 
   /* Glass blur levels */
   --glass-card: var(--zephyr-glass-blur);
@@ -1471,7 +1456,7 @@ button:focus-visible:not(:disabled, [disabled]),
 #modal-container {
   transition-property: opacity, transform;
   transition-duration: var(--zephyr-time-page);
-  transition-timing-function: var(--zephyr-easing-smooth);
+  transition-timing-function: var(--zephyr-easing-ease-in-out);
 }
 
 /* ============================================
