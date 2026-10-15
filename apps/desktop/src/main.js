@@ -74,6 +74,7 @@ import { initDnsRewriteToggle } from './ui/dns.js';
 import { initNodeWheel } from './ui/node-wheel.js';
 import { initHomeStats } from './ui/home-stats.js';
 import { initHeaderFit } from './ui/header-fit.js';
+import { initTablistKeys } from './ui/tablist-keys.js';
 import {
   initTrayEventListeners,
   startUnifiedSync,
@@ -479,6 +480,7 @@ async function initApp() {
   initNodeWheel();
   registerCleanup(initHomeStats());
   registerCleanup(initHeaderFit());
+  registerCleanup(initTablistKeys());
   initShortcutSettings();
 
   // 6b. Initialize reactive bindings (Bus -> store -> DOM)

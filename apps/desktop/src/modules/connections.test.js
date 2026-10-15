@@ -142,6 +142,15 @@ describe('connections page list rendering', () => {
         expect(list().querySelector('#connections-empty')).toBeNull();
     });
 
+    it('exposes every sort control as a toggle before the first sort pass', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        initConnectionsPage();
+        await flush();
+        const controls = [...document.querySelectorAll('#conn-table-header .sortable')];
+        expect(controls).toHaveLength(7);
+        for (const el of controls) expect(el.getAttribute('aria-pressed')).not.toBeNull();
+    });
+
     it('opens the detail panel through the delegated click listener', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
@@ -183,6 +192,22 @@ describe('connections page list rendering', () => {
         expect(document.querySelectorAll('#conn-detail-panel')).toHaveLength(1);
     });
 
+    it('moves focus into the detail dialog and returns it to the row on Escape', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const panel = document.getElementById('conn-detail-panel');
+        expect(panel?.getAttribute('role')).toBe('dialog');
+        expect(panel?.getAttribute('aria-modal')).toBe('true');
+        expect(document.getElementById(panel?.getAttribute('aria-labelledby') || '')?.textContent).toBe('a.example');
+        expect(document.activeElement?.id).toBe('detail-dismiss-btn');
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(document.activeElement).toBe(row);
+    });
+
     it('patches idle dimming in place when traffic starts', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 100)] });
         initConnectionsPage();
@@ -195,7 +220,7 @@ describe('connections page list rendering', () => {
         await refresh();
         expect(rows()[0]).toBe(row);
         expect(row.classList.contains('conn-row--idle')).toBe(false);
-        expect(row.querySelector('.conn-rate--down')?.textContent).not.toBe('');
+        expect(row.querySelector('.conn-rate--down')?.textContent).toBeTruthy();
     });
 
     it('keeps sorted order and moves rows when the order changes', async () => {
