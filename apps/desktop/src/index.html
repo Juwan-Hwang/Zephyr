@@ -199,11 +199,11 @@
                         <!-- Legend -->
                         <div class="flex items-center gap-4">
                             <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-purple-500/80"></div>
+                                <div class="w-2 h-2 rounded-sm bg-download/80"></div>
                                 <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="downstream">Down</span>
                             </div>
                             <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-blue-500/80"></div>
+                                <div class="w-2 h-2 rounded-sm bg-upload/80"></div>
                                 <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="upstream">Up</span>
                             </div>
                         </div>
@@ -491,14 +491,13 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <div data-theme="purple" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-purple-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div data-theme="blue" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div data-theme="green" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div data-theme="orange" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div data-theme="pink" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div class="relative group">
                                         <input type="color" id="custom-theme-color" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
-                                        <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 via-blue-500 to-pink-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
+                                        <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 via-emerald-500 to-amber-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
                                     </div>
                                 </div>
                             </div>
@@ -1474,7 +1473,7 @@
                 <!-- Resizer Handle -->
                 <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--bg-tertiary);">
                     <div class="absolute inset-y-0 -start-1 -end-1"></div>
-                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-primary, #6366f1);"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-primary, #007AFF);"></div>
                 </div>
                 <!-- Right Sidebar - Output Panel -->
                 <div id="fullscreen-editor-sidebar" class="flex flex-col min-w-[200px] max-w-[600px]" style="flex-basis: 350px; border-left: 1px solid var(--zephyr-border-primary); background: var(--zephyr-bg-secondary);">

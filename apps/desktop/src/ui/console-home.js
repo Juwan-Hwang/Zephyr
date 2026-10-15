@@ -30,6 +30,7 @@ import { bind } from './bind.js';
 import { subscribeToEvents, getExtLogEvents } from '../modules/backend-events.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { createLogger } from '../utils/logger.js';
+import { hexToRgb } from '../utils/color.js';
 import { showNotification } from './notifications.js';
 import { t, applyTranslations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -85,6 +86,24 @@ function fmtBytes(bytes) {
 /** @param {string} name */
 function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/**
+ * Resolve the fixed traffic colours (download = blue, upload = coral) as
+ * "r,g,b" strings for canvas drawing. They follow light/dark mode via the
+ * design tokens but never the theme accent.
+ * @returns {{ down: string, up: string }}
+ */
+function trafficRgb() {
+    /** @param {string} name @param {string} fallback */
+    const toRgb = (name, fallback) => {
+        const c = hexToRgb(cssVar(name)) || hexToRgb(fallback);
+        return c ? `${c.r},${c.g},${c.b}` : '0,0,0';
+    };
+    return {
+        down: toRgb('--zephyr-color-download', '#0A84FF'),
+        up: toRgb('--zephyr-color-upload', '#FF6B6B'),
+    };
 }
 
 /** @param {number} v */
@@ -167,9 +186,10 @@ function setupCanvas(canvas) {
  * @param {'up' | 'down'} key
  * @param {number} max
  * @param {string} rgb
- * @param {string} fillTop
+ * @param {number} fillAlpha - top-of-gradient fill opacity (0 = no fill)
+ * @param {number} lineWidth
  */
-function drawSeries(ctx, w, h, data, key, max, rgb, fillTop) {
+function drawSeries(ctx, w, h, data, key, max, rgb, fillAlpha, lineWidth) {
     const n = data.length;
     if (n < 2) return;
     const step = w / (n - 1);
@@ -195,20 +215,22 @@ function drawSeries(ctx, w, h, data, key, max, rgb, fillTop) {
     // Fill path: data curve → bottom-right → bottom-left → close.
     // The first data point sits at x=0, so closePath draws a vertical
     // line from (0, h) back to it — correctly anchoring the fill area.
-    buildPath('lineTo');
-    ctx.lineTo(w, h);
-    ctx.lineTo(0, h);
-    ctx.closePath();
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, fillTop);
-    g.addColorStop(1, `rgba(${rgb},0)`);
-    ctx.fillStyle = g;
-    ctx.fill();
+    if (fillAlpha > 0) {
+        buildPath('lineTo');
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, `rgba(${rgb},${fillAlpha})`);
+        g.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = g;
+        ctx.fill();
+    }
 
     // Stroke path: data curve only.
     buildPath('moveTo');
     ctx.strokeStyle = `rgba(${rgb},0.9)`;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = lineWidth;
     ctx.stroke();
 }
 
@@ -224,9 +246,11 @@ function drawChart(canvas) {
         const y = (h / 4) * i;
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     }
-    // Fixed palette — does NOT follow theme accent (speed colors must be stable)
-    drawSeries(ctx, w, h, trafficHistory, 'up', max, '56,189,248', 'rgba(56,189,248,0.14)');
-    drawSeries(ctx, w, h, trafficHistory, 'down', max, '175,82,222', 'rgba(175,82,222,0.20)');
+    // Fixed palette — does NOT follow theme accent (speed colors must be stable):
+    // download = blue with gradient fill, upload = coral with a faint fill.
+    const rgb = trafficRgb();
+    drawSeries(ctx, w, h, trafficHistory, 'down', max, rgb.down, 0.22, 1.8);
+    drawSeries(ctx, w, h, trafficHistory, 'up', max, rgb.up, 0.06, 1.4);
 }
 
 /** @param {HTMLElement | null} canvas @param {'up' | 'down'} key @param {string} rgb */
@@ -1208,7 +1232,7 @@ const TEMPLATE = `
         <div class="glass-card dz-kpi">
             <div class="dz-kpi-top">
                 <span class="dz-kpi-label" data-i18n="consoleDownSpeed">Download Speed</span>
-                <span class="dz-kpi-icon" style="background:rgba(175,82,222,.12);color:#af52de;">
+                <span class="dz-kpi-icon" style="background:color-mix(in srgb, var(--zephyr-color-download) 12%, transparent);color:var(--zephyr-color-download);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M4 21h16"/></svg>
                 </span>
             </div>
@@ -1219,7 +1243,7 @@ const TEMPLATE = `
         <div class="glass-card dz-kpi">
             <div class="dz-kpi-top">
                 <span class="dz-kpi-label" data-i18n="consoleUpSpeed">Upload Speed</span>
-                <span class="dz-kpi-icon" style="background:rgba(56,189,248,.12);color:#38bdf8;">
+                <span class="dz-kpi-icon" style="background:color-mix(in srgb, var(--zephyr-color-upload) 12%, transparent);color:var(--zephyr-color-upload);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9m0 0 5 5m-5-5-5 5"/><path d="M4 3h16"/></svg>
                 </span>
             </div>
@@ -1250,7 +1274,7 @@ const TEMPLATE = `
         <div class="glass-card dz-kpi">
             <div class="dz-kpi-top">
                 <span class="dz-kpi-label" data-i18n="consoleNodeLatency">Node Latency</span>
-                <span class="dz-kpi-icon" style="background:rgba(175,82,222,.12);color:#af52de;">
+                <span class="dz-kpi-icon" style="background:color-mix(in srgb, var(--color-accent) 12%, transparent);color:var(--color-accent);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
                 </span>
             </div>
@@ -1265,8 +1289,8 @@ const TEMPLATE = `
             <div class="dz-card-head">
                 <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleRealtimeTraffic">Real-time Traffic</span></div>
                 <div class="dz-legend">
-                    <div class="dz-legend-item"><span class="dz-legend-swatch" style="background:rgba(175,82,222,.8)"></span><span data-i18n="consoleDownload">Download</span></div>
-                    <div class="dz-legend-item"><span class="dz-legend-swatch" style="background:rgba(56,189,248,.8)"></span><span data-i18n="consoleUpload">Upload</span></div>
+                    <div class="dz-legend-item"><span class="dz-legend-swatch" style="background:color-mix(in srgb, var(--zephyr-color-download) 80%, transparent)"></span><span data-i18n="consoleDownload">Download</span></div>
+                    <div class="dz-legend-item"><span class="dz-legend-swatch" style="background:color-mix(in srgb, var(--zephyr-color-upload) 80%, transparent)"></span><span data-i18n="consoleUpload">Upload</span></div>
                 </div>
             </div>
             <div class="dz-chart-wrap"><canvas id="dz-chart"></canvas></div>
@@ -1648,8 +1672,9 @@ function _buildConsoleHome(container) {
 
         renderNumbers();
         drawChart($('dz-chart'));
-        drawSpark($('dz-spark-down'), 'down', '175,82,222');
-        drawSpark($('dz-spark-up'), 'up', '56,189,248');
+        const rgb = trafficRgb();
+        drawSpark($('dz-spark-down'), 'down', rgb.down);
+        drawSpark($('dz-spark-up'), 'up', rgb.up);
     }));
 
     // ── Log stream ──

@@ -485,7 +485,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     const globalCheck = document.createElement('input');
     globalCheck.type = 'checkbox';
     globalCheck.checked = currentGlobal;
-    globalCheck.className = 'w-4 h-4 rounded accent-indigo-500';
+    globalCheck.className = 'w-4 h-4 rounded accent-[var(--accent-primary)]';
     const globalLabel = document.createElement('span');
     globalLabel.className = 'text-sm text-[var(--text-secondary)]';
     globalLabel.textContent = t('overrideScopeGlobal') ?? 'Global (applies to all subscriptions)';
@@ -527,7 +527,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
             cb.type = 'checkbox';
             cb.value = cfg.name || cfg;
             cb.checked = profileIds.includes(cb.value);
-            cb.className = 'w-4 h-4 rounded accent-indigo-500 profile-scope-cb';
+            cb.className = 'w-4 h-4 rounded accent-[var(--accent-primary)] profile-scope-cb';
             cb.dataset.profileName = cb.value;
             const label = document.createElement('span');
             label.className = 'text-xs text-[var(--text-secondary)] truncate';
@@ -1030,7 +1030,7 @@ function buildOverrideCard(item) {
 
     // ── Type badge color ───────────────────────────────────────
     const isJs = item.ext === 'js';
-    const typeColor = isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+    const typeColor = isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-teal-500/20 text-teal-400';
     const typeLabel = isJs ? 'JS' : 'Prism';
 
     // ── Scope badge ───────────────────────────────────────────
@@ -1422,7 +1422,7 @@ function openFullscreenEditor() {
     const isJs = activeOverrideExt === 'js';
     if (typeBadge) {
         typeBadge.textContent = isJs ? 'JS' : 'Prism';
-        typeBadge.className = `text-2xs px-2 py-0.5 rounded-sm ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`;
+        typeBadge.className = `text-2xs px-2 py-0.5 rounded-sm ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-teal-500/20 text-teal-400'}`;
     }
 
     // Create fullscreen editor
@@ -1679,7 +1679,7 @@ function copyFullscreenOutput() {
         if (copyBtn) {
             const originalText = copyBtn.textContent;
             copyBtn.textContent = t('overrideCopied') || 'Copied';
-            copyBtn.style.color = 'var(--accent-primary, #6366f1)';
+            copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             setTimeout(() => {
                 copyBtn.textContent = originalText;
                 copyBtn.style.color = '';
@@ -1698,7 +1698,7 @@ function copyFullscreenOutput() {
             if (copyBtn) {
                 const originalText = copyBtn.textContent;
                 copyBtn.textContent = t('overrideCopied') || 'Copied';
-                copyBtn.style.color = 'var(--accent-primary, #6366f1)';
+                copyBtn.style.color = 'var(--accent-primary, #007AFF)';
                 setTimeout(() => {
                     copyBtn.textContent = originalText;
                     copyBtn.style.color = '';
