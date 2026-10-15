@@ -37,7 +37,7 @@ import { translations, currentLang } from '../i18n.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
-import { renderLogLineHtml } from './log-highlight.js';
+import { renderLogLineHtml, parseCoreLogLine, renderStructuredLogHtml } from './log-highlight.js';
 import { getExtLogEvents, subscribeToEvents, unsubscribeFromEvents } from '../modules/backend-events.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ const DEBOUNCE_MS     = 150;    // Search input debounce (ms)
 const OVERSCAN_ROWS   = 40;     // Virtual scroll overscan buffer
 const SCROLL_QUANTUM  = 20;     // Scroll quantization bin size (rows)
 const MAX_MOUNTED     = 300;    // Hard cap on simultaneously mounted DOM nodes
-const ROW_HEIGHT_EST  = 18;     // Estimated line height in px (text-2xs + leading-relaxed)
+const ROW_HEIGHT_EST  = 22;     // Estimated row height in px (12px mono + padding)
 const STICKY_THRESHOLD = 40;    // Pixels from bottom to consider "at bottom"
 
 /** @type {Readonly<Record<string, string>>} Level → color mapping (dark mode) */
@@ -315,7 +315,7 @@ function buildPageHTML() {
             </div>
 
             <!-- Virtual scroll container -->
-            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
+            <div id="log-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] px-3 py-2 font-mono text-xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
                 <div id="log-spacer-top" style="height:0"></div>
                 <div id="log-lines-container"></div>
                 <div id="log-spacer-bottom" style="height:0"></div>
@@ -342,7 +342,7 @@ function buildPageHTML() {
                     <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
                 </div>
             </div>
-            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] p-4 font-mono text-2xs leading-relaxed tabular-nums custom-scrollbar">
+            <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] px-3 py-2 font-mono text-xs leading-relaxed tabular-nums custom-scrollbar">
                 <div id="log-ext-empty" class="flex flex-col items-center justify-center h-full text-[var(--text-tertiary)]">
                     <svg class="w-8 h-8 mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span data-i18n="ruleLibraryLogEmpty">${t('ruleLibraryLogEmpty')}</span>
@@ -604,13 +604,26 @@ function createVirtualScrollInstance() {
             const line = _allLines[lineIdx];
             if (line === undefined) return;
 
+            const parsed = parseCoreLogLine(line);
+            if (parsed) {
+                // Structured row: local time / level badge / message; warn+error rows get a tint.
+                const row = document.createElement('div');
+                row.className = 'log-line log-row';
+                row.dataset.lineIdx = String(idx);
+                row.dataset.level = parsed.level;
+                // eslint-disable-next-line no-unsanitized/property -- every text segment escaped via escapeHtml() in renderStructuredLogHtml()
+                row.innerHTML = renderStructuredLogHtml(parsed, _searchQuery); // nosemgrep: js-innerhtml-assignment
+                fragment.appendChild(row);
+                return;
+            }
+
             const isDark = document.documentElement.classList.contains('dark');
             const levelColors = isDark ? LEVEL_COLORS_DARK : LEVEL_COLORS_LIGHT;
             const level = parseLogLevel(line);
             const color = levelColors[level] || (isDark ? '#a1a1aa' : '#71717a');
 
             const pre = document.createElement('pre');
-            pre.className = 'log-line whitespace-pre-wrap break-all min-h-[1.4em]';
+            pre.className = 'log-line log-raw whitespace-pre-wrap min-h-[1.4em]';
             pre.dataset.lineIdx = String(idx);
             pre.style.color = color;
 
@@ -877,7 +890,7 @@ function createExtLogRow(entry) {
         : entry.type;
 
     const msg = document.createElement('span');
-    msg.className = 'text-[var(--text-secondary)] break-all';
+    msg.className = 'text-[var(--text-secondary)] [overflow-wrap:anywhere] min-w-0';
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
     msg.innerHTML = formatExtLogMessage(entry); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 

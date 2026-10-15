@@ -146,3 +146,73 @@ export function renderLogLineHtml(line, query, levelColors, fallbackColor) {
     if (openLevel) html += '</span>';
     return html;
 }
+
+// ── Structured core log lines ─────────────────────────────────────────────
+
+/** mihomo logfmt line: time="…" level=info msg="…" (msg may contain escaped quotes). */
+const CORE_LINE_RE = /^time="([^"]*)"\s+level=(\w+)\s+msg="((?:[^"\\]|\\.)*)"\s*$/;
+
+/**
+ * Split a mihomo core log line into its parts.
+ * @param {string} line
+ * @returns {{ time: string, level: 'debug'|'info'|'warn'|'error'|'fatal', msg: string } | null}
+ *   null when the line is not in the logfmt shape (callers fall back to raw rendering)
+ */
+export function parseCoreLogLine(line) {
+    if (typeof line !== 'string') return null;
+    const m = CORE_LINE_RE.exec(line);
+    if (!m) return null;
+    const raw = m[2].toLowerCase();
+    const level = raw === 'warning' ? 'warn' : raw;
+    if (!['debug', 'info', 'warn', 'error', 'fatal'].includes(level)) return null;
+    const msg = m[3].replace(/\\(["\\])/g, '$1');
+    return { time: m[1], level: /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (level), msg };
+}
+
+/** @type {Intl.DateTimeFormat | null} */
+let _timeFmt = null;
+
+/**
+ * Format an RFC 3339 timestamp as local HH:mm:ss; returns the input when it cannot be parsed.
+ * @param {string} iso
+ * @returns {string}
+ */
+export function formatLogTime(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    if (!_timeFmt) {
+        _timeFmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    }
+    return _timeFmt.format(d);
+}
+
+/**
+ * Escape `text` and wrap the search matches in <mark>.
+ * @param {string} text
+ * @param {string} query
+ * @returns {string}
+ */
+export function highlightText(text, query) {
+    const marks = findSearchRanges(text, query);
+    if (marks.length === 0) return escapeHtml(text);
+    let html = '';
+    let pos = 0;
+    for (const [s, e] of marks) {
+        html += escapeHtml(text.slice(pos, s)) + SEARCH_MARK_OPEN + escapeHtml(text.slice(s, e)) + SEARCH_MARK_CLOSE;
+        pos = e;
+    }
+    return html + escapeHtml(text.slice(pos));
+}
+
+/**
+ * Render a parsed core log line as time / level badge / message (same structure as app logs).
+ * @param {{ time: string, level: string, msg: string }} parsed
+ * @param {string} query
+ * @returns {string} HTML-safe string
+ */
+export function renderStructuredLogHtml(parsed, query) {
+    const local = formatLogTime(parsed.time);
+    return `<span class="log-time" title="${escapeHtml(parsed.time)}">${highlightText(local, query)}</span>`
+        + `<span class="log-badge" data-level="${escapeHtml(parsed.level)}">${escapeHtml(parsed.level.toUpperCase())}</span>`
+        + `<span class="log-msg">${highlightText(parsed.msg, query)}</span>`;
+}

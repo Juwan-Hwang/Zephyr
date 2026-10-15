@@ -1543,6 +1543,45 @@ html:not(.dark) .log-tab-btn.active {
 .log-line:hover {
     background: var(--zephyr-bg-subtle);
 }
+/* Structured core log row: local time / level badge / message */
+.log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    min-height: 1.4em;
+}
+.log-raw { overflow-wrap: anywhere; padding: 3px 6px; }
+.log-time {
+    flex-shrink: 0;
+    color: var(--zephyr-text-muted);
+    user-select: none;
+}
+.log-badge {
+    flex-shrink: 0;
+    min-width: 46px;
+    text-align: center;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    color: var(--zephyr-text-secondary);
+    background: var(--zephyr-bg-input);
+}
+.log-badge[data-level="info"] { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 14%, transparent); }
+.log-badge[data-level="warn"] { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 16%, transparent); }
+.log-badge[data-level="error"], .log-badge[data-level="fatal"] { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 16%, transparent); }
+.log-msg {
+    min-width: 0;
+    color: var(--zephyr-text-primary);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.log-row[data-level="debug"] .log-msg { color: var(--zephyr-text-muted); }
+.log-row[data-level="warn"] { background: color-mix(in srgb, var(--zephyr-color-warning) 7%, transparent); }
+.log-row[data-level="error"], .log-row[data-level="fatal"] { background: color-mix(in srgb, var(--zephyr-color-danger) 8%, transparent); }
 
 /* ============================================
    Logs Page — Light Mode Overrides

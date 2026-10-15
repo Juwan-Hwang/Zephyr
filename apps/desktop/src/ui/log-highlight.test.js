@@ -112,3 +112,27 @@ describe('renderLogLineHtml', () => {
         expect(html).toContain(`&lt;${mark('x')}&gt;`);
     });
 });
+
+describe('structured core log lines', () => {
+    it('parses mihomo logfmt into time / level / msg', async () => {
+        const { parseCoreLogLine } = await import('./log-highlight.js');
+        const p = parseCoreLogLine('time="2026-10-15T16:45:13.936Z" level=warning msg="[DNS] resolve \\"a.com\\" failed"');
+        expect(p).toEqual({ time: '2026-10-15T16:45:13.936Z', level: 'warn', msg: '[DNS] resolve "a.com" failed' });
+        expect(parseCoreLogLine('plain text line')).toBeNull();
+        expect(parseCoreLogLine('time="x" level=trace msg="y"')).toBeNull();
+    });
+
+    it('renders an escaped badge row and highlights only literal message text', async () => {
+        const { renderStructuredLogHtml } = await import('./log-highlight.js');
+        const html = renderStructuredLogHtml({ time: 'not-a-date', level: 'error', msg: '<b>dial</b> failed' }, 'dial');
+        expect(html).toContain('<span class="log-badge" data-level="error">ERROR</span>');
+        expect(html).toContain('&lt;b&gt;<mark');
+        expect(html).toContain('>dial</mark>&lt;/b&gt; failed');
+        expect(html).toContain('<span class="log-time" title="not-a-date">not-a-date</span>');
+    });
+
+    it('formats valid timestamps as local HH:mm:ss', async () => {
+        const { formatLogTime } = await import('./log-highlight.js');
+        expect(formatLogTime('2026-10-15T16:45:13.936Z')).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    });
+});
