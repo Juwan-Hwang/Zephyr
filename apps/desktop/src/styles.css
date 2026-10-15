@@ -512,35 +512,37 @@ html.dark .glass-card:is(.cursor-pointer, [role="button"], [role="option"], butt
   filter: drop-shadow(0 0 8px var(--color-accent-glow));
 }
 
-/* Sidebar — light mode: subtle dark tint so it reads as a card */
+/* Sidebar — light mode: soft off-white panel, one step below the cards */
 html:not(.dark) #sidebar-nav {
-  background: rgba(0, 0, 0, 0.015);
-  border-color: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(15, 30, 60, 0.06);
 }
 
 /* Light theme: low-saturation blue/cyan mist behind the glass, so cards read as
    glass floating on colour instead of white on white. Accent tint follows the
    chosen theme colour; the cyan layer is fixed. */
 html:not(.dark) #app-main-container {
-  background-color: rgb(248 250 252 / var(--app-opacity, 0.4));
+  background-color: rgb(232 233 236 / var(--app-opacity, 0.4));
   background-image:
     radial-gradient(55% 50% at 10% 6%, rgba(var(--accent-rgb), 0.09), transparent 72%),
     radial-gradient(48% 46% at 94% 18%, rgba(6, 182, 212, 0.07), transparent 72%),
     radial-gradient(70% 55% at 62% 104%, rgba(var(--accent-rgb), 0.07), transparent 70%);
 }
 
+/* Cards sit ~1.16:1 above the page, matching the dark theme's depth, and stay
+   off-white (never pure white) so large areas don't glare. */
 html:not(.dark) .glass-card {
-  background: rgba(255, 255, 255, 0.45);
-  border-color: rgba(255, 255, 255, 0.7);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 1px 2px rgba(30, 50, 80, 0.04), 0 8px 24px -10px rgba(30, 64, 110, 0.14);
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(15, 30, 60, 0.06);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.05), 0 8px 24px -12px rgba(30, 64, 110, 0.16);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 html:not(.dark) .glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
-  background: rgba(255, 255, 255, 0.62);
-  border-color: rgba(255, 255, 255, 0.85);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 1px 2px rgba(30, 50, 80, 0.05), 0 14px 28px -12px rgba(30, 64, 110, 0.18);
+  background: #fff;
+  border-color: rgba(15, 30, 60, 0.08);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.06), 0 14px 28px -12px rgba(30, 64, 110, 0.2);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -1293,7 +1295,7 @@ html:not(.dark) .form-control:focus {
 .conn-row {
   cursor: pointer;
   content-visibility: auto;
-  contain-intrinsic-size: 0 48px;
+  contain-intrinsic-size: 0 54px; /* two-line row ≈ 53px */
 }
 
 /* Proxy card wrapper: content-visibility for virtual scroll perf */
@@ -1750,6 +1752,8 @@ html.dark #fullscreen-editor-output {
 /* Keep footer text clear of the sparkline drawn in the bottom corner */
 .dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
 .dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The footer is a flex row: ellipsize its text pieces, not just the row. */
+.dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
@@ -1966,10 +1970,20 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
      always lands on the sidebar's bottom edge (860×620, 720×540 and wide alike) */
   flex: 1 1 auto;
   min-height: 144px;
+  display: flex;
+  flex-direction: column;
+}
+/* chart, node pill and speed read-out; the figures row sits under it as the card's footer */
+.home-hero-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 56px 24px 20px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
 }
 .home-hero-chart {
   position: absolute;
@@ -1988,6 +2002,9 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   align-items: center;
   justify-content: center;
   gap: clamp(32px, 9vw, 112px);
+  /* optical centring: lift the read-out so its ink sits 46% down the band between the
+     node pill and the footer (the eye reads the true middle as low); ≈ 4% of that band */
+  top: calc(-4% - 4px);
 }
 .home-speed {
   display: flex;
@@ -2018,8 +2035,9 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   border-radius: 3px;
 }
 .home-speed-value {
-  /* scales with the window height: 45px at 540, 52px at 620, 67px at 800 */
-  font-size: clamp(44px, 8.4vh, 72px);
+  /* scales with the window height: 42px at 540, 48px at 620, 62px at 800 — sized so the
+     page's visual weight centres on the middle of the window instead of the top */
+  font-size: clamp(40px, 7.7vh, 66px);
   font-weight: 200;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -2055,6 +2073,16 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
 }
 [data-page].page-enter {
   animation: page-enter 180ms var(--motion-ease-out) both;
+}
+/* A transformed page becomes the containing block of its position:fixed
+   children, so while a fixed overlay inside the page is open (the plugin
+   panel) the page only fades; the overlay keeps covering the window. */
+@keyframes page-enter-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-page].page-enter:has(.fixed:not(.hidden)) {
+  animation-name: page-enter-fade;
 }
 
 /* Sidebar: one highlight that slides between items */
@@ -2122,21 +2150,32 @@ html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-in
   min-width: 0;
 }
 
-/* Home: live figures strip — three equal cells split by hairlines */
+/* Home: live figures — the hero card's footer row, three equal cells split by hairlines */
 .home-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 12px 0;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--zephyr-border-subtle);
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
+  background: rgba(255, 255, 255, .025);
 }
+html:not(.dark) .home-stats { background: rgba(15, 30, 60, .018); }
 .home-stat {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 2px;
   min-width: 0;
   padding: 0 16px;
 }
 .home-stat + .home-stat { border-inline-start: 1px solid var(--zephyr-border-subtle); }
 .home-stat-label {
+  max-width: 100%;
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -2145,7 +2184,7 @@ html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-in
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.home-stat-value { display: flex; align-items: baseline; gap: 4px; min-width: 0; height: 28px; line-height: 28px; color: var(--text-primary); }
+.home-stat-value { display: flex; align-items: baseline; justify-content: center; gap: 4px; min-width: 0; max-width: 100%; height: 28px; line-height: 28px; color: var(--text-primary); }
 .home-stat-value b {
   font-size: 22px;
   font-weight: 300;
@@ -2157,6 +2196,7 @@ html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-in
 .home-stat-value small { font-size: 11px; line-height: 1; font-weight: 600; color: var(--text-muted); }
 .home-stat-foot {
   display: block;
+  max-width: 100%;
   height: 16px;
   font-size: 12px;
   line-height: 16px;
@@ -2174,7 +2214,7 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
   [data-page="home"] { gap: 12px; }
   .home-stat-foot { display: none; }
   .home-stats { padding: 8px 0; }
-  .home-hero { padding-top: 52px; padding-bottom: 16px; }
+  .home-hero-body { padding-top: 52px; padding-bottom: 16px; }
 }
 
 /* While the quick-switch wheel is open it owns the hero: the read-out steps
@@ -2268,6 +2308,9 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
   box-shadow: var(--zephyr-shadow-sm);
 }
 html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+/* Full-width tabs inside dialogs get a roomier 40px track */
+.seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
+.seg-tabs-lg .seg-tab { font-size: 13px; }
 
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */
@@ -2383,8 +2426,7 @@ button[data-home-mode] {
    while the cell itself keeps its right-to-left alignment */
 [dir="rtl"] .home-speed > .flex,
 [dir="rtl"] .home-stat-value { direction: ltr; }
-[dir="rtl"] .home-stat-value { justify-content: flex-end; }
-[dir="rtl"] .home-stat-foot { direction: ltr; text-align: right; }
+[dir="rtl"] .home-stat-foot { direction: ltr; text-align: center; }
 [dir="rtl"] :is(#conn-stats-bar span[id], .conn-num > .conn-main, .conn-num > .conn-sub) { direction: ltr; unicode-bidi: isolate; }
 
 /* Wide windows: settings rows stop at a readable measure (label and control
