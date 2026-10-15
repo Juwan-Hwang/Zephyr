@@ -1,0 +1,151 @@
+# ============================================================
+# Zephyr CI
+# Fast feedback for pull requests and pushes to main:
+# lint, typecheck and tests in the debug profile.
+# All GitHub Actions are pinned to immutable commit SHAs
+# (same pins as security.yml / release.yml).
+# ============================================================
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # ============================================================
+  # 前端：i18n 检查 + ESLint + typecheck + vitest
+  # ============================================================
+  frontend:
+    name: Frontend (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        # --ignore-scripts + explicit rebuild of the allow-listed native deps,
+        # matching security.yml.
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm rebuild esbuild @parcel/watcher
+
+      - name: Check i18n completeness
+        run: pnpm check:i18n
+
+      - name: Lint JavaScript (ESLint)
+        run: pnpm lint
+
+      - name: TypeScript/JSDoc typecheck
+        run: pnpm typecheck
+
+      - name: Run frontend tests
+        run: pnpm test
+
+  # ============================================================
+  # Rust (Linux)：fmt + clippy + debug 测试
+  # ============================================================
+  rust-linux:
+    name: Rust (ubuntu, fmt, clippy, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          # Keep in sync with rust-toolchain.toml.
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Commands run from the repo root, so cache the workspace-root target dir.
+          workspaces: . -> target
+
+      - name: Install system dependencies
+        run: |
+          success=0
+          for i in 1 2 3; do
+            if sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils; then
+              success=1
+              break
+            elif [ "$i" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Failed to install system dependencies after 3 attempts"
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        # Lint rules live in [workspace.lints] in the root Cargo.toml.
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run Rust tests (debug)
+        # insta defaults to INSTA_UPDATE=no on CI, so missing or outdated
+        # snapshots fail the run.
+        run: cargo test --workspace --locked
+
+  # ============================================================
+  # Rust (Windows / macOS)：debug 测试
+  # 覆盖 #[cfg(target_os = ...)] 平台专属代码的编译与测试。
+  # ============================================================
+  rust-platform:
+    name: Rust (${{ matrix.os }}, test)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          # Keep in sync with rust-toolchain.toml.
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: . -> target
+
+      - name: Run Rust tests (debug)
+        if: runner.os != 'Windows'
+        run: cargo test --workspace --locked
+
+      # Windows: the desktop crate's lib test binary links Tauri/WebView2 but
+      # does not get the app manifest (Common Controls v6) that tauri-build
+      # embeds only into the app binary, so it aborts at load time with
+      # STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139) before any test runs.
+      # Until build.rs embeds the manifest for test targets too, run every
+      # other workspace member's tests and only compile the desktop crate's
+      # tests (which still catches Windows-only compile errors).
+      - name: Run Rust tests (debug, excluding desktop crate)
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --exclude Zephyr --locked
+      - name: Build desktop crate tests without running (debug)
+        if: runner.os == 'Windows'
+        run: cargo test -p Zephyr --no-run --locked
