@@ -86,7 +86,13 @@ export function parseSubExpire(subInfo) {
     if (!subInfo) return 0;
     for (const part of String(subInfo).split(';')) {
         const s = part.trim();
-        if (s.startsWith('expire=')) return Number.parseInt(s.slice(7), 10) || 0;
+        if (s.startsWith('expire=')) {
+            const v = s.slice(7).trim();
+            if (!/^\d+$/.test(v)) return 0;
+            const n = Number(v);
+            // Reject values no Date can represent (8.64e12 s is far past any real expiry).
+            return Number.isSafeInteger(n) && n > 0 && n <= 8640000000000 ? n : 0;
+        }
     }
     return 0;
 }
@@ -198,18 +204,18 @@ async function showEditPanel(configInfo) {
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label for="edit-name" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
+                    <label for="edit-name" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.rename || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="form-control form-control-md">
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label for="edit-url" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <label for="edit-url" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
                     <div class="input-paste-wrapper">
                         <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
                         ${renderPasteButtonHtml('edit-url-paste-btn', t.paste || 'Paste')}
                     </div>
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
+                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
                     <div id="edit-ua-wrap" class="relative">
                         <button id="edit-ua-trigger" type="button" class="select-common w-full flex items-center justify-between text-xs py-1.5">
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
@@ -229,7 +235,7 @@ async function showEditPanel(configInfo) {
             <!-- Auto-update dropdown in bottom right -->
             <div class="flex items-center justify-between pt-2">
                 <div class="flex items-center gap-2">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
+                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
                     <div id="edit-auto-update-wrap" class="relative">
                         <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
@@ -1411,7 +1417,7 @@ export function initSubscriptionSettings({
                     const textRow = document.createElement('div');
                     const labelId = generateDomId('sub-usage-label');
                     textRow.id = labelId;
-                    textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
+                    textRow.className = 'flex justify-between gap-3 text-xs font-medium tabular-nums text-[var(--text-muted)] mb-1.5 px-0.5';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
                     textRow.innerHTML = '<span>' + formatFileSize(used) + ' ' + (t?.usedSpace || 'used') + '</span><span>' + formatFileSize(total) + ' ' + (t?.totalSpace || 'total') + '</span>'; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
@@ -1467,7 +1473,9 @@ export function initSubscriptionSettings({
                         metaEl.appendChild(timeEl);
                     }
                     if (hasExpiry) {
-                        const daysLeft = Math.floor((expireTs - Date.now() / 1000) / 86400);
+                        const secsLeft = expireTs - Date.now() / 1000;
+                        // Round up: a subscription with 5 hours left still has "1 day", not "Expired".
+                        const daysLeft = Math.ceil(secsLeft / 86400);
                         if (hasTime) {
                             const sep = document.createElement('span');
                             sep.setAttribute('aria-hidden', 'true');
@@ -1476,7 +1484,7 @@ export function initSubscriptionSettings({
                         }
                         const expEl = document.createElement('span');
                         expEl.className = 'sub-expiry';
-                        if (daysLeft <= 0) {
+                        if (secsLeft <= 0) {
                             expEl.textContent = t3.subExpired || 'Expired';
                             expEl.dataset.tone = 'danger';
                         } else {
