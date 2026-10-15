@@ -70,7 +70,7 @@
         <!-- Main Area -->
         <div class="flex-1 flex flex-col min-w-0 relative z-10">
             <!-- Title Bar -->
-            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-4 select-none cursor-grab active:cursor-grabbing">
+            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-8 select-none cursor-grab active:cursor-grabbing">
                 <div class="flex items-center gap-2 pointer-events-none">
                     <img src="app-icon.png" id="app-title-icon" alt="" aria-hidden="true" class="w-5 h-5 opacity-90 filter drop-shadow-[var(--zephyr-shadow-glow)] transition-all duration-[var(--zephyr-time-standard)]">
                     <span class="text-xs font-semibold text-[var(--text-secondary)] tracking-wide">Zephyr</span>
@@ -86,7 +86,7 @@
             </div>
 
             <!-- Dashboard Page -->
-            <div data-page="home" class="flex-1 flex flex-col p-8 gap-4 overflow-y-auto custom-scrollbar relative">
+            <div data-page="home" class="flex-1 flex flex-col px-8 pt-8 gap-4 overflow-y-auto custom-scrollbar relative">
 
                 <!-- Hero: live traffic area chart behind the speed read-out -->
                 <section id="home-hero" class="home-hero glass-card relative z-20">
@@ -216,7 +216,7 @@
             <div data-page="console" class="flex-1 hidden flex flex-col overflow-hidden relative min-w-0"></div>
 
             <!-- Subscriptions Page -->
-            <div data-page="subscriptions" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="subscriptions" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div>
@@ -238,7 +238,7 @@
                     </div>
                 </header>
 
-                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pe-2 pt-2 -mt-2 -mb-8 custom-scrollbar relative z-10">
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pt-2 -mt-2 custom-scrollbar relative z-10">
                     <!-- Subscriptions will be rendered here -->
                 </div>
 
@@ -321,14 +321,14 @@
             </div>
 
             <!-- Proxies Page -->
-            <div data-page="proxies" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="proxies" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-4">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
                         <!-- Group Selector Dropdown -->
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
-                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
                                 <svg class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
@@ -358,19 +358,19 @@
                 <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
                 <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 relative z-10 shrink-0" data-flex-class="flex"></div>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
-                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-4 overflow-y-auto px-4 pt-4 pb-0 -mx-4 -mt-4 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
                 </div>
             </div>
 
             <!-- Connections Page (HTML injected by connections.js module) -->
-            <div data-page="connections" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="connections" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
 
             <!-- Logs Page (HTML injected by logs.js module) -->
-            <div data-page="logs" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="logs" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
 
             <!-- Rule Library Page -->
-            <div data-page="rule-library" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="rule-library" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="ruleLibraryTitle">Rule Library</h2>
@@ -382,13 +382,13 @@
                         <button type="button" id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryImport">Import Rules</button>
                     </div>
                 </header>
-                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pe-2 pt-2 -mt-2 -mb-8 space-y-4 relative z-10">
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 space-y-4 relative z-10">
                     <!-- Rendered by rule-library.js -->
                 </div>
             </div>
 
             <!-- Settings Page -->
-            <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
+            <div data-page="settings" class="flex-1 hidden flex flex-col px-8 pt-8 overflow-y-auto custom-scrollbar relative">
 
                 <h2 class="text-2xl font-light text-[var(--text-primary)] mb-8 relative z-10" data-i18n="settingsTitle">Settings</h2>
 
@@ -1275,7 +1275,7 @@
             </div>
 
             <!-- Advanced Page -->
-            <div data-page="advanced" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
+            <div data-page="advanced" class="flex-1 flex flex-col px-8 pt-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
 
                 <header class="flex items-center justify-between relative z-10">
                     <div class="flex items-center gap-4">
