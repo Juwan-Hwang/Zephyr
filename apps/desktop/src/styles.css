@@ -17,16 +17,28 @@
    ═══════════════════════════════════════════════════════════════ */
 :root[dir="rtl"] { --rtl-sign: -1; --scroll-fade-dir: left; --scale-origin-x: right; }
 
+/* ── 国旗 emoji 字体 ──
+   Windows 的 Segoe UI Emoji 不含国旗字形，区域指示符会显示成两个字母
+   （如 "🇯🇵" → "JP"）。用 unicode-range 限定只接管区域指示符与
+   subdivision 旗帜标签，其余字符继续走系统字体。
+   字形来自 Twemoji（CC-BY-4.0），见 NOTICE。 */
+@font-face {
+  font-family: "Twemoji Country Flags";
+  src: url("./fonts/TwemojiCountryFlags.woff2") format("woff2");
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  font-display: swap;
+}
+
 /* ── Font stack + Accent + 圆角系统 (原 @theme → :root) ── */
 :root {
   --rtl-sign: 1;
   --scroll-fade-dir: right;
   --ui-scale: 1;
   --scale-origin-x: left;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+  --font-sans: "Twemoji Country Flags", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
     "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+  --font-mono: "Twemoji Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
     "Courier New", monospace;
   --color-accent: var(--accent-primary, #007AFF);

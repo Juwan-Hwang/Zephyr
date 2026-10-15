@@ -50,6 +50,17 @@ Zephyr uses the following open source components. We are grateful to all contrib
 | @tauri-apps/plugin-autostart | 2.5.1 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 | js-yaml | 4.x | MIT | https://github.com/nodeca/js-yaml |
 
+## Bundled Assets
+
+| Asset | Version | License | Homepage |
+|-------|---------|---------|----------|
+| Twemoji Country Flags font (`apps/desktop/src/fonts/TwemojiCountryFlags.woff2`), from country-flag-emoji-polyfill | 0.1.10 | Font build: MIT (© 2022 TalkJS); flag artwork: CC-BY-4.0 | https://github.com/talkjs/country-flag-emoji-polyfill |
+
+Flag artwork: Copyright 2020 Twitter, Inc and other contributors. Graphics from
+[Twemoji](https://github.com/twitter/twemoji), licensed under
+[CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). The glyphs are used
+unmodified; only the regional-indicator / flag-tag subset is bundled.
+
 ## JavaScript Dev Dependencies (Build-time only)
 
 > These packages are not included in distributed builds.
@@ -73,6 +84,7 @@ Full license texts:
 - **MIT**: https://opensource.org/licenses/MIT
 - **Apache-2.0**: https://www.apache.org/licenses/LICENSE-2.0
 - **LGPL-2.1**: www.gnu.org/licenses/lgpl-2.1.html
+- **CC-BY-4.0**: https://creativecommons.org/licenses/by/4.0/legalcode
 
 > For complete copyright and license information of each dependency,
 > please refer to their respective source repositories linked above.

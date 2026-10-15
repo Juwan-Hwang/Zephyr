@@ -54,3 +54,25 @@ describe('motion tokens', () => {
         expect(all).not.toMatch(/--zephyr-time-fast|--zephyr-transition-fast|--zephyr-easing-smooth|--zephyr-easing-ease-in\)/);
     });
 });
+
+describe('Windows country-flag font', () => {
+    it('ships the woff2 and scopes it to regional indicators / flag tags', () => {
+        expect(fs.existsSync(path.join(SRC, 'fonts/TwemojiCountryFlags.woff2'))).toBe(true);
+        const css = read('styles.css');
+        expect(css).toMatch(/font-family: "Twemoji Country Flags";/);
+        expect(css).toMatch(/unicode-range: U\+1F1E6-1F1FF, U\+1F3F4, U\+E0062-E007F;/);
+        expect(css).toMatch(/--font-sans: "Twemoji Country Flags",/);
+    });
+
+    it('CSP lets the app load its own fonts', () => {
+        const conf = JSON.parse(fs.readFileSync(path.join(SRC, '../src-tauri/tauri.conf.json'), 'utf8'));
+        const csp = String(conf.app.security.csp);
+        expect(csp).toMatch(/font-src 'self'|default-src 'self'/);
+    });
+
+    it('NOTICE credits Twemoji under CC-BY-4.0', () => {
+        const notice = readRoot('NOTICE');
+        expect(notice).toMatch(/Twemoji/);
+        expect(notice).toMatch(/CC-BY[ -]4\.0/);
+    });
+});
