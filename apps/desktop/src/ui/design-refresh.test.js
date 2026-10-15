@@ -12,7 +12,9 @@ const readRoot = (/** @type {string} */ rel) => fs.readFileSync(path.join(ROOT, 
 describe('proxy card meta line', () => {
     it('shows protocol · transport layer (TRANSPORT_MAP), not the proxy.udp capability', () => {
         const src = read('ui/proxies.js');
-        expect(src).toMatch(/metaText\.textContent = transport === '-' \? abbr : `\$\{abbr\} · \$\{transport\}`/);
+        expect(src).toMatch(/return transport === '-' \? abbr : `\$\{abbr\} · \$\{transport\}`/);
+        expect(src).toMatch(/metaText\.textContent = proxyMetaLabel\(proxy, groupNow\)/);
+        expect(src).toMatch(/meta\.textContent = proxyMetaLabel\(proxy, groupNow\)/);
         expect(src).not.toMatch(/`\$\{abbr\} · UDP`/);
         expect(src).toMatch(/'HYSTERIA2': 'QUIC'/);
     });
@@ -78,7 +80,9 @@ describe('Windows country-flag font', () => {
     it('CSP lets the app load its own fonts', () => {
         const conf = JSON.parse(fs.readFileSync(path.join(SRC, '../src-tauri/tauri.conf.json'), 'utf8'));
         const csp = String(conf.app.security.csp);
-        expect(csp).toMatch(/font-src 'self'|default-src 'self'/);
+        // font-src wins when present; default-src only applies without it.
+        const src = csp.match(/(?:^|;)\s*font-src\s+([^;]*)/)?.[1] ?? csp.match(/(?:^|;)\s*default-src\s+([^;]*)/)?.[1] ?? '';
+        expect(src).toMatch(/(?:^|\s)'self'(?:\s|$)/);
     });
 
     it('NOTICE credits Twemoji under CC-BY-4.0', () => {
