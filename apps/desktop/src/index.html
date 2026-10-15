@@ -86,14 +86,18 @@
             </div>
 
             <!-- Dashboard Page -->
-            <div data-page="home" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar relative">
+            <div data-page="home" class="flex-1 flex flex-col p-8 gap-4 overflow-y-auto custom-scrollbar relative">
 
-                <div class="flex flex-col items-center justify-center py-12 relative z-10">
+                <!-- Hero: live traffic area chart behind the speed read-out -->
+                <section id="home-hero" class="home-hero glass-card relative z-20 shrink-0">
+                    <div class="home-hero-chart" aria-hidden="true">
+                        <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
+                    </div>
                     <!-- Current Node Display (Interactive Wheel) -->
-                    <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-2">
+                    <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-4">
                         <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false">
                             <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
-                            <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold tracking-wide truncate max-w-[280px]">Loading...</span>
+                            <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span>
                         </button>
                         
                         <!-- Wheel Dropdown -->
@@ -108,32 +112,32 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center gap-24 mb-4">
+                    <div class="home-hero-speeds relative z-10">
                         <!-- Downstream -->
-                        <div class="flex flex-col items-center group cursor-default w-[160px]">
-                            <span class="text-[var(--text-muted)] text-2xs font-bold uppercase tracking-wider mb-3 group-hover:text-accent transition-colors" data-i18n="downstream">Downstream</span>
+                        <div class="home-speed">
+                            <span class="home-speed-label"><span class="home-speed-swatch bg-download/80" aria-hidden="true"></span><span data-i18n="downstream">Downstream</span></span>
                             <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-down-val" class="text-[64px] font-extralight text-[var(--text-primary)] tabular-nums tracking-tighter leading-none">0.00</span>
-                                <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap tracking-wider">KB/s</span>
+                                <span id="speed-down-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
                             </div>
                         </div>
 
                         <!-- Divider -->
-                        <div class="w-px h-16 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent"></div>
+                        <div class="w-px h-14 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent" aria-hidden="true"></div>
 
                         <!-- Upstream -->
-                        <div class="flex flex-col items-center group cursor-default w-[160px]">
-                            <span class="text-[var(--text-muted)] text-2xs font-bold uppercase tracking-wider mb-3 group-hover:text-accent transition-colors" data-i18n="upstream">Upstream</span>
+                        <div class="home-speed">
+                            <span class="home-speed-label"><span class="home-speed-swatch bg-upload/80" aria-hidden="true"></span><span data-i18n="upstream">Upstream</span></span>
                             <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-up-val" class="text-[64px] font-extralight text-[var(--text-primary)] tabular-nums tracking-tighter leading-none">0.00</span>
-                                <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap tracking-wider">KB/s</span>
+                                <span id="speed-up-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
                             </div>
                         </div>
                     </div>
-                </div>
-                
+                </section>
+
                 <!-- System Proxy Toggle -->
-                <div class="glass-card p-5 flex items-center justify-between mb-2 relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
+                <div class="glass-card p-5 flex items-center justify-between relative z-10">
                     <div class="flex items-center gap-4">
                         <div class="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-inner">
                             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -151,9 +155,9 @@
 </label>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2 pb-2">
+                <div class="grid grid-cols-2 gap-4">
                     <!-- Proxy Mode Selector -->
-                    <div class="glass-card p-4 relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
+                    <div class="glass-card p-4 relative z-10">
                         <div class="flex items-center gap-3 mb-3">
                             <div class="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -169,7 +173,7 @@
                     </div>
 
                     <!-- TUN Mode Toggle -->
-                    <div class="glass-card p-4 flex flex-col justify-center relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
+                    <div class="glass-card p-4 flex flex-col justify-center relative z-10">
                         <div class="flex items-center justify-between gap-3">
                             <div class="flex items-center gap-3 min-w-0">
                                 <div class="w-8 h-8 shrink-0 rounded-md bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
@@ -191,29 +195,6 @@
                     </div>
                 </div>
 
-                <div class="flex-1 relative glass-card p-6 overflow-hidden min-h-[160px] flex flex-col">
-                    <div class="flex items-center justify-between mb-4 shrink-0">
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-2 rounded-full bg-accent animate-pulse"></div>
-                            <span class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider" data-i18n="traffic">Real-time Traffic</span>
-                        </div>
-                        
-                        <!-- Legend -->
-                        <div class="flex items-center gap-4">
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-download/80"></div>
-                                <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="downstream">Down</span>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-upload/80"></div>
-                                <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="upstream">Up</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex-1 relative w-full">
-                        <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
-                    </div>
-                </div>
             </div>
 
             <!-- Console Dashboard Page (injected by ui/console-home.js) -->

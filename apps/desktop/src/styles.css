@@ -1915,3 +1915,67 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
     .dz-log-list { max-height: 200px; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Minimal home hero: speed read-out layered over a full-width live area chart
+   ═══════════════════════════════════════════════════════════════════════════ */
+.home-hero {
+  min-height: 196px;
+  padding: 60px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.home-hero:hover { box-shadow: var(--zephyr-shadow-sm); }
+.home-hero-chart {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  opacity: .5;
+  pointer-events: none;
+  /* fade the chart out toward the top so the node pill and numbers sit on calm glass */
+  mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+}
+html:not(.dark) .home-hero-chart { opacity: .6; }
+.home-hero-speeds {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(32px, 9vw, 96px);
+}
+.home-speed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 168px;
+  cursor: default;
+}
+.home-speed-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+:lang(zh) .home-speed-label, :lang(ja) .home-speed-label, :lang(ko) .home-speed-label {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.home-speed-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+.home-speed-value {
+  font-size: 52px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--zephyr-bg-elevated, #000) 35%, transparent);
+}
