@@ -32,6 +32,8 @@ function buildDom(visible = 'home') {
     const glows = ['home', 'proxies'].map(id => {
         const g = document.createElement('div');
         g.id = `glow-${id}`;
+        // Mirror index.html: only the initial page's glow starts without `hidden`.
+        if (id !== visible) g.classList.add('hidden');
         return g;
     });
     document.body.replaceChildren(...nav, ...pages, ...glows);
@@ -81,7 +83,9 @@ describe('switchPage', () => {
     it('activates only the glow layer belonging to the target page', () => {
         nav.switchPage('proxies');
         // Glows cross-fade via .page-glow.is-active instead of toggling .hidden.
-        expect(document.getElementById('glow-proxies').classList.contains('is-active')).toBe(true);
+        const target = document.getElementById('glow-proxies');
+        expect(target.classList.contains('is-active')).toBe(true);
+        expect(target.classList.contains('hidden')).toBe(false);
         expect(document.getElementById('glow-home').classList.contains('is-active')).toBe(false);
     });
 

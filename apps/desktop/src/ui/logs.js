@@ -80,20 +80,20 @@ const LEVEL_PRIORITY = Object.freeze({
 
 // ── Log Level Parser (regex compiled once, reused) ────────────────────────
 
-// mihomo format: level=info / level=warn / level=error / level=debug
-const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR)(?:\]|\b)/i;
+// mihomo format: level=info / level=warn / level=error / level=debug / level=fatal
+const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)(?:\]|\b)/i;
 
 /**
  * Extract log level from a line.
  * Supports both mihomo format (`level=info`) and bracket format (`[INFO]`).
  * @param {string} line
- * @returns {'debug'|'info'|'warn'|'error'}
+ * @returns {'debug'|'info'|'warn'|'error'|'fatal'}
  */
 function parseLogLevel(line) {
     const m = LEVEL_RE.exec(line);
     if (!m) return 'info';
     const lvl = m[1].toUpperCase();
-    return lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'} */ (lvl.toLowerCase());
+    return lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (lvl.toLowerCase());
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -286,7 +286,7 @@ function buildPageHTML() {
             </div>
             <div class="flex items-center gap-3">
                 <span id="log-line-count" class="text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
-                <button id="log-auto-scroll-btn" class="btn-ghost active" title="${t('autoScroll')}">
+                <button id="log-auto-scroll-btn" class="btn-ghost active" title="${t('autoScroll')}" data-i18n-title="autoScroll">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
                     <span data-i18n="autoScroll">${t('autoScroll')}</span>
                 </button>

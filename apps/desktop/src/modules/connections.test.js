@@ -195,7 +195,7 @@ describe('connections page list rendering', () => {
         await refresh();
         expect(rows()[0]).toBe(row);
         expect(row.classList.contains('conn-row--idle')).toBe(false);
-        expect(row.querySelector('.conn-rate--down')?.textContent).not.toBe('');
+        expect(row.querySelector('.conn-rate--down')?.textContent).toBeTruthy();
     });
 
     it('keeps sorted order and moves rows when the order changes', async () => {
