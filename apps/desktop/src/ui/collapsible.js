@@ -46,7 +46,7 @@ export function createCollapsible(container, {
 
     // Collapse arrow
     const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    arrow.setAttribute('class', 'w-3 h-3 text-[var(--text-muted)] transition-transform ease-[cubic-bezier(0.25,1,0.5,1)] collapse-arrow');
+    arrow.setAttribute('class', 'w-3 h-3 text-[var(--text-muted)] transition-transform ease-[var(--motion-ease-out)] collapse-arrow');
     arrow.setAttribute('viewBox', '0 0 24 24');
     arrow.setAttribute('fill', 'none');
     arrow.setAttribute('stroke', 'currentColor');

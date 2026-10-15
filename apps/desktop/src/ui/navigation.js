@@ -9,27 +9,78 @@
 import { setup3DEffect } from './3d-effect.js';
 import { appStore } from './state.js';
 
+/** @returns {boolean} */
+function prefersReducedMotion() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 /**
  * Switch the visible page by pageId.
- * Direct hidden toggle - no opacity transition to prevent flicker.
- * Also toggles the shared background glow layer.
+ * Only the incoming page animates (fade + 6px rise, transform/opacity only);
+ * the outgoing page is hidden immediately, so there is nothing to flicker.
+ * The shared background glows cross-fade instead of jumping.
  *
  * @param {string} pageId - The data-page attribute value of the target page
  */
 export function switchPage(pageId) {
     const pages = document.querySelectorAll('[data-page]');
+    const animate = !prefersReducedMotion();
     pages.forEach(p => {
         if (p.getAttribute('data-page') === pageId) {
+            const wasHidden = p.classList.contains('hidden');
             p.classList.remove('hidden');
+            if (animate && wasHidden && p instanceof HTMLElement) {
+                p.classList.remove('page-enter');
+                void p.offsetWidth; // restart the keyframes when re-entering quickly
+                p.classList.add('page-enter');
+                p.addEventListener('animationend', () => p.classList.remove('page-enter'), { once: true });
+            }
         } else {
             p.classList.add('hidden');
+            p.classList.remove('page-enter');
         }
     });
 
-    // Toggle shared background glow for the active page
+    // Cross-fade the shared background glow for the active page
     document.querySelectorAll('[id^="glow-"]').forEach(g => {
-        g.classList.toggle('hidden', g.id !== `glow-${pageId}`);
+        g.classList.add('page-glow');
+        g.classList.remove('hidden');
+        g.classList.toggle('is-active', g.id === `glow-${pageId}`);
     });
+}
+
+/**
+ * Sliding highlight behind the active sidebar item. It replaces the
+ * per-button raised background so selection glides between items.
+ * @type {HTMLElement|null}
+ */
+let _navIndicator = null;
+
+/**
+ * Move the sidebar indicator under `target`.
+ * @param {Element|null} target
+ * @param {boolean} [instant] - jump without animating (first paint, resize)
+ */
+function moveNavIndicator(target, instant = false) {
+    const nav = document.getElementById('sidebar-nav');
+    if (!nav || !(target instanceof HTMLElement)) return;
+    if (!_navIndicator || !_navIndicator.isConnected) {
+        _navIndicator = document.createElement('span');
+        _navIndicator.className = 'nav-indicator';
+        _navIndicator.setAttribute('aria-hidden', 'true');
+        nav.prepend(_navIndicator);
+        nav.classList.add('has-nav-indicator');
+        instant = true;
+    }
+    const ind = _navIndicator;
+    if (instant) ind.classList.add('no-anim');
+    ind.style.width = `${target.offsetWidth}px`;
+    ind.style.height = `${target.offsetHeight}px`;
+    ind.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
+    if (instant) {
+        void ind.offsetWidth;
+        ind.classList.remove('no-anim');
+    }
 }
 
 /** Store leave-timeout IDs without polluting DOM element types. */
@@ -156,6 +207,7 @@ export function initNavigation(callbacks = {}) {
         targetNav.classList.add('is-active', 'bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
         targetNav.classList.remove('text-[var(--text-muted)]', 'is-leaving');
         targetNav.setAttribute('aria-current', 'page');
+        moveNavIndicator(targetNav);
     }
 
     /**
@@ -207,6 +259,21 @@ export function initNavigation(callbacks = {}) {
 
     // Expose for programmatic navigation (e.g. HOME_PAGE_MODE_CHANGED handler)
     _navigateToRef = navigateToInternal;
+
+    // Sliding sidebar highlight: place it under the initial item, then keep it
+    // aligned when the sidebar resizes (window height, UI scale).
+    moveNavIndicator(document.querySelector('.nav-btn.is-active'), true);
+    const sidebar = document.getElementById('sidebar-nav');
+    if (sidebar && typeof ResizeObserver === 'function') {
+        new ResizeObserver(() => moveNavIndicator(document.querySelector('.nav-btn.is-active'), true)).observe(sidebar);
+    }
+    // Initial glow state without animation
+    document.querySelectorAll('[id^="glow-"]').forEach(g => {
+        const active = !g.classList.contains('hidden');
+        g.classList.add('page-glow');
+        g.classList.remove('hidden');
+        g.classList.toggle('is-active', active);
+    });
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {

@@ -23,9 +23,9 @@
         <div id="glow-subscriptions" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-proxies" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-connections" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
         <div id="glow-logs" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
         <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
 
         <!-- Sidebar -->
@@ -101,7 +101,7 @@
                         </button>
                         
                         <!-- Wheel Dropdown -->
-                        <div id="node-wheel-dropdown" class="absolute top-[14px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[cubic-bezier(0.23,1,0.32,1)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                        <div id="node-wheel-dropdown" class="absolute top-[14px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
                             <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
                                 <div id="node-wheel-padding-top" style="height: 56px;"></div>
                                 <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">

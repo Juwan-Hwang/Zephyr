@@ -78,15 +78,16 @@ describe('switchPage', () => {
         expect(visiblePages()).toEqual(['proxies']);
     });
 
-    it('shows only the glow layer belonging to the target page', () => {
+    it('activates only the glow layer belonging to the target page', () => {
         nav.switchPage('proxies');
-        expect(document.getElementById('glow-proxies').classList.contains('hidden')).toBe(false);
-        expect(document.getElementById('glow-home').classList.contains('hidden')).toBe(true);
+        // Glows cross-fade via .page-glow.is-active instead of toggling .hidden.
+        expect(document.getElementById('glow-proxies').classList.contains('is-active')).toBe(true);
+        expect(document.getElementById('glow-home').classList.contains('is-active')).toBe(false);
     });
 
-    it('hides every glow layer when the page has none', () => {
+    it('deactivates every glow layer when the page has none', () => {
         nav.switchPage('logs');
-        expect(document.querySelectorAll('[id^="glow-"]:not(.hidden)')).toHaveLength(0);
+        expect(document.querySelectorAll('[id^="glow-"].is-active')).toHaveLength(0);
     });
 });
 
