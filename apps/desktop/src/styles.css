@@ -1380,9 +1380,11 @@ button:focus-visible:not(:disabled, [disabled]),
 
 .form-control:focus-visible:not(:disabled, [disabled]),
 .select-common:focus-visible:not(:disabled, [disabled]) {
-  border-color: var(--zephyr-focus-border);
+  /* text fields are focused whenever you type: a solid accent border plus a
+     soft 3px halo reads as "active" without the heavy 4px solid band */
+  border-color: var(--color-accent);
   outline: 2px solid transparent;
-  box-shadow: 0 0 0 4px var(--zephyr-focus-ring);
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring-soft);
 }
 
 /* ============================================
@@ -2301,3 +2303,31 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 /* Nested panel inside a settings card: 16px radius (24 outer − 8) */
 #fake-client-options .glass-card { border-radius: var(--radius-md); }
 
+/* Dialogs: one title style everywhere (was 20px light / 14px bold depending on the dialog) */
+.dialog-title {
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+/* Toasts: neutral text on glass, a status dot carries the type colour */
+#notif-container { inset-inline-end: 32px; bottom: 24px; }
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--zephyr-shadow-dialog, 0 8px 32px rgba(0, 0, 0, .25));
+}
+html.dark .toast { background: rgba(28, 28, 32, 0.82); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+html:not(.dark) .toast { background: rgba(255, 255, 255, 0.86); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+.toast-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--color-accent); }
+.toast[data-type="success"] .toast-dot { background: var(--zephyr-color-success); }
+.toast[data-type="error"] .toast-dot { background: var(--zephyr-color-danger); }
+.toast[data-type="warning"] .toast-dot { background: var(--zephyr-color-warning); }
+.toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toast-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
+.toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); }

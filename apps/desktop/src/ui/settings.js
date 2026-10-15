@@ -223,7 +223,7 @@ function initCopyEnvSettings() {
         modal.innerHTML = `
             <div class="glass-card w-[360px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
                     <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -374,7 +374,7 @@ function initLogSettingsModal() {
         modal.innerHTML = `
             <div class="glass-card w-[400px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
                     <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -572,7 +572,7 @@ function initLogSettingsModal() {
         modal.innerHTML = `
             <div class="glass-card w-[480px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
                     <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -2255,7 +2255,7 @@ appStore.set('isNetworkUpdating', false);
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
+                        <h3 class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
                         <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>

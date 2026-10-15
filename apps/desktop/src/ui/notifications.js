@@ -47,30 +47,33 @@ export function showNotification(message, type = 'info', title = null, { log = t
     }
 
     const notif = document.createElement('div');
-    notif.className = 'glass-card py-3 px-5 border-s-4 flex flex-col gap-1 shadow-2xl transition-all duration-[var(--zephyr-time-page)] notif-offscreen opacity-0 pointer-events-auto min-w-0 max-w-[480px]';
-
-    const colors = {
-        info: 'border-accent text-accent',
-        success: 'border-emerald-500 text-emerald-400',
-        error: 'border-rose-500 text-rose-400',
-        warning: 'border-amber-500 text-amber-400',
-    };
-    notif.className += ` ${colors[type] || colors.info}`;
+    notif.className = 'toast glass-card transition-all duration-[var(--zephyr-time-page)] notif-offscreen opacity-0 pointer-events-auto min-w-0 max-w-[420px]';
+    notif.dataset.type = type in NOTIFICATION_PRIORITY ? type : 'info';
     notif.dataset.priority = String(NOTIFICATION_PRIORITY[type] ?? 2);
 
+    // Coloured status dot + neutral text: the colour says what kind of message
+    // it is, the text stays readable (it used to be tinted end to end).
+    const dot = document.createElement('span');
+    dot.className = 'toast-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    notif.appendChild(dot);
+
+    const body = document.createElement('div');
+    body.className = 'toast-body';
     if (title) {
         const titleDiv = document.createElement('div');
-        titleDiv.className = 'text-xs font-bold tracking-tight break-all line-clamp-2';
+        titleDiv.className = 'toast-title break-all line-clamp-2';
         titleDiv.textContent = title;
-        notif.appendChild(titleDiv);
+        body.appendChild(titleDiv);
     }
 
     const msgDiv = document.createElement('div');
-    msgDiv.className = 'text-xs tracking-tight opacity-80 break-all line-clamp-3';
+    msgDiv.className = 'toast-msg break-all line-clamp-3';
     msgDiv.textContent = message;
+    body.appendChild(msgDiv);
     // Full path tooltip on hover
     notif.title = title || message;
-    notif.appendChild(msgDiv);
+    notif.appendChild(body);
 
     // Priority insert — higher priority notifications appear first
     const priority = NOTIFICATION_PRIORITY[type] ?? 2;
@@ -289,7 +292,7 @@ export function showConfirmModal(title, message = '') {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-lg border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }

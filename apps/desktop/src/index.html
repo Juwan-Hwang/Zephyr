@@ -248,7 +248,7 @@
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
-                            <h3 class="text-lg font-light text-[var(--text-primary)]" data-i18n="overrideTitle">覆写脚本</h3>
+                            <h3 class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
                             <button id="close-plugins-btn" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
@@ -1330,12 +1330,12 @@
     </div>
 
     <!-- Notifications Container -->
-    <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 end-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
+    <div id="notif-container" role="status" aria-live="polite" class="fixed z-[var(--z-toast)] flex flex-col gap-2 pointer-events-none items-end"></div>
 
     <!-- Modal Background -->
     <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-[var(--zephyr-time-standard)] opacity-0 pointer-events-auto">
-        <div id="modal-container" class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
-            <h3 id="modal-title" class="text-xl font-light text-[var(--text-primary)] mb-6">Subscription Name</h3>
+        <div id="modal-container" class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
+            <h3 id="modal-title" class="dialog-title mb-5">Subscription Name</h3>
             <div class="space-y-6">
                 <div id="modal-content-area"></div>
 <div class="flex gap-3 justify-end">
@@ -1348,13 +1348,13 @@
 
     <!-- DNS Configuration Modal -->
     <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
-        <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="text-xl font-light text-[var(--text-primary)] mb-6" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
             
             <div class="space-y-4">
                 <div>
-                    <label for="dns-nameservers-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
+                    <label for="dns-nameservers-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
                         <button type="button" id="dns-nameservers-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
@@ -1365,7 +1365,7 @@
                 </div>
                 
                 <div>
-                    <label for="dns-fallbacks-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
+                    <label for="dns-fallbacks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
                         <button type="button" id="dns-fallbacks-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
@@ -1385,31 +1385,31 @@
 
     <!-- Port Configuration Modal -->
     <div id="port-config-modal" role="dialog" aria-modal="true" aria-labelledby="port-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
-        <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 id="port-config-title" class="text-xl font-light text-[var(--text-primary)] mb-2" data-i18n="portConfigTitle">Port Configuration</h3>
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 id="port-config-title" class="dialog-title mb-1" data-i18n="portConfigTitle">Port Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="portConfigDesc">Set ports for proxy protocols</p>
 
             <div class="space-y-4">
                 <div>
-                    <label for="port-mixed-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
+                    <label for="port-mixed-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="mixedPort">Mixed Port</label>
                     <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-socks-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
+                    <label for="port-socks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="socksPort">SOCKS5 Port</label>
                     <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-redir-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
+                    <label for="port-redir-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="redirPort">Redir Port</label>
                     <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-tproxy-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
+                    <label for="port-tproxy-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="tproxyPort">TProxy Port</label>
                     <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
                 </div>

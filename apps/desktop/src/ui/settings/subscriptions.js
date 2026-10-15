@@ -191,7 +191,7 @@ async function showEditPanel(configInfo) {
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:opacity ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1),transform ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
+                <h3 class="dialog-title">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
                 <button id="edit-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
@@ -1005,7 +1005,7 @@ export function initSubscriptionSettings({
                 // Render groups
                 for (const [groupName, groupFiles] of grouped) {
                     const groupHeader = document.createElement('div');
-                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-[var(--text-muted)] uppercase tracking-wider font-bold';
+                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                     groupHeader.innerHTML = `<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${escapeHtml(groupName)}`;
                     menuScroll.appendChild(groupHeader);
