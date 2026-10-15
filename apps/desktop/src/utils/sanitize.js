@@ -11,34 +11,52 @@
 // HTML entity escaping
 // ---------------------------------------------------------------------------
 
+/** Characters that are significant in HTML text and quoted attribute contexts. */
+const HTML_ESCAPE_RE = /[&<>"']/g;
+
+/** @type {Record<string, string>} */
+const HTML_ESCAPE_MAP = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+};
+
 /**
  * Escape HTML entities to prevent XSS.
- * Uses the browser's built-in textContent/innerHTML round-trip
- * for reliable, spec-compliant escaping.
+ *
+ * Escapes `&`, `<`, `>`, `"` and `'`, so the result is safe both as element
+ * text and inside single- or double-quoted attribute values. Implemented as a
+ * pure string replacement (no DOM allocation), so it is cheap on hot paths.
+ *
+ * The input is not Unicode-normalized: what is displayed is exactly the value
+ * that was passed in (e.g. full-width characters in node or subscription
+ * names are preserved). Normalization adds no safety here because only the
+ * five ASCII characters above are significant to the HTML parser.
  *
  * @param {string} str - Raw string to escape
  * @returns {string} HTML-safe string; empty string for non-string input
  */
 export function escapeHtml(str) {
     if (typeof str !== 'string') return '';
-    const normalized = str.normalize('NFKC');
-    const div = document.createElement('div');
-    div.textContent = normalized;
-    return div.innerHTML;
+    return str.replace(HTML_ESCAPE_RE, (ch) => HTML_ESCAPE_MAP[ch]);
 }
 
 /**
- * Escape a string for safe use inside HTML attribute values (double-quoted).
- * Extends {@link escapeHtml} by also escaping `"` and `'`.
+ * Escape a string for safe use inside a QUOTED HTML attribute value
+ * (`attr="..."` or `attr='...'`). Alias of {@link escapeHtml}, which already
+ * escapes `"` and `'`; kept for call sites that want to state attribute
+ * context explicitly.
+ *
+ * Not safe for unquoted attributes (`attr=${value}`): whitespace, `=` and
+ * backticks are left as-is. Always quote the attribute.
  *
  * @param {string} str - Raw string to escape
  * @returns {string} Attribute-safe string
  */
 export function escapeAttr(str) {
-    if (typeof str !== 'string') return '';
-    return escapeHtml(str)
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+    return escapeHtml(str);
 }
 
 // ---------------------------------------------------------------------------
