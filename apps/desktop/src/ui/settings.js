@@ -67,6 +67,7 @@ import { syncCoreConfig, startSmartAutoTest, stopSmartAutoTest } from './proxies
 import { initThemeSettings } from './settings/theme.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { initSubscriptionSettings } from './settings/subscriptions.js';
+import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
 let __langDropdown = null;
 /** @type {(() => void) | null} */
@@ -730,9 +731,6 @@ function initFakeClient() {
 
     if (!toggle || !optionsContainer || !select || !customInput) return;
 
-    let isFetching = false;
-    let versionsFetched = false;
-
     const storedEnabled = localStorage.getItem('fakeClientEnabled');
     const savedEnabled = storedEnabled === null ? true : storedEnabled === 'true';
 
@@ -754,6 +752,27 @@ function initFakeClient() {
 
     // Sync UA to backend on init so scheduler uses it from the start
     syncUserAgentToBackend();
+
+    // Owns the lookup: single in-flight request, exponential backoff on
+    // failure/empty replies, and a bounded number of automatic retries.
+    // Previously the `finally` re-entered updateVisibility() -> fetch, which
+    // spun in a tight loop whenever the backend failed fast.
+    const versionFetcher = createClientVersionFetcher({
+        fetch: () => {
+            spinner?.classList.remove('hidden');
+            return invoke(COMMANDS.GET_LATEST_CLIENT_VERSIONS);
+        },
+        isValid: isValidClientVersions,
+        onSuccess: applyLatestVersions,
+        onFailure: (err) => {
+            settingsLogger.error('Failed to fetch latest client versions', err);
+        },
+        onSettled: () => {
+            spinner?.classList.add('hidden');
+            updateVisibility();
+        },
+    });
+    registerCleanup(() => versionFetcher.dispose());
 
     const fakeClientDropdown = initCustomDropdown({
         wrapId: 'fake-client-select-wrap',
@@ -778,9 +797,7 @@ function initFakeClient() {
             } else if (customContainer) {
                 customContainer.classList.add('hidden');
             }
-            if (!versionsFetched) {
-                fetchLatestVersions();
-            }
+            versionFetcher.request();
         } else {
             /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-40', 'opacity-100');
             /** @type {HTMLElement} */ (optionsContainer).classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
@@ -788,60 +805,51 @@ function initFakeClient() {
         }
     }
 
-    async function fetchLatestVersions() {
-        if (isFetching || versionsFetched) return;
-        isFetching = true;
-        spinner?.classList.remove('hidden');
+    /**
+     * Apply fetched client versions to the select, the custom dropdown menu
+     * and the persisted selection.
+     * @param {import('./settings/client-version-fetch.js').ClientVersions} versions
+     */
+    function applyLatestVersions(versions) {
+        const vergeOpt = select.querySelector('option[value^="clash-verge"]');
+        const partyOpt = select.querySelector('option[value^="mihomo-party"]');
+        const flclashOpt = select.querySelector('option[value^="Flclash"]');
 
-        try {
-            /** @type {any} */
-            const versions = await invoke(COMMANDS.GET_LATEST_CLIENT_VERSIONS);
+        if (vergeOpt) { /** @type {HTMLOptionElement} */ (vergeOpt).value = versions.verge; vergeOpt.textContent = `Clash Verge Rev (${versions.verge})`; }
+        if (partyOpt) { /** @type {HTMLOptionElement} */ (partyOpt).value = versions.mihomo_party; partyOpt.textContent = `mihomo-party (${versions.mihomo_party})`; }
+        if (flclashOpt) { /** @type {HTMLOptionElement} */ (flclashOpt).value = versions.flclash; flclashOpt.textContent = `Flclash (${versions.flclash})`; }
 
-            const vergeOpt = select.querySelector('option[value^="clash-verge"]');
-            const partyOpt = select.querySelector('option[value^="mihomo-party"]');
-            const flclashOpt = select.querySelector('option[value^="Flclash"]');
-
-            if (vergeOpt) { /** @type {HTMLOptionElement} */ (vergeOpt).value = versions.verge; vergeOpt.textContent = `Clash Verge Rev (${versions.verge})`; }
-            if (partyOpt) { /** @type {HTMLOptionElement} */ (partyOpt).value = versions.mihomo_party; partyOpt.textContent = `mihomo-party (${versions.mihomo_party})`; }
-            if (flclashOpt) { /** @type {HTMLOptionElement} */ (flclashOpt).value = versions.flclash; flclashOpt.textContent = `Flclash (${versions.flclash})`; }
-
-            const menu = document.getElementById('fake-client-menu');
-            if (menu) {
-                const vergeBtn = menu.querySelector('[data-value^="clash-verge"]');
-                const partyBtn = menu.querySelector('[data-value^="mihomo-party"]');
-                const flclashBtn = menu.querySelector('[data-value^="Flclash"]');
-                if (vergeBtn) { vergeBtn.setAttribute('data-value', versions.verge); vergeBtn.textContent = `Clash Verge Rev (${versions.verge})`; vergeBtn.setAttribute('data-label', `Clash Verge Rev (${versions.verge})`); }
-                if (partyBtn) { partyBtn.setAttribute('data-value', versions.mihomo_party); partyBtn.textContent = `mihomo-party (${versions.mihomo_party})`; partyBtn.setAttribute('data-label', `mihomo-party (${versions.mihomo_party})`); }
-                if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
-            }
-
-            if (savedType && savedType.startsWith('clash-verge')) {
-                select.value = versions.verge;
-                localStorage.setItem('fakeClientType', versions.verge);
-            } else if (savedType && savedType.startsWith('mihomo-party')) {
-                select.value = versions.mihomo_party;
-                localStorage.setItem('fakeClientType', versions.mihomo_party);
-            } else if (savedType && savedType.startsWith('Flclash')) {
-                select.value = versions.flclash;
-                localStorage.setItem('fakeClientType', versions.flclash);
-            } else {
-                select.value = savedType;
-            }
-
-            if (fakeClientDropdown) fakeClientDropdown.syncUI();
-
-            versionsFetched = true;
-        } catch (err) {
-            settingsLogger.error('Failed to fetch latest client versions', err);
-        } finally {
-            isFetching = false;
-            spinner?.classList.add('hidden');
-            updateVisibility();
+        const menu = document.getElementById('fake-client-menu');
+        if (menu) {
+            const vergeBtn = menu.querySelector('[data-value^="clash-verge"]');
+            const partyBtn = menu.querySelector('[data-value^="mihomo-party"]');
+            const flclashBtn = menu.querySelector('[data-value^="Flclash"]');
+            if (vergeBtn) { vergeBtn.setAttribute('data-value', versions.verge); vergeBtn.textContent = `Clash Verge Rev (${versions.verge})`; vergeBtn.setAttribute('data-label', `Clash Verge Rev (${versions.verge})`); }
+            if (partyBtn) { partyBtn.setAttribute('data-value', versions.mihomo_party); partyBtn.textContent = `mihomo-party (${versions.mihomo_party})`; partyBtn.setAttribute('data-label', `mihomo-party (${versions.mihomo_party})`); }
+            if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
         }
+
+        if (savedType && savedType.startsWith('clash-verge')) {
+            select.value = versions.verge;
+            localStorage.setItem('fakeClientType', versions.verge);
+        } else if (savedType && savedType.startsWith('mihomo-party')) {
+            select.value = versions.mihomo_party;
+            localStorage.setItem('fakeClientType', versions.mihomo_party);
+        } else if (savedType && savedType.startsWith('Flclash')) {
+            select.value = versions.flclash;
+            localStorage.setItem('fakeClientType', versions.flclash);
+        } else {
+            select.value = savedType;
+        }
+
+        if (fakeClientDropdown) fakeClientDropdown.syncUI();
     }
 
     toggle.addEventListener('change', () => {
         localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
+        // Re-enabling is an explicit user action: allow a fresh retry budget.
+        if (toggle.checked) versionFetcher.retryNow();
+        else versionFetcher.pause();
         updateVisibility();
         syncUserAgentToBackend();
         if (!toggle.checked) {
