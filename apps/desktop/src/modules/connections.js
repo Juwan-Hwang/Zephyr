@@ -25,6 +25,7 @@ import { escapeHtml } from '../utils/sanitize.js';
 import { formatBytes, formatSpeed } from '../utils/format.js';
 import { connectionsLogger } from '../utils/logger.js';
 import { Bus, Events } from '../ui/events.js';
+import { reconcileKeyedList, resetKeyedList } from '../utils/keyed-list.js';
 
 // ============================================
 // State
@@ -189,11 +190,13 @@ export function initConnectionsPage() {
     bindConnTabEvents();
     fetchAndRenderConnections();
 
-// Re-apply sort arrows when i18n/theme changes wipe header text
-const _onI18nApplied = () => updateSortIndicators();
-const _onThemeChanged = () => updateSortIndicators();
-_unsubI18n = Bus.on(Events.I18N_APPLIED, _onI18nApplied);
-_unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, _onThemeChanged);
+    // Re-apply sort arrows when i18n/theme changes wipe header text.
+    // initConnectionsPage() runs on every visit, so drop the previous
+    // subscriptions first instead of stacking a new pair each time.
+    if (_unsubI18n) { _unsubI18n(); _unsubI18n = null; }
+    if (_unsubTheme) { _unsubTheme(); _unsubTheme = null; }
+    _unsubI18n = Bus.on(Events.I18N_APPLIED, () => updateSortIndicators());
+    _unsubTheme = Bus.on(Events.THEME_MODE_CHANGED, () => updateSortIndicators());
 
     // Auto-refresh: 2s when core is reachable, 15s when unreachable
     // Using recursive setTimeout to dynamically adjust interval
@@ -511,6 +514,7 @@ function renderConnectionList(connections, mode) {
 
     if (filtered.length === 0) {
         container.replaceChildren();
+        resetKeyedList(container);
         const tpl = mode === 'active' ? emptyState : closedEmptyState;
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
@@ -541,19 +545,19 @@ function renderConnectionList(connections, mode) {
         });
     }
 
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in buildConnectionRow
-    container.innerHTML = filtered.map((/** @type {any} */ conn) => buildConnectionRow(conn, mode)).join(''); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    // Keyed by connection id: rows that are still present keep their DOM
+    // node and only get their speed/total text patched; rows are inserted,
+    // removed or moved only when the visible list itself changed. The
+    // resulting markup is identical to a full innerHTML rebuild.
+    reconcileKeyedList(container, filtered, {
+        getKey: (/** @type {any} */ conn) => String(conn.id ?? ''),
+        getSignature: (/** @type {any} */ conn) => buildConnectionRow(conn, mode, EMPTY_ROW_STATS),
+        create: (/** @type {any} */ conn) => createConnectionRowElement(conn, mode),
+        update: (el, /** @type {any} */ conn) => patchConnectionRowStats(el, resolveConnStats(conn, mode)),
+    });
 
-    // Bind row click → open detail panel
-    for (const row of container.querySelectorAll('.conn-row')) {
-        /** @type {HTMLElement} */ (row).addEventListener('click', () => {
-            const connId = /** @type {HTMLElement} */ (row).dataset.connId;
-            const connMode = /** @type {HTMLElement} */ (row).dataset.mode;
-            const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
-            const conn = sourceList.find(c => c.id === connId);
-            if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
-        });
-    }
+    // One delegated listener per list element instead of one per row per render.
+    bindRowClickDelegate(container);
 
     // Re-apply sort arrows (in case i18n or other code reset header text)
     updateSortIndicators();
@@ -586,6 +590,28 @@ function getConnSortValue(conn, key, mode) {
 }
 
 /**
+ * Each column's original header color (matches the utility classes in PAGE_HTML).
+ * @type {Readonly<Record<string, string>>}
+ */
+const SORT_HEADER_COLORS = Object.freeze({
+    host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
+    dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
+    dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
+    ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
+    ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
+});
+
+/**
+ * Assign textContent only when it differs, so the per-poll header refresh
+ * does not replace identical text nodes.
+ * @param {Element} el
+ * @param {string} text
+ */
+function setTextIfChanged(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+}
+
+/**
  * Update sort arrow indicators in the table header.
  * Shows ▲/▼ next to the active sort column.
  */
@@ -594,16 +620,7 @@ function updateSortIndicators() {
     if (!header) return;
     for (const cell of header.querySelectorAll('.sortable')) {
         const sortKey = /** @type {HTMLElement} */ (cell).dataset.sort;
-
-        // Each column's original color (matches the utility classes in PAGE_HTML)
-        const originalColors = {
-            host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
-            dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
-            dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
-            ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
-            ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
-        };
-        const origColor = (/** @type {Record<string, string>} */ (originalColors))[/** @type {string} */ (sortKey)] || '';
+        const origColor = SORT_HEADER_COLORS[/** @type {string} */ (sortKey)] || '';
 
         if (connSortState && sortKey === connSortState.key) {
             // Active column: show text + arrow
@@ -619,7 +636,7 @@ function updateSortIndicators() {
                 // Fallback: strip any existing arrow from current text
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
-            (/** @type {HTMLElement} */ (cell)).textContent = `${base} ${isAsc ? '\u25B2' : '\u25BC'}`;
+            setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
@@ -634,7 +651,7 @@ function updateSortIndicators() {
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
-                if (t[i18nKey]) (/** @type {HTMLElement} */ (cell)).textContent = t[i18nKey];
+                if (t[i18nKey]) setTextIfChanged(cell, t[i18nKey]);
             }
         }
     }
@@ -690,11 +707,16 @@ function bindHeaderSortEvents() {
 /** Use escapeHtml from ../utils/sanitize.js */
 const _esc = /** @param {string} str */ (str) => escapeHtml(str);
 
+/** Stats placeholder used to compute a row's structural signature. */
+const EMPTY_ROW_STATS = Object.freeze({ dlSpeed: '', ulSpeed: '', dlTotal: '', ulTotal: '' });
+
 /**
  * @param {any} conn
  * @param {string} mode
+ * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} [stats]
+ *   Display values for the four traffic cells; resolved from the connection when omitted.
  */
-function buildConnectionRow(conn, mode) {
+function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode)) {
     const id = _esc(conn.id ?? '');
     const meta = conn.metadata ?? {};
     const host = _esc(meta.host ?? '-');
@@ -709,7 +731,7 @@ function buildConnectionRow(conn, mode) {
         ? `<span class="text-xs text-[var(--text-muted)] truncate max-w-[120px] block">${process}</span>`
         : '';
 
-    const { dlSpeed, ulSpeed, dlTotal, ulTotal } = resolveConnStats(conn, mode);
+    const { dlSpeed, ulSpeed, dlTotal, ulTotal } = stats;
 
     const dimClass = mode === 'closed' ? 'opacity-60' : '';
     // No inline close button — click row to open detail panel
@@ -757,6 +779,76 @@ function buildConnectionRow(conn, mode) {
             <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
         </div>
     </div>`;
+}
+
+/** Grid columns (0-based) holding ↓speed, ↓total, ↑speed, ↑total. */
+const STAT_COLUMNS = Object.freeze([3, 4, 5, 6]);
+
+/** @type {WeakMap<Element, Element[]>} Cached stat <span>s per row element. */
+const _rowStatCells = new WeakMap();
+
+/**
+ * Parse one row's markup into an element (same markup as the former
+ * innerHTML rebuild, so the DOM is identical).
+ * @param {any} conn
+ * @param {string} mode
+ * @returns {Element}
+ */
+function createConnectionRowElement(conn, mode) {
+    const tpl = document.createElement('template');
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in buildConnectionRow
+    tpl.innerHTML = buildConnectionRow(conn, mode).trim(); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    return /** @type {Element} */ (tpl.content.firstElementChild);
+}
+
+/**
+ * @param {Element} row
+ * @returns {Element[]}
+ */
+function getRowStatCells(row) {
+    let cells = _rowStatCells.get(row);
+    if (!cells) {
+        cells = [];
+        for (const col of STAT_COLUMNS) {
+            const span = row.children[col]?.firstElementChild;
+            if (span) cells.push(span);
+        }
+        _rowStatCells.set(row, cells);
+    }
+    return cells;
+}
+
+/**
+ * Patch the four traffic cells of an existing row in place.
+ * @param {Element} row
+ * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} stats
+ */
+function patchConnectionRowStats(row, stats) {
+    const cells = getRowStatCells(row);
+    const values = [stats.dlSpeed, stats.dlTotal, stats.ulSpeed, stats.ulTotal];
+    for (let i = 0; i < cells.length; i++) setTextIfChanged(cells[i], values[i]);
+}
+
+/** @type {WeakSet<Element>} List elements that already carry the delegated row click listener. */
+const _rowClickBound = new WeakSet();
+
+/**
+ * Open the detail panel for a clicked row via a single listener on the list.
+ * @param {Element} container
+ */
+function bindRowClickDelegate(container) {
+    if (_rowClickBound.has(container)) return;
+    _rowClickBound.add(container);
+    container.addEventListener('click', (e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        const row = /** @type {HTMLElement|null} */ (target?.closest('.conn-row') ?? null);
+        if (!row || !container.contains(row)) return;
+        const connId = row.dataset.connId;
+        const connMode = row.dataset.mode;
+        const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
+        const conn = sourceList.find(c => c.id === connId);
+        if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
+    });
 }
 
 /** @param {string} rule */
