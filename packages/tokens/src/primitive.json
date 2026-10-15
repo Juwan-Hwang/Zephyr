@@ -4,7 +4,6 @@
     "green":  { "500": { "value": "#34C759" }, "600": { "value": "#16a34a" } },
     "orange": { "500": { "value": "#FF9500" }, "600": { "value": "#ea580c" } },
     "pink":   { "500": { "value": "#FF2D55" }, "600": { "value": "#db2777" } },
-    "purple": { "500": { "value": "#AF52DE" }, "600": { "value": "#9333ea" } },
     "red":    { "400": { "value": "#f87171" }, "500": { "value": "#ef4444" }, "600": { "value": "#dc2626" } },
     "amber":  { "500": { "value": "#f59e0b" }, "600": { "value": "#d97706" } },
     "emerald":{ "400": { "value": "#4ade80" }, "500": { "value": "#22c55e" }, "600": { "value": "#16a34a" } },
@@ -12,7 +11,7 @@
     "cyan":   { "500": { "value": "#06b6d4" } },
     "indigo": { "400": { "value": "#818cf8" }, "500": { "value": "#6366f1" }, "600": { "value": "#4f46e5" } },
     "close-btn": { "value": "#ff5f57" },
-    "accent": { "value": "{color.purple.500}" },
+    "accent": { "value": "{color.blue.500}" },
     "zinc":   { "100": { "value": "#f4f4f5" }, "200": { "value": "#e4e4e7" }, "300": { "value": "#d4d4d8" }, "400": { "value": "#a1a1aa" }, "500": { "value": "#71717a" }, "600": { "value": "#52525b" } }
   },
   "space": {

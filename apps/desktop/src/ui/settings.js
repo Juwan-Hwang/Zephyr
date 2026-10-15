@@ -30,7 +30,7 @@ import { escapeHtml } from '../utils/sanitize.js';
 import { debounce } from '../utils/debounce.js';
 import { settingsLogger } from '../utils/logger.js';
 import { showNotification, showConfirmModal, showUpdateNotesModal } from './notifications.js';
-import { applyTheme } from './theme.js';
+import { applyTheme, DEFAULT_THEME } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
 import { pasteWithFeedback } from '../utils/clipboard.js';
@@ -179,7 +179,7 @@ function initCopyEnvSettings() {
                 copyBtn.dataset._originalText = textSpan.textContent || '';
             }
             textSpan.textContent = t.copyEnvCopied || 'Copied';
-            copyBtn.style.color = 'var(--accent-primary, #6366f1)';
+            copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             const timeoutId = setTimeout(() => {
                 textSpan.textContent = copyBtn.dataset._originalText || '';
                 copyBtn.style.color = '';
@@ -1329,11 +1329,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 settings.dns_fallbacks = null;
 
                 localStorage.removeItem('appTheme');
-                appStore.set('currentTheme', 'zinc');
-                settings.theme = 'zinc';
-                applyTheme('zinc');
+                appStore.set('currentTheme', DEFAULT_THEME);
+                settings.theme = DEFAULT_THEME;
+                applyTheme(DEFAULT_THEME);
                 document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-[var(--zephyr-bg-secondary)]'));
-                const defaultThemeBtn = document.querySelector('.theme-btn[data-theme="zinc"]');
+                const defaultThemeBtn = document.querySelector('.theme-btn[data-theme="blue"]');
                 if (defaultThemeBtn) {
                     defaultThemeBtn.classList.add('ring-2', 'ring-offset-2', 'ring-offset-[var(--zephyr-bg-secondary)]', 'ring-zinc-500');
                 }

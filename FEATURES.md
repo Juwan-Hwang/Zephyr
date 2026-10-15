@@ -105,7 +105,7 @@
 - **Design Token System** — Style Dictionary pipeline with 3 layers (Primitive → Semantic → Component), 4-level radius system (Control 8px / Surface 12px / Overlay 16px / Full 9999px), semantic surface layers (page/raised/elevated/input/overlay), hardcoded color elimination
 - **Component System** — Unified Form Control (sm/md/lg sizes + mono variant), Status Dot (online/offline/error/warning), Latency Badge (fast/medium/slow color-coded), Danger Zone styling, Status Ring (SVG stroke-dashoffset circular progress), Button State Matrix (disabled/loading/aria-busy)
 - **Accessibility Enhancements** — Unified disabled state across all interactive elements, hover protection for disabled buttons, collapsible ARIA (role/button/tabindex/aria-expanded/aria-controls/keyboard), dropdown disabled guards, proxies reduced-motion support, theme-aware focus ring via color-mix, transition tokens
-- **Theme System** — 5 presets (purple, blue, green, orange, pink) + custom hex color with cross-restart persistence, automatic dark/light switching via CSS custom properties
+- **Theme System** — 4 presets (blue, green, orange, pink) + custom hex color with cross-restart persistence, automatic dark/light switching via CSS custom properties
 - **i18n** — 14 languages (en, zh, ja, ko, ru, es, fa, tk, my, ar, ur, sw, tr, vi) with full RTL layout support (Arabic/Persian/Urdu) and CLDR plural rule validation
 - **Event Bus** — Inter-module communication (`Bus`/`Events`)
 - **Centralized State** — `appStore` for reactive state management

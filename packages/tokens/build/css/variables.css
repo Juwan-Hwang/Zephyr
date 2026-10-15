@@ -30,8 +30,6 @@
   --zephyr-color-orange-600: #ea580c;
   --zephyr-color-pink-500: #FF2D55;
   --zephyr-color-pink-600: #db2777;
-  --zephyr-color-purple-500: #AF52DE;
-  --zephyr-color-purple-600: #9333ea;
   --zephyr-color-red-400: #f87171;
   --zephyr-color-red-500: #ef4444;
   --zephyr-color-red-600: #dc2626;
@@ -47,7 +45,7 @@
   --zephyr-color-indigo-500: #6366f1;
   --zephyr-color-indigo-600: #4f46e5;
   --zephyr-color-close-btn: #ff5f57;
-  --zephyr-color-accent: #AF52DE;
+  --zephyr-color-accent: #007AFF;
   --zephyr-color-zinc-100: #f4f4f5;
   --zephyr-color-zinc-200: #e4e4e7;
   --zephyr-color-zinc-300: #d4d4d8;
@@ -58,8 +56,8 @@
   --zephyr-color-warning: #f59e0b;
   --zephyr-color-success: #4ade80;
   --zephyr-color-info: #38bdf8;
-  --zephyr-color-download: #AF52DE;
-  --zephyr-color-upload: #38bdf8;
+  --zephyr-color-download: #0A84FF;
+  --zephyr-color-upload: #FF6B6B;
   --zephyr-space-0: 0;
   --zephyr-space-1: 4px;
   --zephyr-space-2: 6px;
@@ -133,8 +131,8 @@
   --zephyr-border-subtle: rgba(255, 255, 255, 0.05);
   --zephyr-border-default: rgba(255, 255, 255, 0.1);
   --zephyr-border-strong: rgba(255, 255, 255, 0.2);
-  --zephyr-focus-color: #AF52DE;
-  --zephyr-focus-ring-alpha: 50%;
+  --zephyr-focus-color: #007AFF;
+  --zephyr-focus-ring-alpha: 90%;
   --zephyr-focus-ring-soft-alpha: 30%;
   --zephyr-focus-border-alpha: 50%;
   --zephyr-transition-micro: 0.1s ease-in;
@@ -152,8 +150,8 @@ html:not(.dark) {
   --zephyr-color-warning: #d97706;
   --zephyr-color-success: #16a34a;
   --zephyr-color-info: #2563eb;
-  --zephyr-color-download: #9333ea;
-  --zephyr-color-upload: #2563eb;
+  --zephyr-color-download: #007AFF;
+  --zephyr-color-upload: #D13A3F;
   --zephyr-shadow-dropdown: 10px 10px 10px 0 rgba(0, 0, 0, 0.08);
   --zephyr-shadow-dialog: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 8px 40px rgba(0, 0, 0, 0.25);
   --zephyr-text-primary: rgba(24, 24, 28, 0.95);
@@ -179,7 +177,6 @@ html:not(.dark) {
   --zephyr-border-subtle: rgba(30, 41, 59, 0.1);
   --zephyr-border-default: rgba(30, 41, 59, 0.14);
   --zephyr-border-strong: rgba(30, 41, 59, 0.2);
-  --zephyr-focus-ring-alpha: 70%;
   --zephyr-focus-ring-soft-alpha: 45%;
   --zephyr-focus-border-alpha: 70%;
 }

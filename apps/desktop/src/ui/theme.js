@@ -7,9 +7,19 @@
  */
 
 /** Currently active theme name or hex color string. */
-export let currentTheme = 'purple';
+export let currentTheme = 'blue';
 
-const VALID_THEMES = new Set(['purple', 'blue', 'green', 'orange', 'pink', 'zinc']);
+/** Theme applied when nothing (or something unknown) is saved. */
+export const DEFAULT_THEME = 'blue';
+
+export const VALID_THEMES = new Set(['blue', 'green', 'orange', 'pink', 'zinc']);
+
+/**
+ * Preset names that were removed but may still be persisted in user
+ * settings / localStorage. They are transparently mapped to a current preset.
+ * @type {Readonly<Record<string, string>>}
+ */
+const LEGACY_THEME_ALIASES = Object.freeze({ purple: 'blue' });
 
 const THEME_CLASSES = [
     'theme-purple', 'theme-blue', 'theme-green',
@@ -17,10 +27,25 @@ const THEME_CLASSES = [
 ];
 
 /**
+ * Normalize a persisted theme value: custom hex colors are kept as-is,
+ * legacy preset names are migrated, unknown values fall back to the default.
+ *
+ * @param {unknown} theme
+ * @returns {string}
+ */
+export function normalizeTheme(theme) {
+    if (typeof theme !== 'string' || !theme.trim()) return DEFAULT_THEME;
+    const value = theme.trim();
+    if (value.startsWith('#')) return value;
+    if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_ALIASES, value)) return LEGACY_THEME_ALIASES[value];
+    return VALID_THEMES.has(value) ? value : DEFAULT_THEME;
+}
+
+/**
  * Apply a theme to the document element.
  * Supports both preset theme names and hex color strings.
  *
- * @param {string} theme - Theme name (e.g. 'purple') or hex color (e.g. '#8b5cf6')
+ * @param {string} theme - Theme name (e.g. 'blue') or hex color (e.g. '#007aff')
  */
 export function applyTheme(theme) {
     currentTheme = theme;
@@ -39,9 +64,9 @@ export function applyTheme(theme) {
         const r = parseInt(hex.slice(0, 2), 16);
         const g = parseInt(hex.slice(2, 4), 16);
         const b = parseInt(hex.slice(4, 6), 16);
-        const rv = isNaN(r) ? 175 : r;
-        const gv = isNaN(g) ? 82 : g;
-        const bv = isNaN(b) ? 222 : b;
+        const rv = isNaN(r) ? 0 : r;
+        const gv = isNaN(g) ? 122 : g;
+        const bv = isNaN(b) ? 255 : b;
         document.documentElement.style.setProperty('--accent-glow', `rgba(${rv}, ${gv}, ${bv}, 0.2)`);
         document.documentElement.style.setProperty('--accent-rgb', `${rv}, ${gv}, ${bv}`);
     } else {
@@ -49,7 +74,7 @@ export function applyTheme(theme) {
         document.documentElement.style.removeProperty('--accent-glow');
         document.documentElement.style.removeProperty('--accent-rgb');
 
-        const t = VALID_THEMES.has(theme) ? theme : 'purple';
+        const t = normalizeTheme(theme);
         document.documentElement.classList.add(`theme-${t}`);
         currentTheme = t;
     }
