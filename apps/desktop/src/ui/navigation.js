@@ -14,6 +14,17 @@ function prefersReducedMotion() {
     return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** @type {WeakMap<Element, (e: AnimationEvent) => void>} */
+const pageEnterListeners = new WeakMap();
+
+/** @param {Element} p */
+function dropPageEnterListener(p) {
+    const fn = pageEnterListeners.get(p);
+    if (!fn) return;
+    p.removeEventListener('animationend', /** @type {EventListener} */ (fn));
+    pageEnterListeners.delete(p);
+}
+
 /**
  * Switch the visible page by pageId.
  * Only the incoming page animates (fade + 6px rise, transform/opacity only);
@@ -33,11 +44,21 @@ export function switchPage(pageId) {
                 p.classList.remove('page-enter');
                 void p.offsetWidth; // restart the keyframes when re-entering quickly
                 p.classList.add('page-enter');
-                p.addEventListener('animationend', () => p.classList.remove('page-enter'), { once: true });
+                dropPageEnterListener(p);
+                /** @param {AnimationEvent} e */
+                const onEnd = (e) => {
+                    // animationend bubbles: ignore animations of the page's children.
+                    if (e.target !== p) return;
+                    p.classList.remove('page-enter');
+                    dropPageEnterListener(p);
+                };
+                pageEnterListeners.set(p, onEnd);
+                p.addEventListener('animationend', onEnd);
             }
         } else {
             p.classList.add('hidden');
             p.classList.remove('page-enter');
+            dropPageEnterListener(p);
         }
     });
 

@@ -1293,7 +1293,7 @@ html:not(.dark) .form-control:focus {
 .conn-row {
   cursor: pointer;
   content-visibility: auto;
-  contain-intrinsic-size: 0 48px;
+  contain-intrinsic-size: 0 54px; /* two-line row ≈ 53px */
 }
 
 /* Proxy card wrapper: content-visibility for virtual scroll perf */
@@ -1750,6 +1750,8 @@ html.dark #fullscreen-editor-output {
 /* Keep footer text clear of the sparkline drawn in the bottom corner */
 .dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
 .dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The footer is a flex row: ellipsize its text pieces, not just the row. */
+.dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
@@ -2056,6 +2058,16 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
 [data-page].page-enter {
   animation: page-enter 180ms var(--motion-ease-out) both;
 }
+/* A transformed page becomes the containing block of its position:fixed
+   children, so while a fixed overlay inside the page is open (the plugin
+   panel) the page only fades; the overlay keeps covering the window. */
+@keyframes page-enter-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-page].page-enter:has(.fixed:not(.hidden)) {
+  animation-name: page-enter-fade;
+}
 
 /* Sidebar: one highlight that slides between items */
 #sidebar-nav .nav-btn { position: relative; z-index: 1; }
@@ -2268,6 +2280,9 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
   box-shadow: var(--zephyr-shadow-sm);
 }
 html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+/* Full-width tabs inside dialogs get a roomier 40px track */
+.seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
+.seg-tabs-lg .seg-tab { font-size: 13px; }
 
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */

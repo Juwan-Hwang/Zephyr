@@ -142,6 +142,15 @@ describe('connections page list rendering', () => {
         expect(list().querySelector('#connections-empty')).toBeNull();
     });
 
+    it('exposes every sort control as a toggle before the first sort pass', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        initConnectionsPage();
+        await flush();
+        const controls = [...document.querySelectorAll('#conn-table-header .sortable')];
+        expect(controls).toHaveLength(7);
+        for (const el of controls) expect(el.getAttribute('aria-pressed')).not.toBeNull();
+    });
+
     it('opens the detail panel through the delegated click listener', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
@@ -183,6 +192,100 @@ describe('connections page list rendering', () => {
         expect(document.querySelectorAll('#conn-detail-panel')).toHaveLength(1);
     });
 
+    it('moves focus into the detail dialog and returns it to the row on Escape', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const panel = document.getElementById('conn-detail-panel');
+        expect(panel?.getAttribute('role')).toBe('dialog');
+        expect(panel?.getAttribute('aria-modal')).toBe('true');
+        expect(document.getElementById(panel?.getAttribute('aria-labelledby') || '')?.textContent).toBe('a.example');
+        expect(document.activeElement?.id).toBe('detail-dismiss-btn');
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(document.activeElement).toBe(row);
+    });
+
+    it('returns focus to a clicked row even when the click did not focus it', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        const tab = /** @type {HTMLElement} */ (document.getElementById('conn-tab-closed'));
+        tab.focus();
+        /** @type {HTMLElement} */ (row.querySelector('span')).click();
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(document.activeElement).toBe(row);
+    });
+
+    it('moves focus to the selected tab when the opening row is gone on close', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        row.remove();
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(document.activeElement?.id).toBe('conn-tab-active');
+    });
+
+    it('moves focus to the selected tab after closing the connection from its dialog', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        await flush();
+        expect(document.activeElement?.id).toBe('conn-tab-active');
+    });
+
+    it('keeps keyboard focus on a row that the refresh re-creates', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        rows()[1].focus();
+        // Host change → new signature → the row element is rebuilt.
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'c.example', 0)] });
+        await refresh();
+        const active = /** @type {HTMLElement | null} */ (document.activeElement);
+        expect(active?.classList.contains('conn-row')).toBe(true);
+        expect(active?.dataset.connId).toBe('2');
+    });
+
+    it('closes the detail dialog on a backdrop click after a click inside the panel', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        /** @type {HTMLElement} */ (rows()[0].querySelector('span')).click();
+        const bg = /** @type {HTMLElement} */ (document.getElementById('conn-detail-bg'));
+        /** @type {HTMLElement} */ (document.getElementById('conn-detail-panel')).click();
+        vi.advanceTimersByTime(200);
+        expect(bg.classList.contains('hidden')).toBe(false);
+        bg.click();
+        vi.advanceTimersByTime(200);
+        expect(bg.classList.contains('hidden')).toBe(true);
+    });
+
+    it('keeps a dialog reopened during the close animation visible', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        vi.advanceTimersByTime(200);
+        expect(document.getElementById('conn-detail-bg')?.classList.contains('hidden')).toBe(false);
+    });
+
     it('patches idle dimming in place when traffic starts', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 100)] });
         initConnectionsPage();
@@ -195,7 +298,7 @@ describe('connections page list rendering', () => {
         await refresh();
         expect(rows()[0]).toBe(row);
         expect(row.classList.contains('conn-row--idle')).toBe(false);
-        expect(row.querySelector('.conn-rate--down')?.textContent).not.toBe('');
+        expect(row.querySelector('.conn-rate--down')?.textContent).toBeTruthy();
     });
 
     it('keeps sorted order and moves rows when the order changes', async () => {
