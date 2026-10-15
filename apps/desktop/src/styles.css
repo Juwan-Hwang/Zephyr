@@ -1979,3 +1979,23 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   letter-spacing: -0.04em;
   text-shadow: 0 1px 12px color-mix(in srgb, var(--zephyr-bg-elevated, #000) 35%, transparent);
 }
+
+/* Segmented control items without a sliding thumb (e.g. UI scale): selected = raised grey, same as the sliders */
+.seg-item {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: var(--text-secondary);
+  background: transparent;
+}
+.seg-item:hover { color: var(--text-primary); }
+.seg-item[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+
+/* Subscription card: days left until expiry */
+.sub-expiry { font-variant-numeric: tabular-nums; }
+.sub-expiry[data-tone="warning"] { color: var(--zephyr-color-warning); font-weight: 600; }
+.sub-expiry[data-tone="danger"] { color: var(--zephyr-color-danger); font-weight: 600; }

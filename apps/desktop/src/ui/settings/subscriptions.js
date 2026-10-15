@@ -15,7 +15,7 @@ import {
 } from '../../api.js';
 import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
-import { translations } from '../../i18n.js';
+import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showModal, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
@@ -75,6 +75,20 @@ function formatLastUpdated(timestamp, t) {
     if (diff < 3600) return (t.lastUpdatedMinutesAgo || '{m} min ago').replace('{m}', String(Math.floor(diff / 60)));
     if (diff < 86400) return (t.lastUpdatedHoursAgo || '{h}h ago').replace('{h}', String(Math.floor(diff / 3600)));
     return (t.lastUpdatedDaysAgo || '{d}d ago').replace('{d}', String(Math.floor(diff / 86400)));
+}
+
+/**
+ * Read the `expire=` unix timestamp (seconds) from a subscription-userinfo string.
+ * @param {string | null | undefined} subInfo
+ * @returns {number} 0 when absent
+ */
+export function parseSubExpire(subInfo) {
+    if (!subInfo) return 0;
+    for (const part of String(subInfo).split(';')) {
+        const s = part.trim();
+        if (s.startsWith('expire=')) return Number.parseInt(s.slice(7), 10) || 0;
+    }
+    return 0;
 }
 
 // ---- Module-level renderConfigs for use before init ----
@@ -1267,7 +1281,8 @@ export function initSubscriptionSettings({
             left.appendChild(label);
 
             const actions = document.createElement('div');
-            actions.className = 'flex items-center gap-2 transition-opacity opacity-0 group-hover:opacity-100';
+            // Always visible (dimmed) so the actions are discoverable and reachable by keyboard
+            actions.className = 'sub-actions flex items-center gap-2 transition-opacity opacity-40 group-hover:opacity-100 group-focus-within:opacity-100';
 
             // Delete button
             const delBtn = document.createElement('button');
@@ -1405,7 +1420,10 @@ export function initSubscriptionSettings({
 
                     const barFill = document.createElement('div');
                     const clampedPercentage = isNaN(percentage) || !isFinite(percentage) ? 0 : Math.max(0, Math.min(100, percentage));
-                    barFill.className = `h-full rounded-full transition-[width] duration-[var(--zephyr-time-page)] ${clampedPercentage > 90 ? 'bg-danger' : 'bg-accent'}`;
+                    let usageTone = 'bg-accent';
+                    if (clampedPercentage >= 90) usageTone = 'bg-danger';
+                    else if (clampedPercentage >= 75) usageTone = 'bg-warning';
+                    barFill.className = `h-full rounded-full transition-[width] duration-[var(--zephyr-time-page)] ${usageTone}`;
                     barFill.style.width = `${clampedPercentage}%`;
 
                     barBg.setAttribute('role', 'progressbar');
@@ -1425,8 +1443,10 @@ export function initSubscriptionSettings({
             const lastUpdatedText = formatLastUpdated(configInfo.last_updated, t3);
             const hasUrl = !!configInfo.url_display;
             const hasTime = lastUpdatedText !== (t3.lastUpdatedNever || 'Never');
+            const expireTs = parseSubExpire(configInfo.sub_info);
+            const hasExpiry = expireTs > 0;
             
-            if (hasUrl || hasTime) {
+            if (hasUrl || hasTime || hasExpiry) {
                 const infoRow = document.createElement('div');
                 infoRow.className = 'flex items-center justify-between mt-1 gap-2';
                 
@@ -1437,11 +1457,37 @@ export function initSubscriptionSettings({
                     infoRow.appendChild(urlLabel);
                 }
                 
-                if (hasTime) {
-                    const timeEl = document.createElement('div');
-                    timeEl.className = 'text-2xs text-[var(--text-tertiary)] shrink-0';
-                    timeEl.textContent = lastUpdatedText;
-                    infoRow.appendChild(timeEl);
+                if (hasTime || hasExpiry) {
+                    const metaEl = document.createElement('div');
+                    metaEl.className = 'flex items-center gap-1.5 text-2xs text-[var(--text-tertiary)] shrink-0 ms-auto';
+                    if (hasTime) {
+                        const timeEl = document.createElement('span');
+                        timeEl.textContent = lastUpdatedText;
+                        if (t3.consoleSubLastUpdate) timeEl.title = `${t3.consoleSubLastUpdate}: ${lastUpdatedText}`;
+                        metaEl.appendChild(timeEl);
+                    }
+                    if (hasExpiry) {
+                        const daysLeft = Math.floor((expireTs - Date.now() / 1000) / 86400);
+                        if (hasTime) {
+                            const sep = document.createElement('span');
+                            sep.setAttribute('aria-hidden', 'true');
+                            sep.textContent = '·';
+                            metaEl.appendChild(sep);
+                        }
+                        const expEl = document.createElement('span');
+                        expEl.className = 'sub-expiry';
+                        if (daysLeft <= 0) {
+                            expEl.textContent = t3.subExpired || 'Expired';
+                            expEl.dataset.tone = 'danger';
+                        } else {
+                            expEl.textContent = tr('consoleSubDaysLeft', daysLeft, { d: String(daysLeft) });
+                            if (daysLeft < 7) expEl.dataset.tone = 'warning';
+                        }
+                        const expDate = new Date(expireTs * 1000).toLocaleDateString(appStore.get('currentLang') || undefined);
+                        expEl.title = `${t3.consoleSubExpiry || 'Expires'}: ${expDate}`;
+                        metaEl.appendChild(expEl);
+                    }
+                    infoRow.appendChild(metaEl);
                 }
                 
                 item.appendChild(infoRow);

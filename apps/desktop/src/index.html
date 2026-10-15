@@ -517,11 +517,11 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <button type="button" id="ui-scale-100" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">100%</button>
-                                    <button type="button" id="ui-scale-110" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">110%</button>
-                                    <button type="button" id="ui-scale-125" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">125%</button>
-                                    <button type="button" id="ui-scale-150" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">150%</button>
+                                <div class="seg-control relative grid grid-cols-4 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 w-[220px]" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
+                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold tabular-nums transition-colors">100%</button>
+                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold tabular-nums transition-colors">110%</button>
+                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold tabular-nums transition-colors">125%</button>
+                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold tabular-nums transition-colors">150%</button>
                                 </div>
                             </div>
 

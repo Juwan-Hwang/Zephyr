@@ -1062,15 +1062,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     const uiScaleButtons = document.querySelectorAll('.ui-scale-btn');
     const applyUiScale = (/** @type {number} */ scale) => {
         // Update button states
+        // Same raised-grey selected state as the theme / home-mode segmented controls
+        const activeId = `ui-scale-${Math.round(scale * 100)}`;
         uiScaleButtons.forEach(btn => {
-            btn.classList.remove('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
-            btn.classList.add('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
+            btn.setAttribute('aria-pressed', btn.id === activeId ? 'true' : 'false');
         });
-        const activeBtn = document.getElementById(`ui-scale-${Math.round(scale * 100)}`);
-        if (activeBtn) {
-            activeBtn.classList.remove('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
-            activeBtn.classList.add('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
-        }
         // Apply scale via CSS custom property --ui-scale
         // The actual transform/size is handled by CSS on #app-main-container.
         // This avoids inline style conflicts with Tailwind classes and ensures
