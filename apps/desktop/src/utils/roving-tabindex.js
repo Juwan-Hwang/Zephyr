@@ -5,7 +5,8 @@
  * ArrowDown/ArrowUp move focus between items.
  * Home/End jump to first/last item.
  * Typeahead: typing characters jumps to the next matching item (500ms timeout).
- * MutationObserver automatically adapts to dynamic DOM changes.
+ * MutationObserver adapts when items are added/removed as direct children
+ * of the container (changes deeper inside an item are ignored).
  *
  * Usage:
  *   const roving = createRovingTabindex(container, {
@@ -203,7 +204,11 @@ export function createRovingTabindex(container, options = {}) {
                 }
             }
         });
-        observer.observe(container, { childList: true, subtree: true });
+        // Items are the container's direct children (e.g. the proxy cards),
+        // so only their insertion/removal can change the item list. Watching
+        // the whole subtree re-wrote every tabindex on each inner text or
+        // innerHTML change (latency badges, scores) for no effect.
+        observer.observe(container, { childList: true });
     }
 
     // Initialize
