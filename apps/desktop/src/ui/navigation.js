@@ -267,8 +267,11 @@ export function initNavigation(callbacks = {}) {
     if (sidebar && typeof ResizeObserver === 'function') {
         new ResizeObserver(() => moveNavIndicator(document.querySelector('.nav-btn.is-active'), true)).observe(sidebar);
     }
-    // Initial glow state without animation
+    // Initial glow state without animation. Glows switchPage() already
+    // adopted carry .page-glow and must keep their is-active state; only the
+    // untouched markup still uses `hidden` to mean "inactive".
     document.querySelectorAll('[id^="glow-"]').forEach(g => {
+        if (g.classList.contains('page-glow')) return;
         const active = !g.classList.contains('hidden');
         g.classList.add('page-glow');
         g.classList.remove('hidden');
