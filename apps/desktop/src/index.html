@@ -89,7 +89,7 @@
             <div data-page="home" class="flex-1 flex flex-col p-8 gap-4 overflow-y-auto custom-scrollbar relative">
 
                 <!-- Hero: live traffic area chart behind the speed read-out -->
-                <section id="home-hero" class="home-hero glass-card relative z-20 shrink-0">
+                <section id="home-hero" class="home-hero glass-card relative z-20">
                     <div class="home-hero-chart" aria-hidden="true">
                         <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
                     </div>
@@ -101,7 +101,7 @@
                         </button>
                         
                         <!-- Wheel Dropdown -->
-                        <div id="node-wheel-dropdown" class="absolute top-[14px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                        <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
                             <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
                                 <div id="node-wheel-padding-top" style="height: 56px;"></div>
                                 <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
@@ -137,63 +137,78 @@
                 </section>
 
                 <!-- System Proxy Toggle -->
-                <div class="glass-card p-5 flex items-center justify-between relative z-10">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-inner">
-                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <div class="glass-card p-4 flex items-center justify-between gap-4 relative z-10 shrink-0">
+                    <div class="flex items-center gap-4 min-w-0">
+                        <div class="w-12 h-12 shrink-0 rounded-[var(--radius-md)] bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                         </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <h3 class="text-sm font-bold text-[var(--text-primary)] tracking-tight" data-i18n="sysProxy">System Proxy Control</h3>
-                            </div>
-                            <p class="text-xs text-[var(--text-muted)] font-medium" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
                         </div>
                     </div>
-                    <label class="ios-switch switch-lg">
+                    <label class="ios-switch switch-lg shrink-0">
     <input type="checkbox" id="sys-proxy-toggle">
     <span class="switch-slider"></span>
 </label>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-4 shrink-0">
                     <!-- Proxy Mode Selector -->
-                    <div class="glass-card p-4 relative z-10">
-                        <div class="flex items-center gap-3 mb-3">
-                            <div class="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center gap-3 h-8 min-w-0">
+                            <div class="w-8 h-8 shrink-0 rounded-[10px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                             </div>
-                            <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="mode">Proxy Mode</h3>
+                            <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="mode">Proxy Mode</h3>
                         </div>
                         <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
                             <div id="mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="rule">Rule</button>
-                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="global">Global</button>
-                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="direct">Direct</button>
+                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="rule">Rule</button>
+                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="global">Global</button>
+                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="direct">Direct</button>
                         </div>
                     </div>
 
-                    <!-- TUN Mode Toggle -->
-                    <div class="glass-card p-4 flex flex-col justify-center relative z-10">
-                        <div class="flex items-center justify-between gap-3">
+                    <!-- TUN Mode Toggle: same two-row rhythm as the mode card (header row, then a 36px control row) -->
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center justify-between gap-3 h-8 min-w-0">
                             <div class="flex items-center gap-3 min-w-0">
-                                <div class="w-8 h-8 shrink-0 rounded-md bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                <div class="w-8 h-8 shrink-0 rounded-[10px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                 </div>
-                                <div class="min-w-0">
-                                    <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="tunMode">TUN Mode</h3>
-                                    <div class="flex items-center gap-1.5 min-w-0">
-                                        <div id="tun-spinner" class="hidden w-2.5 h-2.5 shrink-0 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
-                                        <p class="text-2xs text-[var(--text-muted)] font-medium transition-colors truncate" id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>
-                                    </div>
-                                </div>
+                                <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
                             </div>
                             <label class="ios-switch shrink-0">
     <input type="checkbox" id="tun-proxy-toggle">
     <span class="switch-slider"></span>
 </label>
                         </div>
+                        <div class="home-tun-status">
+                            <div id="tun-spinner" class="hidden w-2.5 h-2.5 shrink-0 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium transition-colors truncate" id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Live figures that already exist elsewhere (console / connections), so the page ends on information rather than empty glass -->
+                <section id="home-stats" class="home-stats glass-card relative z-10 shrink-0">
+                    <div class="home-stat">
+                        <span class="home-stat-label" data-i18n="consoleTotalTraffic">Total Traffic</span>
+                        <span class="home-stat-value"><b id="home-stat-total">—</b></span>
+                        <span class="home-stat-foot"><span class="text-download-ink" aria-hidden="true">↓</span> <span id="home-stat-down">—</span> · <span class="text-upload-ink" aria-hidden="true">↑</span> <span id="home-stat-up">—</span></span>
+                    </div>
+                    <div class="home-stat">
+                        <span class="home-stat-label" data-i18n="consoleActiveConn">Active Connections</span>
+                        <span class="home-stat-value"><b id="home-stat-conn">—</b></span>
+                        <span class="home-stat-foot">TCP <span id="home-stat-tcp">—</span> · UDP <span id="home-stat-udp">—</span></span>
+                    </div>
+                    <div class="home-stat">
+                        <span class="home-stat-label" data-i18n="consoleNodeLatency">Node Latency</span>
+                        <span class="home-stat-value"><b id="home-stat-lat">—</b><small>ms</small></span>
+                        <span class="home-stat-foot truncate" id="home-stat-node">—</span>
+                    </div>
+                </section>
 
             </div>
 
