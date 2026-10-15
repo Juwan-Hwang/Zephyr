@@ -40,6 +40,11 @@ describe('findSearchRanges', () => {
 });
 
 describe('renderLogLineHtml', () => {
+    it('colours FATAL tags like other levels', () => {
+        expect(renderLogLineHtml('[FATAL] boom', '', { ...COLORS, fatal: '#x' }, FALLBACK)).toBe(`${lvl('#x', '[FATAL]')} boom`);
+        expect(renderLogLineHtml('level=fatal boom', '', COLORS, FALLBACK)).toBe(`${lvl('#e', 'level=fatal')} boom`);
+    });
+
     it('escapes a plain line without search', () => {
         expect(renderLogLineHtml('a < b & c', '', COLORS, FALLBACK)).toBe('a &lt; b &amp; c');
     });
@@ -80,7 +85,7 @@ describe('renderLogLineHtml', () => {
     it('colours bracket and level= tags exactly as before', () => {
         expect(renderLogLineHtml('[ERROR] boom', '', COLORS, FALLBACK)).toBe(`${lvl('#e', '[ERROR]')} boom`);
         expect(renderLogLineHtml('time=1 level=warning msg', '', COLORS, FALLBACK))
-            .toBe(`time=1 ${lvl('#w', 'level=warn')}ing msg`); // same alternation order as before
+            .toBe(`time=1 ${lvl('#w', 'level=warning')} msg`);
     });
 
     it('uses the fallback colour for unknown level keys', () => {
