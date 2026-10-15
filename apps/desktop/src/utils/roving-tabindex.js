@@ -5,7 +5,9 @@
  * ArrowDown/ArrowUp move focus between items.
  * Home/End jump to first/last item.
  * Typeahead: typing characters jumps to the next matching item (500ms timeout).
- * MutationObserver automatically adapts to dynamic DOM changes.
+ * MutationObserver resyncs when navigable items are added or removed anywhere
+ * in the container (mutations inside an item that do not add or remove items
+ * are ignored).
  *
  * Usage:
  *   const roving = createRovingTabindex(container, {
@@ -66,6 +68,13 @@ export function createRovingTabindex(container, options = {}) {
     let typeaheadTimer = /** @type {number|null} */ (null);
     /** @type {MutationObserver|null} */
     let observer = null;
+    /**
+     * Items seen at the last sync. Removed nodes are detached by the time the
+     * observer runs, so a selector that depends on an ancestor no longer
+     * matches them; membership in this list still identifies them.
+     * @type {HTMLElement[]}
+     */
+    let knownItems = [];
 
     /**
      * @returns {HTMLElement[]}
@@ -191,9 +200,38 @@ export function createRovingTabindex(container, options = {}) {
         }
     }
 
+    /**
+     * Whether a mutation added or removed a navigable item. Item content
+     * (latency badges, scores) changes on every poll; resyncing every
+     * tabindex for those is wasted work, so only list changes count.
+     * @param {MutationRecord[]} records
+     */
+    function itemsChanged(records) {
+        let removedElement = false;
+        for (const record of records) {
+            for (const list of [record.addedNodes, record.removedNodes]) {
+                for (const node of list) {
+                    if (!(node instanceof Element)) continue;
+                    if (list === record.removedNodes) removedElement = true;
+                    if (node.matches(itemSelector) || node.querySelector(itemSelector)) return true;
+                }
+            }
+        }
+        if (!removedElement) return false;
+        // Compare against a fresh query: with an ancestor-dependent selector an
+        // item can match without ever having been tracked, so a containment
+        // check on `knownItems` alone can miss its removal.
+        const current = getItems();
+        return current.length !== knownItems.length
+            || current.some((item, i) => item !== knownItems[i])
+            || currentIndex >= current.length;
+    }
+
     function setupObserver() {
-        observer = new MutationObserver(() => {
+        observer = new MutationObserver((records) => {
+            if (!itemsChanged(records)) return;
             const items = getItems();
+            knownItems = items;
             if (currentIndex >= items.length) {
                 currentIndex = items.length > 0 ? items.length - 1 : -1;
             }
@@ -203,6 +241,8 @@ export function createRovingTabindex(container, options = {}) {
                 }
             }
         });
+        // Watch the subtree so items nested under wrappers are tracked too;
+        // the callback ignores mutations that do not add or remove an item.
         observer.observe(container, { childList: true, subtree: true });
     }
 
@@ -212,6 +252,7 @@ export function createRovingTabindex(container, options = {}) {
         initialItems[i].setAttribute('tabindex', i === 0 ? '0' : '-1');
     }
     if (initialItems.length > 0) currentIndex = 0;
+    knownItems = initialItems;
 
     container.addEventListener('keydown', onKeyDown);
     container.addEventListener('click', onClick);
