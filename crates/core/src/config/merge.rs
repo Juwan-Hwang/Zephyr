@@ -5,7 +5,9 @@
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
-use super::sanitizer::remove_dangerous_keys_internal_pub;
+use super::sanitizer::{
+    remove_control_plane_keys, remove_dangerous_keys_internal_pub, remove_keys_resolved,
+};
 
 // ── Security settings extraction / restoration (pure functions) ─────────
 
@@ -38,10 +40,25 @@ pub fn extract_security_settings(yaml: &YamlValue) -> SecuritySettings {
 }
 
 /// Restore security-critical settings into a YAML mapping after merge.
+///
+/// Besides pinning `external-controller` / `secret`, this also drops any
+/// controller surface the app does not manage (unix socket / named pipe /
+/// TLS listeners, CORS, the `DoH` server, external UI), since those either bypass
+/// `secret` or widen the controller's exposure.
 pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettings) {
+    remove_control_plane_keys(yaml);
     let YamlValue::Mapping(ref mut map) = yaml else {
         return;
     };
+
+    // The app-managed values below replace any existing entry, including one
+    // written with an explicit tag (`!!str secret`) that mihomo resolves to the
+    // same key; otherwise both would survive and the config would carry two
+    // conflicting controller/secret settings.
+    remove_keys_resolved(map, &["external-controller"]);
+    if settings.secret.is_some() {
+        remove_keys_resolved(map, &["secret"]);
+    }
 
     // Restore external-controller: always bind to localhost
     if let Some(ctrl) = &settings.external_controller {
@@ -370,5 +387,151 @@ mod tests {
     #[test]
     fn snapshot_mask_url_unicode_host() {
         insta::assert_snapshot!(mask_url("https://例子.测试.com/path".to_owned()));
+    }
+
+    // -- Control-plane keys -------------------------------------------------
+
+    struct MemIo {
+        content: std::cell::RefCell<Option<String>>,
+    }
+
+    impl ConfigIo for MemIo {
+        fn read_to_string(&self, _path: &std::path::Path) -> Result<String, String> {
+            self.content
+                .borrow()
+                .clone()
+                .ok_or_else(|| "missing".to_owned())
+        }
+        fn write_file(&self, _path: &std::path::Path, content: &str) -> Result<(), String> {
+            *self.content.borrow_mut() = Some(content.to_owned());
+            Ok(())
+        }
+        fn path_exists(&self, _path: &std::path::Path) -> bool {
+            self.content.borrow().is_some()
+        }
+    }
+
+    const CONTROL_SAMPLES: &[(&str, &str)] = &[
+        ("external-controller-unix", "\"/tmp/mihomo.sock\""),
+        (
+            "external-controller-pipe",
+            "\"\\\\\\\\.\\\\pipe\\\\mihomo\"",
+        ),
+        ("external-controller-tls", "\"0.0.0.0:9443\""),
+        ("external-controller-cors", "{\"allow-origins\": [\"*\"]}"),
+        ("external-doh-server", "\"/dns-query\""),
+        ("external-ui", "\"/tmp/ui\""),
+        ("external-ui-url", "\"https://example.com/ui.zip\""),
+        ("external-ui-name", "\"evil\""),
+    ];
+
+    #[test]
+    fn test_control_samples_cover_blacklist() {
+        let sample_keys: Vec<&str> = CONTROL_SAMPLES.iter().map(|(k, _)| *k).collect();
+        for key in crate::config::sanitizer::CONTROL_PLANE_KEYS {
+            assert!(sample_keys.contains(key), "no merge test for {key}");
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_strips_control_plane_keys_from_patch() {
+        for (key, json_value) in CONTROL_SAMPLES {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(
+                    "external-controller: 127.0.0.1:9090\nsecret: s3cret\nmixed-port: 7890\n"
+                        .to_owned(),
+                )),
+            };
+            let patch: JsonValue = serde_json::from_str(&format!(
+                "{{\"{key}\": {json_value}, \"mode\": \"global\"}}"
+            ))
+            .unwrap();
+            let (yaml, port) =
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+            assert!(yaml.get(*key).is_none(), "{key} survived patch merge");
+            assert_eq!(yaml["mode"].as_str().unwrap(), "global");
+            assert_eq!(
+                yaml["external-controller"].as_str().unwrap(),
+                "127.0.0.1:9090"
+            );
+            assert_eq!(yaml["secret"].as_str().unwrap(), "s3cret");
+            assert_eq!(port, "9090");
+            let written = io.content.borrow().clone().unwrap();
+            assert!(
+                !written.contains(&format!("{key}:")),
+                "{key} written to disk"
+            );
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_strips_control_plane_keys_from_existing_file() {
+        for (key, json_value) in CONTROL_SAMPLES {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(format!(
+                    "external-controller: 127.0.0.1:9090\nsecret: s3cret\n{key}: {json_value}\n"
+                ))),
+            };
+            let patch = serde_json::json!({"mode": "rule"});
+            let (yaml, _) =
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+            assert!(
+                yaml.get(*key).is_none(),
+                "{key} survived from existing file"
+            );
+            assert_eq!(yaml["secret"].as_str().unwrap(), "s3cret");
+            let written = io.content.borrow().clone().unwrap();
+            assert!(
+                !written.contains(key),
+                "{key} was written back to disk: {written}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_restore_security_settings_replaces_tagged_controller_and_secret() {
+        let mut yaml: YamlValue = serde_yaml::from_str(
+            "!!str external-controller: 0.0.0.0:9090\n!!str secret: attacker\nport: 7890\n",
+        )
+        .unwrap();
+        let settings = SecuritySettings {
+            external_controller: Some("127.0.0.1:9090".to_owned()),
+            secret: Some("mysecret".to_owned()),
+            tun_enabled: false,
+        };
+        restore_security_settings(&mut yaml, &settings);
+        let map = yaml.as_mapping().unwrap();
+        let resolved = |name: &str| {
+            map.iter()
+                .filter(|(k, _)| super::super::sanitizer::resolved_key_str(k) == Some(name))
+                .map(|(_, v)| v.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(resolved("external-controller"), vec!["127.0.0.1:9090"]);
+        assert_eq!(resolved("secret"), vec!["mysecret"]);
+        assert_eq!(yaml["port"].as_i64().unwrap(), 7890);
+    }
+
+    #[test]
+    fn test_restore_security_settings_strips_control_plane_keys() {
+        for (key, json_value) in CONTROL_SAMPLES {
+            let mut yaml: YamlValue = serde_yaml::from_str(&format!(
+                "external-controller: 0.0.0.0:9090\nport: 7890\n{key}: {json_value}\n"
+            ))
+            .unwrap();
+            let settings = SecuritySettings {
+                external_controller: Some("127.0.0.1:9090".to_owned()),
+                secret: Some("mysecret".to_owned()),
+                tun_enabled: false,
+            };
+            restore_security_settings(&mut yaml, &settings);
+            assert!(yaml.get(*key).is_none(), "{key} survived restore");
+            assert_eq!(
+                yaml["external-controller"].as_str().unwrap(),
+                "127.0.0.1:9090"
+            );
+            assert_eq!(yaml["secret"].as_str().unwrap(), "mysecret");
+            assert_eq!(yaml["port"].as_i64().unwrap(), 7890);
+        }
     }
 }
