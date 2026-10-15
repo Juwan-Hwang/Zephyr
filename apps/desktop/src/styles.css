@@ -2188,6 +2188,46 @@ html:not(.dark) .home-stat-foot { color: var(--text-muted); }
    instead of being centred on the pill and poking 30px above the card). */
 #node-wheel-dropdown.node-wheel-dropdown { transform-origin: 50% 19%; }
 
+/* Settings: section headings sit on the card's inner content line (20px),
+   sentence case — the same line the row icons start on */
+.settings-section-title {
+  padding-inline: 20px;
+  margin-bottom: 2px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.settings-section-desc {
+  padding-inline: 20px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+/* Settings: one trailing-action style (text button with a quiet hover pill);
+   the negative end margin keeps its text on the card's 20px content edge */
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  margin-inline-end: -10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--accent-ink);
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.row-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); }
+.row-action:active:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 16%, transparent); }
+.row-action + .row-action { margin-inline-start: 0; }
+.flex > .row-action:not(:last-child) { margin-inline-end: 0; }
+.row-action svg { width: 14px; height: 14px; }
+
 /* Segmented tabs (logs, rule library): one 32px pill track, raised thumb —
    the same selected look as the settings segmented controls */
 .seg-tabs {
@@ -2240,4 +2280,7 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
   text-align: center;
 }
 .empty-state.hidden { display: none; }
+
+/* Nested panel inside a settings card: 16px radius (24 outer − 8) */
+#fake-client-options .glass-card { border-radius: var(--radius-md); }
 
