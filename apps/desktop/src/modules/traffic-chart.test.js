@@ -100,6 +100,8 @@ beforeEach(async () => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
     document.documentElement.style.removeProperty('--accent-primary');
     document.documentElement.style.removeProperty('--color-secondary');
+    document.documentElement.style.removeProperty('--zephyr-color-download');
+    document.documentElement.style.removeProperty('--zephyr-color-upload');
 
     buildDom();
     vi.resetModules();
@@ -267,19 +269,19 @@ describe('theme colours', () => {
         chart.updateTrafficData(sample(2, 2));
         flushRaf();
         const [initialDown, initialUp] = ctx.strokes.slice(-2);
-        // defaults from getThemeColors(): #8b5cf6 / #3b82f6
-        expect(initialDown).toBe('rgba(139,92,246,0.8)');
-        expect(initialUp).toBe('rgba(59,130,246,0.8)');
+        // defaults from getThemeColors(): download #0A84FF / upload #FF6B6B
+        expect(initialDown).toBe('rgba(10,132,255,0.8)');
+        expect(initialUp).toBe('rgba(255,107,107,0.8)');
 
-        document.documentElement.style.setProperty('--accent-primary', '#ff0000');
-        document.documentElement.style.setProperty('--color-secondary', '#00ff00');
+        document.documentElement.style.setProperty('--zephyr-color-download', '#ff0000');
+        document.documentElement.style.setProperty('--zephyr-color-upload', '#00ff00');
         chart.updateChartTheme();
 
         now += 200; // halfway
         flushRaf();
         const [midDown, midUp] = ctx.strokes.slice(-2);
-        expect(midDown).toBe(`rgba(${Math.round(139 + (255 - 139) / 2)},${Math.round(92 / 2)},${Math.round(246 / 2)},0.8)`);
-        expect(midUp).toBe(`rgba(${Math.round(59 / 2)},${Math.round(130 + (255 - 130) / 2)},${Math.round(246 / 2)},0.8)`);
+        expect(midDown).toBe(`rgba(${Math.round(10 + (255 - 10) / 2)},${Math.round(132 / 2)},${Math.round(255 / 2)},0.8)`);
+        expect(midUp).toBe(`rgba(${Math.round(255 / 2)},${Math.round(107 + (255 - 107) / 2)},${Math.round(107 / 2)},0.8)`);
         // transition still in flight → another frame queued
         expect(rafQueue.size).toBe(1);
 
@@ -293,14 +295,14 @@ describe('theme colours', () => {
     });
 
     it('falls back to default colours when the CSS variables are not hex', () => {
-        document.documentElement.style.setProperty('--accent-primary', 'rebeccapurple');
+        document.documentElement.style.setProperty('--zephyr-color-download', 'rgb(1, 2, 3)');
         chart.initChart();
         now += 400;
         flushRaf();
         chart.updateTrafficData(sample(1, 1));
         chart.updateTrafficData(sample(2, 2));
         flushRaf();
-        expect(ctx.strokes.slice(-2)[0]).toBe('rgba(139,92,246,0.8)');
+        expect(ctx.strokes.slice(-2)[0]).toBe('rgba(10,132,255,0.8)');
     });
 });
 

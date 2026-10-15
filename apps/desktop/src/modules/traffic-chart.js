@@ -46,6 +46,9 @@ let _chartFrameId = null;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _chartResizeDebounce = null;
 
+/** @type {MutationObserver | null} Re-reads the traffic colours when light/dark mode toggles. */
+let _chartThemeObserver = null;
+
 /* ---- visibility state ---- */
 
 /** @type {boolean} Whether the document is currently visible. */
@@ -88,20 +91,20 @@ function _destroyVisibilityListener() {
 /**
  * Current (possibly mid-transition) chart colours.
  * Each property stores `{ r, g, b }` for fast interpolation.
- * @type {{ accent: { r: number, g: number, b: number }, secondary: { r: number, g: number, b: number } }}
+ * @type {{ download: { r: number, g: number, b: number }, upload: { r: number, g: number, b: number } }}
  */
 const currentColors = {
-  accent: { r: 175, g: 82, b: 222 },
-  secondary: { r: 59, g: 130, b: 246 },
+  download: { r: 10, g: 132, b: 255 },
+  upload: { r: 255, g: 107, b: 107 },
 };
 
 /**
  * Target colours (what we are transitioning *towards*).
- * @type {{ accent: { r: number, g: number, b: number }, secondary: { r: number, g: number, b: number } }}
+ * @type {{ download: { r: number, g: number, b: number }, upload: { r: number, g: number, b: number } }}
  */
 let targetColors = {
-  accent: { r: 175, g: 82, b: 222 },
-  secondary: { r: 59, g: 130, b: 246 },
+  download: { r: 10, g: 132, b: 255 },
+  upload: { r: 255, g: 107, b: 107 },
 };
 
 /** @type {number} Timestamp when the last colour transition started. */
@@ -109,8 +112,8 @@ let colorTransitionStart = 0;
 
 /** Snapshot of colours at the moment the transition began. */
 let colorTransitionFrom = {
-  accent: { r: 175, g: 82, b: 222 },
-  secondary: { r: 59, g: 130, b: 246 },
+  download: { r: 10, g: 132, b: 255 },
+  upload: { r: 255, g: 107, b: 107 },
 };
 
 /** @type {boolean} Whether a colour transition is currently in progress. */
@@ -150,12 +153,12 @@ function rgba(c, alpha = 1) {
 /**
  * Kick off a smooth colour transition towards the given target colours.
  *
- * @param {{ accent: { r: number, g: number, b: number }, secondary: { r: number, g: number, b: number } }} target
+ * @param {{ download: { r: number, g: number, b: number }, upload: { r: number, g: number, b: number } }} target
  */
 function beginColorTransition(target) {
   colorTransitionFrom = {
-    accent: { ...currentColors.accent },
-    secondary: { ...currentColors.secondary },
+    download: { ...currentColors.download },
+    upload: { ...currentColors.upload },
   };
   targetColors = target;
   colorTransitionStart = performance.now();
@@ -172,8 +175,8 @@ function tickColorTransition() {
   const elapsed = performance.now() - colorTransitionStart;
   const t = Math.min(1, elapsed / COLOR_LERP_DURATION);
 
-  currentColors.accent = lerpColor(colorTransitionFrom.accent, targetColors.accent, t);
-  currentColors.secondary = lerpColor(colorTransitionFrom.secondary, targetColors.secondary, t);
+  currentColors.download = lerpColor(colorTransitionFrom.download, targetColors.download, t);
+  currentColors.upload = lerpColor(colorTransitionFrom.upload, targetColors.upload, t);
 
   if (t >= 1) isColorTransitioning = false;
 }
@@ -194,6 +197,14 @@ export function initChart() {
 
   // Immediately adopt the current theme colours
   updateChartTheme();
+
+  // Download/upload colours differ between light and dark mode; re-read them
+  // whenever <html>'s class list (which carries `dark`) changes.
+  if (_chartThemeObserver) _chartThemeObserver.disconnect();
+  if (typeof MutationObserver !== 'undefined') {
+    _chartThemeObserver = new MutationObserver(() => updateChartTheme());
+    _chartThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  }
 
   // Start listening for visibility changes (pause rendering when hidden)
   _initVisibilityListener();
@@ -262,6 +273,11 @@ export function cleanupChart() {
     _chartResizeObserver = null;
   }
 
+  if (_chartThemeObserver) {
+    _chartThemeObserver.disconnect();
+    _chartThemeObserver = null;
+  }
+
   canvas = null;
   ctx = null;
 }
@@ -327,12 +343,12 @@ export function clearTrafficHistory() {
  * themes, or at any time the CSS variables change.
  */
 export function updateChartTheme() {
-  const { accent, secondary } = getThemeColors();
+  const { download, upload } = getThemeColors();
 
-  const accentRgb = hexToRgb(accent) || { r: 139, g: 92, b: 246 };
-  const secondaryRgb = hexToRgb(secondary) || { r: 59, g: 130, b: 246 };
+  const downloadRgb = hexToRgb(download) || { r: 10, g: 132, b: 255 };
+  const uploadRgb = hexToRgb(upload) || { r: 255, g: 107, b: 107 };
 
-  beginColorTransition({ accent: accentRgb, secondary: secondaryRgb });
+  beginColorTransition({ download: downloadRgb, upload: uploadRgb });
 
   // Ensure a render is scheduled so the transition is visible
   scheduleRender();
@@ -392,18 +408,20 @@ function renderChart() {
 
   const getY = (/** @type {number} */ v) => height - ((v / maxVal) * (height - 20)) - 10;
 
-  // Downstream — accent colour
+  // Downstream — fixed blue, solid line + gradient fill (primary series)
   drawArea(
     trafficHistory.map((d) => d.down || 0),
-    currentColors.accent,
+    currentColors.download,
     getY,
+    { lineWidth: 2, fillAlpha: 0.3 },
   );
 
-  // Upstream — secondary colour
+  // Upstream — fixed coral, slightly thinner solid line + faint fill
   drawArea(
     trafficHistory.map((d) => d.up || 0),
-    currentColors.secondary,
+    currentColors.upload,
     getY,
+    { lineWidth: 1.5, fillAlpha: 0.08 },
   );
 }
 
@@ -413,9 +431,10 @@ function renderChart() {
  * @param {number[]} data - Y-values for each data point
  * @param {{ r: number, g: number, b: number }} color - RGB colour for this series
  * @param {(val: number) => number} getY - Maps a data value to a canvas Y coordinate
+ * @param {{ lineWidth?: number, fillAlpha?: number }} [style] - Stroke width and top-of-gradient fill opacity
  * @private
  */
-function drawArea(data, color, getY) {
+function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
   if (!canvas || !ctx) return;
 
   const width = canvas.clientWidth;
@@ -439,14 +458,14 @@ function drawArea(data, color, getY) {
 
   // Stroke
   ctx.strokeStyle = rgba(color, 0.8);
-  ctx.lineWidth = 2;
+  ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.stroke();
 
   // Gradient fill
   const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, rgba(color, 0.3));
+  gradient.addColorStop(0, rgba(color, fillAlpha));
   gradient.addColorStop(1, rgba(color, 0));
 
   ctx.lineTo(getX(data.length - 1), height);

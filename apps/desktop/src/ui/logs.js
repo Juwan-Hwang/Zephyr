@@ -645,7 +645,7 @@ const EXT_EVENT_COLORS = Object.freeze({
     PatchApplied:   '#60a5fa',
     PatchFailed:    '#ef4444',
     ConfigReloaded: '#f59e0b',
-    WatcherEvent:   '#a78bfa',
+    WatcherEvent:   '#22d3ee',
     WatcherStatus:  '#34d399',
     RulesChanged:   '#f472b6',
 });
@@ -774,7 +774,7 @@ function formatExtLogMessage(entry) {
                     modify: '#f59e0b', modified: '#f59e0b', change: '#f59e0b',
                     remove: '#ef4444', removed: '#ef4444', delete: '#ef4444',
                 };
-                const ctColor = changeColors[String(changeType).toLowerCase()] || '#a78bfa';
+                const ctColor = changeColors[String(changeType).toLowerCase()] || '#22d3ee';
                 return `<span style="color:${ctColor}">${escapeHtml(String(changeType))}</span> <span class="font-mono">${escapeHtml(String(file))}</span>`;
             }
             return escapeHtml(entry.message);

@@ -8,7 +8,7 @@
  * @module ui/settings/theme
  */
 
-import { applyTheme, currentTheme } from '../theme.js';
+import { applyTheme, currentTheme, normalizeTheme, DEFAULT_THEME } from '../theme.js';
 import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
@@ -180,9 +180,15 @@ export function initThemeSettings({
     const saved = typeof savedTheme === 'string' && savedTheme.trim() ? savedTheme : null;
     const stored = appStore.get('currentTheme');
     const storedTheme = typeof stored === 'string' && stored.trim() ? stored : null;
-    const initialTheme = saved ?? storedTheme ?? 'purple';
+    const initialTheme = normalizeTheme(saved ?? storedTheme ?? DEFAULT_THEME);
     applyColorTheme(initialTheme);
     appStore.set('currentTheme', currentTheme);
+    // Migrate removed presets (e.g. 'purple' -> 'blue') back into settings.json.
+    // Patch only the theme field through the serialized settings queue; a
+    // full read-modify-write here could race a queued `theme_mode` migration.
+    if (saved !== null && saved !== currentTheme) {
+        saveSetting('theme', currentTheme).catch(() => {});
+    }
 
     if (customColorInput) {
         customColorInput.onchange = () => {

@@ -29,7 +29,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
     "Courier New", monospace;
-  --color-accent: var(--accent-primary);
+  --color-accent: var(--accent-primary, #007AFF);
   --color-accent-glow: var(--accent-glow);
   --color-accent-rgb: var(--accent-rgb);
   --radius-sm: var(--zephyr-radius-control);
@@ -245,9 +245,9 @@ input[type="range"],
   --bg-tertiary: var(--zephyr-bg-tertiary);
   --border-primary: var(--zephyr-border-primary);
   --app-opacity: 0.6;
-  --accent-primary: #AF52DE;
-  --accent-rgb: 175, 82, 222;
-  --accent-glow: rgba(175, 82, 222, 0.2);
+  --accent-primary: #007AFF;
+  --accent-rgb: 0, 122, 255;
+  --accent-glow: rgba(0, 122, 255, 0.2);
 
   /* Brightness control for glass effects */
   --brightness: 0.95;
@@ -269,14 +269,19 @@ input[type="range"],
   --z-modal: var(--zephyr-z-index-modal);
   --z-toast: var(--zephyr-z-index-toast);
 
-  /* Focus ring adapter — color-mix for theme-awareness */
-  --zephyr-focus-ring: color-mix(in srgb, var(--zephyr-focus-color, var(--color-accent)) var(--zephyr-focus-ring-alpha, 50%), transparent);
-  --zephyr-focus-ring-soft: color-mix(in srgb, var(--zephyr-focus-color, var(--color-accent)) var(--zephyr-focus-ring-soft-alpha, 30%), transparent);
-  --zephyr-focus-border: color-mix(in srgb, var(--zephyr-focus-color, var(--color-accent)) var(--zephyr-focus-border-alpha, 50%), transparent);
+  /* Focus ring adapter — follows the theme accent, with a visible blue
+     hard fallback so the ring can never resolve to transparent. */
+  --zephyr-focus-ring: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-ring-alpha, 90%), transparent);
+  --zephyr-focus-ring-soft: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-ring-soft-alpha, 30%), transparent);
+  --zephyr-focus-border: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-border-alpha, 50%), transparent);
 }
 
 html:not(.dark) {
   --brightness: 0.95;
+  /* Light surfaces: bright accents (green, orange) fall to ~2.2:1 against
+     white, so the ring uses a darker shade of the same accent (>= 3:1 for
+     every preset) at full opacity. Blue fallback keeps it always visible. */
+  --zephyr-focus-ring: color-mix(in srgb, var(--accent-primary, #007AFF) 75%, black);
   --dialog-shadow-color: rgba(0, 0, 0, 0.25);
 }
 
@@ -566,7 +571,7 @@ html:not(.dark) #setting-lang-menu {
 }
 .btn-paste-base:focus-visible {
   color: var(--text-primary, #ffffff);
-  outline: 2px solid var(--accent-primary, #6366f1);
+  outline: 2px solid var(--accent-primary, #007AFF);
   outline-offset: 1px;
 }
 
