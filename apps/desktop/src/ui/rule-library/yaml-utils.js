@@ -34,11 +34,304 @@ export function parseRulesFromYaml(yamlContent) {
         }
     }
 
-    // Line-based: each non-empty line that looks like a rule
+    // Line-based: each non-empty line that looks like a rule.
+    // Strip YAML list markers ("- ") and surrounding quotes so the result
+    // matches what the structured parser would return.
     return yamlContent
         .split('\n')
         .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#') && line.includes(','));
+        .filter((line) => line && !line.startsWith('#'))
+        .map((line) => unquoteYamlScalar(stripYamlComment(line.replace(/^-\s+/, '').trim())))
+        .filter((line) => line && line.includes(','));
+}
+
+/**
+ * Drop a trailing YAML comment from a single-line scalar.
+ * For quoted scalars everything after the closing quote is dropped; for plain
+ * scalars a `#` preceded by whitespace starts a comment (YAML 1.2 rule), so
+ * `DOMAIN,a#b,DIRECT` keeps its `#`.
+ * @param {string} value
+ * @returns {string}
+ */
+function stripYamlComment(value) {
+    const q = value[0];
+    if (q === "'" || q === '"') {
+        for (let i = 1; i < value.length; i++) {
+            const ch = value[i];
+            if (q === '"' && ch === '\\') { i++; continue; }
+            if (ch === q) {
+                if (q === "'" && value[i + 1] === "'") { i++; continue; }
+                const rest = value.slice(i + 1).trim();
+                return rest === '' || rest.startsWith('#') ? value.slice(0, i + 1) : value;
+            }
+        }
+        return value;
+    }
+    const m = /\s#/.exec(value);
+    return m ? value.slice(0, m.index).trimEnd() : value;
+}
+
+/** Single-character escapes of YAML double-quoted scalars. */
+const YAML_SIMPLE_ESCAPES = /** @type {Record<string, string>} */ ({
+    '0': '\0', a: '\x07', b: '\b', t: '\t', '\t': '\t', n: '\n', v: '\v', f: '\f', r: '\r',
+    e: '\x1b', ' ': ' ', '"': '"', '/': '/', '\\': '\\', N: '\x85', _: '\xa0',
+    L: '\u2028', P: '\u2029',
+});
+
+/** Hex digits that follow `\x`, `\u` and `\U`. */
+const YAML_HEX_ESCAPE_LENGTHS = /** @type {Record<string, number>} */ ({ x: 2, u: 4, U: 8 });
+
+/**
+ * Decode the body of a single-line YAML double-quoted scalar.
+ * @param {string} body - text between the quotes
+ * @returns {string | null} decoded text, or null if an escape is invalid
+ */
+function decodeYamlDoubleQuoted(body) {
+    let out = '';
+    for (let i = 0; i < body.length; i++) {
+        const ch = body[i];
+        if (ch === '"') return null;
+        if (ch !== '\\') { out += ch; continue; }
+        const esc = body[++i];
+        if (esc === undefined) return null;
+        if (esc in YAML_SIMPLE_ESCAPES) { out += YAML_SIMPLE_ESCAPES[esc]; continue; }
+        const len = YAML_HEX_ESCAPE_LENGTHS[esc];
+        if (!len) return null;
+        const hex = body.slice(i + 1, i + 1 + len);
+        if (hex.length !== len || !/^[0-9a-fA-F]+$/.test(hex)) return null;
+        const cp = parseInt(hex, 16);
+        if (cp > 0x10ffff) return null;
+        out += String.fromCodePoint(cp);
+        i += len;
+    }
+    return out;
+}
+
+/**
+ * Remove matching surrounding quotes from a single-line YAML scalar.
+ * Single-quoted scalars unescape '' to '; double-quoted scalars are decoded
+ * with the full YAML escape set (`\x41`, `\u00e9`, `\e`, `\N`, ...).
+ * Anything that is not a well-formed quoted scalar is returned unchanged.
+ * @param {string} value
+ * @returns {string}
+ */
+function unquoteYamlScalar(value) {
+    if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+        return value.slice(1, -1).replace(/''/g, "'");
+    }
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+        const decoded = decodeYamlDoubleQuoted(value.slice(1, -1));
+        return decoded ?? value;
+    }
+    return value;
+}
+
+/**
+ * Characters YAML cannot hold literally in a scalar (outside the YAML 1.2
+ * printable set: C0/C1 controls except TAB/LF/CR/NEL, DEL, lone surrogates,
+ * U+FFFE/U+FFFF), plus LF/CR, which a single-line scalar cannot hold.
+ */
+const YAML_NEEDS_ESCAPE_RE = /[\u0000-\u0008\u000a-\u001f\u007f-\u0084\u0086-\u009f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/**
+ * Quote a rule as a YAML scalar without depending on js-yaml.
+ * Uses single quotes (doubling embedded ') unless the value contains a
+ * character that must be escaped; those use a double-quoted scalar with
+ * `\xNN` / `\uNNNN` escapes, which every YAML parser reads back exactly.
+ * @param {string} value
+ * @returns {string}
+ */
+function quoteYamlScalar(value) {
+    if (!YAML_NEEDS_ESCAPE_RE.test(value)) {
+        return `'${value.replace(/'/g, "''")}'`;
+    }
+    let out = '"';
+    for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        const code = ch.charCodeAt(0);
+        if (ch === '"' || ch === '\\') {
+            out += `\\${ch}`;
+        } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length
+            && value.charCodeAt(i + 1) >= 0xdc00 && value.charCodeAt(i + 1) <= 0xdfff) {
+            out += ch + value[++i];
+        } else if (YAML_NEEDS_ESCAPE_RE.test(ch)) {
+            out += code <= 0xff ? `\\x${code.toString(16).padStart(2, '0')}` : `\\u${code.toString(16).padStart(4, '0')}`;
+        } else {
+            out += ch;
+        }
+    }
+    return `${out}"`;
+}
+
+/**
+ * Render a `rules:` block (`rules: { <op>: [...] }`) by hand.
+ * @param {unknown[]} rules
+ * @param {'$append' | '$prepend'} op
+ * @returns {string[]} lines
+ */
+function buildRulesBlockLines(rules, op) {
+    if (rules.length === 0) return ['rules:', `  ${op}: []`];
+    const lines = ['rules:', `  ${op}:`];
+    for (const rule of rules) {
+        lines.push(`    - ${quoteYamlScalar(String(rule))}`);
+    }
+    return lines;
+}
+
+/**
+ * Find the DSL operator of an original `rules:` block from its own keys only,
+ * so a comment or rule value that mentions `$prepend:` cannot flip it.
+ * @param {string[]} block - the `rules:` line and the lines nested under it
+ * @returns {'$append' | '$prepend'}
+ */
+function detectRulesOperator(block) {
+    const OP_KEY = /^(['"]?)(\$prepend|\$append)\1\s*:/;
+    // Flow form on the same line: `rules: { $prepend: [...] }`.
+    const inline = block[0].replace(/^[^:]*:/, '').trim();
+    if (inline.startsWith('{')) {
+        const m = inline.slice(1).trim().match(OP_KEY);
+        return m && m[2] === '$prepend' ? '$prepend' : '$append';
+    }
+    // Block form: only keys at the first nested indentation level count.
+    /** @type {number | null} */
+    let indent = null;
+    for (const line of block.slice(1)) {
+        if (/^\s*(?:#.*)?$/.test(line)) continue;
+        const lineIndent = line.length - line.trimStart().length;
+        if (indent === null) indent = lineIndent;
+        if (lineIndent !== indent) continue;
+        const m = line.trimStart().match(OP_KEY);
+        if (m) return m[2] === '$prepend' ? '$prepend' : '$append';
+    }
+    return '$append';
+}
+
+/**
+ * Conservative lexical check used when js-yaml is unavailable: every quoted
+ * scalar must be closed on its own line and every flow collection (`[...]`, `{...}`) balanced.
+ * Brackets inside a plain scalar (`foo[bar`) are text, not flow syntax.
+ * A quote only opens a scalar at the start of a value (after whitespace,
+ * `:`, `-`, `,`, `[` or `{`), so apostrophes inside plain text are ignored.
+ * Anything it cannot vouch for (including block scalars containing brackets)
+ * is rejected, so callers fall back to a minimal, known-valid document.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function looksBalanced(text) {
+    /** @type {string[]} */
+    const stack = [];
+    /** @type {string | null} */
+    let quote = null;
+    let prev = '\n';
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (quote) {
+            // Multi-line quoted scalars are valid YAML but cannot be told
+            // apart from an unclosed quote lexically; reject them too.
+            if (ch === '\n') return false;
+            if (quote === '"' && ch === '\\') { i++; prev = ''; continue; }
+            if (ch === quote) {
+                if (quote === "'" && text[i + 1] === "'") { i++; continue; }
+                quote = null;
+            }
+            prev = ch;
+            continue;
+        }
+        if (ch === '#' && /\s/.test(prev)) {
+            const nl = text.indexOf('\n', i);
+            if (nl < 0) break;
+            i = nl - 1;
+            prev = ' ';
+            continue;
+        }
+        if ((ch === "'" || ch === '"') && /[\s:,\-[{]/.test(prev)) {
+            quote = ch;
+        } else if ((ch === '[' || ch === '{') && (stack.length > 0 || /[\s:\-]/.test(prev))) {
+            // Outside a flow collection a bracket only opens one at the start
+            // of a value; `name: foo[bar` is a plain scalar.
+            stack.push(ch === '[' ? ']' : '}');
+        } else if ((ch === ']' || ch === '}') && stack.length > 0) {
+            if (stack.pop() !== ch) return false;
+        }
+        prev = ch;
+    }
+    return quote === null && stack.length === 0;
+}
+
+/**
+ * Build a Prism DSL document by hand (no js-yaml).
+ *
+ * When `originalContent` is a block-style mapping (optionally framed by
+ * `---` / `...` document markers), every top-level entry
+ * other than `rules` (e.g. `__when__`, comments) is kept verbatim and the
+ * original DSL operator (`$prepend` / `$append`) is reused; only the `rules`
+ * block is replaced. Otherwise a minimal `rules: { $append: [...] }`
+ * document is produced.
+ * @param {unknown[]} rules
+ * @param {string} [originalContent]
+ * @returns {string}
+ */
+function buildFallbackPrismYaml(rules, originalContent = '') {
+    const lines = originalContent.replace(/\r\n?/g, '\n').split('\n');
+    // A bare `---` / `...` line is a document marker, not a mapping entry.
+    const isMarker = (/** @type {string} */ l) => /^(?:---|\.\.\.)\s*(?:#.*)?$/.test(l);
+    // An unindented `- item` continues the previous key's sequence value.
+    const isTopLevelLine = (/** @type {string} */ l) => !isMarker(l) && /^(?!-(?:\s|$))[^\s#]/.test(l);
+    const isRulesKey = (/** @type {string} */ l) => /^(?:rules|'rules'|"rules")\s*:(?:\s|$)/.test(l);
+    const topLevel = lines.filter(isTopLevelLine);
+    const firstIdx = lines.findIndex(isTopLevelLine);
+    const lastIdx = lines.length - 1 - [...lines].reverse().findIndex(isTopLevelLine);
+    // Only a single document is spliced: at most one `---` before its first
+    // entry and one `...` after its last.
+    const markersOk = lines.every((l, i) => !isMarker(l)
+        || (l.startsWith('---') ? i < firstIdx : i > lastIdx))
+        && lines.filter((l) => /^---/.test(l) && isMarker(l)).length <= 1
+        && lines.filter((l) => /^\.\.\./.test(l) && isMarker(l)).length <= 1;
+    // Only splice into a block mapping whose top-level lines are `key:` entries
+    // with a single `rules` key.
+    const blockMapping = firstIdx >= 0 && markersOk
+        && topLevel.every((l) => /^(?:[\p{L}\p{N}_$.-]+|'[^']*'|"[^"]*")\s*:(?:\s|$)/u.test(l))
+        && topLevel.filter(isRulesKey).length <= 1;
+    const minimal = () => buildRulesBlockLines(rules, '$append').join('\n') + '\n';
+    if (!blockMapping) return minimal();
+
+    // When js-yaml is loaded we only get here because it rejected the
+    // original; keep the splice only if the result parses, so a malformed
+    // line outside `rules` is never written back.
+    const validated = (/** @type {string} */ text) => {
+        if (typeof jsyaml === 'undefined') return looksBalanced(text) ? text : minimal();
+        try {
+            const doc = jsyaml.load(text);
+            return doc && typeof doc === 'object' && !Array.isArray(doc) ? text : minimal();
+        } catch {
+            return minimal();
+        }
+    };
+
+    const start = lines.findIndex(isRulesKey);
+    if (start < 0) {
+        // Append after the last entry's block, before a closing `...`.
+        const close = lines.findIndex((l) => /^\.\.\./.test(l) && isMarker(l));
+        const body = close < 0 ? lines : lines.slice(0, close);
+        const tail = close < 0 ? [] : lines.slice(close);
+        const kept = body.join('\n').replace(/\n*$/, '');
+        const out = [kept, ...buildRulesBlockLines(rules, '$append'), ...tail].join('\n');
+        return validated(out.replace(/\n*$/, '\n'));
+    }
+    let end = start + 1;
+    while (end < lines.length && !isTopLevelLine(lines[end]) && !isMarker(lines[end])) end++;
+    // Leave trailing blank/comment lines that belong to the next entry alone.
+    while (end - 1 > start && /^\s*(?:#.*)?$/.test(lines[end - 1]) && !/^\s+\S/.test(lines[end - 1])) end--;
+    const block = lines.slice(start, end);
+    const kept = [...lines.slice(0, start), ...lines.slice(end)];
+    // An anchor defined inside the replaced block would leave any alias to it
+    // in the kept entries dangling; fall back to the minimal document then.
+    const anchors = [...block.join('\n').matchAll(/&([^\s,[\]{}]+)/g)].map((m) => m[1]);
+    const keptText = kept.join('\n');
+    if (anchors.some((a) => keptText.split('*' + a).length > 1)) return minimal();
+    const op = detectRulesOperator(block);
+    const out = [...lines.slice(0, start), ...buildRulesBlockLines(rules, op), ...lines.slice(end)];
+    return validated(out.join('\n').replace(/\n*$/, '\n'));
 }
 
 /**
@@ -73,12 +366,8 @@ export function rebuildYamlWithRules(originalContent, rules) {
         }
     }
 
-    // Fallback: build minimal valid Prism DSL with $append
-    const lines = ['rules:', '  $append:'];
-    for (const rule of rules) {
-        lines.push(`    - '${rule}'`);
-    }
-    return lines.join('\n') + '\n';
+    // Fallback: rebuild by hand, keeping metadata and the DSL operator
+    return buildFallbackPrismYaml(rules, typeof originalContent === 'string' ? originalContent : '');
 }
 
 /**
@@ -97,7 +386,7 @@ export function wrapRulesAsPrismYaml(rawRulesText, originalYaml) {
     if (typeof jsyaml !== 'undefined' && originalYaml) {
         try {
             const parsed = jsyaml.load(originalYaml);
-            if (parsed && typeof parsed === 'object') {
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 // Preserve metadata, keep original DSL operator if present
                 const oldRules = parsed.rules;
                 let newRules;
@@ -115,7 +404,14 @@ export function wrapRulesAsPrismYaml(rawRulesText, originalYaml) {
         }
     }
 
-    // Fallback: create minimal prism YAML with $append
-    const obj = { rules: { $append: rules } };
-    return jsyaml.dump(obj, { lineWidth: -1, quotingType: "'", forceQuotes: false });
+    // Fallback: create minimal prism YAML with $append.
+    // Prefer js-yaml when it is loaded; otherwise build it by hand.
+    if (typeof jsyaml !== 'undefined') {
+        try {
+            return jsyaml.dump({ rules: { $append: rules } }, { lineWidth: -1, quotingType: "'", forceQuotes: false });
+        } catch {
+            // Fall through to the hand-written fallback
+        }
+    }
+    return buildFallbackPrismYaml(rules, typeof originalYaml === 'string' ? originalYaml : '');
 }
