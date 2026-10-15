@@ -135,19 +135,19 @@ const PAGE_HTML = `
         <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
         <div class="conn-grid conn-head" id="conn-table-header">
             <div class="conn-head-cell">
-                <span class="sortable" role="button" tabindex="0" data-sort="host" data-i18n="hostCol">Host</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="host" data-i18n="hostCol">Host</span>
             </div>
             <div class="conn-head-cell">
-                <span class="sortable" role="button" tabindex="0" data-sort="rule" data-i18n="ruleCol">Rule</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="chains" data-i18n="chainsCol">Chains</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="rule" data-i18n="ruleCol">Rule</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="chains" data-i18n="chainsCol">Chains</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
             </div>
         </div>
     </div>
@@ -539,6 +539,12 @@ function renderConnectionList(connections, mode) {
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
+            // The template was copied before any later language switch: translate it now.
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
+            clone.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = /** @type {HTMLElement} */ (el).dataset.i18n;
+                if (key && typeof t[key] === 'string') el.textContent = t[key];
+            });
             container.appendChild(clone);
         }
         return;
@@ -645,8 +651,9 @@ function updateSortIndicators() {
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
             setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
-            const ariaSort = isAsc ? 'ascending' : 'descending';
-            if (cell.getAttribute('aria-sort') !== ariaSort) cell.setAttribute('aria-sort', ariaSort);
+            // aria-sort only applies to column headers; these are buttons, so expose
+            // the active sort as pressed (the ▲/▼ in the label gives the direction).
+            if (cell.getAttribute('aria-pressed') !== 'true') cell.setAttribute('aria-pressed', 'true');
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--text-primary)';
@@ -658,7 +665,7 @@ function updateSortIndicators() {
         } else {
             // Inactive: colour comes from CSS (.conn-head); drop the inline active colour and clean text
             (/** @type {HTMLElement} */ (cell)).style.color = '';
-            cell.removeAttribute('aria-sort');
+            if (cell.getAttribute('aria-pressed') !== 'false') cell.setAttribute('aria-pressed', 'false');
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
@@ -821,7 +828,7 @@ const RULE_SHORT_NAMES = Object.freeze(/** @type {Record<string, string>} */ ({
 
 /** @param {string} rule */
 export function shortRuleName(rule) {
-    const key = String(rule ?? '').toLowerCase();
+    const key = String(rule ?? '').toLowerCase().replace(/[-_]/g, '');
     return RULE_SHORT_NAMES[key] || String(rule ?? '');
 }
 
@@ -942,11 +949,27 @@ function getRuleColorClass(rule) {
 // ============================================
 
 /**
+ * Return focus to the row (or control) that opened the detail dialog. Rows can be
+ * re-rendered while it is open, so fall back to the row with the same id.
+ * @param {HTMLElement|null} opener @param {string} connId
+ */
+function restoreDetailFocus(opener, connId) {
+    let target = opener && opener.isConnected ? opener : null;
+    if (!target && connId) {
+        target = /** @type {HTMLElement|null} */ (Array.from(document.querySelectorAll('.conn-row'))
+            .find((r) => /** @type {HTMLElement} */ (r).dataset.connId === connId) ?? null);
+    }
+    target?.focus({ preventScroll: true });
+}
+
+/** Pending hide of the detail backdrop after its close animation. */
+/** @type {ReturnType<typeof setTimeout>|undefined} */
+let connDetailHideTimer;
+
+/**
  * Show a detail overlay panel for a single connection.
  * Reuses glass-card styling from the app's design system.
  * For active connections, includes a Close button.
- */
-/**
  * @param {any} conn
  * @param {string} mode
  */
@@ -995,14 +1018,14 @@ function showConnDetail(conn, mode) {
         : '';
 
     const panelHtml = `
-    <div class="glass-card w-full max-w-lg p-6 relative" id="conn-detail-panel">
+    <div class="glass-card w-full max-w-lg p-6 relative" id="conn-detail-panel" role="dialog" aria-modal="true" aria-labelledby="conn-detail-title">
         <!-- Header -->
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pe-4">
-                <h3 class="dialog-title truncate">${host}</h3>
+                <h3 class="dialog-title truncate" id="conn-detail-title">${host}</h3>
                 <p class="text-2xs text-[var(--text-muted)] mt-0.5 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" aria-label="Close" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" aria-label="${escapeHtml(t.dismiss || 'Close')}" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
@@ -1060,6 +1083,13 @@ function showConnDetail(conn, mode) {
         document.body.appendChild(bg);
     }
 
+    // Remember who opened the dialog so focus can return there on close.
+    const opener = document.activeElement instanceof HTMLElement && !bg.contains(document.activeElement)
+        ? document.activeElement : null;
+
+    // A reopen inside the close animation must not be hidden by the old timer.
+    clearTimeout(connDetailHideTimer);
+    connDetailHideTimer = undefined;
     // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in showConnDetail
     bg.innerHTML = panelHtml; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     bg.classList.remove('hidden');
@@ -1095,8 +1125,37 @@ function showConnDetail(conn, mode) {
             panel.style.transform = 'scale(0.96)';
             panel.style.opacity = '0';
         }
-        setTimeout(() => { bg.classList.add('hidden'); bg.classList.remove('flex'); }, 150);
+        clearTimeout(connDetailHideTimer);
+        connDetailHideTimer = setTimeout(() => {
+            connDetailHideTimer = undefined;
+            bg.classList.add('hidden');
+            bg.classList.remove('flex');
+        }, 150);
+        bg.onkeydown = null;
+        restoreDetailFocus(opener, conn.id);
     };
+
+    // Keyboard: Escape closes, Tab stays inside the dialog.
+    bg.onkeydown = (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            dismiss();
+            return;
+        }
+        if (e.key !== 'Tab') return;
+        const items = /** @type {HTMLElement[]} */ (Array.from(bg.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')));
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    };
+    document.getElementById('detail-dismiss-btn')?.focus({ preventScroll: true });
 
     document.getElementById('detail-dismiss-btn')?.addEventListener('click', dismiss);
     bg.addEventListener('click', (e) => { if (e.target === bg) dismiss(); }, { once: true });

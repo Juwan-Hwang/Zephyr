@@ -137,18 +137,18 @@ export function initTunnelSettings({
         const customHtml = `
             <div class="space-y-4">
                 <div>
-                    <label for="tunnel-protocol-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
+                    <label for="tunnel-protocol-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
                     <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="form-control form-control-md form-control-mono">
                 </div>
                 <div>
-                    <label for="tunnel-address-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
+                    <label for="tunnel-address-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
                     <div class="input-paste-wrapper">
                         <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="form-control form-control-md form-control-mono">
                         ${renderPasteButtonHtml('tunnel-address-paste-btn', `${t.paste || 'Paste'} (${t.tunnelNetwork || 'Listen Network'})`, false, null)}
                     </div>
                 </div>
                 <div>
-                    <label for="tunnel-target-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
+                    <label for="tunnel-target-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
                     <div class="input-paste-wrapper">
                         <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="form-control form-control-md form-control-mono">
                         ${renderPasteButtonHtml('tunnel-target-paste-btn', `${t.paste || 'Paste'} (${t.tunnelTarget || 'Target Address'})`, false, null)}
