@@ -90,48 +90,69 @@
 
                 <!-- Hero: live traffic area chart behind the speed read-out -->
                 <section id="home-hero" class="home-hero glass-card relative z-20">
-                    <div class="home-hero-chart" aria-hidden="true">
-                        <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
-                    </div>
-                    <!-- Current Node Display (Interactive Wheel) -->
-                    <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-4">
-                        <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false">
-                            <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
-                            <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span>
-                        </button>
+                    <div class="home-hero-body">
+                        <div class="home-hero-chart" aria-hidden="true">
+                            <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
+                        </div>
+                        <!-- Current Node Display (Interactive Wheel) -->
+                        <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-4">
+                            <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="node-wheel-trigger-label current-node-name">
+                                <span id="node-wheel-trigger-label" class="sr-only" data-i18n="consoleNodePicker">Switch node</span>
+                                <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
+                                <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span>
+                            </button>
                         
-                        <!-- Wheel Dropdown -->
-                        <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
-                            <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
-                                <div id="node-wheel-padding-top" style="height: 56px;"></div>
-                                <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
-                                    <!-- Node capsules will be inserted here -->
+                            <!-- Wheel Dropdown -->
+                            <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                                <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
+                                    <div id="node-wheel-padding-top" style="height: 56px;"></div>
+                                    <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
+                                        <!-- Node capsules will be inserted here -->
+                                    </div>
+                                    <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
                                 </div>
-                                <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
+                            </div>
+                        </div>
+
+                        <div class="home-hero-speeds relative z-10">
+                            <!-- Downstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-download/80" aria-hidden="true"></span><span data-i18n="downstream">Downstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-down-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="w-px h-14 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent" aria-hidden="true"></div>
+
+                            <!-- Upstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-upload/80" aria-hidden="true"></span><span data-i18n="upstream">Upstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-up-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-
-                    <div class="home-hero-speeds relative z-10">
-                        <!-- Downstream -->
-                        <div class="home-speed">
-                            <span class="home-speed-label"><span class="home-speed-swatch bg-download/80" aria-hidden="true"></span><span data-i18n="downstream">Downstream</span></span>
-                            <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-down-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
-                                <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
-                            </div>
+                    <!-- Footer row of the hero card: live figures that already exist elsewhere (console / connections) -->
+                    <div id="home-stats" class="home-stats">
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleTotalTraffic">Total Traffic</span>
+                            <span class="home-stat-value"><b id="home-stat-total">—</b></span>
+                            <span class="home-stat-foot"><span class="text-download-ink" aria-hidden="true">↓</span> <span id="home-stat-down">—</span> · <span class="text-upload-ink" aria-hidden="true">↑</span> <span id="home-stat-up">—</span></span>
                         </div>
-
-                        <!-- Divider -->
-                        <div class="w-px h-14 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent" aria-hidden="true"></div>
-
-                        <!-- Upstream -->
-                        <div class="home-speed">
-                            <span class="home-speed-label"><span class="home-speed-swatch bg-upload/80" aria-hidden="true"></span><span data-i18n="upstream">Upstream</span></span>
-                            <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-up-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
-                                <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
-                            </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleActiveConn">Active Connections</span>
+                            <span class="home-stat-value"><b id="home-stat-conn">—</b></span>
+                            <span class="home-stat-foot">TCP <span id="home-stat-tcp">—</span> · UDP <span id="home-stat-udp">—</span></span>
+                        </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleNodeLatency">Node Latency</span>
+                            <span class="home-stat-value"><b id="home-stat-lat">—</b><small>ms</small></span>
+                            <span class="home-stat-foot truncate" id="home-stat-node">—</span>
                         </div>
                     </div>
                 </section>
@@ -191,25 +212,6 @@
                     </div>
                 </div>
 
-                <!-- Live figures that already exist elsewhere (console / connections), so the page ends on information rather than empty glass -->
-                <section id="home-stats" class="home-stats glass-card relative z-10 shrink-0">
-                    <div class="home-stat">
-                        <span class="home-stat-label" data-i18n="consoleTotalTraffic">Total Traffic</span>
-                        <span class="home-stat-value"><b id="home-stat-total">—</b></span>
-                        <span class="home-stat-foot"><span class="text-download-ink" aria-hidden="true">↓</span> <span id="home-stat-down">—</span> · <span class="text-upload-ink" aria-hidden="true">↑</span> <span id="home-stat-up">—</span></span>
-                    </div>
-                    <div class="home-stat">
-                        <span class="home-stat-label" data-i18n="consoleActiveConn">Active Connections</span>
-                        <span class="home-stat-value"><b id="home-stat-conn">—</b></span>
-                        <span class="home-stat-foot">TCP <span id="home-stat-tcp">—</span> · UDP <span id="home-stat-udp">—</span></span>
-                    </div>
-                    <div class="home-stat">
-                        <span class="home-stat-label" data-i18n="consoleNodeLatency">Node Latency</span>
-                        <span class="home-stat-value"><b id="home-stat-lat">—</b><small>ms</small></span>
-                        <span class="home-stat-foot truncate" id="home-stat-node">—</span>
-                    </div>
-                </section>
-
             </div>
 
             <!-- Console Dashboard Page (injected by ui/console-home.js) -->
@@ -223,11 +225,11 @@
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="subscriptions">Subscriptions</h2>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins">
+                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins" data-i18n-title="plugins">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span data-i18n="plugins">Plugins</span>
                         </button>
-                        <button id="update-all-sub-btn" class="btn-ghost" title="Update All">
+                        <button id="update-all-sub-btn" class="btn-ghost" title="Update All" data-i18n-title="updateAll">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="updateAll">Update All</span>
                         </button>
@@ -475,9 +477,9 @@
                                 </div>
                                 <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
                                     <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button data-theme-mode="light" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
-                                    <button data-theme-mode="auto" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
-                                    <button data-theme-mode="dark" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
+                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
+                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
+                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
                                 </div>
                             </div>
 

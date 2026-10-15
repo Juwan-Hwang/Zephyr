@@ -94,6 +94,7 @@ export function initThemeSettings({
             themeModeSlider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
         }
         themeModeButtons.forEach((btn, btnIdx) => {
+            btn.setAttribute('aria-pressed', String(btnIdx === idx));
             if (btnIdx === idx) {
                 btn.classList.add('text-[var(--text-primary)]');
                 btn.classList.remove('text-[var(--text-secondary)]');

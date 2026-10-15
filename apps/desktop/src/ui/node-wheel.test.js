@@ -151,6 +151,18 @@ describe('node quick-switch wheel', () => {
         expect(isShown(dom.dropdown)).toBe(false);
     });
 
+    it('a click on the pill while a hover-started open is loading does not cancel it', async () => {
+        const slow = deferred();
+        fetchProxyGroups.mockReturnValueOnce(slow.promise);
+        enter(dom.trigger);
+        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
+        dom.trigger.click();
+        slow.resolve(GROUPS);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(true);
+        expect(wheel.isNodeWheelOpen()).toBe(true);
+    });
+
     it('releases the open state when there is nothing to show, so the next hover can open', async () => {
         fetchProxyGroups.mockResolvedValueOnce(null);
         await hoverOpen();
@@ -259,6 +271,18 @@ describe('node quick-switch wheel', () => {
         dom.list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
         expect(document.activeElement?.textContent).toBe('HK 01');
 
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect(isShown(dom.dropdown)).toBe(false);
+        expect(document.activeElement).toBe(dom.trigger);
+    });
+
+    it('moves keyboard focus to the loading hint when the group has no nodes yet', async () => {
+        fetchProxyGroups.mockResolvedValue({ ...GROUPS, proxies: [] });
+        dom.trigger.focus();
+        dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(true);
+        expect(document.activeElement?.textContent).toBe('loadingNodes');
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(false);
         expect(document.activeElement).toBe(dom.trigger);

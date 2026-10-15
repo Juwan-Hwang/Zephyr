@@ -28,7 +28,8 @@ function syncTitles(header, compact) {
         const btn = /** @type {HTMLElement} */ (span.parentElement);
         if (!btn.querySelector(':scope > svg')) return; // text-only buttons keep their label
         if (compact) {
-            if (!btn.hasAttribute('title')) {
+            // Refresh our own tooltip too, so a language switch updates it.
+            if (!btn.hasAttribute('title') || btn.dataset.fitTitle) {
                 btn.setAttribute('title', (span.textContent || '').trim());
                 btn.dataset.fitTitle = '1';
             }
@@ -62,8 +63,8 @@ export function fitHeader(header) {
  */
 export function initHeaderFit() {
     if (typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') return () => {};
-    /** @type {WeakSet<Element>} */
-    const seen = new WeakSet();
+    /** @type {Set<HTMLElement>} */
+    const seen = new Set();
     /** @type {Set<HTMLElement>} */
     const pending = new Set();
     let frame = 0;
@@ -79,29 +80,51 @@ export function initHeaderFit() {
         }
     };
     const resize = new ResizeObserver(entries => entries.forEach(e => schedule(/** @type {HTMLElement} */ (e.target))));
-    // Text changes (language switch, live counters) can change the width needed.
+    // Text changes (language switch, live counters) and controls being shown or
+    // hidden inside the header can change the width needed.
     const text = new MutationObserver(records => {
         records.forEach(r => {
             const h = /** @type {Element} */ (r.target.nodeType === 1 ? r.target : r.target.parentElement)?.closest('header');
-            if (h) schedule(/** @type {HTMLElement} */ (h));
+            // fitHeader() toggles the header's own class: ignore that to avoid a loop.
+            if (!h || (r.type === 'attributes' && r.target === h)) return;
+            schedule(/** @type {HTMLElement} */ (h));
         });
     });
+    const TEXT_OPTS = { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] };
     const attach = () => {
-        document.querySelectorAll('[data-page] > header').forEach(h => {
+        // Pages that re-render replace their header: stop watching detached ones.
+        const stale = [...seen].filter(h => !h.isConnected);
+        if (stale.length) {
+            stale.forEach(h => { seen.delete(h); resize.unobserve(h); pending.delete(h); });
+            text.disconnect();
+            seen.forEach(h => text.observe(h, TEXT_OPTS));
+        }
+        document.querySelectorAll('[data-page] > header').forEach(el => {
+            const h = /** @type {HTMLElement} */ (el);
             if (seen.has(h)) return;
             seen.add(h);
             resize.observe(h);
-            text.observe(h, { childList: true, characterData: true, subtree: true });
-            schedule(/** @type {HTMLElement} */ (h));
+            text.observe(h, TEXT_OPTS);
+            schedule(h);
         });
     };
     const pages = new MutationObserver(attach);
     document.querySelectorAll('[data-page]').forEach(p => pages.observe(p, { childList: true }));
+    // Controls that grow on focus (the connections search widens via :focus)
+    // change the width needed without any resize or DOM mutation.
+    const onFocusChange = (/** @type {Event} */ e) => {
+        const h = /** @type {Element} */ (e.target)?.closest?.('[data-page] > header');
+        if (h && seen.has(/** @type {HTMLElement} */ (h))) schedule(/** @type {HTMLElement} */ (h));
+    };
+    const FOCUS_EVENTS = ['focusin', 'focusout', 'transitionend'];
+    FOCUS_EVENTS.forEach(t => document.addEventListener(t, onFocusChange, true));
     attach();
     return () => {
         if (frame) cancelAnimationFrame(frame);
+        FOCUS_EVENTS.forEach(t => document.removeEventListener(t, onFocusChange, true));
         resize.disconnect();
         text.disconnect();
         pages.disconnect();
+        seen.clear();
     };
 }

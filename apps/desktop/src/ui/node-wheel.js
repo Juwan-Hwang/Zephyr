@@ -12,6 +12,7 @@ import { sortProxiesByLatency, syncCoreConfig, renderProxies } from './proxies.j
 import { appStore } from './state.js';
 import { invalidateProxiesCache, getSettingsCached } from './cache.js';
 import { saveProxySelection } from './proxy-memory.js';
+import { resetObservedGroup } from './observed-group.js';
 
 /** Hover dwell before the wheel opens (ms). */
 export const WHEEL_HOVER_OPEN_DELAY = 300;
@@ -124,6 +125,9 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     const success = await switchProxy(targetGroup, name);
     if (success) {
         invalidateProxiesCache();
+        // The observed exit node described the old selection; drop it so the pill
+        // and home figures follow the new node (the watcher re-confirms it if active).
+        resetObservedGroup();
         await closeAllConnections();
 
         // Save proxy selection for restore after core restart
@@ -190,14 +194,23 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
     /** The pointer left / the page changed while we were loading: stay closed. */
     const cancelled = () => generation !== wheelGeneration || !isWheelOpen;
 
+    // Escape, blur and navigation must cancel an open that is still loading.
+    installOpenGuards?.();
+
     try {
         const preferredGroupName = appStore.get('uiGroupName') || null;
         const proxyGroupsResult = await fetchProxyGroups({ preferredGroupName });
         if (cancelled()) return false;
+        if (trigger.closest('[data-page]')?.classList.contains('hidden')) {
+            closeWheel();
+            return false;
+        }
         if (!proxyGroupsResult) {
             // Nothing to show: release the open state so the next hover can retry
             // (and so the page-level wheel guard stops swallowing scrolls).
             isWheelOpen = false;
+            teardownOpenGuards?.();
+            teardownOpenGuards = null;
             return false;
         }
 
@@ -218,6 +231,10 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             const hint = document.createElement('div');
             hint.className = 'px-3 py-2 text-xs text-[var(--text-muted)] text-center';
             hint.textContent = t('loadingNodes');
+            // Focusable so a keyboard open has somewhere to land while the pill is hidden.
+            hint.tabIndex = -1;
+            hint.dataset.wheelHint = '';
+            hint.setAttribute('role', 'status');
             /** @type {any} */ (list)._virtObserver?.disconnect();
             list.replaceChildren();
             list.appendChild(hint);
@@ -517,10 +534,11 @@ export function initNodeWheel() {
     /** @param {{ viaKeyboard?: boolean, viaHover?: boolean }} [opts] */
     const openWheel = async (opts = {}) => {
         cancelPendingOpen();
-        pointerInside = !!opts.viaHover;
+        pointerInside = !opts.viaKeyboard; // hover and mouse clicks start over the pill
         const shown = await populateAndShowWheel(trigger, dropdown, scrollContainer, list, updateWheelVisualState, resetToCenterFocus);
         if (shown && opts.viaKeyboard) {
-            focusWheelItem(defaultActiveItem);
+            if (defaultActiveItem) focusWheelItem(defaultActiveItem);
+            else /** @type {HTMLElement | null} */ (list.querySelector('[data-wheel-hint]'))?.focus({ preventScroll: true });
         }
     };
 
@@ -529,7 +547,7 @@ export function initNodeWheel() {
         if (isWheelOpen || wheelHoverTimer || hoverSuppressedAt(e)) return;
         wheelHoverTimer = setTimeout(() => {
             wheelHoverTimer = null;
-            openWheel({ viaHover: true });
+            openWheel({ viaHover: true }).catch(err => nodeWheelLogger.error('Failed to open wheel', err));
         }, WHEEL_HOVER_OPEN_DELAY);
     };
     trigger.addEventListener('pointerenter', armHoverOpen);
@@ -547,11 +565,14 @@ export function initNodeWheel() {
     trigger.addEventListener('click', (e) => {
         cancelPendingOpen();
         if (isWheelOpen) {
+            // A hover-started open is still loading its nodes: let it finish
+            // instead of cancelling it (the click meant "open").
+            if (dropdown.classList.contains('opacity-0')) return;
             closeWheel();
             return;
         }
         // detail === 0 means Enter/Space rather than a pointer click.
-        openWheel({ viaKeyboard: e.detail === 0 });
+        openWheel({ viaKeyboard: e.detail === 0 }).catch(err => nodeWheelLogger.error('Failed to open wheel', err));
     });
 
     // Keyboard: arrows move through nodes, Enter/Space picks one, Tab leaves.
@@ -608,6 +629,10 @@ export function initNodeWheel() {
     if (!win._wheelPointerTracked) {
         document.addEventListener('pointermove', (e) => {
             lastPointer = { x: e.clientX, y: e.clientY };
+            // Any real movement away from where the wheel closed re-enables hover-open.
+            if (suppressHoverAt && (Math.abs(e.clientX - suppressHoverAt.x) >= 1 || Math.abs(e.clientY - suppressHoverAt.y) >= 1)) {
+                suppressHoverAt = null;
+            }
         }, { capture: true, passive: true });
         win._wheelPointerTracked = true;
     }
