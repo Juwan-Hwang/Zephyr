@@ -21,7 +21,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
 import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig, failoverReport } from './prism.js';
-import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType } from './proxy-groups.js';
+import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
@@ -125,6 +125,31 @@ const PROTOCOL_ABBR = Object.freeze({
 const GROUP_TYPES = new Set(['SELECTOR', 'URLTEST', 'FALLBACK', 'LOADBALANCE', 'RELAY', 'SMART']);
 
 /**
+ * Whether a proxy entry is a group: any entry with members (`all`), plus the
+ * known group types, so new mihomo group types are handled too.
+ * @param {any} p
+ * @returns {boolean}
+ */
+function isProxyGroup(p) {
+    return hasGroupMembers(p) || GROUP_TYPES.has(String(p?.type || '').toUpperCase());
+}
+
+/**
+ * The bottom-row label of a card: "→ node" for a group, otherwise the
+ * protocol and its transport ("SS · TCP"; protocol only when unknown).
+ * @param {any} proxy
+ * @param {{ node: string|null } | null} groupNow
+ * @returns {string}
+ */
+function proxyMetaLabel(proxy, groupNow) {
+    const upperType = String(proxy?.type || '').toUpperCase();
+    const abbr = PROTOCOL_ABBR[upperType] || proxy?.type || '';
+    if (isProxyGroup(proxy)) return groupNow?.node ? `→ ${groupNow.node}` : abbr;
+    const transport = TRANSPORT_MAP[upperType] || '-';
+    return transport === '-' ? abbr : `${abbr} · ${transport}`;
+}
+
+/**
  * Bucket a latency value into a status tier used by the card's status dot.
  * Thresholds mirror getDelayColorClass(): <200 good, <500 ok, otherwise bad.
  * @param {number|null|undefined} delay
@@ -160,13 +185,24 @@ function resolveGroupNow(data, groupName) {
     while (name && !seen.has(name)) {
         seen.add(name);
         const p = data?.proxies?.[name];
-        if (!p || !GROUP_TYPES.has(String(p.type || '').toUpperCase()) || !p.now) break;
+        if (!p || !isProxyGroup(p) || !p.now) break;
         name = p.now;
     }
     const leaf = name ? data?.proxies?.[name] : null;
     const hist = leaf?.history;
     const delay = (hist && hist.length > 0) ? hist[hist.length - 1].delay : null;
     return { node: name, delay };
+}
+
+/**
+ * The delay a card is sorted by: its own last delay, or — for a group with no
+ * delay of its own — the delay of the node it routes to (the one its card shows).
+ * @param {any} data @param {string} name @param {any} proxy @param {number|null} lastDelay
+ * @returns {number|null}
+ */
+function groupSortDelay(data, name, proxy, lastDelay) {
+    if (lastDelay !== null || !isProxyGroup(proxy)) return lastDelay;
+    return resolveGroupNow(data, name).delay;
 }
 
 /** Lazily measured hover marquee for long node names (always on; reduced motion keeps the ellipsis). */
@@ -216,8 +252,10 @@ export function sortProxiesByLatency(proxies, data) {
     proxies.sort((a, b) => {
         const getLat = (/** @type {string} */ name) => {
             const p = (/** @type {any} */ (data)).proxies[name];
-            const lat = (p && p.history && p.history.length > 0) ? p.history[p.history.length - 1].delay : 0;
-            return isInvalidDelay(lat) ? DELAY_INFINITE : lat;
+            const own = (p && p.history && p.history.length > 0) ? p.history[p.history.length - 1].delay : null;
+            // Groups without their own history sort by the node they route to (what their card shows).
+            const lat = groupSortDelay(data, name, p, own);
+            return (lat == null || isInvalidDelay(lat)) ? DELAY_INFINITE : lat;
         };
         return getLat(a) - getLat(b);
     });
@@ -597,6 +635,7 @@ export async function syncCoreConfig() {
             // Fallback to Direct when no proxy groups available
             const currentNodeEl = document.getElementById('current-node-name');
             if (currentNodeEl) {
+                delete currentNodeEl.dataset.group;
                 currentNodeEl.textContent = 'Direct';
             }
         }
@@ -1695,7 +1734,8 @@ async function updateProxiesInPlace(container, proxies, data, current) {
         (/** @type {HTMLElement} */ (wrapper)).setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
         if ((/** @type {HTMLElement} */ (wrapper)).dataset.pending !== '1') {
-            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
+            const sortDelay = groupSortDelay(data, name, proxy, lastDelay);
+            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(sortDelay) ? DELAY_INFINITE : sortDelay);
             (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
         }
 
@@ -1705,11 +1745,15 @@ async function updateProxiesInPlace(container, proxies, data, current) {
             (/** @type {HTMLElement} */ (card)).dataset.selected = isSelected ? '1' : '0';
 
             let shownDelay = lastDelay;
-            if (GROUP_TYPES.has(String(proxy?.type || '').toUpperCase())) {
-                const groupNow = resolveGroupNow(data, name);
-                if (shownDelay === null) shownDelay = groupNow.delay;
-                const meta = card.querySelector('[data-group-now]');
-                if (meta && groupNow.node) meta.textContent = `→ ${groupNow.node}`;
+            const groupNow = isProxyGroup(proxy) ? resolveGroupNow(data, name) : null;
+            if (groupNow && shownDelay === null) shownDelay = groupNow.delay;
+            // Refresh the label too: a same-name proxy may have changed type.
+            const meta = /** @type {HTMLElement | null} */ (card.querySelector('.proxy-meta'));
+            if (meta) {
+                meta.textContent = proxyMetaLabel(proxy, groupNow);
+                meta.title = proxy?.type || '';
+                if (groupNow) meta.dataset.groupNow = '1';
+                else delete meta.dataset.groupNow;
             }
             const delayColor = getDelayColorClass(shownDelay);
             const latVal = card.querySelector('[id^="latency-"]');
@@ -1796,8 +1840,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             lastDelay = latFromWrapper;
         }
 
-        const upperType = String(proxy.type || '').toUpperCase();
-        const isGroup = GROUP_TYPES.has(upperType);
+        const isGroup = isProxyGroup(proxy);
         // Group cards show where the group routes to right now; use that node's delay when the group has none of its own.
         const groupNow = isGroup ? resolveGroupNow(virtData, name) : null;
         if (isGroup && lastDelay === null && groupNow && groupNow.delay !== null) {
@@ -1833,17 +1876,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         dot.dataset.tier = isPending ? 'none' : getDelayTier(lastDelay);
         const metaText = document.createElement('span');
         metaText.className = 'proxy-meta text-2xs text-[var(--text-muted)] font-medium truncate';
-        if (isGroup) {
-            metaText.textContent = groupNow?.node ? `→ ${groupNow.node}` : (PROTOCOL_ABBR[upperType] || proxy.type || '');
-            metaText.dataset.groupNow = '1';
-        } else {
-            const abbr = PROTOCOL_ABBR[upperType] || proxy.type || '';
-            // Protocol + its transport layer, e.g. "SS · TCP", "Hy2 · QUIC".
-            // Types without a transport (DIRECT/REJECT…) show the protocol only.
-            // Unknown (future) types show the protocol only rather than guessing a transport.
-            const transport = TRANSPORT_MAP[upperType] || '-';
-            metaText.textContent = transport === '-' ? abbr : `${abbr} · ${transport}`;
-        }
+        // Group: "→ node". Otherwise protocol + transport, e.g. "SS · TCP", "Hy2 · QUIC";
+        // types without a known transport (DIRECT/REJECT, future types) show the protocol only.
+        metaText.textContent = proxyMetaLabel(proxy, groupNow);
+        if (isGroup) metaText.dataset.groupNow = '1';
         metaText.title = proxy.type || '';
         left.appendChild(dot);
         left.appendChild(metaText);
@@ -1961,7 +1997,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         wrapper.setAttribute('role', 'option');
         wrapper.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         const lastDelay = (proxy?.history && proxy.history.length > 0) ? proxy.history[proxy.history.length - 1].delay : null;
-        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(lastDelay) ? DELAY_INFINITE : lastDelay);
+        const sortDelay = groupSortDelay(data, name, proxy, lastDelay);
+        (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(isInvalidDelay(sortDelay) ? DELAY_INFINITE : sortDelay);
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
         wrapper.style.height = 'auto';

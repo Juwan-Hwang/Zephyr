@@ -135,19 +135,19 @@ const PAGE_HTML = `
         <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
         <div class="conn-grid conn-head" id="conn-table-header">
             <div class="conn-head-cell">
-                <span class="sortable" role="button" tabindex="0" data-sort="host" data-i18n="hostCol">Host</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="host" data-i18n="hostCol">Host</span>
             </div>
             <div class="conn-head-cell">
-                <span class="sortable" role="button" tabindex="0" data-sort="rule" data-i18n="ruleCol">Rule</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="chains" data-i18n="chainsCol">Chains</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="rule" data-i18n="ruleCol">Rule</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="chains" data-i18n="chainsCol">Chains</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
-                <span class="sortable conn-head-sub" role="button" tabindex="0" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
             </div>
         </div>
     </div>
@@ -539,6 +539,12 @@ function renderConnectionList(connections, mode) {
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
+            // The template was copied before any later language switch: translate it now.
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
+            clone.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = /** @type {HTMLElement} */ (el).dataset.i18n;
+                if (key && typeof t[key] === 'string') el.textContent = t[key];
+            });
             container.appendChild(clone);
         }
         return;
@@ -645,8 +651,9 @@ function updateSortIndicators() {
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
             setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
-            const ariaSort = isAsc ? 'ascending' : 'descending';
-            if (cell.getAttribute('aria-sort') !== ariaSort) cell.setAttribute('aria-sort', ariaSort);
+            // aria-sort only applies to column headers; these are buttons, so expose
+            // the active sort as pressed (the ▲/▼ in the label gives the direction).
+            if (cell.getAttribute('aria-pressed') !== 'true') cell.setAttribute('aria-pressed', 'true');
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--text-primary)';
@@ -658,7 +665,7 @@ function updateSortIndicators() {
         } else {
             // Inactive: colour comes from CSS (.conn-head); drop the inline active colour and clean text
             (/** @type {HTMLElement} */ (cell)).style.color = '';
-            cell.removeAttribute('aria-sort');
+            if (cell.getAttribute('aria-pressed') !== 'false') cell.setAttribute('aria-pressed', 'false');
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
@@ -821,7 +828,7 @@ const RULE_SHORT_NAMES = Object.freeze(/** @type {Record<string, string>} */ ({
 
 /** @param {string} rule */
 export function shortRuleName(rule) {
-    const key = String(rule ?? '').toLowerCase();
+    const key = String(rule ?? '').toLowerCase().replace(/[-_]/g, '');
     return RULE_SHORT_NAMES[key] || String(rule ?? '');
 }
 
@@ -1002,7 +1009,7 @@ function showConnDetail(conn, mode) {
                 <h3 class="dialog-title truncate">${host}</h3>
                 <p class="text-2xs text-[var(--text-muted)] mt-0.5 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" aria-label="Close" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" aria-label="${escapeHtml(t.dismiss || 'Close')}" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
