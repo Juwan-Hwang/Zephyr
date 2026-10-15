@@ -1824,9 +1824,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             metaText.dataset.groupNow = '1';
         } else {
             const abbr = PROTOCOL_ABBR[upperType] || proxy.type || '';
+            // Protocol + its transport layer, e.g. "SS · TCP", "Hy2 · QUIC".
+            // Types without a transport (DIRECT/REJECT…) show the protocol only.
             const transport = TRANSPORT_MAP[upperType] || 'TCP';
-            const showUdp = proxy.udp && transport !== '-';
-            metaText.textContent = showUdp ? `${abbr} · UDP` : abbr;
+            metaText.textContent = transport === '-' ? abbr : `${abbr} · ${transport}`;
         }
         metaText.title = proxy.type || '';
         left.appendChild(dot);
