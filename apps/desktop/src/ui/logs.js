@@ -37,6 +37,7 @@ import { translations, currentLang } from '../i18n.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
+import { renderLogLineHtml } from './log-highlight.js';
 import { getExtLogEvents, subscribeToEvents, unsubscribeFromEvents } from '../modules/backend-events.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -597,30 +598,11 @@ function createVirtualScrollInstance() {
             pre.dataset.lineIdx = String(idx);
             pre.style.color = color;
 
-            // Build inner HTML with level highlighting + optional search highlight
-            let html = escapeHtml(line);
+            // Build inner HTML with level highlighting + optional search highlight.
+            // Matching runs on the raw line; each segment is escaped separately.
+            const html = renderLogLineHtml(line, _searchQuery, levelColors, color);
 
-            // Highlight search matches
-            const hasSearch = !!_searchQuery;
-            if (hasSearch) {
-                const searchEscaped = _searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const searchRe = new RegExp(`(${searchEscaped})`, 'gi');
-                html = html.replace(searchRe, '<mark class="bg-accent/30 text-accent rounded px-0.5">$1</mark>');
-            }
-
-            // Highlight level tag with color (supports both [INFO] and level=info formats)
-            html = html.replace(
-                /(\[(?:DEBUG|INFO|WARN|WARNING|ERROR)\]|level=(?:debug|info|warn|warning|error))/gi,
-                (match) => {
-                    const m = match.match(/(?:DEBUG|INFO|WARN|WARNING|ERROR)/i);
-                    if (!m) return match;
-                    const key = m[0].toUpperCase() === 'WARNING' ? 'warn' : m[0].toLowerCase();
-                    const c = levelColors[/** @type {keyof typeof levelColors} */ (key)] || color;
-                    return `<span style="color:${c};font-weight:600">${match}</span>`;
-                }
-            );
-
-            // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() on line variable above // nosemgrep: js-innerhtml-assignment
+            // eslint-disable-next-line no-unsanitized/property -- every text segment escaped via escapeHtml() in renderLogLineHtml() // nosemgrep: js-innerhtml-assignment
             pre.innerHTML = html;
             fragment.appendChild(pre);
         },
