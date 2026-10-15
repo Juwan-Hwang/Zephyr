@@ -75,13 +75,16 @@ const TRANSPORT_MAP = Object.freeze({
     // Special/no transport
     'DIRECT': '-',
     'REJECT': '-',
+    'REJECTDROP': '-',
+    'DNS': '-',
     'PASS': '-',
     'COMPATIBLE': '-',
     'SELECTOR': '-',
     'URLTEST': '-',
     'LOADBALANCE': '-',
     'FALLBACK': '-',
-    'RELAY': '-'
+    'RELAY': '-',
+    'SMART': '-'
 });
 
 /** Short, human-friendly protocol labels shown in the card's bottom row.
@@ -103,8 +106,19 @@ const PROTOCOL_ABBR = Object.freeze({
     'SOCKS5': 'SOCKS5',
     'HTTP': 'HTTP',
     'SSH': 'SSH',
+    'SOCKS': 'SOCKS',
+    'MIERU': 'Mieru',
+    'MASQUE': 'MASQUE',
+    'SUDOKU': 'Sudoku',
+    'TRUSTTUNNEL': 'TrustTunnel',
+    'KCP': 'KCP',
+    'KCPTUN': 'KCPTun',
     'DIRECT': 'Direct',
     'REJECT': 'Reject',
+    'REJECTDROP': 'Reject',
+    'DNS': 'DNS',
+    'PASS': 'Pass',
+    'COMPATIBLE': 'Compatible',
 });
 
 /** Proxy types that are groups (their card shows the group's current node). */
@@ -1826,7 +1840,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             const abbr = PROTOCOL_ABBR[upperType] || proxy.type || '';
             // Protocol + its transport layer, e.g. "SS · TCP", "Hy2 · QUIC".
             // Types without a transport (DIRECT/REJECT…) show the protocol only.
-            const transport = TRANSPORT_MAP[upperType] || 'TCP';
+            // Unknown (future) types show the protocol only rather than guessing a transport.
+            const transport = TRANSPORT_MAP[upperType] || '-';
             metaText.textContent = transport === '-' ? abbr : `${abbr} · ${transport}`;
         }
         metaText.title = proxy.type || '';

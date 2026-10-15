@@ -16,6 +16,17 @@ describe('proxy card meta line', () => {
         expect(src).not.toMatch(/`\$\{abbr\} · UDP`/);
         expect(src).toMatch(/'HYSTERIA2': 'QUIC'/);
     });
+
+    it('never guesses TCP for unknown types and has no transport for non-proxy types', () => {
+        const src = read('ui/proxies.js');
+        expect(src).toMatch(/TRANSPORT_MAP\[upperType\] \|\| '-'/);
+        for (const t of ['REJECTDROP', 'DNS', 'SMART']) {
+            expect(src).toMatch(new RegExp(`'${t}': '-'`));
+        }
+        for (const t of ['MIERU', 'MASQUE', 'SUDOKU', 'TRUSTTUNNEL']) {
+            expect(src).toMatch(new RegExp(`PROTOCOL_ABBR[\\s\\S]*'${t}':`));
+        }
+    });
 });
 
 describe('motion tokens', () => {
