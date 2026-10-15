@@ -13,8 +13,8 @@
 import { escapeHtml } from '../utils/sanitize.js';
 
 /** Level tags coloured inline (supports both `[INFO]` and `level=info`). */
-const LEVEL_TAG_RE = /\[(?:DEBUG|INFO|WARN|WARNING|ERROR)\]|level=(?:debug|info|warn|warning|error)/gi;
-const LEVEL_WORD_RE = /DEBUG|INFO|WARN|WARNING|ERROR/i;
+const LEVEL_TAG_RE = /\[(?:DEBUG|INFO|WARNING|WARN|ERROR|FATAL)\]|level=(?:debug|info|warning|warn|error|fatal)\b/gi;
+const LEVEL_WORD_RE = /DEBUG|INFO|WARN|WARNING|ERROR|FATAL/i;
 
 export const SEARCH_MARK_OPEN = '<mark class="bg-accent/30 text-accent rounded px-0.5">';
 const SEARCH_MARK_CLOSE = '</mark>';
@@ -105,7 +105,9 @@ export function renderLogLineHtml(line, query, levelColors, fallbackColor) {
     while ((m = LEVEL_TAG_RE.exec(line)) !== null) {
         const w = m[0].match(LEVEL_WORD_RE);
         if (!w) continue;
-        const key = w[0].toUpperCase() === 'WARNING' ? 'warn' : w[0].toLowerCase();
+        const word = w[0].toUpperCase();
+        // WARNING shares WARN's colour; FATAL is shown as an error.
+        const key = word === 'WARNING' ? 'warn' : (word === 'FATAL' ? (levelColors.fatal ? 'fatal' : 'error') : word.toLowerCase());
         levels.push({ start: m.index, end: m.index + m[0].length, color: levelColors[key] || fallbackColor });
     }
 
