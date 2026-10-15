@@ -6,10 +6,11 @@
  * the window is visible.
  */
 
-import { getConnections } from '../api.js';
+import { getConnections, getProxiesMerged } from '../api.js';
 import { getProxiesCached } from './cache.js';
 import { formatBytes, getDelayColorClass } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
+import { appStore } from './state.js';
 
 const logger = createLogger('HomeStats');
 const POLL_MS = 2000;
@@ -43,13 +44,54 @@ export function splitBytes(bytes) {
  */
 export function resolveLeaf(proxies, name) {
     let p = proxies?.[name];
-    for (let i = 0; p && Array.isArray(p.all) && p.now && i < 8; i++) p = proxies[p.now];
+    // Follow any depth of nesting; stop on a cycle instead of a fixed depth.
+    const seen = new Set([name]);
+    while (p && Array.isArray(p.all) && p.now && !seen.has(p.now)) {
+        seen.add(p.now);
+        p = proxies[p.now];
+    }
     return p;
 }
 
 function homeVisible() {
     const page = document.querySelector('[data-page="home"]');
     return !!page && !page.classList.contains('hidden') && !document.hidden;
+}
+
+/**
+ * Whether `node` is reachable from `group` (directly or through nested groups).
+ * @param {Record<string, any>} proxies @param {string} group @param {string} node
+ * @returns {boolean}
+ */
+export function groupContains(proxies, group, node) {
+    const seen = new Set();
+    const stack = [group];
+    while (stack.length) {
+        const g = /** @type {string} */ (stack.pop());
+        if (seen.has(g)) continue;
+        seen.add(g);
+        const all = proxies?.[g]?.all;
+        if (!Array.isArray(all)) continue;
+        if (all.includes(node)) return true;
+        stack.push(...all);
+    }
+    return false;
+}
+
+/**
+ * The node the pill names: the observed exit node when it is reachable from
+ * the selected group, otherwise the group's current leaf.
+ * @param {Record<string, any>} proxies @param {string} group
+ * @returns {any}
+ */
+export function displayedLeaf(proxies, group) {
+    const observed = appStore.get('observedNodeName');
+    const observedGroup = appStore.get('observedGroupName');
+    if (observed && observedGroup && proxies?.[observed]
+        && (observed === group || groupContains(proxies, group, observed))) {
+        return resolveLeaf(proxies, observed);
+    }
+    return resolveLeaf(proxies, group);
 }
 
 /** @param {number} bytes */
@@ -81,17 +123,23 @@ async function tick() {
         logger.debug('connections poll failed', e);
     }
     try {
-        const nodeName = (document.getElementById('current-node-name')?.textContent || '').trim();
-        const res = /** @type {any} */ (await getProxiesCached());
+        // The pill shows a display label ("Auto - HK"); the real proxy-map key
+        // of the selected group lives in data-group.
+        const nodeEl = document.getElementById('current-node-name');
+        const nodeName = (nodeEl?.dataset.group || nodeEl?.textContent || '').trim();
+        const raw = /** @type {any} */ (await getProxiesCached());
+        // Provider-downloaded nodes are missing from the raw /proxies map.
+        const res = /** @type {any} */ (raw?.proxies ? await getProxiesMerged(raw) : raw);
         const proxies = res?.proxies || res || {};
-        const leaf = nodeName ? resolveLeaf(proxies, nodeName) : null;
+        const leaf = nodeName ? displayedLeaf(proxies, nodeName) : null;
         const hist = Array.isArray(leaf?.history) ? leaf.history : [];
         const delay = hist.length ? Number(hist[hist.length - 1]?.delay) || 0 : 0;
+        const valid = delay > 0 && delay < 999999; // 999999+ means timeout
         const latEl = document.getElementById('home-stat-lat');
         if (latEl) {
-            latEl.textContent = delay > 0 ? String(delay) : '—';
+            latEl.textContent = valid ? String(delay) : '—';
             latEl.classList.remove(...DELAY_CLASSES);
-            if (delay > 0) latEl.classList.add(getDelayColorClass(delay));
+            if (valid) latEl.classList.add(getDelayColorClass(delay));
         }
         setText('home-stat-node', leaf?.name || nodeName || '—');
     } catch (e) {
@@ -106,11 +154,12 @@ async function tick() {
  * @returns {() => void}
  */
 export function initHomeStats() {
-    if (!document.getElementById('home-stats')) return () => {};
-    if (!timer) timer = setInterval(tick, POLL_MS);
-    const onVis = () => { if (!document.hidden) tick(); };
+    if (!document.getElementById('home-stats') || timer) return () => {};
+    const run = () => { tick().catch(e => logger.debug('home stats tick failed', e)); };
+    timer = setInterval(run, POLL_MS);
+    const onVis = () => { if (!document.hidden) run(); };
     document.addEventListener('visibilitychange', onVis);
-    tick();
+    run();
     return () => {
         if (timer) clearInterval(timer);
         timer = null;
