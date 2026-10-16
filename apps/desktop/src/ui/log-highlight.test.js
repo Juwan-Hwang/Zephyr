@@ -40,6 +40,11 @@ describe('findSearchRanges', () => {
 });
 
 describe('renderLogLineHtml', () => {
+    it('colours FATAL tags like other levels', () => {
+        expect(renderLogLineHtml('[FATAL] boom', '', { ...COLORS, fatal: '#x' }, FALLBACK)).toBe(`${lvl('#x', '[FATAL]')} boom`);
+        expect(renderLogLineHtml('level=fatal boom', '', COLORS, FALLBACK)).toBe(`${lvl('#e', 'level=fatal')} boom`);
+    });
+
     it('escapes a plain line without search', () => {
         expect(renderLogLineHtml('a < b & c', '', COLORS, FALLBACK)).toBe('a &lt; b &amp; c');
     });
@@ -80,7 +85,7 @@ describe('renderLogLineHtml', () => {
     it('colours bracket and level= tags exactly as before', () => {
         expect(renderLogLineHtml('[ERROR] boom', '', COLORS, FALLBACK)).toBe(`${lvl('#e', '[ERROR]')} boom`);
         expect(renderLogLineHtml('time=1 level=warning msg', '', COLORS, FALLBACK))
-            .toBe(`time=1 ${lvl('#w', 'level=warn')}ing msg`); // same alternation order as before
+            .toBe(`time=1 ${lvl('#w', 'level=warning')} msg`);
     });
 
     it('uses the fallback colour for unknown level keys', () => {
@@ -110,5 +115,29 @@ describe('renderLogLineHtml', () => {
         const html = renderLogLineHtml(line, 'x', COLORS, FALLBACK);
         expect(visibleText(html)).toBe(line);
         expect(html).toContain(`&lt;${mark('x')}&gt;`);
+    });
+});
+
+describe('structured core log lines', () => {
+    it('parses mihomo logfmt into time / level / msg', async () => {
+        const { parseCoreLogLine } = await import('./log-highlight.js');
+        const p = parseCoreLogLine('time="2026-10-15T16:45:13.936Z" level=warning msg="[DNS] resolve \\"a.com\\" failed"');
+        expect(p).toEqual({ time: '2026-10-15T16:45:13.936Z', level: 'warn', msg: '[DNS] resolve "a.com" failed' });
+        expect(parseCoreLogLine('plain text line')).toBeNull();
+        expect(parseCoreLogLine('time="x" level=trace msg="y"')).toBeNull();
+    });
+
+    it('renders an escaped badge row and highlights only literal message text', async () => {
+        const { renderStructuredLogHtml } = await import('./log-highlight.js');
+        const html = renderStructuredLogHtml({ time: 'not-a-date', level: 'error', msg: '<b>dial</b> failed' }, 'dial');
+        expect(html).toContain('<span class="log-badge" data-level="error">ERROR</span>');
+        expect(html).toContain('&lt;b&gt;<mark');
+        expect(html).toContain('>dial</mark>&lt;/b&gt; failed');
+        expect(html).toContain('<span class="log-time" title="not-a-date">not-a-date</span>');
+    });
+
+    it('formats valid timestamps as local HH:mm:ss', async () => {
+        const { formatLogTime } = await import('./log-highlight.js');
+        expect(formatLogTime('2026-10-15T16:45:13.936Z')).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     });
 });

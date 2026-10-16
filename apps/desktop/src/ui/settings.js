@@ -223,7 +223,7 @@ function initCopyEnvSettings() {
         modal.innerHTML = `
             <div class="glass-card w-[360px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
                     <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -374,16 +374,16 @@ function initLogSettingsModal() {
         modal.innerHTML = `
             <div class="glass-card w-[400px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
                     <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
 
                 <!-- Tab switcher -->
-                <div class="flex gap-1 bg-[var(--zephyr-bg-muted)] rounded-lg p-1">
-                    <button id="log-tab-app" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logAppTab || 'App Logs')}</button>
-                    <button id="log-tab-core" class="log-tab-btn flex-1 text-2xs font-medium uppercase tracking-wider py-1.5 rounded-md transition-all">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
+                <div class="seg-tabs seg-tabs-lg w-full" role="tablist">
+                    <button id="log-tab-app" type="button" role="tab" aria-selected="true" class="seg-tab active flex-1 justify-center">${escapeHtml(t.logAppTab || 'App Logs')}</button>
+                    <button id="log-tab-core" type="button" role="tab" aria-selected="false" class="seg-tab flex-1 justify-center">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
                 </div>
 
                 <!-- App Logs Tab -->
@@ -397,14 +397,14 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
@@ -424,14 +424,14 @@ function initLogSettingsModal() {
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
                             </div>
                         </div>
                         <div class="flex flex-col gap-1">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
                             <div class="flex items-center gap-1">
                                 <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
                                 <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
@@ -488,12 +488,10 @@ function initLogSettingsModal() {
 
         const activateTab = (/** @type {HTMLElement} */ tab, /** @type {HTMLElement} */ p) => {
             [tabApp, tabCore].forEach(tb => {
-                tb.classList.remove('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
-                tb.classList.add('text-[var(--text-muted)]');
+                tb.classList.toggle('active', tb === tab);
+                tb.setAttribute('aria-selected', String(tb === tab));
             });
             [panelApp, panelCore].forEach(pn => { pn.style.display = 'none'; });
-            tab.classList.add('bg-[var(--zephyr-bg-card)]', 'text-[var(--text-primary)]', 'shadow-sm');
-            tab.classList.remove('text-[var(--text-muted)]');
             p.style.display = '';
         };
         activateTab(tabApp, panelApp);
@@ -572,7 +570,7 @@ function initLogSettingsModal() {
         modal.innerHTML = `
             <div class="glass-card w-[480px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
+                    <h3 class="dialog-title">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
                     <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -941,7 +939,6 @@ export async function initSettings() {
     /** @type {NodeListOf<HTMLElement>} */
     const themeCircles = document.querySelectorAll('[data-theme]');
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
-    const nodeScrollToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-node-scroll'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
     const failoverToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-failover'));
     const encryptConfigsToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-encrypt-configs'));
@@ -1063,15 +1060,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     const uiScaleButtons = document.querySelectorAll('.ui-scale-btn');
     const applyUiScale = (/** @type {number} */ scale) => {
         // Update button states
+        // Same raised-grey selected state as the theme / home-mode segmented controls
+        const activeId = `ui-scale-${Math.round(scale * 100)}`;
         uiScaleButtons.forEach(btn => {
-            btn.classList.remove('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
-            btn.classList.add('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
+            btn.setAttribute('aria-pressed', btn.id === activeId ? 'true' : 'false');
         });
-        const activeBtn = document.getElementById(`ui-scale-${Math.round(scale * 100)}`);
-        if (activeBtn) {
-            activeBtn.classList.remove('bg-[var(--zephyr-bg-input)]', 'text-[var(--text-tertiary)]');
-            activeBtn.classList.add('bg-accent/20', 'dark:bg-accent/30', 'text-accent');
-        }
         // Apply scale via CSS custom property --ui-scale
         // The actual transform/size is handled by CSS on #app-main-container.
         // This avoids inline style conflicts with Tailwind classes and ensures
@@ -1114,7 +1107,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     if (autoUpdateToggle) autoUpdateToggle.checked = settings.auto_update;
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
-    if (nodeScrollToggle) nodeScrollToggle.checked = !!settings.node_scroll;
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
     if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
     if (encryptConfigsToggle) encryptConfigsToggle.checked = settings.encrypt_configs || false;
@@ -1239,11 +1231,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         hideTimeoutToggle.dispatchEvent(new Event('change'));
                     }
                 }
-                if (nodeScrollToggle) {
-                    nodeScrollToggle.checked = false;
-                    settings.node_scroll = false;
-                    successItems.push('nodeScroll');
-                }
                 if (failoverToggle) {
                     failoverToggle.checked = false;
                     settings.failover_enabled = false;
@@ -1362,7 +1349,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     }
                 }
 
-                // Re-render proxy list after settings are persisted (node_scroll CSS class depends on backend value)
+                // Re-render proxy list after settings are persisted
                 const proxyContainer = document.getElementById('proxies-list');
                 if (proxyContainer) proxyContainer.replaceChildren();
                 Bus.emit(Events.CONFIG_UPDATED);
@@ -1913,16 +1900,6 @@ appStore.set('isNetworkUpdating', false);
     // Theme circles are handled by initThemeSettings above
 
     // ---- Node scroll toggle ----
-    nodeScrollToggle?.addEventListener('change', () => {
-        if (!nodeScrollToggle) return;
-        saveSetting('node_scroll', nodeScrollToggle.checked).catch((e) =>
-            settingsLogger.warn("Failed to persist nodeScroll change", e)
-        );
-        // Clear the container to force full re-render (in-place update won't update CSS classes)
-        const container = document.getElementById('proxies-list');
-        if (container) container.replaceChildren();
-        Bus.emit(Events.CONFIG_UPDATED);
-    });
 
     // ---- Core version ----
     let currentCoreVersion = "";
@@ -2276,34 +2253,34 @@ appStore.set('isNetworkUpdating', false);
             modal.innerHTML = `
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
+                        <h3 class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
                         <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
                             <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
                             <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
                             <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
                             <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
                             <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono">
                         </div>
                         <div class="flex flex-col gap-1.5">
-                            <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
+                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
                             <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono">
                         </div>
                     </div>

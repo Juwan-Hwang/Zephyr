@@ -143,7 +143,9 @@ describe('traffic chart rendering', () => {
         const beforeStroke = series[strokeIdx - 1];
 
         const n = 6; // five samples + one more
-        const lastX = ((n - 1) / 59) * WIDTH;
+        // The newest sample is anchored to the right edge; older ones extend leftwards.
+        const lastX = WIDTH;
+        const firstX = ((60 - n) / 59) * WIDTH;
         const maxVal = 60000;
         const lastY = HEIGHT - ((30000 / maxVal) * (HEIGHT - 20)) - 10;
 
@@ -156,7 +158,9 @@ describe('traffic chart rendering', () => {
         expect(afterStroke[0][0]).toBe('lineTo');
         expect(afterStroke[0][1]).toBeCloseTo(lastX, 6);
         expect(afterStroke[0][2]).toBe(HEIGHT);
-        expect(afterStroke[1]).toEqual(['lineTo', 0, HEIGHT]);
+        expect(afterStroke[1][0]).toBe('lineTo');
+        expect(afterStroke[1][1]).toBeCloseTo(firstX, 6);
+        expect(afterStroke[1][2]).toBe(HEIGHT);
         expect(afterStroke[2]).toEqual(['closePath']);
     });
 

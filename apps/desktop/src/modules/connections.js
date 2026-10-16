@@ -80,11 +80,11 @@ const PAGE_HTML = `
         <!-- Search -->
         <div class="relative group flex items-center">
             <div class="absolute inset-y-0 start-0 ps-4 flex items-center pointer-events-none">
-                <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-standard)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
-            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full py-2 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-400 focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
+            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
         </div>
         <!-- Close All / Clear All Button -->
         <button id="close-all-conns-btn" class="btn-danger">
@@ -103,19 +103,19 @@ const PAGE_HTML = `
 <div id="conn-stats-bar" class="glass-card p-4 relative z-10 shrink-0 grid grid-cols-4 gap-4">
     <div class="flex flex-col items-center justify-center">
         <span id="stat-total" class="text-xl font-extralight text-[var(--text-primary)] tabular-nums">0</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="totalConn">Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="totalConn">Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-dl-total" class="text-lg font-semibold text-download tabular-nums">0 B</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="dlTotal">↓ Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="dlTotal">↓ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-ul-total" class="text-lg font-semibold text-upload tabular-nums">0 B</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="ulTotal">↑ Total</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="ulTotal">↑ Total</span>
     </div>
     <div class="flex flex-col items-center justify-center">
         <span id="stat-active" class="text-lg font-semibold text-emerald-400 tabular-nums">0</span>
-        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="activeConn">Active</span>
+        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="activeConn">Active</span>
     </div>
 </div>
 
@@ -124,36 +124,46 @@ const PAGE_HTML = `
     <!-- Tab Bar + Table Header -->
     <div class="shrink-0">
         <!-- Tabs -->
-        <div class="flex items-center px-4 pt-3 pb-0 gap-1">
-            <button type="button" id="conn-tab-active" class="conn-tab active px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-accent border-b-2 border-accent" data-i18n="activeTab">Active</button>
-            <button type="button" id="conn-tab-closed" class="conn-tab px-4 py-2 text-xs font-normal uppercase tracking-wider rounded-t-lg transition-colors duration-[var(--zephyr-time-micro)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border-b-2 border-transparent" data-i18n="closedTab">Closed</button>
+        <div class="flex items-center px-4 pt-4 pb-1 gap-2">
+            <div class="seg-tabs" role="tablist">
+                <button type="button" id="conn-tab-active" role="tab" aria-selected="true" class="conn-tab seg-tab active" data-i18n="activeTab">Active</button>
+                <button type="button" id="conn-tab-closed" role="tab" aria-selected="false" class="conn-tab seg-tab" data-i18n="closedTab">Closed</button>
+            </div>
             <div class="flex-1"></div>
-            <span id="closed-count-badge" class="hidden text-2xs text-[var(--text-tertiary)] tabular-nums"></span>
+            <span id="closed-count-badge" class="hidden text-xs text-[var(--text-muted)] tabular-nums pe-1"></span>
         </div>
-        <!-- Table Header (clickable for sort) -->
-        <div style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.625rem 1rem; user-select:none;" id="conn-table-header">
-            <div class="sortable ps-1 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="host" data-i18n="hostCol">Host</div>
-            <div class="sortable text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="rule" data-i18n="ruleCol">Rule</div>
-            <div class="sortable text-end pe-2 text-[9px] font-bold text-[var(--zephyr-text-muted)] uppercase tracking-widest cursor-pointer" data-sort="chains" data-i18n="chainsCol">Chains</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/70 uppercase tracking-widest cursor-pointer hover:text-download transition-colors" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-download/50 uppercase tracking-widest cursor-pointer hover:text-download/80 transition-colors" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</div>
-            <div class="sortable text-end pe-1 text-[9px] font-bold text-upload/70 uppercase tracking-widest cursor-pointer hover:text-upload transition-colors" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</div>
-            <div class="sortable text-end pe-2 text-[9px] font-bold text-upload/50 uppercase tracking-widest cursor-pointer hover:text-upload/80 transition-colors" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</div>
+        <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
+        <div class="conn-grid conn-head" id="conn-table-header">
+            <div class="conn-head-cell">
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="host" data-i18n="hostCol">Host</span>
+            </div>
+            <div class="conn-head-cell">
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="rule" data-i18n="ruleCol">Rule</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="chains" data-i18n="chainsCol">Chains</span>
+            </div>
+            <div class="conn-head-cell conn-num">
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
+            </div>
+            <div class="conn-head-cell conn-num">
+                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
+                <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
+            </div>
         </div>
     </div>
     <!-- List Body -->
     <div id="connections-list" class="flex-1 overflow-y-auto custom-scrollbar py-1 pb-1 space-y-0.5 px-2">
         <!-- Empty State (Active) -->
-        <div id="connections-empty" class="flex flex-col items-center justify-center h-full py-16 gap-3">
+        <div id="connections-empty" class="empty-state">
             <svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="17" r="4"/><path d="M4 17l6-6-6-6"/><path d="M13 11h8"/></svg>
-            <p class="text-sm text-[var(--text-tertiary)]" data-i18n="noConnections">No active connections</p>
-            <p class="text-2xs text-[var(--text-tertiary)]" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
+            <p class="text-sm font-medium text-[var(--text-secondary)]" data-i18n="noConnections">No active connections</p>
+            <p class="text-xs text-[var(--text-muted)] max-w-xs" data-i18n="noConnectionsHint">Connections will appear here as traffic flows through the proxy</p>
         </div>
         <!-- Empty State (Closed) -->
-        <div id="connections-closed-empty" class="hidden flex flex-col items-center justify-center h-full py-16 gap-3">
+        <div id="connections-closed-empty" class="empty-state hidden">
             <svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            <p class="text-sm text-[var(--text-tertiary)]" data-i18n="noClosedConns">No closed connections yet</p>
-            <p class="text-2xs text-[var(--text-tertiary)]" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
+            <p class="text-sm font-medium text-[var(--text-secondary)]" data-i18n="noClosedConns">No closed connections yet</p>
+            <p class="text-xs text-[var(--text-muted)] max-w-xs" data-i18n="noClosedConnsHint">Closed connections will appear here after you close them</p>
         </div>
     </div>
 </div>
@@ -284,10 +294,10 @@ function switchConnTab(tab) {
     }
 
     if (tab === 'active') {
-        activeTab?.classList.add('text-accent', 'border-accent', 'font-bold', 'active');
-        activeTab?.classList.remove('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
-        closedTab?.classList.remove('text-accent', 'border-accent', 'font-bold', 'active');
-        closedTab?.classList.add('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
+        activeTab?.classList.add('active');
+        closedTab?.classList.remove('active');
+        activeTab?.setAttribute('aria-selected', 'true');
+        closedTab?.setAttribute('aria-selected', 'false');
 
         if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-danger';
@@ -296,10 +306,10 @@ function switchConnTab(tab) {
             if (actionText) { actionText.textContent = t.closeAll || 'Close All'; actionText.setAttribute('data-i18n', 'closeAll'); }
         }
     } else {
-        closedTab?.classList.add('text-accent', 'border-accent', 'font-bold', 'active');
-        closedTab?.classList.remove('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
-        activeTab?.classList.remove('text-accent', 'border-accent', 'font-bold', 'active');
-        activeTab?.classList.add('text-[var(--text-muted)]', 'border-transparent', 'font-normal');
+        closedTab?.classList.add('active');
+        activeTab?.classList.remove('active');
+        closedTab?.setAttribute('aria-selected', 'true');
+        activeTab?.setAttribute('aria-selected', 'false');
 
         if (actionBtn instanceof HTMLButtonElement) {
             actionBtn.className = 'btn-warning';
@@ -488,14 +498,24 @@ const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 // Rendering
 // ============================================
 
+/** @type {{ active: HTMLElement | null, closed: HTMLElement | null }} */
+const emptyTemplates = { active: null, closed: null };
+
 /**
  * @param {any[]} connections
  * @param {string} mode
  */
 function renderConnectionList(connections, mode) {
     const container = document.getElementById('connections-list');
-    const emptyState = document.getElementById('connections-empty');
-    const closedEmptyState = document.getElementById('connections-closed-empty');
+    // The empty-state templates live inside the list and are wiped by the first
+    // render that has rows; keep detached copies so either tab can show its
+    // empty state later (the closed tab used to stay blank).
+    const liveActive = document.getElementById('connections-empty');
+    const liveClosed = document.getElementById('connections-closed-empty');
+    if (liveActive) emptyTemplates.active = /** @type {HTMLElement} */ (liveActive.cloneNode(true));
+    if (liveClosed) emptyTemplates.closed = /** @type {HTMLElement} */ (liveClosed.cloneNode(true));
+    const emptyState = emptyTemplates.active;
+    const closedEmptyState = emptyTemplates.closed;
     if (!container) return;
 
     let filtered = connections;
@@ -519,6 +539,12 @@ function renderConnectionList(connections, mode) {
         if (tpl) {
             const clone = /** @type {HTMLElement} */ (tpl.cloneNode(true));
             clone.classList.remove('hidden');
+            // The template was copied before any later language switch: translate it now.
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
+            clone.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = /** @type {HTMLElement} */ (el).dataset.i18n;
+                if (key && typeof t[key] === 'string') el.textContent = t[key];
+            });
             container.appendChild(clone);
         }
         return;
@@ -549,15 +575,27 @@ function renderConnectionList(connections, mode) {
     // node and only get their speed/total text patched; rows are inserted,
     // removed or moved only when the visible list itself changed. The
     // resulting markup is identical to a full innerHTML rebuild.
+    // Moving or re-creating the focused row drops keyboard focus to <body>;
+    // put it back on the same connection's row.
+    const focusedRow = /** @type {HTMLElement | null} */ (document.activeElement?.closest?.('.conn-row') ?? null);
+    const focusedId = focusedRow && container.contains(focusedRow) ? focusedRow.dataset.connId : undefined;
+
     reconcileKeyedList(container, filtered, {
         getKey: (/** @type {any} */ conn) => String(conn.id ?? ''),
-        getSignature: (/** @type {any} */ conn) => buildConnectionRow(conn, mode, EMPTY_ROW_STATS),
+        getSignature: (/** @type {any} */ conn) => buildConnectionRow(conn, mode, EMPTY_ROW_STATS, false),
         create: (/** @type {any} */ conn) => createConnectionRowElement(conn, mode),
-        update: (el, /** @type {any} */ conn) => patchConnectionRowStats(el, resolveConnStats(conn, mode)),
+        update: (el, /** @type {any} */ conn) => patchConnectionRowStats(el, resolveConnStats(conn, mode), isConnIdle(conn, mode)),
     });
 
-    // One delegated listener per list element instead of one per row per render.
+    // One delegated listener per list element instead of one per row per render
+    // (click and keyboard activation of the role=button rows).
     bindRowClickDelegate(container);
+
+    if (focusedId !== undefined && !document.activeElement?.closest?.('.conn-row')) {
+        const row = Array.from(container.querySelectorAll('.conn-row'))
+            .find(el => /** @type {HTMLElement} */ (el).dataset.connId === focusedId);
+        /** @type {HTMLElement | undefined} */ (row)?.focus({ preventScroll: true });
+    }
 
     // Re-apply sort arrows (in case i18n or other code reset header text)
     updateSortIndicators();
@@ -590,18 +628,6 @@ function getConnSortValue(conn, key, mode) {
 }
 
 /**
- * Each column's original header color (matches the utility classes in PAGE_HTML).
- * @type {Readonly<Record<string, string>>}
- */
-const SORT_HEADER_COLORS = Object.freeze({
-    host:   'var(--zephyr-text-muted)', rule: 'var(--zephyr-text-muted)', chains: 'var(--zephyr-text-muted)',
-    dlSpeed: 'color-mix(in srgb, var(--zephyr-color-download) 70%, transparent)',
-    dlTotal: 'color-mix(in srgb, var(--zephyr-color-download) 50%, transparent)',
-    ulSpeed: 'color-mix(in srgb, var(--zephyr-color-upload) 70%, transparent)',
-    ulTotal: 'color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent)',
-});
-
-/**
  * Assign textContent only when it differs, so the per-poll header refresh
  * does not replace identical text nodes.
  * @param {Element} el
@@ -620,7 +646,6 @@ function updateSortIndicators() {
     if (!header) return;
     for (const cell of header.querySelectorAll('.sortable')) {
         const sortKey = /** @type {HTMLElement} */ (cell).dataset.sort;
-        const origColor = SORT_HEADER_COLORS[/** @type {string} */ (sortKey)] || '';
 
         if (connSortState && sortKey === connSortState.key) {
             // Active column: show text + arrow
@@ -637,17 +662,21 @@ function updateSortIndicators() {
                 base = (/** @type {HTMLElement} */ (cell)).textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim();
             }
             setTextIfChanged(cell, `${base} ${isAsc ? '\u25B2' : '\u25BC'}`);
+            // aria-sort only applies to column headers; these are buttons, so expose
+            // the active sort as pressed (the ▲/▼ in the label gives the direction).
+            if (cell.getAttribute('aria-pressed') !== 'true') cell.setAttribute('aria-pressed', 'true');
             // Active color: BRIGHT highlight, unmistakable in both modes
             if (SORT_TEXT_KEYS.has(sortKey)) {
-                (/** @type {HTMLElement} */ (cell)).style.color = '#facc15';  /* yellow-400: bright gold */
+                (/** @type {HTMLElement} */ (cell)).style.color = 'var(--text-primary)';
             } else if (sortKey.startsWith('dl')) {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-download)';  /* fixed blue download colour */
             } else {
                 (/** @type {HTMLElement} */ (cell)).style.color = 'var(--zephyr-color-upload)';  /* fixed coral upload colour */
             }
         } else {
-            // Inactive: restore original color and clean text
-            (/** @type {HTMLElement} */ (cell)).style.color = origColor;
+            // Inactive: colour comes from CSS (.conn-head); drop the inline active colour and clean text
+            (/** @type {HTMLElement} */ (cell)).style.color = '';
+            if (cell.getAttribute('aria-pressed') !== 'false') cell.setAttribute('aria-pressed', 'false');
             const i18nKey = /** @type {HTMLElement} */ (cell).getAttribute('data-i18n');
             if (i18nKey) {
                 const t = /** @type {any} */ (translations)[currentLang] ?? {};
@@ -676,6 +705,13 @@ function bindHeaderSortEvents() {
     const freshHeader = bindOnce(header);
     if (!freshHeader) return;
     for (const cell of freshHeader.querySelectorAll('.sortable')) {
+        cell.addEventListener('keydown', (/** @type {Event} */ e) => {
+            const key = /** @type {KeyboardEvent} */ (e).key;
+            if (key === 'Enter' || key === ' ') {
+                e.preventDefault();
+                /** @type {HTMLElement} */ (cell).click();
+            }
+        });
         cell.addEventListener('click', () => {
             const key = /** @type {HTMLElement} */ (cell).dataset.sort;
             if (!connSortState) {
@@ -707,6 +743,20 @@ function bindHeaderSortEvents() {
 /** Use escapeHtml from ../utils/sanitize.js */
 const _esc = /** @param {string} str */ (str) => escapeHtml(str);
 
+/** Class that dims an active row with no traffic right now. */
+const IDLE_ROW_CLASS = 'conn-row--idle';
+
+/**
+ * An active connection is idle when it moved no bytes since the last poll.
+ * @param {any} conn
+ * @param {string} mode
+ */
+function isConnIdle(conn, mode) {
+    if (mode === 'closed') return false;
+    const acc = connAccumulators[conn.id];
+    return !acc || (!(acc.dlSpeed > 0) && !(acc.ulSpeed > 0));
+}
+
 /** Stats placeholder used to compute a row's structural signature. */
 const EMPTY_ROW_STATS = Object.freeze({ dlSpeed: '', ulSpeed: '', dlTotal: '', ulTotal: '' });
 
@@ -715,8 +765,9 @@ const EMPTY_ROW_STATS = Object.freeze({ dlSpeed: '', ulSpeed: '', dlTotal: '', u
  * @param {string} mode
  * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} [stats]
  *   Display values for the four traffic cells; resolved from the connection when omitted.
+ * @param {boolean} [idle] Dim an active row with no traffic right now; resolved when omitted.
  */
-function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode)) {
+function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode), idle = isConnIdle(conn, mode)) {
     const id = _esc(conn.id ?? '');
     const meta = conn.metadata ?? {};
     const host = _esc(meta.host ?? '-');
@@ -727,62 +778,78 @@ function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode)) {
     const chains = (conn.chains ?? []).map(_esc).join(' → ');
 
     const ruleColorClass = getRuleColorClass(rule);
-    const processHtml = process
-        ? `<span class="text-xs text-[var(--text-muted)] truncate max-w-[120px] block">${process}</span>`
-        : '';
+    const ruleShort = _esc(shortRuleName(conn.rule || 'Match'));
+    const rulePayload = _esc(conn.rulePayload || '');
+    const ruleTitle = rulePayload ? `${rule}: ${rulePayload}` : rule;
 
     const { dlSpeed, ulSpeed, dlTotal, ulTotal } = stats;
 
-    const dimClass = mode === 'closed' ? 'opacity-60' : '';
-    // No inline close button — click row to open detail panel
+    // Closed rows and active rows with no traffic right now are dimmed so busy rows stand out.
+    // The idle class is patched in place on existing rows (see patchConnectionRowStats).
+    const rowClass = ['conn-row', 'conn-grid', 'group'];
+    if (mode === 'closed') rowClass.push('conn-row--closed');
+    else if (idle) rowClass.push(IDLE_ROW_CLASS);
 
-    // Subtitle: destination + process info under host
-    const destHtml = (destIP && destIP !== '-')
-        ? `<span class="text-2xs text-[var(--text-muted)] truncate block">→ ${destIP}:${destPort}</span>`
-        : '';
-    const subtitleHtml = process || destHtml
-        ? `<div class="flex items-center gap-2 mt-0.5">
-            ${processHtml}
-            ${destHtml}
-           </div>`
-        : '';
+    const subParts = [];
+    if (process) subParts.push(`<span class="conn-proc">${process}</span>`);
+    if (destIP && destIP !== '-') subParts.push(`<span class="conn-dest">${destIP}:${destPort}</span>`);
+    const subtitleHtml = subParts.length ? `<span class="conn-sub">${subParts.join('<span class="conn-sep" aria-hidden="true"> · </span>')}</span>` : '';
 
     return `
-    <div class="conn-row group hover:bg-[var(--zephyr-bg-muted)] transition-[color,border-color] duration-[var(--zephyr-time-micro)] items-center cursor-pointer border border-transparent hover:border-[var(--zephyr-border-subtle)] ${dimClass}" style="display:grid; grid-template-columns: 4fr 2fr 2fr 2fr 2fr 2fr 2fr; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:var(--zephyr-radius-surface); align-items:center;" data-conn-id="${id}" data-mode="${mode}">
-        <!-- Host + Destination subtitle -->
-        <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding-inline-start:0.25rem;">
-            <span class="text-xs text-[var(--text-primary)] font-medium truncate" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${host}</span>
+    <div class="${rowClass.join(' ')}" role="button" tabindex="0" data-conn-id="${id}" data-mode="${mode}">
+        <div class="conn-cell">
+            <span class="conn-main conn-host">${host}</span>
             ${subtitleHtml}
         </div>
-        <!-- Rule -->
-        <div style="min-width:0; display:flex; justify-content:center;">
-            <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-2xs font-semibold ${ruleColorClass} truncate max-w-full">${rule}</span>
+        <div class="conn-cell">
+            <span class="conn-rule ${ruleColorClass}" title="${ruleTitle}">${ruleShort}</span>
+            <span class="conn-sub" title="${chains || '-'}">→ ${chains || '-'}</span>
         </div>
-        <!-- Chains -->
-        <div style="text-align:end; min-width:0;">
-            <span style="font-size:10px; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-inline-start:auto; max-width:100%;">${chains || '-'}</span>
+        <div class="conn-cell conn-num">
+            <span class="conn-main conn-rate conn-rate--down">${dlSpeed}</span>
+            <span class="conn-sub">${dlTotal}</span>
         </div>
-        <!-- Download Speed -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:var(--zephyr-color-download); font-variant-numeric:tabular-nums; line-height:1;">${dlSpeed}</span>
-        </div>
-        <!-- Download Total -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-download) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${dlTotal}</span>
-        </div>
-        <!-- Upload Speed -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.25rem;">
-            <span style="font-size:10px; color:var(--zephyr-color-upload); font-variant-numeric:tabular-nums; line-height:1;">${ulSpeed}</span>
-        </div>
-        <!-- Upload Total -->
-        <div style="text-align:end; min-width:0; padding-inline-end:0.5rem;">
-            <span style="font-size:9px; color:color-mix(in srgb, var(--zephyr-color-upload) 50%, transparent); font-variant-numeric:tabular-nums; line-height:1;">${ulTotal}</span>
+        <div class="conn-cell conn-num">
+            <span class="conn-main conn-rate conn-rate--up">${ulSpeed}</span>
+            <span class="conn-sub">${ulTotal}</span>
         </div>
     </div>`;
 }
 
-/** Grid columns (0-based) holding ↓speed, ↓total, ↑speed, ↑total. */
-const STAT_COLUMNS = Object.freeze([3, 4, 5, 6]);
+/** Short display names for long mihomo rule types; the full name stays in the badge title. */
+const RULE_SHORT_NAMES = Object.freeze(/** @type {Record<string, string>} */ ({
+    domainsuffix: 'Suffix',
+    domainkeyword: 'Keyword',
+    domainregex: 'Regex',
+    domainwildcard: 'Wildcard',
+    ipcidr: 'CIDR',
+    ipcidr6: 'CIDR6',
+    'ip-cidr': 'CIDR',
+    'ip-cidr6': 'CIDR6',
+    ipsuffix: 'IP Suffix',
+    srcipcidr: 'Src CIDR',
+    processname: 'Process',
+    processpath: 'Path',
+    processnameregex: 'Process',
+    processpathregex: 'Path',
+    dstport: 'Port',
+    srcport: 'Src Port',
+    ruleset: 'RuleSet',
+}));
+
+/** @param {string} rule */
+export function shortRuleName(rule) {
+    const key = String(rule ?? '').toLowerCase().replace(/[-_]/g, '');
+    return RULE_SHORT_NAMES[key] || String(rule ?? '');
+}
+
+/** Selectors for the ↓speed, ↓total, ↑speed, ↑total cells of a row. */
+const STAT_SELECTORS = Object.freeze([
+    '.conn-rate--down',
+    '.conn-rate--down + .conn-sub',
+    '.conn-rate--up',
+    '.conn-rate--up + .conn-sub',
+]);
 
 /** @type {WeakMap<Element, Element[]>} Cached stat <span>s per row element. */
 const _rowStatCells = new WeakMap();
@@ -809,8 +876,8 @@ function getRowStatCells(row) {
     let cells = _rowStatCells.get(row);
     if (!cells) {
         cells = [];
-        for (const col of STAT_COLUMNS) {
-            const span = row.children[col]?.firstElementChild;
+        for (const sel of STAT_SELECTORS) {
+            const span = row.querySelector(sel);
             if (span) cells.push(span);
         }
         _rowStatCells.set(row, cells);
@@ -819,35 +886,63 @@ function getRowStatCells(row) {
 }
 
 /**
- * Patch the four traffic cells of an existing row in place.
+ * Patch the four traffic cells and the idle dimming of an existing row in place.
  * @param {Element} row
  * @param {{ dlSpeed: string, ulSpeed: string, dlTotal: string, ulTotal: string }} stats
+ * @param {boolean} [idle]
  */
-function patchConnectionRowStats(row, stats) {
+function patchConnectionRowStats(row, stats, idle) {
     const cells = getRowStatCells(row);
     const values = [stats.dlSpeed, stats.dlTotal, stats.ulSpeed, stats.ulTotal];
     for (let i = 0; i < cells.length; i++) setTextIfChanged(cells[i], values[i]);
+    if (idle !== undefined && row.classList.contains(IDLE_ROW_CLASS) !== idle) {
+        row.classList.toggle(IDLE_ROW_CLASS, idle);
+    }
 }
 
 /** @type {WeakSet<Element>} List elements that already carry the delegated row click listener. */
 const _rowClickBound = new WeakSet();
 
 /**
- * Open the detail panel for a clicked row via a single listener on the list.
+ * @param {Element} container
+ * @param {EventTarget|null} target
+ * @returns {HTMLElement|null}
+ */
+function rowFromEvent(container, target) {
+    const el = target instanceof Element ? target : null;
+    const row = /** @type {HTMLElement|null} */ (el?.closest('.conn-row') ?? null);
+    return row && container.contains(row) ? row : null;
+}
+
+/** @param {HTMLElement} row */
+function openRowDetail(row) {
+    const connId = row.dataset.connId;
+    const connMode = row.dataset.mode;
+    const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
+    const conn = sourceList.find(c => c.id === connId);
+    if (conn) showConnDetail(conn, /** @type {string} */ (connMode), row);
+}
+
+/**
+ * Open the detail panel for a clicked row (or a focused row on Enter/Space)
+ * via single listeners on the list.
  * @param {Element} container
  */
 function bindRowClickDelegate(container) {
     if (_rowClickBound.has(container)) return;
     _rowClickBound.add(container);
     container.addEventListener('click', (e) => {
-        const target = e.target instanceof Element ? e.target : null;
-        const row = /** @type {HTMLElement|null} */ (target?.closest('.conn-row') ?? null);
-        if (!row || !container.contains(row)) return;
-        const connId = row.dataset.connId;
-        const connMode = row.dataset.mode;
-        const sourceList = connMode === 'closed' ? closedConnections : cachedConnections;
-        const conn = sourceList.find(c => c.id === connId);
-        if (conn) showConnDetail(conn, /** @type {string} */ (connMode));
+        const row = rowFromEvent(container, e.target);
+        if (row) openRowDetail(row);
+    });
+    container.addEventListener('keydown', (e) => {
+        const key = /** @type {KeyboardEvent} */ (e).key;
+        if (key !== 'Enter' && key !== ' ') return;
+        // Only the row itself, not a focusable control inside it.
+        const row = rowFromEvent(container, e.target);
+        if (!row || row !== e.target) return;
+        e.preventDefault();
+        openRowDetail(row);
     });
 }
 
@@ -865,15 +960,40 @@ function getRuleColorClass(rule) {
 // ============================================
 
 /**
+ * Return focus to the row (or control) that opened the detail dialog. Rows can be
+ * re-rendered while it is open, so fall back to the row with the same id.
+ * @param {HTMLElement|null} opener @param {string} connId
+ */
+function restoreDetailFocus(opener, connId) {
+    let target = opener && opener.isConnected ? opener : null;
+    if (!target && connId) {
+        target = /** @type {HTMLElement|null} */ (Array.from(document.querySelectorAll('.conn-row'))
+            .find((r) => /** @type {HTMLElement} */ (r).dataset.connId === connId) ?? null);
+    }
+    // The row may be gone (connection closed while the dialog was open): land on the
+    // selected list tab so focus never stays inside the closing dialog.
+    if (!target) {
+        target = /** @type {HTMLElement|null} */ (document.querySelector('.conn-tab[aria-selected="true"]'));
+    }
+    target?.focus({ preventScroll: true });
+}
+
+/** Pending hide of the detail backdrop after its close animation. */
+/** @type {ReturnType<typeof setTimeout>|undefined} */
+let connDetailHideTimer;
+/** Document-level key handler of the open detail dialog (catches keys even when focus slipped out). */
+/** @type {((e: KeyboardEvent) => void)|null} */
+let connDetailKeyHandler = null;
+
+/**
  * Show a detail overlay panel for a single connection.
  * Reuses glass-card styling from the app's design system.
  * For active connections, includes a Close button.
- */
-/**
  * @param {any} conn
  * @param {string} mode
+ * @param {HTMLElement|null} [openerRow] row that opened it (a mouse click may not focus it)
  */
-function showConnDetail(conn, mode) {
+function showConnDetail(conn, mode, openerRow = null) {
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
     const meta = conn.metadata ?? {};
     const id = _esc(conn.id ?? '');
@@ -918,46 +1038,44 @@ function showConnDetail(conn, mode) {
         : '';
 
     const panelHtml = `
-    <div class="glass-card w-full max-w-lg p-6 relative" id="conn-detail-panel">
+    <div class="glass-card w-full max-w-lg p-6 relative" id="conn-detail-panel" role="dialog" aria-modal="true" aria-labelledby="conn-detail-title">
         <!-- Header -->
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pe-4">
-                <h3 class="text-lg font-light text-[var(--text-primary)] truncate">${host}</h3>
-                <p class="text-xs text-[var(--text-secondary)] mt-1 font-mono truncate">${id}</p>
+                <h3 class="dialog-title truncate" id="conn-detail-title">${host}</h3>
+                <p class="text-2xs text-[var(--text-muted)] mt-0.5 font-mono truncate">${id}</p>
             </div>
-            <button id="detail-dismiss-btn" class="shrink-0 w-8 h-8 rounded-sm bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
+            <button id="detail-dismiss-btn" aria-label="${escapeHtml(t.dismiss || 'Close')}" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
 
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
-            <span class="inline-flex px-2.5 py-1 rounded-sm text-xs font-semibold ${ruleColorClass}">${rule}</span>
+            <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ruleColorClass}">${rule}</span>
             <span class="text-xs text-[var(--text-secondary)] truncate">${chains}</span>
         </div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
-                <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-download/70 font-medium uppercase tracking-wider">${t.dlSpeedLabel || 'Download Speed'}</span>
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--radius-md)] p-3 border border-[var(--zephyr-border-subtle)]">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-[var(--text-muted)] font-medium">${t.dlSpeedLabel || 'Download Speed'}</span>
                 </div>
                 <span class="text-sm font-semibold text-download tabular-nums block" id="detail-dl-speed">${dlSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${t.totalLabel || 'Total'}</span>
+                    <span class="text-xs text-[var(--text-secondary)] tabular-nums" id="detail-dl-total">${dlTotal}</span>
                 </div>
             </div>
-            <div class="bg-[var(--zephyr-bg-muted)] rounded-lg p-3 border border-[var(--zephyr-border-subtle)]">
-                <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-2xs text-upload/70 font-medium uppercase tracking-wider">${t.ulSpeedLabel || 'Upload Speed'}</span>
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
+            <div class="bg-[var(--zephyr-bg-muted)] rounded-[var(--radius-md)] p-3 border border-[var(--zephyr-border-subtle)]">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-[var(--text-muted)] font-medium">${t.ulSpeedLabel || 'Upload Speed'}</span>
                 </div>
                 <span class="text-sm font-semibold text-upload tabular-nums block" id="detail-ul-speed">${ulSpeed}</span>
                 <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[var(--zephyr-border-subtle)]">
-                    <span class="text-[8px] text-[var(--text-secondary)]">${t.totalLabel || 'Total'}</span>
-                    <span class="text-2xs text-[var(--text-muted)] tabular-nums" id="detail-ul-total">${ulTotal}</span>
+                    <span class="text-xs text-[var(--text-muted)]">${t.totalLabel || 'Total'}</span>
+                    <span class="text-xs text-[var(--text-secondary)] tabular-nums" id="detail-ul-total">${ulTotal}</span>
                 </div>
             </div>
         </div>
@@ -985,6 +1103,15 @@ function showConnDetail(conn, mode) {
         document.body.appendChild(bg);
     }
 
+    // Remember who opened the dialog so focus can return there on close.
+    const opener = openerRow ?? (document.activeElement instanceof HTMLElement && !bg.contains(document.activeElement)
+        ? document.activeElement : null);
+
+    // A reopen inside the close animation must not be hidden by the old timer.
+    clearTimeout(connDetailHideTimer);
+    connDetailHideTimer = undefined;
+    if (connDetailKeyHandler) document.removeEventListener('keydown', connDetailKeyHandler);
+    connDetailKeyHandler = null;
     // eslint-disable-next-line no-unsanitized/property -- values escaped via _esc() in showConnDetail
     bg.innerHTML = panelHtml; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     bg.classList.remove('hidden');
@@ -1020,11 +1147,48 @@ function showConnDetail(conn, mode) {
             panel.style.transform = 'scale(0.96)';
             panel.style.opacity = '0';
         }
-        setTimeout(() => { bg.classList.add('hidden'); bg.classList.remove('flex'); }, 150);
+        clearTimeout(connDetailHideTimer);
+        connDetailHideTimer = setTimeout(() => {
+            connDetailHideTimer = undefined;
+            bg.classList.add('hidden');
+            bg.classList.remove('flex');
+        }, 150);
+        if (connDetailKeyHandler) document.removeEventListener('keydown', connDetailKeyHandler);
+        connDetailKeyHandler = null;
+        bg.onclick = null;
+        restoreDetailFocus(opener, conn.id);
     };
 
+    // Keyboard: Escape closes, Tab stays inside the dialog. Listen on the document so a Tab
+    // pressed after focus slipped out (e.g. a click on the panel's text) is still caught.
+    const panelBg = bg;
+    connDetailKeyHandler = (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            dismiss();
+            return;
+        }
+        if (e.key !== 'Tab') return;
+        const items = /** @type {HTMLElement[]} */ (Array.from(panelBg.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')));
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items.at(-1) ?? first;
+        if (!panelBg.contains(document.activeElement)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    };
+    document.addEventListener('keydown', connDetailKeyHandler);
+    document.getElementById('detail-dismiss-btn')?.focus({ preventScroll: true });
+
     document.getElementById('detail-dismiss-btn')?.addEventListener('click', dismiss);
-    bg.addEventListener('click', (e) => { if (e.target === bg) dismiss(); }, { once: true });
+    bg.onclick = (e) => { if (e.target === bg) dismiss(); };
 
     // Close connection button (only active)
     const closeBtn = document.getElementById('detail-close-btn');
@@ -1039,6 +1203,9 @@ function showConnDetail(conn, mode) {
                 showNotification(t.connClosed || 'Connection closed', 'success');
                 dismiss();
                 await fetchAndRenderConnections();
+                // The refresh removes the closed row that just took focus back; land on the tab instead.
+                const active = document.activeElement;
+                if (!active || active === document.body || !active.isConnected) restoreDetailFocus(null, conn.id);
             } catch {
                 showNotification(t.closeConnFailed || 'Failed to close connection', 'error');
                 resetButton(closeBtn, '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', t.closeConn || 'Close Connection');

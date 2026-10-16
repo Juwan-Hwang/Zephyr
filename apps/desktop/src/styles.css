@@ -17,16 +17,28 @@
    ═══════════════════════════════════════════════════════════════ */
 :root[dir="rtl"] { --rtl-sign: -1; --scroll-fade-dir: left; --scale-origin-x: right; }
 
+/* ── 国旗 emoji 字体 ──
+   Windows 的 Segoe UI Emoji 不含国旗字形，区域指示符会显示成两个字母
+   （如 "🇯🇵" → "JP"）。用 unicode-range 限定只接管区域指示符与
+   subdivision 旗帜标签，其余字符继续走系统字体。
+   字形来自 Twemoji（CC-BY-4.0），见 NOTICE。 */
+@font-face {
+  font-family: "Twemoji Country Flags";
+  src: url("./fonts/TwemojiCountryFlags.woff2") format("woff2");
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  font-display: swap;
+}
+
 /* ── Font stack + Accent + 圆角系统 (原 @theme → :root) ── */
 :root {
   --rtl-sign: 1;
   --scroll-fade-dir: right;
   --ui-scale: 1;
   --scale-origin-x: left;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+  --font-sans: "Twemoji Country Flags", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
     "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+  --font-mono: "Twemoji Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
     "Courier New", monospace;
   --color-accent: var(--accent-primary, #007AFF);
@@ -41,6 +53,7 @@
   --radius-button: var(--zephyr-button-radius);
   --radius-input: var(--zephyr-input-radius);
   --radius-card: var(--zephyr-card-radius);
+  --radius-card-compact: 16px;
   --radius-panel: var(--zephyr-panel-radius);
   --radius-modal: var(--zephyr-modal-radius);
   --radius-nav: var(--zephyr-radius-md);
@@ -78,8 +91,27 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 
 /* ── Custom Utilities (原 @utility → 普通 CSS 类) ── */
 .text-2xs {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   line-height: 1.4;
+}
+
+/* ── CJK typography floor ──
+   Latin-only micro labels (units, protocol abbreviations) may stay at 11px, but anything
+   that can render Chinese/Japanese/Korean is lifted to at least 12px, and the
+   English-style uppercase tracking is dropped because it only spreads Han glyphs apart. */
+:lang(zh) .text-2xs, :lang(ja) .text-2xs, :lang(ko) .text-2xs,
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  font-size: 0.75rem;
+}
+:lang(zh) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ja) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ko) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  letter-spacing: normal;
 }
 
 /* ── Button System ── */
@@ -88,8 +120,11 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   align-items: center;
   justify-content: center;
   gap: var(--zephyr-button-gap);
-  padding: var(--zephyr-button-padding-y) var(--zephyr-button-padding-x);
+  /* one control height across every header/toolbar/dialog: 32px */
+  min-height: 2rem;
+  padding: 5px var(--zephyr-button-padding-x);
   border-radius: var(--radius-button);
+  white-space: nowrap;
   font-size: var(--zephyr-button-font-size);
   line-height: 1.4;
   font-weight: var(--zephyr-button-weight);
@@ -194,11 +229,9 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 
 /* 极简滚动动画 */
-@keyframes text-scroll {
-    0% { transform: translateX(0); }
-    15% { transform: translateX(0); }
-    85% { transform: translateX(calc(var(--rtl-sign, 1) * (-100% + 120px))); }
-    100% { transform: translateX(calc(var(--rtl-sign, 1) * (-100% + 120px))); }
+@keyframes node-marquee {
+    0%, 12% { transform: translateX(0); }
+    88%, 100% { transform: translateX(calc(var(--rtl-sign, 1) * -1 * var(--marquee-shift, 0px))); }
 }
 
 button,
@@ -209,10 +242,25 @@ input[type="range"],
     cursor: pointer !important;
 }
 
-.scrolling-text-container {
+/* Proxy card node name: ellipsis at rest, measured marquee on hover/focus (always on). */
+.node-name {
     overflow: hidden;
-    mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 80%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 80%, transparent 100%);
+}
+.node-name-text {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.node-name.is-marquee {
+    mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+}
+.node-name.is-marquee .node-name-text {
+    overflow: visible;
+    text-overflow: clip;
+    width: max-content;
+    animation: node-marquee var(--marquee-duration, 4s) linear infinite alternate;
 }
 
 /* Hide scrollbar on node wheel dropdown */
@@ -222,16 +270,13 @@ input[type="range"],
 #node-wheel-scroll {
     -ms-overflow-style: none;
 }
-
-.scrolling-text {
-    display: inline-block;
-    white-space: nowrap;
-    padding-inline-end: 20px;
+/* Keyboard focus on a wheel node (options are tabindex=-1, so the global ring skips them) */
+#node-wheel-list [role="option"]:focus { outline: none; }
+#node-wheel-list [role="option"]:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
 }
 
-.group:hover .scrolling-text {
-    animation: text-scroll 4s linear infinite alternate;
-}
 
 :root {
   color-scheme: light dark;
@@ -252,10 +297,21 @@ input[type="range"],
   /* Brightness control for glass effects */
   --brightness: 0.95;
 
+  /* ── Motion system ──
+     Three durations + two curves, sourced from packages/tokens:
+       fast 120ms  → press / hover            (--zephyr-time-micro)
+       base 200ms  → expand / toggle / switch (--zephyr-time-standard)
+       slow 320ms  → page / large panels      (--zephyr-time-slow) */
+  --motion-fast: var(--zephyr-time-micro);
+  --motion-base: var(--zephyr-time-standard);
+  --motion-slow: var(--zephyr-time-slow);
+  --motion-ease-out: var(--zephyr-easing-ease-out);
+  --motion-ease-in-out: var(--zephyr-easing-ease-in-out);
+
   /* Transition system — reference zephyr tokens */
   --transition-micro: var(--zephyr-transition-micro);
   --transition-standard: var(--zephyr-transition-standard);
-  --transition-fast: var(--zephyr-transition-fast);
+  --transition-slow: var(--zephyr-transition-slow);
 
   /* Glass blur levels */
   --glass-card: var(--zephyr-glass-blur);
@@ -327,7 +383,8 @@ input[type=number] {
   transition-timing-function: var(--zephyr-easing-ease-out);
 }
 
-.glass-card:hover {
+/* Only surfaces you can act on react to the pointer; static panels stay still */
+.glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
   background: var(--zephyr-bg-muted);
   border-color: rgba(255, 255, 255, 0.12);
   box-shadow: var(--zephyr-shadow-md);
@@ -359,14 +416,14 @@ input[type=number] {
     cursor: pointer;
     inset: 0;
     background-color: #8e8e93;
-    transition: 0.4s;
+    transition: background-color var(--motion-base) var(--motion-ease-in-out), box-shadow var(--motion-base) var(--motion-ease-in-out);
     border-radius: var(--zephyr-switch-radius);
 }
 .switch-slider:before {
     position: absolute;
     content: "";
     background-color: white;
-    transition: 0.4s;
+    transition: transform var(--motion-base) var(--motion-ease-in-out);
     border-radius: 50%;
     height: 20px;
     width: 20px;
@@ -446,7 +503,7 @@ html.dark .glass-card {
   background: rgba(255, 255, 255, 0.05);
 }
 
-html.dark .glass-card:hover {
+html.dark .glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
   background: rgba(255, 255, 255, 0.09);
 }
 
@@ -455,28 +512,37 @@ html.dark .glass-card:hover {
   filter: drop-shadow(0 0 8px var(--color-accent-glow));
 }
 
-/* Sidebar — light mode: subtle dark tint so it reads as a card */
+/* Sidebar — light mode: soft off-white panel, one step below the cards */
 html:not(.dark) #sidebar-nav {
-  background: rgba(0, 0, 0, 0.015);
-  border-color: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(15, 30, 60, 0.06);
 }
 
+/* Light theme: low-saturation blue/cyan mist behind the glass, so cards read as
+   glass floating on colour instead of white on white. Accent tint follows the
+   chosen theme colour; the cyan layer is fixed. */
 html:not(.dark) #app-main-container {
-  background-color: rgb(248 250 252 / var(--app-opacity, 0.4));
+  background-color: rgb(232 233 236 / var(--app-opacity, 0.4));
+  background-image:
+    radial-gradient(55% 50% at 10% 6%, rgba(var(--accent-rgb), 0.09), transparent 72%),
+    radial-gradient(48% 46% at 94% 18%, rgba(6, 182, 212, 0.07), transparent 72%),
+    radial-gradient(70% 55% at 62% 104%, rgba(var(--accent-rgb), 0.07), transparent 70%);
 }
 
+/* Cards sit ~1.16:1 above the page, matching the dark theme's depth, and stay
+   off-white (never pure white) so large areas don't glare. */
 html:not(.dark) .glass-card {
-  background: rgba(255, 255, 255, 0.4);
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 4px 16px -4px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(15, 30, 60, 0.06);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.05), 0 8px 24px -12px rgba(30, 64, 110, 0.16);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-html:not(.dark) .glass-card:hover {
-  background: rgba(255, 255, 255, 0.6);
-  border-color: rgba(255, 255, 255, 0.8);
-  box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+html:not(.dark) .glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
+  background: #fff;
+  border-color: rgba(15, 30, 60, 0.08);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.06), 0 14px 28px -12px rgba(30, 64, 110, 0.2);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -561,7 +627,7 @@ html:not(.dark) #setting-lang-menu {
   background: transparent;
   color: var(--text-muted, #94a3b8);
   cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+  transition: color var(--motion-fast) var(--motion-ease-out), background-color var(--motion-fast) var(--motion-ease-out), opacity var(--motion-fast) var(--motion-ease-out), transform var(--motion-fast) var(--motion-ease-out);
   z-index: 2;
   line-height: 1;
 }
@@ -676,6 +742,61 @@ html:not(.dark) #setting-lang-menu {
   border: 1px solid var(--zephyr-border-subtle);
   text-transform: uppercase;
   flex-shrink: 0;
+}
+
+/* --- Proxy node cards (dense 96px cards: compact radius, selection, delay tier) --- */
+.proxy-card.glass-card {
+  border-radius: var(--radius-card-compact, 16px);
+}
+html:not(.dark) .proxy-card.glass-card,
+html:not(.dark) .proxy-card.glass-card:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+html .proxy-card.proxy-card--selected.glass-card,
+html .proxy-card.proxy-card--selected.glass-card:hover {
+  border-color: var(--accent-primary);
+  /* 1px border + 0.5px inset ring = 1.5px accent stroke without shifting layout.
+     No outer shadow: the virtualised wrapper uses content-visibility (paint containment),
+     which would clip an outer shadow into a visible rectangle. */
+  box-shadow: inset 0 0 0 0.5px var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.proxy-check {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 10px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-primary);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  pointer-events: none;
+}
+.proxy-check svg {
+  width: 10px;
+  height: 10px;
+}
+.delay-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--zephyr-text-muted) 55%, transparent);
+}
+.delay-dot[data-tier="good"] {
+  background: var(--zephyr-color-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-success) 45%, transparent);
+}
+.delay-dot[data-tier="ok"] {
+  background: var(--zephyr-color-warning);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-warning) 45%, transparent);
+}
+.delay-dot[data-tier="bad"] {
+  background: var(--zephyr-color-danger);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-danger) 40%, transparent);
 }
 
 /* --- Score Badge (Smart Proxy) --- */
@@ -940,9 +1061,9 @@ html:not(.dark) .form-control:focus {
   opacity: 0;
   visibility: hidden;
   transform: translate(-4px, -50%);
-  transition: opacity .16s var(--zephyr-easing-ease-out, ease-out),
-              transform .22s var(--nav-glide),
-              visibility 0s linear .16s;
+  transition: opacity var(--motion-fast) var(--motion-ease-out),
+              transform var(--motion-base) var(--nav-glide),
+              visibility 0s linear var(--motion-fast);
 }
 .nav-tooltip[data-side="start"] { transform: translate(calc(-100% + 4px), -50%); }
 .nav-tooltip.is-visible {
@@ -1065,48 +1186,106 @@ html:not(.dark) .form-control:focus {
    Connections Page - Tab Styles
    ============================================ */
 
-.conn-tab {
-  cursor: pointer;
+.conn-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* ── Connections table: 4 columns, two lines per row ── */
+.conn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1.7fr) minmax(84px, 1fr) minmax(84px, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+.conn-head {
+  align-items: start;
+  padding: 8px 20px 8px 20px;
   user-select: none;
-  position: relative;
-  background: transparent;
-  border: none;
-  outline: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-weight: 400;
-  margin: 0 0.5rem;
-  padding: 0.5rem 1rem;
-  padding-bottom: 0.5rem;
-  transition: color 0.3s ease, border-bottom 0.3s ease;
+  border-bottom: 1px solid var(--zephyr-border-subtle);
 }
-
-.conn-tab:hover:not(.active) {
-  color: var(--text-primary);
-  background: transparent;
+.conn-head-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
-
-.conn-tab.active {
-  color: var(--text-primary);
+.conn-head .sortable {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--zephyr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
 }
-
-/* Stats bar subtle animation on data change */
-#conn-stats-bar > div {
-  transition: transform var(--transition-standard);
+.conn-head .sortable.conn-head-sub {
+  font-weight: 500;
+  color: var(--zephyr-text-tertiary);
 }
-
-#conn-stats-bar:hover > div {
-  transform: scale(1.03);
+.conn-head .sortable:hover { color: var(--text-primary); }
+:lang(zh) .conn-head .sortable, :lang(ja) .conn-head .sortable, :lang(ko) .conn-head .sortable {
+  font-size: 12px;
+  letter-spacing: normal;
 }
-
-/* Closed connection rows dimmed */
-#connections-list [data-conn-id].opacity-60 {
-  opacity: 0.55;
+.conn-num { text-align: end; align-items: flex-end; }
+.conn-row {
+  padding: 8px 12px;
+  border-radius: var(--zephyr-radius-surface);
+  border: 1px solid transparent;
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
 }
-
-#connections-list [data-conn-id].opacity-60:hover {
-  opacity: 0.8;
+.conn-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
 }
+.conn-main {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.conn-host { color: var(--text-primary); font-weight: 500; }
+.conn-rate { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.conn-rate--down { color: var(--zephyr-color-download); }
+.conn-rate--up { color: var(--zephyr-color-upload); }
+.conn-sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--zephyr-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+:lang(zh) .conn-sub, :lang(ja) .conn-sub, :lang(ko) .conn-sub { font-size: 12px; }
+.conn-rule {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-row--closed { opacity: .6; }
+.conn-row--idle { opacity: .55; }
+.conn-row--closed:hover, .conn-row--idle:hover, .conn-row:focus-visible { opacity: 1; }
 
 /* ============================================
    Connection Detail Panel
@@ -1116,7 +1295,7 @@ html:not(.dark) .form-control:focus {
 .conn-row {
   cursor: pointer;
   content-visibility: auto;
-  contain-intrinsic-size: 0 44px;
+  contain-intrinsic-size: 0 54px; /* two-line row ≈ 53px */
 }
 
 /* Proxy card wrapper: content-visibility for virtual scroll perf */
@@ -1203,9 +1382,11 @@ button:focus-visible:not(:disabled, [disabled]),
 
 .form-control:focus-visible:not(:disabled, [disabled]),
 .select-common:focus-visible:not(:disabled, [disabled]) {
-  border-color: var(--zephyr-focus-border);
+  /* text fields are focused whenever you type: a solid accent border plus a
+     soft 3px halo reads as "active" without the heavy 4px solid band */
+  border-color: var(--color-accent);
   outline: 2px solid transparent;
-  box-shadow: 0 0 0 4px var(--zephyr-focus-ring);
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring-soft);
 }
 
 /* ============================================
@@ -1242,13 +1423,9 @@ button:focus-visible:not(:disabled, [disabled]),
   .nav-btn .icon,
   .p-draw, .p-shaft, .p-prompt, .p-check, .p-head, .p-fold, .p-book, .p-cursor,
   .c-node, .gear,
-  .scrolling-text,
+  .node-name-text,
   #connections-empty svg {
     animation: none !important;
-  }
-  /* Allow manual scrolling when scroll animation is disabled (WCAG 2.2.2) */
-  .scrolling-text-container {
-    overflow-x: auto !important;
   }
 }
 
@@ -1278,7 +1455,7 @@ button:focus-visible:not(:disabled, [disabled]),
 #modal-container {
   transition-property: opacity, transform;
   transition-duration: var(--zephyr-time-page);
-  transition-timing-function: var(--zephyr-easing-smooth);
+  transition-timing-function: var(--zephyr-easing-ease-in-out);
 }
 
 /* ============================================
@@ -1319,39 +1496,13 @@ button:focus-visible:not(:disabled, [disabled]),
    Logs Page Styles
    ============================================ */
 
-/* ── Log Tab Buttons ── */
-.log-tab-btn {
-    color: var(--text-muted, rgba(161, 161, 170, 1));
-    cursor: pointer;
-}
-.log-tab-btn:hover {
-    color: var(--text-primary, rgba(244, 244, 245, 1));
-    background: var(--zephyr-bg-muted);
-}
-.log-tab-btn.active {
-    color: var(--text-primary, rgba(244, 244, 245, 1));
-    background: var(--zephyr-bg-muted);
-    font-weight: 600;
-}
-html:not(.dark) .log-tab-btn {
-    color: rgba(113, 113, 122, 1);
-}
-html:not(.dark) .log-tab-btn:hover {
-    color: rgba(24, 24, 27, 1);
-    background: rgba(0, 0, 0, 0.05);
-}
-html:not(.dark) .log-tab-btn.active {
-    color: rgba(24, 24, 27, 1);
-    background: rgba(0, 0, 0, 0.08);
-    font-weight: 600;
-}
-
 /* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
 .log-level-btn {
     display: inline-flex;
     align-items: center;
     gap: var(--zephyr-button-gap);
-    padding: var(--zephyr-button-padding-y) var(--zephyr-button-padding-x);
+    min-height: 2rem;
+    padding: 5px var(--zephyr-button-padding-x);
     border-radius: var(--radius-button);
     font-size: var(--zephyr-button-font-size);
     line-height: 1.4;
@@ -1384,11 +1535,50 @@ html:not(.dark) .log-tab-btn.active {
 .log-line {
     padding: 1px 0;
     border-bottom: 1px solid var(--zephyr-border-subtle);
-    transition: background 0.15s ease;
+    transition: background var(--motion-fast) var(--motion-ease-out);
 }
 .log-line:hover {
     background: var(--zephyr-bg-subtle);
 }
+/* Structured core log row: local time / level badge / message */
+.log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    min-height: 1.4em;
+}
+.log-raw { overflow-wrap: anywhere; padding: 3px 6px; }
+.log-time {
+    flex-shrink: 0;
+    color: var(--zephyr-text-muted);
+    user-select: none;
+}
+.log-badge {
+    flex-shrink: 0;
+    min-width: 46px;
+    text-align: center;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    color: var(--zephyr-text-secondary);
+    background: var(--zephyr-bg-input);
+}
+.log-badge[data-level="info"] { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 14%, transparent); }
+.log-badge[data-level="warn"] { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 16%, transparent); }
+.log-badge[data-level="error"], .log-badge[data-level="fatal"] { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 16%, transparent); }
+.log-msg {
+    min-width: 0;
+    color: var(--zephyr-text-primary);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.log-row[data-level="debug"] .log-msg { color: var(--zephyr-text-muted); }
+.log-row[data-level="warn"] { background: color-mix(in srgb, var(--zephyr-color-warning) 7%, transparent); }
+.log-row[data-level="error"], .log-row[data-level="fatal"] { background: color-mix(in srgb, var(--zephyr-color-danger) 8%, transparent); }
 
 /* ============================================
    Logs Page — Light Mode Overrides
@@ -1401,6 +1591,12 @@ html:not(.dark) .log-level-btn {
 }
 html:not(.dark) .log-level-btn:hover {
     background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+/* The light base rule above outranks .log-level-btn.active, so "All" needs its own active state */
+html:not(.dark) .log-level-btn.active {
+    color: color-mix(in srgb, var(--color-accent) 80%, black);
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 html:not(.dark) .log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.12); border-color: rgba(107, 114, 128, 0.20); }
 html:not(.dark) .log-level-btn[data-level="info"].active { color: #2563eb; background: rgba(37, 99, 235, 0.12); border-color: rgba(37, 99, 235, 0.20); }
@@ -1532,49 +1728,55 @@ html.dark #fullscreen-editor-output {
    Console Dashboard (dz-* prefix — self-contained layout for the console home page)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.dz-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 32px 32px; display: flex; flex-direction: column; gap: 20px; }
+.dz-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 32px 32px 0; display: flex; flex-direction: column; gap: 16px; }
+.dz-content > .dz-header { margin-bottom: 8px; }
 
 /* ── Page header: title + view switch ── */
 .dz-header { display: flex; align-items: flex-end; justify-content: space-between; flex-shrink: 0; min-width: 0; }
-.dz-header h1 { font-size: 24px; font-weight: 300; color: var(--zephyr-text-primary); margin: 0; letter-spacing: -0.01em; }
+.dz-header h1 { font-size: 24px; line-height: 2rem; font-weight: 300; color: var(--zephyr-text-primary); margin: 0; letter-spacing: -0.01em; }
 .dz-header .dz-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dz-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--zephyr-color-success); box-shadow: 0 0 8px var(--zephyr-color-success); animation: dz-pulse 2s ease-in-out infinite; }
 @keyframes dz-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* ── KPI indicator strip ── */
-.dz-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; flex-shrink: 0; min-width: 0; }
-.dz-kpi { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; transition: transform .21s ease-out; }
-.dz-kpi:hover { transform: translateY(-2px); }
+.dz-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
+.dz-kpi { padding: 16px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; min-width: 0; }
 .dz-kpi-top { display: flex; align-items: center; justify-content: space-between; }
-.dz-kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
+.dz-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
 .dz-kpi-icon { width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .dz-kpi-icon svg { width: 12px; height: 12px; }
 .dz-kpi-value { display: flex; align-items: baseline; gap: 4px; }
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
-.dz-kpi-value span { font-size: 10px; font-weight: 600; color: var(--zephyr-text-muted); }
-.dz-kpi-foot { font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dz-kpi-value span { font-size: 11px; font-weight: 600; color: var(--zephyr-text-muted); }
+.dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Keep footer text clear of the sparkline drawn in the bottom corner */
+.dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
+.dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The footer is a flex row: ellipsize its text pieces, not just the row. */
+.dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
-.dz-grid-main { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 12px; flex-shrink: 0; min-width: 0; }
+.dz-grid-main { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
 .dz-grid-main > .glass-card { min-width: 0; overflow: hidden; }
-.dz-card-pad { padding: 18px 20px; }
+.dz-card-pad { padding: 20px; }
 .dz-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .dz-card-title { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); }
 .dz-card-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: dz-pulse 2s ease-in-out infinite; }
 .dz-legend { display: flex; align-items: center; gap: 14px; }
-.dz-legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--zephyr-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.dz-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--zephyr-text-muted); text-transform: uppercase; letter-spacing: .05em; }
 .dz-legend-swatch { width: 8px; height: 8px; border-radius: 3px; }
-.dz-chart-wrap { height: 216px; position: relative; overflow: hidden; }
+/* grows with its card so a taller side column never leaves a blank band under the meta row */
+.dz-chart-wrap { flex: 1 1 216px; min-height: 216px; position: relative; overflow: hidden; }
 .dz-chart-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .dz-chart-meta { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--zephyr-border-subtle); overflow: hidden; }
 .dz-chart-meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dz-chart-meta span, .dz-chart-meta b { white-space: nowrap; }
-.dz-chart-meta span { font-size: 10px; color: var(--zephyr-text-tertiary); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.dz-chart-meta span { font-size: 11px; color: var(--zephyr-text-tertiary); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
 .dz-chart-meta b { font-size: 13px; font-weight: 600; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; }
 
 /* Sidebar card stack */
-.dz-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dz-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 /* Current node card */
 .dz-node-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1587,33 +1789,33 @@ html.dark #fullscreen-editor-output {
 
 /* Node card */
 .dz-node-wrap { position: relative; }
-.dz-node-sub span { cursor: copy; transition: color .21s ease-out; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dz-node-sub span { cursor: copy; transition: color var(--motion-base) var(--motion-ease-out); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dz-node-sub span:hover { color: var(--color-accent); }
-.dz-switch-node-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--zephyr-radius-full); border: 1px solid var(--zephyr-border-subtle); background: var(--zephyr-bg-muted); color: var(--zephyr-text-secondary); font-size: 10px; font-weight: 600; cursor: pointer; transition: all .21s ease-out; white-space: nowrap; }
+.dz-switch-node-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--zephyr-radius-full); border: 1px solid var(--zephyr-border-subtle); background: var(--zephyr-bg-muted); color: var(--zephyr-text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
 .dz-switch-node-btn:hover, .dz-switch-node-btn.open { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
-.dz-switch-node-btn svg { width: 10px; height: 10px; transition: transform .21s ease-out; }
+.dz-switch-node-btn svg { width: 10px; height: 10px; transition: transform var(--motion-base) var(--motion-ease-out); }
 .dz-switch-node-btn.open svg { transform: rotate(180deg); }
 
 /* Node picker panel */
-.dz-node-picker { position: absolute; top: calc(100% + 8px); inset-inline: 0; z-index: 40; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-elevated); border: 1px solid var(--zephyr-border-default); box-shadow: var(--zephyr-shadow-dialog); animation: dz-pop .28s cubic-bezier(0.16,1,0.3,1); }
+.dz-node-picker { position: absolute; top: calc(100% + 8px); inset-inline: 0; z-index: 40; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-elevated); border: 1px solid var(--zephyr-border-default); box-shadow: var(--zephyr-shadow-dialog); animation: dz-pop var(--motion-base) var(--motion-ease-out); }
 html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
 @keyframes dz-pop { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
 .dz-picker-subs { display: flex; flex-wrap: wrap; gap: 6px; }
-.dz-picker-sub { padding: 5px 12px; border-radius: var(--zephyr-radius-full); font-size: 10.5px; font-weight: 600; color: var(--zephyr-text-secondary); background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); cursor: pointer; transition: all .21s ease-out; white-space: nowrap; }
+.dz-picker-sub { padding: 5px 12px; border-radius: var(--zephyr-radius-full); font-size: 10.5px; font-weight: 600; color: var(--zephyr-text-secondary); background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
 .dz-picker-sub.active { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); }
 .dz-picker-list { display: flex; flex-direction: column; max-height: 216px; overflow-y: auto; }
-.dz-picker-node { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--zephyr-radius-control); cursor: pointer; transition: background .15s; }
+.dz-picker-node { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--zephyr-radius-control); cursor: pointer; transition: background var(--motion-fast) var(--motion-ease-out); }
 .dz-picker-node:hover { background: var(--zephyr-bg-subtle); }
 .dz-picker-node.active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
 .dz-picker-node-main { flex: 1; min-width: 0; }
 .dz-picker-node-name { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dz-picker-node-meta { font-size: 10px; color: var(--zephyr-text-tertiary); font-family: var(--font-mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-picker-node-meta { font-size: 11px; color: var(--zephyr-text-tertiary); font-family: var(--font-mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dz-picker-check { width: 14px; height: 14px; color: var(--color-accent); flex-shrink: 0; visibility: hidden; }
 .dz-picker-node.active .dz-picker-check { visibility: visible; }
 .dz-picker-sub-count { opacity: .55; font-weight: 500; margin-inline-start: 2px; }
 
 /* Connection sort button */
-.dz-sort-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--zephyr-text-tertiary); font-weight: 600; background: none; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: all .21s ease-out; white-space: nowrap; }
+.dz-sort-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 600; background: none; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
 .dz-sort-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
 .dz-sort-btn svg { width: 10px; height: 10px; }
 
@@ -1643,26 +1845,26 @@ html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
 .dz-quick-row-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--zephyr-text-secondary); }
 .dz-quick-row-label svg { width: 14px; height: 14px; color: var(--zephyr-text-muted); }
 .dz-mode-seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px; background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); border-radius: var(--radius-lg); height: 36px; width: 100%; margin-top: 12px; }
-.dz-mode-slider { position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc((100% - 8px)/3); border-radius: var(--radius-lg); box-shadow: var(--zephyr-shadow-sm); border: 1px solid var(--zephyr-border-default); transition: transform .3s cubic-bezier(0.16,1,0.3,1); }
+.dz-mode-slider { position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc((100% - 8px)/3); border-radius: var(--radius-lg); box-shadow: var(--zephyr-shadow-sm); border: 1px solid var(--zephyr-border-default); transition: transform var(--motion-base) var(--motion-ease-out); }
 html.dark .dz-mode-slider { background: rgba(255,255,255,.09); }
 html:not(.dark) .dz-mode-slider { background: #fff; }
-.dz-mode-seg button { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color .21s; white-space: nowrap; overflow: hidden; }
+.dz-mode-seg button { position: relative; z-index: 1; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out); white-space: nowrap; overflow: hidden; }
 .dz-mode-seg button.active { color: var(--color-accent); }
 
 /* ── Bottom three-column grid ── */
-.dz-grid-bottom { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; flex: 1; min-height: 230px; min-width: 0; }
+.dz-grid-bottom { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 230px; min-width: 0; }
 .dz-grid-bottom > .glass-card { min-width: 0; overflow: hidden; }
 
 /* Active connections */
 .dz-conn-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; margin: 0 -6px; padding: 0 6px; }
-.dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background .15s; min-width: 0; }
+.dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background var(--motion-fast) var(--motion-ease-out); min-width: 0; }
 .dz-conn-row:hover { background: var(--zephyr-bg-subtle); }
-.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
+.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
 .dz-conn-info { flex: 1; min-width: 0; }
 .dz-conn-host { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dz-conn-chain { font-size: 10px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
+.dz-conn-chain { font-size: 11px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
 .dz-conn-speed { font-size: 11px; font-weight: 700; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; text-align: end; flex-shrink: 0; }
-.dz-conn-speed small { display: block; font-size: 9px; color: var(--zephyr-text-tertiary); font-weight: 500; }
+.dz-conn-speed small { display: block; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; }
 
 /* Subscription traffic */
 .dz-sub-used { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
@@ -1677,7 +1879,7 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 .dz-sub-row span { color: var(--zephyr-text-tertiary); font-weight: 500; flex-shrink: 0; white-space: nowrap; }
 .dz-sub-row b { color: var(--zephyr-text-secondary); font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: end; }
 .dz-sub-actions { display: flex; gap: 8px; margin-top: 16px; }
-.dz-mini-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 0; border-radius: var(--zephyr-radius-md); font-size: 11px; font-weight: 600; cursor: pointer; transition: all .21s ease-out; border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); color: var(--zephyr-text-primary); white-space: nowrap; }
+.dz-mini-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 0; border-radius: var(--zephyr-radius-md); font-size: 11px; font-weight: 600; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); color: var(--zephyr-text-primary); white-space: nowrap; }
 .dz-mini-btn:hover { background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
 .dz-mini-btn.accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
 .dz-mini-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
@@ -1687,7 +1889,7 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
 .dz-log-line { display: flex; align-items: baseline; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--zephyr-border-subtle); font-size: 10.5px; line-height: 1.5; min-width: max-content; }
 .dz-log-line:last-child { border-bottom: none; }
 .dz-log-time { color: var(--zephyr-text-tertiary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.dz-log-level { flex-shrink: 0; font-weight: 800; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; }
+.dz-log-level { flex-shrink: 0; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; }
 .dz-log-level.info { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 12%, transparent); }
 .dz-log-level.warn { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 12%, transparent); }
 .dz-log-level.error { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent); }
@@ -1737,9 +1939,20 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
     text-align: left;
 }
 
+/* CJK floor for console labels that can carry Chinese/Japanese/Korean text */
+:lang(zh) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ja) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ko) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span) {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+
 /* Responsive - switch to single-column on narrow viewports */
 @media (max-width: 1080px) {
-    .dz-kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    /* 2 + 3: download/upload are the primary metrics (3 of 6 columns each), the rest share the second row */
+    .dz-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .dz-kpi:nth-child(-n + 2) { grid-column: span 3; }
+    .dz-kpi:nth-child(n + 3) { grid-column: span 2; }
     .dz-grid-main, .dz-grid-bottom { grid-template-columns: minmax(0, 1fr); }
     /* Single-column: let sections take natural height, cap inner lists */
     .dz-grid-main { flex-shrink: 1; }
@@ -1748,3 +1961,477 @@ html:not(.dark) .dz-mode-slider { background: #fff; }
     .dz-log-list { max-height: 200px; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Minimal home hero: speed read-out layered over a full-width live area chart
+   ═══════════════════════════════════════════════════════════════════════════ */
+.home-hero {
+  /* the hero takes whatever height the controls below leave, so the last card
+     always lands on the sidebar's bottom edge (860×620, 720×540 and wide alike) */
+  flex: 1 1 auto;
+  min-height: 144px;
+  display: flex;
+  flex-direction: column;
+}
+/* chart, node pill and speed read-out; the figures row sits under it as the card's footer */
+.home-hero-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 56px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+.home-hero-chart {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  opacity: .5;
+  pointer-events: none;
+  /* fade the chart out toward the top so the node pill and numbers sit on calm glass */
+  mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+}
+html:not(.dark) .home-hero-chart { opacity: .6; }
+.home-hero-speeds {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(32px, 9vw, 112px);
+  /* optical centring: lift the read-out so its ink sits 46% down the band between the
+     node pill and the footer (the eye reads the true middle as low); ≈ 4% of that band */
+  top: calc(-4% - 4px);
+}
+.home-speed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 1 260px;
+  min-width: 0;
+  cursor: default;
+}
+.home-speed-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+:lang(zh) .home-speed-label, :lang(ja) .home-speed-label, :lang(ko) .home-speed-label {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.home-speed-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+.home-speed-value {
+  /* scales with the window height: 42px at 540, 48px at 620, 62px at 800 — sized so the
+     page's visual weight centres on the middle of the window instead of the top */
+  font-size: clamp(40px, 7.7vh, 66px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--zephyr-bg-elevated, #000) 35%, transparent);
+}
+
+/* Segmented control items without a sliding thumb (e.g. UI scale): selected = raised grey, same as the sliders */
+.seg-item {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: var(--text-secondary);
+  background: transparent;
+}
+.seg-item:hover { color: var(--text-primary); }
+.seg-item[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+
+/* Subscription card: days left until expiry */
+.sub-expiry { font-variant-numeric: tabular-nums; }
+.sub-expiry[data-tone="warning"] { color: var(--zephyr-color-warning); font-weight: 600; }
+.sub-expiry[data-tone="danger"] { color: var(--zephyr-color-danger); font-weight: 600; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Page transitions (transform + opacity only; disabled under reduced motion)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+[data-page].page-enter {
+  animation: page-enter 180ms var(--motion-ease-out) both;
+}
+/* A transformed page becomes the containing block of its position:fixed
+   children, so while a fixed overlay inside the page is open (the plugin
+   panel) the page only fades; the overlay keeps covering the window. */
+@keyframes page-enter-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-page].page-enter:has(.fixed:not(.hidden)) {
+  animation-name: page-enter-fade;
+}
+
+/* Sidebar: one highlight that slides between items */
+#sidebar-nav .nav-btn { position: relative; z-index: 1; }
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: var(--radius-md);
+  background: var(--zephyr-bg-muted);
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1), 0 0 0 1px var(--zephyr-border-strong);
+  pointer-events: none;
+  transition: transform 260ms cubic-bezier(.34, 1.36, .64, 1), width var(--motion-base) var(--motion-ease-out), height var(--motion-base) var(--motion-ease-out);
+}
+.nav-indicator.no-anim { transition: none; }
+#sidebar-nav.has-nav-indicator .nav-btn.is-active {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* Background glows cross-fade (opacity only); hidden ones stop painting once faded out */
+.page-glow {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms var(--motion-ease-in-out), visibility 0s linear 400ms;
+}
+.page-glow.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 400ms var(--motion-ease-in-out), visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-page].page-enter { animation: none; }
+  .nav-indicator, .page-glow, .page-glow.is-active { transition: none; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Round-2 polish
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Text-strength accent / download for small text on light glass (>= 4.5:1).
+   Areas (buttons, switches, chart lines) keep the bright hue. */
+:root { --accent-ink: var(--accent-primary); --download-ink: var(--zephyr-color-download); }
+html:not(.dark) { --accent-ink: color-mix(in srgb, var(--accent-primary) 78%, #000); --download-ink: #0062CC; }
+html:not(.dark) .home-status-text.text-accent,
+html:not(.dark) .btn-accent,
+html:not(.dark) .btn-ghost.active,
+html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-ink); }
+.text-download-ink, html:not(.dark) .text-download, html:not(.dark) .conn-rate--down { color: var(--download-ink); }
+.text-upload-ink { color: var(--zephyr-color-upload); }
+
+/* Home: TUN status row mirrors the 36px segmented control next to it */
+.home-tun-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-subtle);
+  min-width: 0;
+}
+
+/* Home: live figures — the hero card's footer row, three equal cells split by hairlines */
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--zephyr-border-subtle);
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
+  background: rgba(255, 255, 255, .025);
+}
+html:not(.dark) .home-stats { background: rgba(15, 30, 60, .018); }
+.home-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 16px;
+}
+.home-stat + .home-stat { border-inline-start: 1px solid var(--zephyr-border-subtle); }
+.home-stat-label {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-stat-value { display: flex; align-items: baseline; justify-content: center; gap: 4px; min-width: 0; max-width: 100%; height: 28px; line-height: 28px; color: var(--text-primary); }
+.home-stat-value b {
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* line-height 1 keeps the unit from stretching the row (it pushed the latency footnote 3px low) */
+.home-stat-value small { font-size: 11px; line-height: 1; font-weight: 600; color: var(--text-muted); }
+.home-stat-foot {
+  display: block;
+  max-width: 100%;
+  height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary, var(--zephyr-text-tertiary));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+html:not(.dark) .home-stat-foot { color: var(--text-muted); }
+
+/* Short windows: drop the per-cell footnote, keep label + figure */
+@media (max-height: 580px) {
+  [data-page="home"] { gap: 12px; }
+  .home-stat-foot { display: none; }
+  .home-stats { padding: 8px 0; }
+  .home-hero-body { padding-top: 52px; padding-bottom: 16px; }
+}
+
+/* While the quick-switch wheel is open it owns the hero: the read-out steps
+   back so the node list is not drawn over the big numbers. */
+.home-hero-speeds { transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), filter var(--zephyr-time-standard) var(--zephyr-easing-ease-out); }
+#home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { opacity: .08; filter: blur(3px); }
+@media (prefers-reduced-motion: reduce) {
+  .home-hero-speeds { transition: none; }
+  #home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { filter: none; }
+}
+
+/* Home node quick-switch: the open wheel unfolds downward from the pill and
+   stays inside the hero (its 140px list starts 4px under the hero's top edge
+   instead of being centred on the pill and poking 30px above the card). */
+#node-wheel-dropdown.node-wheel-dropdown { transform-origin: 50% 19%; }
+
+/* Settings: section headings sit on the card's inner content line (20px),
+   sentence case — the same line the row icons start on */
+.settings-section-title {
+  padding-inline: 20px;
+  margin-bottom: 2px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.settings-section-desc {
+  padding-inline: 20px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+/* Settings: one trailing-action style (text button with a quiet hover pill);
+   the negative end margin keeps its text on the card's 20px content edge */
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  margin-inline-end: -10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--accent-ink);
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.row-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); }
+.row-action:active:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 16%, transparent); }
+.row-action + .row-action { margin-inline-start: 0; }
+.flex > .row-action:not(:last-child) { margin-inline-end: 0; }
+.row-action svg { width: 14px; height: 14px; }
+
+/* Segmented tabs (logs, rule library): one 32px pill track, raised thumb —
+   the same selected look as the settings segmented controls */
+.seg-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 2px;
+  height: 32px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-subtle);
+}
+.seg-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.seg-tab:hover { color: var(--text-primary); }
+.seg-tab.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+/* Full-width tabs inside dialogs get a roomier 40px track */
+.seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
+.seg-tabs-lg .seg-tab { font-size: 13px; }
+
+/* Rule library: groups read as quiet section labels (like settings), files
+   sit flush on the page edge; groups are 24px apart */
+.rl-group + .rl-group { margin-top: 24px; }
+.rl-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: var(--zephyr-radius-control);
+  cursor: pointer;
+  transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.rl-group-header > div { min-width: 0; }
+.rl-group-header:hover { background: var(--zephyr-bg-muted); }
+
+/* Empty states: centred in the space they have, one rhythm everywhere */
+.empty-state {
+  flex: 1;
+  min-height: 240px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.empty-state.hidden { display: none; }
+
+/* Nested panel inside a settings card: 16px radius (24 outer − 8) */
+#fake-client-options .glass-card { border-radius: var(--radius-md); }
+
+/* Dialogs: one title style everywhere (was 20px light / 14px bold depending on the dialog) */
+.dialog-title {
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+/* Toasts: neutral text on glass, a status dot carries the type colour */
+#notif-container { inset-inline-end: 32px; bottom: 24px; }
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--zephyr-shadow-dialog, 0 8px 32px rgba(0, 0, 0, .25));
+}
+html.dark .toast { background: rgba(28, 28, 32, 0.82); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+html:not(.dark) .toast { background: rgba(255, 255, 255, 0.86); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+.toast-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--color-accent); }
+.toast[data-type="success"] .toast-dot { background: var(--zephyr-color-success); }
+.toast[data-type="error"] .toast-dot { background: var(--zephyr-color-danger); }
+.toast[data-type="warning"] .toast-dot { background: var(--zephyr-color-warning); }
+.toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toast-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
+.toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Round-2 finish: long locales, RTL figures, wide windows
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page headers keep the title on one line; when the row runs out of room
+   (Russian/Spanish at 720px) ui/header-fit.js steps it down: icon-only
+   buttons first, then the secondary read-outs. Nothing spills past the edge. */
+[data-page] > header { gap: 16px; }
+[data-page] > header > * { flex-shrink: 0; }
+[data-page] > header h2 { white-space: nowrap; }
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* 14px icon + 2×8px + 1px borders = a 32px square, same height as before */
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) { padding-inline: 8px; min-width: 2rem; }
+header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
+
+/* Proxy group pill: one line, long group names end in an ellipsis */
+#proxy-group-trigger { white-space: nowrap; max-width: 16rem; }
+#proxy-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Connections table head: a long column name truncates inside its own column
+   instead of running into the next one */
+.conn-head .sortable { max-width: 100%; }
+
+/* Segmented controls (proxy mode, theme, home mode): a label that does not fit
+   its third ends in an ellipsis rather than touching its neighbour */
+#mode-selector-container > button,
+button[data-theme-mode],
+button[data-home-mode] {
+  display: block;
+  line-height: 26px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RTL: a figure and its unit read as one left-to-right token ("249.32 KB/s"),
+   while the cell itself keeps its right-to-left alignment */
+[dir="rtl"] .home-speed > .flex,
+[dir="rtl"] .home-stat-value { direction: ltr; }
+[dir="rtl"] .home-stat-foot { direction: ltr; text-align: center; }
+[dir="rtl"] :is(#conn-stats-bar span[id], .conn-num > .conn-main, .conn-num > .conn-sub) { direction: ltr; unicode-bidi: isolate; }
+
+/* Wide windows: settings rows stop at a readable measure (label and control
+   stay within one glance) and the column is centred under the title */
+@media (min-width: 1100px) {
+  [data-page="settings"] > * { width: 100%; max-width: 800px; margin-inline: auto; }
+}

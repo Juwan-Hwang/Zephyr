@@ -208,11 +208,11 @@ function render() {
     if (!tabContent) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         content.innerHTML = `
-            <div class="flex items-center gap-1 mb-4 shrink-0">
-                <button type="button" data-rl-tab="rule-sets" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'rule-sets' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+            <div class="seg-tabs mb-4 shrink-0" role="tablist">
+                <button type="button" role="tab" data-rl-tab="rule-sets" aria-selected="${activeTab === 'rule-sets'}" class="rl-tab seg-tab ${activeTab === 'rule-sets' ? 'active' : ''}">
                     ${escapeHtml(t.ruleLibraryManageFiles || 'Manage Rule Files')}
                 </button>
-                <button type="button" data-rl-tab="active-rules" class="rl-tab px-4 py-1.5 text-sm rounded-lg transition-colors duration-[var(--zephyr-time-micro)] ${activeTab === 'active-rules' ? 'bg-accent/20 text-accent' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)]'}">
+                <button type="button" role="tab" data-rl-tab="active-rules" aria-selected="${activeTab === 'active-rules'}" class="rl-tab seg-tab ${activeTab === 'active-rules' ? 'active' : ''}">
                     ${escapeHtml(t.ruleLibraryActiveRules || 'Active Rules')}
                 </button>
             </div>
@@ -226,6 +226,12 @@ function render() {
                 const newTab = /** @type {string} */ (/** @type {HTMLElement} */ (btn).dataset.rlTab);
                 if (newTab === activeTab) return;
                 activeTab = /** @type {'rule-sets'|'active-rules'} */ (newTab);
+                // Reflect the selection now so the roving tab stop is right while data loads.
+                content.querySelectorAll('.rl-tab').forEach((tab) => {
+                    const on = /** @type {HTMLElement} */ (tab).dataset.rlTab === activeTab;
+                    tab.classList.toggle('active', on);
+                    tab.setAttribute('aria-selected', String(on));
+                });
                 // Always refresh active rules when switching to that tab
                 if (activeTab === 'active-rules') {
                     await refreshData({ loadActiveRules: true });
@@ -254,13 +260,8 @@ function render() {
         } else if (tab === 'active-rules') {
             btn.textContent = t.ruleLibraryActiveRules || 'Active Rules';
         }
-        if (tab === activeTab) {
-            btn.classList.add('bg-accent/20', 'text-accent');
-            btn.classList.remove('text-[var(--text-muted)]');
-        } else {
-            btn.classList.remove('bg-accent/20', 'text-accent');
-            btn.classList.add('text-[var(--text-muted)]');
-        }
+        btn.classList.toggle('active', tab === activeTab);
+        btn.setAttribute('aria-selected', String(tab === activeTab));
     });
 
     if (tabContent) {
@@ -288,20 +289,20 @@ function renderRuleSets(container) {
     if (ruleFiles.length === 0) {
         // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-20 gap-4">
-                <svg class="w-16 h-16 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <div class="empty-state">
+                <svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
                 </svg>
                 <p class="text-[var(--text-muted)] text-sm">${escapeHtml(t.ruleLibraryEmpty || 'No extension rules yet')}</p>
                 <p class="text-[var(--text-secondary)] text-xs max-w-sm text-center">${escapeHtml(t.ruleLibraryEmptyHint || '')}</p>
-                <div class="flex items-center gap-2 mt-2">
-                    <button type="button" id="rl-btn-extract" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]">
+                <div class="flex flex-wrap items-center justify-center gap-2 mt-2">
+                    <button type="button" id="rl-btn-extract" class="btn-ghost">
                         ${escapeHtml(t.ruleLibraryExtract || 'Extract from Subscription')}
                     </button>
-                    <button type="button" id="rl-btn-import-empty" class="px-4 py-2 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]">
+                    <button type="button" id="rl-btn-import-empty" class="btn-accent">
                         ${escapeHtml(t.ruleLibraryImport || 'Import Rules')}
                     </button>
-                    <button type="button" id="rl-btn-create-file" class="px-4 py-2 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]">
+                    <button type="button" id="rl-btn-create-file" class="btn-ghost">
                         ${escapeHtml(t.ruleLibraryCreateFile || 'Create Rule File')}
                     </button>
                 </div>
@@ -363,13 +364,13 @@ function renderRuleSets(container) {
 function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const section = document.createElement('div');
-    section.className = 'space-y-2';
+    section.className = 'rl-group space-y-2';
 
     const totalRules = files.reduce((sum, f) => sum + (f.rule_count || 0), 0);
 
     // Group header
     const header = document.createElement('div');
-    header.className = 'flex items-center justify-between py-2 px-3 rounded-lg border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-bg-input)] cursor-pointer group hover:border-[var(--zephyr-border-strong)] transition-all duration-[var(--zephyr-time-micro)]';
+    header.className = 'rl-group-header group';
     header.setAttribute('role', 'button');
     header.setAttribute('tabindex', '0');
     header.setAttribute('aria-expanded', 'true');
@@ -378,8 +379,8 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
     header.innerHTML = `
         <div class="flex items-center gap-2">
             ${SVG_ICONS.collapseArrow}
-            <span class="text-sm font-medium text-[var(--text-secondary)]">${escapeHtml(group.name)}</span>
-            <span class="text-xs text-[var(--text-muted)]">${files.length} ${t.ruleLibraryFiles || 'files'}  ${totalRules} ${t.ruleLibraryRules || 'rules'}</span>
+            <span class="text-[13px] font-semibold text-[var(--text-secondary)] truncate">${escapeHtml(group.name)}</span>
+            <span class="text-xs text-[var(--text-muted)] tabular-nums whitespace-nowrap">${files.length} ${t.ruleLibraryFiles || 'files'} · ${totalRules} ${t.ruleLibraryRules || 'rules'}</span>
         </div>
     `;
 
@@ -394,7 +395,7 @@ function buildGroupSection(group, files, fileMap, isUngrouped = false) {
 
     // Toggle collapse
     const body = document.createElement('div');
-    body.className = 'space-y-2 ps-2 transition-all duration-[var(--zephyr-time-standard)]';
+    body.className = 'space-y-2 transition-all duration-[var(--zephyr-time-standard)]';
     const bodyId = generateDomId('rl-group-body');
     body.id = bodyId;
     header.setAttribute('aria-controls', bodyId);
@@ -438,7 +439,7 @@ function buildFileCard(file, _fileMap) {
                 <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(file.filename.replace(/\.prism\.ya?ml$/i, ''))}</span>
                 <span class="text-xs text-[var(--text-muted)]">${file.rule_count || 0} ${t.ruleLibraryRules || 'rules'}</span>
             </div>
-            <span class="text-[10px] px-2 py-0.5 rounded-full shrink-0 ${sourceBadge.cls}">${escapeHtml(sourceBadge.label)}</span>
+            <span class="text-2xs font-medium px-2 py-0.5 rounded-full shrink-0 ${sourceBadge.cls}">${escapeHtml(sourceBadge.label)}</span>
         </div>
     `;
 
@@ -633,7 +634,7 @@ function renderActiveRules(container) {
 
                 const header = document.createElement('div');
                 header.setAttribute('data-line-idx', String(idx));
-                header.className = `flex items-center justify-between p-2 rounded-lg border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-bg-input)] cursor-pointer select-none hover:border-[var(--zephyr-border-strong)] transition-all duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'opacity-60' : ''}`;
+                header.className = `flex items-center justify-between p-2 rounded-[var(--radius-md)] border border-[var(--zephyr-border-subtle)] bg-[var(--zephyr-bg-input)] cursor-pointer select-none hover:border-[var(--zephyr-border-strong)] transition-all duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'opacity-60' : ''}`;
                 header.setAttribute('role', 'button');
                 header.setAttribute('tabindex', '0');
                 header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
@@ -643,10 +644,10 @@ function renderActiveRules(container) {
                     <div class="flex items-center gap-3">
                         <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                         <span class="text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
-                        <span class="text-[10px] text-[var(--text-muted)]">${ruleCount} rules</span>
+                        <span class="text-2xs tabular-nums text-[var(--text-muted)]">${ruleCount} ${escapeHtml(t.ruleLibraryRules || 'rules')}</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="text-[10px] ${enabled ? 'text-emerald-500' : 'text-[var(--text-muted)]'}">${enabled ? '● ON' : '○ OFF'}</span>
+                        <span class="text-2xs tabular-nums ${enabled ? 'text-emerald-500' : 'text-[var(--text-muted)]'}">${enabled ? '● ON' : '○ OFF'}</span>
                     </div>
                 `;
                 header.addEventListener('click', () => {
@@ -686,7 +687,7 @@ function renderActiveRules(container) {
                         <div class="text-xs text-[var(--text-secondary)] font-mono truncate max-w-[300px]" title="${escapeAttr(value)}">${escapeHtml(value)}</div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <span class="text-[10px] px-1.5 py-0.5 rounded-full ${badgeColor}">${escapeHtml(groupLabel)}</span>
+                        <span class="text-2xs tabular-nums px-1.5 py-0.5 rounded-full ${badgeColor}">${escapeHtml(groupLabel)}</span>
                         <div class="text-2xs font-bold ${getPolicyColor(policy)} uppercase tracking-wider">${escapeHtml(policy)}</div>
                     </div>
                 `;

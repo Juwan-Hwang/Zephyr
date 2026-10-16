@@ -23,9 +23,9 @@
         <div id="glow-subscriptions" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-proxies" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
         <div id="glow-connections" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
         <div id="glow-logs" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
-        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-500"></div>
+        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
         <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
 
         <!-- Sidebar -->
@@ -70,7 +70,7 @@
         <!-- Main Area -->
         <div class="flex-1 flex flex-col min-w-0 relative z-10">
             <!-- Title Bar -->
-            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-4 select-none cursor-grab active:cursor-grabbing">
+            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-8 select-none cursor-grab active:cursor-grabbing">
                 <div class="flex items-center gap-2 pointer-events-none">
                     <img src="app-icon.png" id="app-title-icon" alt="" aria-hidden="true" class="w-5 h-5 opacity-90 filter drop-shadow-[var(--zephyr-shadow-glow)] transition-all duration-[var(--zephyr-time-standard)]">
                     <span class="text-xs font-semibold text-[var(--text-secondary)] tracking-wide">Zephyr</span>
@@ -86,152 +86,150 @@
             </div>
 
             <!-- Dashboard Page -->
-            <div data-page="home" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar relative">
+            <div data-page="home" class="flex-1 flex flex-col px-8 pt-8 gap-4 overflow-y-auto custom-scrollbar relative">
 
-                <div class="flex flex-col items-center justify-center py-12 relative z-10">
-                    <!-- Current Node Display (Interactive Wheel) -->
-                    <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-2">
-                        <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false">
-                            <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
-                            <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold tracking-wide truncate max-w-[280px]">Loading...</span>
-                        </button>
+                <!-- Hero: live traffic area chart behind the speed read-out -->
+                <section id="home-hero" class="home-hero glass-card relative z-20">
+                    <div class="home-hero-body">
+                        <div class="home-hero-chart" aria-hidden="true">
+                            <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
+                        </div>
+                        <!-- Current Node Display (Interactive Wheel) -->
+                        <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-4">
+                            <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="node-wheel-trigger-label current-node-name">
+                                <span id="node-wheel-trigger-label" class="sr-only" data-i18n="consoleNodePicker">Switch node</span>
+                                <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
+                                <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span>
+                            </button>
                         
-                        <!-- Wheel Dropdown -->
-                        <div id="node-wheel-dropdown" class="absolute top-[14px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[cubic-bezier(0.23,1,0.32,1)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
-                            <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
-                                <div id="node-wheel-padding-top" style="height: 56px;"></div>
-                                <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
-                                    <!-- Node capsules will be inserted here -->
+                            <!-- Wheel Dropdown -->
+                            <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                                <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
+                                    <div id="node-wheel-padding-top" style="height: 56px;"></div>
+                                    <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
+                                        <!-- Node capsules will be inserted here -->
+                                    </div>
+                                    <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
                                 </div>
-                                <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
+                            </div>
+                        </div>
+
+                        <div class="home-hero-speeds relative z-10">
+                            <!-- Downstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-download/80" aria-hidden="true"></span><span data-i18n="downstream">Downstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-down-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="w-px h-14 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent" aria-hidden="true"></div>
+
+                            <!-- Upstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-upload/80" aria-hidden="true"></span><span data-i18n="upstream">Upstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-up-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-
-                    <div class="flex items-center gap-24 mb-4">
-                        <!-- Downstream -->
-                        <div class="flex flex-col items-center group cursor-default w-[160px]">
-                            <span class="text-[var(--text-muted)] text-2xs font-bold uppercase tracking-wider mb-3 group-hover:text-accent transition-colors" data-i18n="downstream">Downstream</span>
-                            <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-down-val" class="text-[64px] font-extralight text-[var(--text-primary)] tabular-nums tracking-tighter leading-none">0.00</span>
-                                <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap tracking-wider">KB/s</span>
-                            </div>
+                    <!-- Footer row of the hero card: live figures that already exist elsewhere (console / connections) -->
+                    <div id="home-stats" class="home-stats">
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleTotalTraffic">Total Traffic</span>
+                            <span class="home-stat-value"><b id="home-stat-total">—</b></span>
+                            <span class="home-stat-foot"><span class="text-download-ink" aria-hidden="true">↓</span> <span id="home-stat-down">—</span> · <span class="text-upload-ink" aria-hidden="true">↑</span> <span id="home-stat-up">—</span></span>
                         </div>
-
-                        <!-- Divider -->
-                        <div class="w-px h-16 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent"></div>
-
-                        <!-- Upstream -->
-                        <div class="flex flex-col items-center group cursor-default w-[160px]">
-                            <span class="text-[var(--text-muted)] text-2xs font-bold uppercase tracking-wider mb-3 group-hover:text-accent transition-colors" data-i18n="upstream">Upstream</span>
-                            <div class="flex items-baseline justify-center w-full gap-1.5">
-                                <span id="speed-up-val" class="text-[64px] font-extralight text-[var(--text-primary)] tabular-nums tracking-tighter leading-none">0.00</span>
-                                <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap tracking-wider">KB/s</span>
-                            </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleActiveConn">Active Connections</span>
+                            <span class="home-stat-value"><b id="home-stat-conn">—</b></span>
+                            <span class="home-stat-foot">TCP <span id="home-stat-tcp">—</span> · UDP <span id="home-stat-udp">—</span></span>
+                        </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleNodeLatency">Node Latency</span>
+                            <span class="home-stat-value"><b id="home-stat-lat">—</b><small>ms</small></span>
+                            <span class="home-stat-foot truncate" id="home-stat-node">—</span>
                         </div>
                     </div>
-                </div>
-                
+                </section>
+
                 <!-- System Proxy Toggle -->
-                <div class="glass-card p-5 flex items-center justify-between mb-2 relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-inner">
-                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <div class="glass-card p-4 flex items-center justify-between gap-4 relative z-10 shrink-0">
+                    <div class="flex items-center gap-4 min-w-0">
+                        <div class="w-12 h-12 shrink-0 rounded-[var(--radius-md)] bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                         </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <h3 class="text-sm font-bold text-[var(--text-primary)] tracking-tight" data-i18n="sysProxy">System Proxy Control</h3>
-                            </div>
-                            <p class="text-xs text-[var(--text-muted)] font-medium" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
                         </div>
                     </div>
-                    <label class="ios-switch switch-lg">
+                    <label class="ios-switch switch-lg shrink-0">
     <input type="checkbox" id="sys-proxy-toggle">
     <span class="switch-slider"></span>
 </label>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2 pb-2">
+                <div class="grid grid-cols-2 gap-4 shrink-0">
                     <!-- Proxy Mode Selector -->
-                    <div class="glass-card p-4 relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
-                        <div class="flex items-center gap-3 mb-3">
-                            <div class="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center gap-3 h-8 min-w-0">
+                            <div class="w-8 h-8 shrink-0 rounded-[10px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                             </div>
-                            <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="mode">Proxy Mode</h3>
+                            <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="mode">Proxy Mode</h3>
                         </div>
                         <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
                             <div id="mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="rule">Rule</button>
-                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="global">Global</button>
-                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="direct">Direct</button>
+                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="rule">Rule</button>
+                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="global">Global</button>
+                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="direct">Direct</button>
                         </div>
                     </div>
 
-                    <!-- TUN Mode Toggle -->
-                    <div class="glass-card p-4 flex flex-col justify-center relative z-10 group hover:translate-y-[-2px] transition-transform duration-[var(--zephyr-time-standard)]">
-                        <div class="flex items-center justify-between gap-3">
+                    <!-- TUN Mode Toggle: same two-row rhythm as the mode card (header row, then a 36px control row) -->
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center justify-between gap-3 h-8 min-w-0">
                             <div class="flex items-center gap-3 min-w-0">
-                                <div class="w-8 h-8 shrink-0 rounded-md bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                <div class="w-8 h-8 shrink-0 rounded-[10px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                 </div>
-                                <div class="min-w-0">
-                                    <h3 class="text-xs font-bold text-[var(--text-primary)] tracking-tight" data-i18n="tunMode">TUN Mode</h3>
-                                    <div class="flex items-center gap-1.5 min-w-0">
-                                        <div id="tun-spinner" class="hidden w-2.5 h-2.5 shrink-0 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
-                                        <p class="text-2xs text-[var(--text-muted)] font-medium transition-colors truncate" id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>
-                                    </div>
-                                </div>
+                                <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
                             </div>
                             <label class="ios-switch shrink-0">
     <input type="checkbox" id="tun-proxy-toggle">
     <span class="switch-slider"></span>
 </label>
                         </div>
+                        <div class="home-tun-status">
+                            <div id="tun-spinner" class="hidden w-2.5 h-2.5 shrink-0 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium transition-colors truncate" id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>
+                        </div>
                     </div>
                 </div>
 
-                <div class="flex-1 relative glass-card p-6 overflow-hidden min-h-[160px] flex flex-col">
-                    <div class="flex items-center justify-between mb-4 shrink-0">
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-2 rounded-full bg-accent animate-pulse"></div>
-                            <span class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider" data-i18n="traffic">Real-time Traffic</span>
-                        </div>
-                        
-                        <!-- Legend -->
-                        <div class="flex items-center gap-4">
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-download/80"></div>
-                                <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="downstream">Down</span>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-2 h-2 rounded-sm bg-upload/80"></div>
-                                <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="upstream">Up</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex-1 relative w-full">
-                        <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
-                    </div>
-                </div>
             </div>
 
             <!-- Console Dashboard Page (injected by ui/console-home.js) -->
             <div data-page="console" class="flex-1 hidden flex flex-col overflow-hidden relative min-w-0"></div>
 
             <!-- Subscriptions Page -->
-            <div data-page="subscriptions" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="subscriptions" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div>
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="subscriptions">Subscriptions</h2>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins">
+                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins" data-i18n-title="plugins">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span data-i18n="plugins">Plugins</span>
                         </button>
-                        <button id="update-all-sub-btn" class="btn-ghost" title="Update All">
+                        <button id="update-all-sub-btn" class="btn-ghost" title="Update All" data-i18n-title="updateAll">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="updateAll">Update All</span>
                         </button>
@@ -242,7 +240,7 @@
                     </div>
                 </header>
 
-                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pe-2 pt-2 -mt-2 -mb-8 custom-scrollbar relative z-10">
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pt-2 -mt-2 custom-scrollbar relative z-10">
                     <!-- Subscriptions will be rendered here -->
                 </div>
 
@@ -252,7 +250,7 @@
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
-                            <h3 class="text-lg font-light text-[var(--text-primary)]" data-i18n="overrideTitle">覆写脚本</h3>
+                            <h3 class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
                             <button id="close-plugins-btn" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
@@ -325,14 +323,14 @@
             </div>
 
             <!-- Proxies Page -->
-            <div data-page="proxies" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="proxies" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-4">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
                         <!-- Group Selector Dropdown -->
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
-                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
                                 <svg class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
@@ -362,46 +360,52 @@
                 <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
                 <div id="group-explanation-bar" class="hidden items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 relative z-10 shrink-0" data-flex-class="flex"></div>
                 <!-- Container added p-4 to prevent 3D scale clipping -->
-                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-6 overflow-y-auto p-4 -mx-4 -mt-4 -mb-8 custom-scrollbar relative z-10">
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-4 overflow-y-auto px-4 pt-4 pb-0 -mx-4 -mt-4 custom-scrollbar relative z-10">
                     <!-- Cards will be injected here -->
                 </div>
             </div>
 
             <!-- Connections Page (HTML injected by connections.js module) -->
-            <div data-page="connections" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="connections" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
 
             <!-- Logs Page (HTML injected by logs.js module) -->
-            <div data-page="logs" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="logs" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
 
             <!-- Rule Library Page -->
-            <div data-page="rule-library" class="flex-1 hidden flex flex-col p-8 gap-6 overflow-hidden relative">
+            <div data-page="rule-library" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="ruleLibraryTitle">Rule Library</h2>
-                        <span id="rl-status" class="text-xs px-2 py-0.5 rounded-full bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)]"></span>
-                        <span id="rl-stats" class="text-xs text-[var(--text-muted)]"></span>
+                        <span id="rl-status" class="inline-flex items-center h-6 text-xs px-2.5 rounded-full bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] whitespace-nowrap"></span>
+                        <span id="rl-stats" class="text-xs text-[var(--text-muted)] tabular-nums whitespace-nowrap truncate"></span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" id="rl-btn-new-group" class="px-3 py-1.5 text-sm rounded-lg bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] hover:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryNewGroup">New Group</button>
-                        <button type="button" id="rl-btn-import" class="px-3 py-1.5 text-sm rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors duration-[var(--zephyr-time-micro)]" data-i18n="ruleLibraryImport">Import Rules</button>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="rl-btn-new-group" class="btn-ghost">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
+                            <span data-i18n="ruleLibraryNewGroup">New Group</span>
+                        </button>
+                        <button type="button" id="rl-btn-import" class="btn-accent">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span data-i18n="ruleLibraryImport">Import Rules</span>
+                        </button>
                     </div>
                 </header>
-                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pe-2 pt-2 -mt-2 -mb-8 space-y-4 relative z-10">
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 space-y-4 relative z-10">
                     <!-- Rendered by rule-library.js -->
                 </div>
             </div>
 
             <!-- Settings Page -->
-            <div data-page="settings" class="flex-1 hidden flex flex-col p-8 overflow-y-auto custom-scrollbar relative">
+            <div data-page="settings" class="flex-1 hidden flex flex-col px-8 pt-8 overflow-y-auto custom-scrollbar relative">
 
-                <h2 class="text-2xl font-light text-[var(--text-primary)] mb-8 relative z-10" data-i18n="settingsTitle">Settings</h2>
+                <h2 class="text-2xl font-light text-[var(--text-primary)] mb-6 relative z-10" data-i18n="settingsTitle">Settings</h2>
 
                 <div class="space-y-6 relative z-10">
 
                     <!-- 1. Appearance -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAppearance">Appearance</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
+                        <h3 class="settings-section-title" data-i18n="settingsAppearance">Appearance</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Language -->
                             <div class="flex items-center justify-between">
@@ -473,9 +477,9 @@
                                 </div>
                                 <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
                                     <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button data-theme-mode="light" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeLight">Light</button>
-                                    <button data-theme-mode="auto" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeAuto">Auto</button>
-                                    <button data-theme-mode="dark" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="themeDark">Dark</button>
+                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
+                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
+                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
                                 </div>
                             </div>
 
@@ -536,11 +540,11 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <button type="button" id="ui-scale-100" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">100%</button>
-                                    <button type="button" id="ui-scale-110" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">110%</button>
-                                    <button type="button" id="ui-scale-125" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">125%</button>
-                                    <button type="button" id="ui-scale-150" class="ui-scale-btn px-2.5 py-1 text-xs rounded-md bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">150%</button>
+                                <div class="seg-control relative grid grid-cols-4 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 w-[220px]" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
+                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">100%</button>
+                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">110%</button>
+                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">125%</button>
+                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">150%</button>
                                 </div>
                             </div>
 
@@ -559,8 +563,8 @@
                                 </div>
                                 <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
                                     <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageMinimal">Minimal</button>
-                                    <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-2xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors uppercase tracking-wider" data-i18n="homePageConsole">Console</button>
+                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageMinimal">Minimal</button>
+                                    <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageConsole">Console</button>
                                 </div>
                             </div>
                         </div>
@@ -568,8 +572,8 @@
 
                     <!-- 2. App Behavior -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAppBehavior">App Behavior</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAppBehaviorDesc">Window lifecycle, startup and runtime behavior</p>
+                        <h3 class="settings-section-title" data-i18n="settingsAppBehavior">App Behavior</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAppBehaviorDesc">Window lifecycle, startup and runtime behavior</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Close Behavior -->
                             <div class="flex items-center justify-between">
@@ -644,32 +648,13 @@
     <span class="switch-slider"></span>
 </label>
                             </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
-                            <!-- Node Name Scroll -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-4">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></svg>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="nodeScrolling">Node Name Scroll</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="nodeScrollingDesc">Enable scrolling for long node names</p>
-                                    </div>
-                                </div>
-                                <label class="ios-switch">
-    <input type="checkbox" id="setting-node-scroll">
-    <span class="switch-slider"></span>
-</label>
-                            </div>
                         </div>
                     </section>
 
                     <!-- 3. Proxy Behavior -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsProxyBehavior">Proxy Behavior</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsProxyBehaviorDesc">How proxy selection, testing and failover work</p>
+                        <h3 class="settings-section-title" data-i18n="settingsProxyBehavior">Proxy Behavior</h3>
+                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">How proxy selection, testing and failover work</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Unified Delay -->
                             <div class="flex items-center justify-between">
@@ -776,8 +761,8 @@
 
                     <!-- 4. Network -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsNetwork">Network</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsNetworkDesc">Local ports, DNS, LAN access and port forwarding</p>
+                        <h3 class="settings-section-title" data-i18n="settingsNetwork">Network</h3>
+                        <p class="settings-section-desc" data-i18n="settingsNetworkDesc">Local ports, DNS, LAN access and port forwarding</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- IPv6 -->
                             <div class="flex items-center justify-between">
@@ -879,7 +864,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="copyProxyEnvDesc">Copy proxy env vars for terminal use</p>
                                     </div>
                                 </div>
-                                <button id="copy-env-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                <button id="copy-env-btn" class="row-action">
                                     <span data-i18n="copy">Copy</span>
                                 </button>
                             </div>
@@ -899,7 +884,7 @@
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <div id="network-optim-status-dot" class="w-2 h-2 rounded-full bg-[var(--text-tertiary)] transition-colors"></div>
-                                    <button id="network-optim-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                    <button id="network-optim-btn" class="row-action">
                                         <span data-i18n="networkOptimApply">Apply</span>
                                     </button>
                                 </div>
@@ -923,7 +908,7 @@
                                 </summary>
                                 <div class="mt-4 ps-9 pe-2">
                                     <div class="flex items-center justify-between mb-3">
-                                        <span class="text-2xs text-[var(--text-muted)] uppercase tracking-wider" data-i18n="tunnelsList">Rules</span>
+                                        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="tunnelsList">Rules</span>
                                         <button id="add-tunnel-btn" class="text-xs text-accent hover:text-accent/80 transition-colors" data-i18n="add">Add</button>
                                     </div>
                                     <div id="tunnels-list" class="space-y-3">
@@ -937,8 +922,8 @@
 
                     <!-- 5. Subscription & Rules -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSubscriptionRulesDesc">Subscription download behavior and rule file management</p>
+                        <h3 class="settings-section-title" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
+                        <p class="settings-section-desc" data-i18n="settingsSubscriptionRulesDesc">Subscription download behavior and rule file management</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Subscription Fake Client -->
                             <div class="flex items-start justify-between flex-col gap-3">
@@ -959,9 +944,9 @@
                                 </div>
 
                                 <div id="fake-client-options" class="w-full ps-9 pe-2 transition-all duration-[var(--zephyr-time-standard)] max-h-0 opacity-0 overflow-hidden">
-                                    <div class="glass-card p-3 mt-2 space-y-3">
+                                    <div class="glass-card rounded-[var(--radius-md)] p-3 mt-2 space-y-3">
                                         <div>
-                                            <label class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Client Type</label>
+                                            <label class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientType">Client Type</label>
                                             <div id="fake-client-select-wrap" class="relative">
                                                 <button id="fake-client-trigger" type="button" class="select-common w-full flex items-center justify-between">
                                                     <span id="fake-client-label">Clash Verge Rev</span>
@@ -986,7 +971,7 @@
                                             </div>
                                         </div>
                                         <div id="fake-client-custom-container" class="hidden">
-                                            <label for="fake-client-custom" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Custom User-Agent</label>
+                                            <label for="fake-client-custom" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientCustomUA">Custom User-Agent</label>
                                             <div class="input-paste-wrapper">
                                                 <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="form-control form-control-md">
                                                 <button type="button" id="fake-client-custom-paste-btn" class="btn-paste-base btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
@@ -1029,7 +1014,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="ruleLibraryManageFilesDesc">Open the prism rules directory in file manager</p>
                                     </div>
                                 </div>
-                                <button id="manage-rule-files-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                <button id="manage-rule-files-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="ruleLibraryManageFiles">Manage Rule Files</span>
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
@@ -1039,8 +1024,8 @@
 
                     <!-- 6. Security & Diagnostics -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSecurityDiagnostics">Security & Diagnostics</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSecurityDiagnosticsDesc">Config encryption and log diagnostics</p>
+                        <h3 class="settings-section-title" data-i18n="settingsSecurityDiagnostics">Security & Diagnostics</h3>
+                        <p class="settings-section-desc" data-i18n="settingsSecurityDiagnosticsDesc">Config encryption and log diagnostics</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Encrypt Configs -->
                             <div class="flex items-center justify-between">
@@ -1077,7 +1062,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="logSettingsDesc">Persist and export application and core logs</p>
                                     </div>
                                 </div>
-                                <button id="log-export-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                <button id="log-export-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="logExport">Export</span>
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
@@ -1087,16 +1072,21 @@
 
                     <!-- 7. Core & Updates -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsCoreUpdates">Core & Updates</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsCoreUpdatesDesc">Core engine, client updates and Geo data maintenance</p>
+                        <h3 class="settings-section-title" data-i18n="settingsCoreUpdates">Core & Updates</h3>
+                        <p class="settings-section-desc" data-i18n="settingsCoreUpdatesDesc">Core engine, client updates and Geo data maintenance</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Version Info (Check Updates 行尾低权重) -->
                             <div class="flex items-center justify-between">
-                                <div>
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                    </div>
+                                    <div>
                                     <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="curVersion">Current Version</p>
                                     <p class="text-2xs text-[var(--text-muted)]"><span data-i18n="appVersion">App</span>: <span id="app-version-text">-</span> | <span data-i18n="coreVersion">Core</span>: <span id="core-version-text">Checking...</span></p>
+                                    </div>
                                 </div>
-                                <button id="check-update-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="checkUpdate">
+                                <button id="check-update-btn" class="row-action" data-i18n="checkUpdate">
                                     Check for Updates
                                 </button>
                             </div>
@@ -1114,9 +1104,9 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="backupRestoreDesc">Export or import your configuration</p>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-3">
-                                    <button id="export-backup-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="exportBackup">Export</button>
-                                    <button id="import-backup-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" data-i18n="importBackup">Import</button>
+                                <div class="flex items-center gap-1">
+                                    <button id="export-backup-btn" class="row-action" data-i18n="exportBackup">Export</button>
+                                    <button id="import-backup-btn" class="row-action" data-i18n="importBackup">Import</button>
                                 </div>
                             </div>
 
@@ -1171,7 +1161,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="geoDataDesc">Update GeoIP and GeoSite routing databases</p>
                                     </div>
                                 </div>
-                                <button id="update-geo-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1.5">
+                                <button id="update-geo-btn" class="row-action flex items-center gap-1.5">
                                     <svg id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
                                     <span data-i18n="updateNow">Update Now</span>
                                 </button>
@@ -1190,7 +1180,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="configFolderDesc">Open the YAML directory for drag-and-drop imports</p>
                                     </div>
                                 </div>
-                                <button id="open-config-folder-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                <button id="open-config-folder-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="openFolder">Open Folder</span>
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
@@ -1200,8 +1190,8 @@
 
                     <!-- 8. System & Compatibility -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsSystemCompatibility">System & Compatibility</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsSystemCompatibilityDesc">System integration, platform compatibility and advanced entries</p>
+                        <h3 class="settings-section-title" data-i18n="settingsSystemCompatibility">System & Compatibility</h3>
+                        <p class="settings-section-desc" data-i18n="settingsSystemCompatibilityDesc">System integration, platform compatibility and advanced entries</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- Global Shortcuts -->
                             <div class="flex items-center justify-between">
@@ -1214,7 +1204,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="globalShortcutDesc">Configure keyboard shortcuts</p>
                                     </div>
                                 </div>
-                                <button id="open-shortcut-settings-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                <button id="open-shortcut-settings-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="configure">Configure</span>
                                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
@@ -1233,7 +1223,7 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="uwpLoopbackDesc">Allow Windows Store apps to use local proxy</p>
                                     </div>
                                 </div>
-                                <button id="exempt-uwp-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1.5">
+                                <button id="exempt-uwp-btn" class="row-action flex items-center gap-1.5">
                                     <svg id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
                                     <span data-i18n="exemptUwp">Exempt All UWP</span>
                                 </button>
@@ -1245,7 +1235,7 @@
                             <!-- Advanced Settings (Drill-in) -->
                             <button type="button" id="btn-goto-advanced" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
                                 <span class="flex items-center gap-4">
-                                    <span class="w-10 h-10 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-colors">
+                                    <span class="flex items-center justify-center text-[var(--text-secondary)] group-hover:text-accent transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
                                     </span>
                                     <span class="block">
@@ -1260,13 +1250,13 @@
 
                     <!-- 9. About -->
                     <section>
-                        <h3 class="text-2xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 ms-1" data-i18n="settingsAbout">About</h3>
-                        <p class="text-2xs text-[var(--text-tertiary)] mb-4 ms-1" data-i18n="settingsAboutDesc">Project links and danger zone</p>
+                        <h3 class="settings-section-title" data-i18n="settingsAbout">About</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAboutDesc">Project links and danger zone</p>
                         <div class="glass-card p-5 space-y-4">
                             <!-- GitHub Homepage (链接行) -->
                             <a id="btn-goto-github" href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start no-underline">
                                 <span class="flex items-center gap-4">
-                                    <span class="w-10 h-10 rounded-md bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] group-hover:bg-[var(--zephyr-bg-muted)] group-hover:text-[var(--text-primary)] transition-colors">
+                                    <span class="flex items-center justify-center text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                                     </span>
                                     <span class="block">
@@ -1278,14 +1268,14 @@
                             </a>
 
                             <!-- Danger Zone: Restore Defaults -->
-                            <div class="border-t mt-6 pt-4" style="border-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);">
+                            <div class="border-t border-[var(--zephyr-bg-muted)] pt-4">
                                 <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
                                     <span class="flex items-center gap-4">
-                                        <span class="w-10 h-10 rounded-md bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 group-hover:bg-red-500/20 transition-colors">
+                                        <span class="flex items-center justify-center text-[var(--zephyr-color-danger)]">
                                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                         </span>
                                         <span class="block">
-                                            <span class="block text-sm font-semibold text-red-500 group-hover:text-red-400 transition-colors" data-i18n="restoreDefaults">Restore Defaults</span>
+                                            <span class="block text-sm font-semibold text-[var(--zephyr-color-danger)] group-hover:opacity-80 transition-opacity" data-i18n="restoreDefaults">Restore Defaults</span>
                                             <span class="block text-2xs text-[var(--text-muted)]" data-i18n="restoreDefaultsDesc">Reset all settings to default values</span>
                                         </span>
                                     </span>
@@ -1298,7 +1288,7 @@
             </div>
 
             <!-- Advanced Page -->
-            <div data-page="advanced" class="flex-1 flex flex-col p-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
+            <div data-page="advanced" class="flex-1 flex flex-col px-8 pt-8 gap-8 overflow-y-auto hidden custom-scrollbar relative">
 
                 <header class="flex items-center justify-between relative z-10">
                     <div class="flex items-center gap-4">
@@ -1342,12 +1332,12 @@
     </div>
 
     <!-- Notifications Container -->
-    <div id="notif-container" role="status" aria-live="polite" class="fixed bottom-6 end-6 z-[var(--z-toast)] flex flex-col gap-3 pointer-events-none items-end"></div>
+    <div id="notif-container" role="status" aria-live="polite" class="fixed z-[var(--z-toast)] flex flex-col gap-2 pointer-events-none items-end"></div>
 
     <!-- Modal Background -->
     <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-[var(--zephyr-time-standard)] opacity-0 pointer-events-auto">
-        <div id="modal-container" class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
-            <h3 id="modal-title" class="text-xl font-light text-[var(--text-primary)] mb-6">Subscription Name</h3>
+        <div id="modal-container" class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
+            <h3 id="modal-title" class="dialog-title mb-5">Subscription Name</h3>
             <div class="space-y-6">
                 <div id="modal-content-area"></div>
 <div class="flex gap-3 justify-end">
@@ -1360,13 +1350,13 @@
 
     <!-- DNS Configuration Modal -->
     <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
-        <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="text-xl font-light text-[var(--text-primary)] mb-6" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
             
             <div class="space-y-4">
                 <div>
-                    <label for="dns-nameservers-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
+                    <label for="dns-nameservers-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
                         <button type="button" id="dns-nameservers-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
@@ -1377,7 +1367,7 @@
                 </div>
                 
                 <div>
-                    <label for="dns-fallbacks-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
+                    <label for="dns-fallbacks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
                         <button type="button" id="dns-fallbacks-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
@@ -1397,31 +1387,31 @@
 
     <!-- Port Configuration Modal -->
     <div id="port-config-modal" role="dialog" aria-modal="true" aria-labelledby="port-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
-        <div class="glass-card w-[400px] p-8 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 id="port-config-title" class="text-xl font-light text-[var(--text-primary)] mb-2" data-i18n="portConfigTitle">Port Configuration</h3>
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 id="port-config-title" class="dialog-title mb-1" data-i18n="portConfigTitle">Port Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="portConfigDesc">Set ports for proxy protocols</p>
 
             <div class="space-y-4">
                 <div>
-                    <label for="port-mixed-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="mixedPort">Mixed Port</label>
+                    <label for="port-mixed-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="mixedPort">Mixed Port</label>
                     <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-socks-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="socksPort">SOCKS5 Port</label>
+                    <label for="port-socks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="socksPort">SOCKS5 Port</label>
                     <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-redir-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="redirPort">Redir Port</label>
+                    <label for="port-redir-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="redirPort">Redir Port</label>
                     <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="redirPortHint">Transparent proxy port, Linux only (0 to disable)</p>
                 </div>
 
                 <div>
-                    <label for="port-tproxy-input" class="block text-2xs text-[var(--text-muted)] uppercase tracking-wider mb-2" data-i18n="tproxyPort">TProxy Port</label>
+                    <label for="port-tproxy-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="tproxyPort">TProxy Port</label>
                     <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="tproxyPortHint">TProxy port, Linux only (0 to disable)</p>
                 </div>

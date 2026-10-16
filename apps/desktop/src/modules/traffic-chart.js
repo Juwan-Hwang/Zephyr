@@ -456,7 +456,10 @@ function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  const getX = (/** @type {number} */ i) => (i / (MAX_DATA_POINTS - 1)) * width;
+  // Anchor the newest sample to the right edge so a short history still reads as a
+  // live tail instead of a sliver hugging the left edge (the home hero is full width).
+  const offset = Math.max(0, MAX_DATA_POINTS - data.length);
+  const getX = (/** @type {number} */ i) => ((i + offset) / (MAX_DATA_POINTS - 1)) * width;
 
   ctx.beginPath();
   traceSmoothCurve(ctx, data.map((v, i) => ({ x: getX(i), y: getY(v) })));

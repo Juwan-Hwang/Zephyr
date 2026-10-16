@@ -15,7 +15,7 @@ import {
 } from '../../api.js';
 import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
-import { translations } from '../../i18n.js';
+import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showModal, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
@@ -75,6 +75,26 @@ function formatLastUpdated(timestamp, t) {
     if (diff < 3600) return (t.lastUpdatedMinutesAgo || '{m} min ago').replace('{m}', String(Math.floor(diff / 60)));
     if (diff < 86400) return (t.lastUpdatedHoursAgo || '{h}h ago').replace('{h}', String(Math.floor(diff / 3600)));
     return (t.lastUpdatedDaysAgo || '{d}d ago').replace('{d}', String(Math.floor(diff / 86400)));
+}
+
+/**
+ * Read the `expire=` unix timestamp (seconds) from a subscription-userinfo string.
+ * @param {string | null | undefined} subInfo
+ * @returns {number} 0 when absent
+ */
+export function parseSubExpire(subInfo) {
+    if (!subInfo) return 0;
+    for (const part of String(subInfo).split(';')) {
+        const s = part.trim();
+        if (s.startsWith('expire=')) {
+            const v = s.slice(7).trim();
+            if (!/^\d+$/.test(v)) return 0;
+            const n = Number(v);
+            // Reject values no Date can represent (8.64e12 s is far past any real expiry).
+            return Number.isSafeInteger(n) && n > 0 && n <= 8640000000000 ? n : 0;
+        }
+    }
+    return 0;
 }
 
 // ---- Module-level renderConfigs for use before init ----
@@ -177,25 +197,25 @@ async function showEditPanel(configInfo) {
     modal.innerHTML = `
         <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:opacity ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1),transform ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
+                <h3 class="dialog-title">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
                 <button id="edit-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label for="edit-name" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.rename || 'Name')}</label>
+                    <label for="edit-name" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.rename || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="form-control form-control-md">
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label for="edit-url" class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
+                    <label for="edit-url" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
                     <div class="input-paste-wrapper">
                         <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
                         ${renderPasteButtonHtml('edit-url-paste-btn', t.paste || 'Paste')}
                     </div>
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
+                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
                     <div id="edit-ua-wrap" class="relative">
                         <button id="edit-ua-trigger" type="button" class="select-common w-full flex items-center justify-between text-xs py-1.5">
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
@@ -215,7 +235,7 @@ async function showEditPanel(configInfo) {
             <!-- Auto-update dropdown in bottom right -->
             <div class="flex items-center justify-between pt-2">
                 <div class="flex items-center gap-2">
-                    <label class="text-2xs text-[var(--text-muted)] font-medium uppercase tracking-wider">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
+                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
                     <div id="edit-auto-update-wrap" class="relative">
                         <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
                             <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
@@ -991,7 +1011,7 @@ export function initSubscriptionSettings({
                 // Render groups
                 for (const [groupName, groupFiles] of grouped) {
                     const groupHeader = document.createElement('div');
-                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-2xs text-[var(--text-muted)] uppercase tracking-wider font-bold';
+                    groupHeader.className = 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] font-bold';
                     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                     groupHeader.innerHTML = `<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${escapeHtml(groupName)}`;
                     menuScroll.appendChild(groupHeader);
@@ -1267,7 +1287,8 @@ export function initSubscriptionSettings({
             left.appendChild(label);
 
             const actions = document.createElement('div');
-            actions.className = 'flex items-center gap-2 transition-opacity opacity-0 group-hover:opacity-100';
+            // Always visible (dimmed) so the actions are discoverable and reachable by keyboard
+            actions.className = 'sub-actions flex items-center gap-2 transition-opacity opacity-40 group-hover:opacity-100 group-focus-within:opacity-100';
 
             // Delete button
             const delBtn = document.createElement('button');
@@ -1396,7 +1417,7 @@ export function initSubscriptionSettings({
                     const textRow = document.createElement('div');
                     const labelId = generateDomId('sub-usage-label');
                     textRow.id = labelId;
-                    textRow.className = 'flex justify-between text-2xs text-[var(--text-muted)] mb-1.5 px-0.5 uppercase tracking-wider font-bold';
+                    textRow.className = 'flex justify-between gap-3 text-xs font-medium tabular-nums text-[var(--text-muted)] mb-1.5 px-0.5';
                     // eslint-disable-next-line no-unsanitized/property -- values from internal formatFileSize() + i18n keys
                     textRow.innerHTML = '<span>' + formatFileSize(used) + ' ' + (t?.usedSpace || 'used') + '</span><span>' + formatFileSize(total) + ' ' + (t?.totalSpace || 'total') + '</span>'; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
@@ -1405,7 +1426,10 @@ export function initSubscriptionSettings({
 
                     const barFill = document.createElement('div');
                     const clampedPercentage = isNaN(percentage) || !isFinite(percentage) ? 0 : Math.max(0, Math.min(100, percentage));
-                    barFill.className = `h-full rounded-full transition-[width] duration-[var(--zephyr-time-page)] ${clampedPercentage > 90 ? 'bg-danger' : 'bg-accent'}`;
+                    let usageTone = 'bg-accent';
+                    if (clampedPercentage >= 90) usageTone = 'bg-danger';
+                    else if (clampedPercentage >= 75) usageTone = 'bg-warning';
+                    barFill.className = `h-full rounded-full transition-[width] duration-[var(--zephyr-time-page)] ${usageTone}`;
                     barFill.style.width = `${clampedPercentage}%`;
 
                     barBg.setAttribute('role', 'progressbar');
@@ -1425,8 +1449,10 @@ export function initSubscriptionSettings({
             const lastUpdatedText = formatLastUpdated(configInfo.last_updated, t3);
             const hasUrl = !!configInfo.url_display;
             const hasTime = lastUpdatedText !== (t3.lastUpdatedNever || 'Never');
+            const expireTs = parseSubExpire(configInfo.sub_info);
+            const hasExpiry = expireTs > 0;
             
-            if (hasUrl || hasTime) {
+            if (hasUrl || hasTime || hasExpiry) {
                 const infoRow = document.createElement('div');
                 infoRow.className = 'flex items-center justify-between mt-1 gap-2';
                 
@@ -1437,11 +1463,39 @@ export function initSubscriptionSettings({
                     infoRow.appendChild(urlLabel);
                 }
                 
-                if (hasTime) {
-                    const timeEl = document.createElement('div');
-                    timeEl.className = 'text-2xs text-[var(--text-tertiary)] shrink-0';
-                    timeEl.textContent = lastUpdatedText;
-                    infoRow.appendChild(timeEl);
+                if (hasTime || hasExpiry) {
+                    const metaEl = document.createElement('div');
+                    metaEl.className = 'flex items-center gap-1.5 text-2xs text-[var(--text-tertiary)] shrink-0 ms-auto';
+                    if (hasTime) {
+                        const timeEl = document.createElement('span');
+                        timeEl.textContent = lastUpdatedText;
+                        if (t3.consoleSubLastUpdate) timeEl.title = `${t3.consoleSubLastUpdate}: ${lastUpdatedText}`;
+                        metaEl.appendChild(timeEl);
+                    }
+                    if (hasExpiry) {
+                        const secsLeft = expireTs - Date.now() / 1000;
+                        // Round up: a subscription with 5 hours left still has "1 day", not "Expired".
+                        const daysLeft = Math.ceil(secsLeft / 86400);
+                        if (hasTime) {
+                            const sep = document.createElement('span');
+                            sep.setAttribute('aria-hidden', 'true');
+                            sep.textContent = '·';
+                            metaEl.appendChild(sep);
+                        }
+                        const expEl = document.createElement('span');
+                        expEl.className = 'sub-expiry';
+                        if (secsLeft <= 0) {
+                            expEl.textContent = t3.subExpired || 'Expired';
+                            expEl.dataset.tone = 'danger';
+                        } else {
+                            expEl.textContent = tr('consoleSubDaysLeft', daysLeft, { d: String(daysLeft) });
+                            if (daysLeft < 7) expEl.dataset.tone = 'warning';
+                        }
+                        const expDate = new Date(expireTs * 1000).toLocaleDateString(appStore.get('currentLang') || undefined);
+                        expEl.title = `${t3.consoleSubExpiry || 'Expires'}: ${expDate}`;
+                        metaEl.appendChild(expEl);
+                    }
+                    infoRow.appendChild(metaEl);
                 }
                 
                 item.appendChild(infoRow);
