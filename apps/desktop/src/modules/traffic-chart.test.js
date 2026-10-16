@@ -182,10 +182,11 @@ describe('chart rendering', () => {
         flushRaf();
         // download series starts at 1024 B/s → 10% of the 10 KB/s floor
         // y = h - (v / max) * (h - 20) - 10 = 120 - 0.1 * 100 - 10 = 100
+        // Two samples: the newest sits on the right edge, the first one gap to its left.
         const [downStart, upStart] = moveTos();
-        expect(downStart.args).toEqual([0, 100]);
+        expect(downStart.args).toEqual([WIDTH - 10, 100]);
         // zero sits on the baseline (10px padding)
-        expect(upStart.args).toEqual([0, 110]);
+        expect(upStart.args).toEqual([WIDTH - 10, 110]);
     });
 
     it('scales the Y axis to the peak value when above the floor', () => {
@@ -193,8 +194,8 @@ describe('chart rendering', () => {
         chart.updateTrafficData(sample(0, 0));
         flushRaf();
         const [downStart, upStart] = moveTos();
-        expect(downStart.args).toEqual([0, 10]); // peak touches the top padding
-        expect(upStart.args).toEqual([0, 60]); // half the peak → middle
+        expect(downStart.args).toEqual([WIDTH - 10, 10]); // peak touches the top padding
+        expect(upStart.args).toEqual([WIDTH - 10, 60]); // half the peak → middle
     });
 
     it('treats NaN samples as zero instead of breaking the chart', () => {

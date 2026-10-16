@@ -72,6 +72,9 @@ import { initConsoleHome, activateConsole, deactivateConsole } from './ui/consol
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
 import { initNodeWheel } from './ui/node-wheel.js';
+import { initHomeStats } from './ui/home-stats.js';
+import { initHeaderFit } from './ui/header-fit.js';
+import { initTablistKeys } from './ui/tablist-keys.js';
 import {
   initTrayEventListeners,
   startUnifiedSync,
@@ -475,6 +478,9 @@ async function initApp() {
   initUwpExemption();
   autoApplyIfNeeded().catch(() => {}); // Non-blocking: avoid freezing UI on admin password prompt
   initNodeWheel();
+  registerCleanup(initHomeStats());
+  registerCleanup(initHeaderFit());
+  registerCleanup(initTablistKeys());
   initShortcutSettings();
 
   // 6b. Initialize reactive bindings (Bus -> store -> DOM)

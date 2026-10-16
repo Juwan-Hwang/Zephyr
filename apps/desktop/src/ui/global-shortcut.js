@@ -205,7 +205,7 @@ function openShortcutModal() {
     modal.innerHTML = `
         <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
             <div class="flex items-center justify-between">
-                <h3 class="text-sm font-bold text-[var(--text-primary)]">${escapeHtml(t.globalShortcut || 'Global Shortcuts')}</h3>
+                <h3 class="dialog-title">${escapeHtml(t.globalShortcut || 'Global Shortcuts')}</h3>
                 <button id="shortcut-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>

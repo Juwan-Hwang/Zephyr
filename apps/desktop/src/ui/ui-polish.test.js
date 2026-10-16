@@ -98,16 +98,17 @@ describe('TUN status labels', () => {
         expect(proxies).toMatch(/renderTunStatus\(/);
     });
 
-    it('TUN card places its status line directly under the title, like the system proxy card', () => {
+    it('TUN card uses the same two rows as the mode card: header, then a 36px status row', () => {
         const doc = parseIndex();
         const status = /** @type {HTMLElement} */ (doc.getElementById('tun-status-text'));
         expect(status).toBeTruthy();
         expect(status.dataset.i18n).toBe('tunInactive');
         const title = /** @type {HTMLElement} */ (doc.querySelector('[data-i18n="tunMode"]'));
-        // Title and status share the same text column.
-        const column = title.parentElement;
-        expect(column?.contains(status)).toBe(true);
-        expect(title.nextElementSibling?.contains(status)).toBe(true);
+        const card = title.closest('.glass-card');
+        expect(card?.contains(status)).toBe(true);
+        // The status sits in its own control row, the counterpart of #mode-selector-container.
+        expect(status.closest('.home-tun-status')).toBeTruthy();
+        expect(card?.contains(doc.getElementById('tun-proxy-toggle'))).toBe(true);
     });
 });
 
