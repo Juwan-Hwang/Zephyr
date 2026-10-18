@@ -265,7 +265,7 @@ pub async fn restart_core_as_root(
     // working-directory probe for root-owned processes.
     let core_path_str = core_path.to_string_lossy();
     let escaped_core_path = shell_escape_single(&core_path_str);
-    let uid = unsafe { libc::getuid() };
+    let uid = rustix::process::getuid().as_raw();
     // Terminate only this app's managed core processes (root- and user-owned):
     // an unrelated root mihomo service must never be killed by a TUN start.
     // The scan runs `ps` twice (plus `lsof` per legacy candidate), so it goes
@@ -884,6 +884,14 @@ mod tests {
             .collect();
         assert!(values.contains(&"any:53".to_owned()));
         assert!(values.contains(&"tcp://any:53".to_owned()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_safe_getuid_retrieval() {
+        let uid = rustix::process::getuid().as_raw();
+        // UID should be non-negative (u32 on Unix)
+        assert!(uid == rustix::process::getuid().as_raw());
     }
 }
 

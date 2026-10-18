@@ -70,6 +70,7 @@ glib = ">= 0.20, < 1"
 # Already an indirect dep via tauri/gtk; used for prctl(PR_SET_PDEATHSIG) to
 # ensure mihomo exits when the Tauri main process dies (even from SIGKILL).
 libc = "0.2"
+rustix = { version = "1", features = ["process"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
