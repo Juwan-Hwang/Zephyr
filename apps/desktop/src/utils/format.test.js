@@ -30,12 +30,30 @@ describe('formatBytes (decimal)', () => {
     it('1000 bytes = 1.00 KB', () => expect(formatBytes(1000)).toBe('1.00 KB'));
     it('1.00 MB for 1000000', () => expect(formatBytes(1000000)).toBe('1.00 MB'));
     it('1.02 KB for 1024', () => expect(formatBytes(1024)).toBe('1.02 KB'));
+
+    // Edge cases
+    it('negative bytes return 0 B', () => expect(formatBytes(-100)).toBe('0 B'));
+    it('null returns 0 B', () => expect(formatBytes(null)).toBe('0 B'));
+    it('undefined returns 0 B', () => expect(formatBytes(undefined)).toBe('0 B'));
+    it('NaN returns 0 B', () => expect(formatBytes(NaN)).toBe('0 B'));
+    it('Infinity returns 0 B', () => expect(formatBytes(Infinity)).toBe('0 B'));
+    it('-Infinity returns 0 B', () => expect(formatBytes(-Infinity)).toBe('0 B'));
+    it('fractional bytes < 1', () => expect(formatBytes(0.5)).toBe('0.50 B'));
+    it('string numeric bytes', () => expect(formatBytes('1000')).toBe('1.00 KB'));
+    it('invalid string returns 0 B', () => expect(formatBytes('invalid')).toBe('0 B'));
+    it('exceeding maximum unit index clamps to highest unit (TB)', () => {
+        expect(formatBytes(1e15)).toBe('1000.00 TB');
+    });
 });
 
 describe('formatSpeed', () => {
     it('0 B/s', () => expect(formatSpeed(0)).toBe('0 B/s'));
     it('1.00 KB/s', () => expect(formatSpeed(1000)).toBe('1.00 KB/s'));
     it('1.02 KB/s', () => expect(formatSpeed(1024)).toBe('1.02 KB/s'));
+    it('invalid/null speed returns 0 B/s', () => {
+        expect(formatSpeed(null)).toBe('0 B/s');
+        expect(formatSpeed(NaN)).toBe('0 B/s');
+    });
 });
 
 describe('formatDuration', () => {
