@@ -75,3 +75,48 @@ pub use core::{
 // Re-export platform-specific items
 #[cfg(target_os = "windows")]
 pub use core::CREATE_NO_WINDOW;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_manager_start_core_reexport_and_binary_name() {
+        let binary_name = core_binary_name();
+        #[cfg(target_os = "windows")]
+        assert_eq!(binary_name, "zephyr-mihomo.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(binary_name, "zephyr-mihomo");
+    }
+
+    #[test]
+    fn test_core_manager_mihomo_state_initialization() {
+        let state = MihomoState(std::sync::Arc::new(std::sync::Mutex::new(CoreData::new())));
+        let lock = state.0.lock().unwrap();
+        assert!(lock.process().is_none());
+        assert!(lock.last_secret().is_empty());
+        assert!(lock.last_config_path().is_none());
+        assert!(lock.last_port().is_none());
+        assert!(lock.started_at().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_core_manager_start_core_preflight_validation() {
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle();
+        let state = MihomoState(std::sync::Arc::new(std::sync::Mutex::new(CoreData::new())));
+
+        // Verify start_core returns an error when config file does not exist or preflight fails
+        let res = start_core(
+            app_handle.clone(),
+            tauri::State::from(&state),
+            "nonexistent_config_for_test.yaml".to_string(),
+            vec![],
+            Some("test_secret".to_string()),
+            Some(true),
+        )
+        .await;
+
+        assert!(res.is_err());
+    }
+}
