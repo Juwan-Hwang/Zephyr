@@ -19,6 +19,7 @@ import {
     indentWithTab,
     syntaxHighlighting,
     defaultHighlightStyle,
+    HighlightStyle,
     foldGutter,
     indentOnInput,
     bracketMatching,
@@ -53,10 +54,10 @@ function zephyrTheme() {
             borderLeftColor: 'var(--accent-primary, #007AFF)',
         },
         '.cm-activeLine': {
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            backgroundColor: 'color-mix(in srgb, var(--accent-primary, #007AFF) 7%, transparent)',
         },
         '.cm-activeLineGutter': {
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            backgroundColor: 'color-mix(in srgb, var(--accent-primary, #007AFF) 7%, transparent)',
         },
         '.cm-selectionBackground': {
             backgroundColor: 'var(--accent-primary, #007AFF) !important',
@@ -87,7 +88,7 @@ function zephyrTheme() {
 
         // Autocomplete styling
         '.cm-tooltip': {
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            backgroundColor: 'var(--zephyr-bg-elevated, rgba(0, 0, 0, 0.85))',
             backdropFilter: 'blur(16px)',
             border: '1px solid var(--border-primary, rgba(255,255,255,0.1))',
             borderRadius: '0.75rem',
@@ -120,6 +121,47 @@ function zephyrTheme() {
     }, { dark: true });
 }
 
+// ─── Syntax colours ────────────────────────────────────────────────
+
+/**
+ * CodeMirror's default highlight colours (purple keywords, dark blue names) were made
+ * for a light editor and vanish on the dark one. Keep its tag set but route every
+ * colour through CSS variables (styles.css: --cm-*), defined per theme. No purple.
+ * @type {Record<string, string>}
+ */
+const CM_COLOR_MAP = {
+    '#708': 'var(--cm-keyword)',
+    '#219': 'var(--cm-atom)',
+    '#164': 'var(--cm-number)',
+    '#a11': 'var(--cm-string)',
+    '#e40': 'var(--cm-regexp)',
+    '#00f': 'var(--cm-def)',
+    '#30a': 'var(--cm-def)',
+    '#085': 'var(--cm-type)',
+    '#167': 'var(--cm-type)',
+    '#256': 'var(--cm-def)',
+    '#00c': 'var(--cm-prop)',
+    '#940': 'var(--cm-comment)',
+    '#404740': 'var(--cm-comment)',
+    '#f00': 'var(--zephyr-color-danger, #ff453a)',
+};
+
+/** @type {any} */
+let _zephyrHighlight = null;
+function zephyrHighlightStyle() {
+    if (_zephyrHighlight) return _zephyrHighlight;
+    const specs = (/** @type {any} */ (defaultHighlightStyle)).specs || [];
+    _zephyrHighlight = HighlightStyle.define(specs.map((/** @type {any} */ spec) => {
+        const color = typeof spec.color === 'string' ? CM_COLOR_MAP[spec.color.toLowerCase()] : undefined;
+        const next = { ...spec };
+        if (color) next.color = color;
+        if (spec.color?.toLowerCase() === '#708') next.fontWeight = '600';
+        if (spec.color?.toLowerCase() === '#940') next.fontStyle = 'italic';
+        return next;
+    }));
+    return _zephyrHighlight;
+}
+
 // ─── Types ─────────────────────────────────────────────────────────
 
 /** @typedef {'yaml' | 'javascript'} EditorLanguage */
@@ -135,7 +177,23 @@ function zephyrTheme() {
  * @property {boolean} [readOnly=false] - Whether the editor is read-only
  * @property {(content: string) => void} [onChange] - Callback when content changes
  * @property {number} [lineHeight] - Line height in pixels
+ * @property {(pos: CursorInfo) => void} [onCursor] - Called on open and whenever the cursor or text changes
  */
+
+/**
+ * Cursor position for a status line ("Ln 9, Col 31 · 248 chars").
+ * @typedef {{ line: number, col: number, length: number }} CursorInfo
+ */
+
+/**
+ * @param {import('../../cm6.bundle.js').EditorState} state
+ * @returns {CursorInfo}
+ */
+export function getCursorInfo(state) {
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    return { line: line.number, col: head - line.from + 1, length: state.doc.length };
+}
 
 // ─── Editor Factory ────────────────────────────────────────────────
 
@@ -155,6 +213,7 @@ export function createEditor(options) {
         readOnly = false,
         onChange,
         lineHeight,
+        onCursor,
     } = options;
 
     /** @type {Extension[]} */
@@ -165,7 +224,7 @@ export function createEditor(options) {
         foldGutter(),
         indentOnInput(),
         bracketMatching(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(zephyrHighlightStyle()),
         keymap.of([indentWithTab]),
         zephyrTheme(),
         EditorState.readOnly.of(readOnly),
@@ -200,6 +259,12 @@ export function createEditor(options) {
         }));
     }
 
+    if (onCursor) {
+        extensions.push(EditorView.updateListener.of((/** @type {import('../../cm6.bundle.js').ViewUpdate} */ update) => {
+            if (update.selectionSet || update.docChanged) onCursor(getCursorInfo(update.state));
+        }));
+    }
+
     // Custom line height
     if (lineHeight) {
         extensions.push(EditorView.theme({
@@ -216,6 +281,7 @@ export function createEditor(options) {
         state,
         parent,
     });
+    onCursor?.(getCursorInfo(view.state));
 
     return view;
 }

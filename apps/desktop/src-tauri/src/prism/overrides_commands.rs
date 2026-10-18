@@ -27,8 +27,11 @@ pub fn override_list(state: State<PrismState>) -> Result<Vec<OverrideItem>, Stri
     items.sort_by_key(|i| i.order);
     // Populate last_success from execution logs
     for item in &mut items {
-        if let Ok(success) = overrides_store::read_log_success(&state, &item.id) {
+        if let Ok((success, error)) = overrides_store::read_log_status(&state, &item.id) {
             item.last_success = Some(success);
+            if !success {
+                item.last_error = error;
+            }
         }
     }
     Ok(items)
@@ -353,6 +356,7 @@ pub async fn override_set_content(
     id: String,
     content: String,
     dry_run: Option<bool>,
+    save_only: Option<bool>,
 ) -> Result<OverrideLog, String> {
     check_input_size(&content, "Override content")?;
 
@@ -366,6 +370,38 @@ pub async fn override_set_content(
         if let Err(e) = runtime.validate(&content) {
             return Err(format!("Script validation failed: {e}"));
         }
+    } else if item.ext == OverrideExt::PrismYaml {
+        // No dry run for Prism YAML: at least refuse content that is not YAML.
+        if let Err(e) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            return Err(format!("YAML syntax error: {e}"));
+        }
+    }
+
+    // Save only: persist the content without executing it (JS is syntax-checked,
+    // Prism YAML is parse-checked; both are fully checked when they run).
+    if save_only.unwrap_or(false) {
+        overrides_store::write_content(&state, &id, &content)?;
+        // An enabled Prism YAML override is compiled from its workspace patch: keep
+        // the patch in step so the next apply uses what was just saved.
+        if item.ext == OverrideExt::PrismYaml && item.enabled {
+            // Same lock as the apply paths, so a compile never reads a half-written patch.
+            let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
+                .lock()
+                .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+            let prism_dir = crate::prism::prism_data_dir(&state.app)?;
+            write_file_secure(&prism_dir.join(item.patch_filename()), &content)
+                .map_err(|e| format!("Failed to write Prism patch: {e}"))?;
+        }
+        return Ok(OverrideLog {
+            script_id: item.id,
+            script_name: item.name,
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_us: 0,
+            success: true,
+            config_modified: false,
+            error: None,
+            logs: Vec::new(),
+        });
     }
 
     let dry = dry_run.unwrap_or(false);
@@ -379,11 +415,36 @@ pub async fn override_set_content(
     let log = if dry {
         execute_override_test(&state, &item, &content)?
     } else {
-        execute_override_write(&state, &item, &content)?
+        // The content is already saved: a pipeline error (core not running, the
+        // running config unreadable) is this run's result, not a failed save, so
+        // record it as the last run instead of leaving the previous status shown.
+        execute_override_write(&state, &item, &content).unwrap_or_else(|e| OverrideLog {
+            script_id: item.id.clone(),
+            script_name: item.name.clone(),
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_us: 0,
+            success: false,
+            config_modified: false,
+            error: Some(e),
+            logs: Vec::new(),
+        })
     };
 
-    // Persist log
-    overrides_store::save_log(&state, &id, &log)?;
+    // Persist the log of real runs only: a dry run (syntax check) must not
+    // replace the last-run status shown for the override.
+    // The script is already written and applied by now: a log that cannot be
+    // saved must not turn the run into an error.
+    if !dry {
+        if let Err(e) = overrides_store::save_log(&state, &id, &log) {
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Could not save the run log for override {}: {}",
+                id,
+                e
+            );
+        }
+    }
 
     Ok(log)
 }
@@ -394,24 +455,18 @@ fn execute_override_test(
     item: &OverrideItem,
     content: &str,
 ) -> Result<OverrideLog, String> {
-    // Prism YAML dry-run: not yet supported — return a clear failure
+    // Prism YAML has no dry-run pipeline: the caller already parsed it, so a
+    // syntax check passes once the YAML is well-formed.
     if item.ext == OverrideExt::PrismYaml {
         return Ok(OverrideLog {
             script_id: item.id.clone(),
             script_name: item.name.clone(),
             executed_at: chrono::Utc::now().timestamp_millis(),
             duration_us: 0,
-            success: false,
+            success: true,
             config_modified: false,
-            error: Some(
-                "Prism YAML dry-run validation is not yet supported. Save & Run to test."
-                    .to_owned(),
-            ),
-            logs: vec![LogEntry {
-                level: "Warn".to_owned(),
-                message: "Prism YAML override: dry-run not supported, use Save & Run instead."
-                    .to_owned(),
-            }],
+            error: None,
+            logs: Vec::new(),
         });
     }
 
