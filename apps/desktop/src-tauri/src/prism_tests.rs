@@ -32,7 +32,7 @@ mod tests {
     // Import private items from prism.rs (two levels up)
     use super::super::{
         count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml, parse_position,
-        read_groups, sanitize_filename, write_groups, RuleGroup, RuleGroups,
+        read_groups, resolve_rule_path, sanitize_filename, write_groups, RuleGroup, RuleGroups,
     };
 
     // ========================================================================
@@ -992,7 +992,7 @@ DOMAIN-SUFFIX,cdn.example-e.co.uk,Reject
         #[test]
         fn resolve_rule_path_valid() {
             let dir = unique_temp_dir();
-            let path = super::super::resolve_rule_path(&dir, "adblock.prism.yaml").unwrap();
+            let path = resolve_rule_path(&dir, "adblock.prism.yaml").unwrap();
             assert_eq!(path, dir.join("adblock.prism.yaml"));
             cleanup(&dir);
         }
@@ -1001,7 +1001,7 @@ DOMAIN-SUFFIX,cdn.example-e.co.uk,Reject
         fn resolve_rule_path_traversal_sanitized() {
             let dir = unique_temp_dir();
             // Path traversal separators are stripped, keeping it safely inside prism_dir
-            let path = super::super::resolve_rule_path(&dir, "../../etc/passwd.prism.yaml").unwrap();
+            let path = resolve_rule_path(&dir, "../../etc/passwd.prism.yaml").unwrap();
             assert!(path.starts_with(&dir));
             cleanup(&dir);
         }
