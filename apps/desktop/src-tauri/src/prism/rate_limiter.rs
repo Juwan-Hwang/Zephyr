@@ -128,4 +128,79 @@ mod tests {
         assert!(limiter.check("a").is_err()); // a is rate-limited
         assert!(limiter.check("b").is_ok()); // b is not
     }
+
+    #[test]
+    fn test_sliding_window_expiration() {
+        let mut limiter = RateLimiter::new();
+        let window = Duration::from_millis(50);
+        limiter.register("test", 2, window);
+
+        assert!(limiter.check("test").is_ok());
+        assert!(limiter.check("test").is_ok());
+        assert!(limiter.check("test").is_err());
+
+        std::thread::sleep(window + Duration::from_millis(10));
+
+        assert!(limiter.check("test").is_ok());
+    }
+
+    #[test]
+    fn test_partial_expiration_pruning() {
+        let mut limiter = RateLimiter::new();
+        let window = Duration::from_millis(100);
+        limiter.register("test", 2, window);
+
+        // First call at t=0
+        assert!(limiter.check("test").is_ok());
+
+        // Second call at t=60ms
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(limiter.check("test").is_ok());
+
+        // Third call at t=60ms -> rejected
+        assert!(limiter.check("test").is_err());
+
+        // Wait another 50ms (total elapsed 110ms > 100ms window from t=0).
+        // First timestamp is pruned, second timestamp (at t=60ms) remains.
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Should allow 1 call (replacing the pruned first call)
+        assert!(limiter.check("test").is_ok());
+        // Next call exceeds limit (2 calls in window t=60ms..t=110ms)
+        assert!(limiter.check("test").is_err());
+    }
+
+    #[test]
+    fn test_retry_after_duration_calculation() {
+        let mut limiter = RateLimiter::new();
+        let window = Duration::from_millis(200);
+        limiter.register("test", 1, window);
+
+        assert!(limiter.check("test").is_ok());
+        let err = limiter.check("test").unwrap_err();
+        assert!(err > Duration::from_secs(0));
+        assert!(err <= window + Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_zero_max_calls() {
+        let mut limiter = RateLimiter::new();
+        limiter.register("test", 0, Duration::from_secs(1));
+
+        let err = limiter.check("test").unwrap_err();
+        assert!(err > Duration::from_secs(0));
+    }
+
+    #[test]
+    fn test_rapid_limit_and_recovery_cycle() {
+        let mut limiter = RateLimiter::new();
+        let window = Duration::from_millis(30);
+        limiter.register("test", 1, window);
+
+        for _ in 0..3 {
+            assert!(limiter.check("test").is_ok());
+            assert!(limiter.check("test").is_err());
+            std::thread::sleep(window + Duration::from_millis(5));
+        }
+    }
 }
