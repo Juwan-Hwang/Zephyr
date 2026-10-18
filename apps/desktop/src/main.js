@@ -94,6 +94,7 @@ import { bind } from './ui/bind.js';
 import { appStore } from './ui/state.js';
 import { Bus, Events } from './ui/events.js';
 import { normalizeVersion, isRemoteNewer } from './utils/version-utils.js';
+import { initInputModality } from './ui/input-modality.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
@@ -763,6 +764,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
+    initInputModality();
   initApp().catch((err) => {
     apiLogger.error('Fatal: initApp threw an unhandled error', err);
   });
