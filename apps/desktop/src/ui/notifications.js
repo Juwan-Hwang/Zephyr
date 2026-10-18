@@ -435,21 +435,37 @@ function openConfirmModal(title, message = '', options = {}) {
             msgDiv.className = danger
                 ? 'text-sm leading-6 text-[var(--text-secondary)]'
                 : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
-            msgDiv.textContent = messageStr;
+            // **text** marks the part worth reading first (e.g. how many rules go away).
+            // Only our own destructive prompts use it: other messages may carry outside
+            // text (a deep-link URL) that must be shown exactly as is.
+            (danger ? messageStr.split(/\*\*(.+?)\*\*/) : [messageStr]).forEach((part, i) => {
+                if (!part) return;
+                if (i % 2) {
+                    const strong = document.createElement('strong');
+                    strong.className = 'font-semibold text-[var(--text-primary)]';
+                    strong.textContent = part;
+                    msgDiv.appendChild(strong);
+                } else {
+                    msgDiv.appendChild(document.createTextNode(part));
+                }
+            });
             contentArea.appendChild(msgDiv);
         }
 
         // A previous dialog may still be closing and not have restored the shared
         // button yet: start from its default look and label every time.
         resetConfirmButton(confirmBtn);
+        container.classList.remove('is-danger');
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
             confirmBtn.classList.add('btn-danger', 'is-solid');
+            container.classList.add('is-danger');
         }
         if (confirmText) confirmBtn.textContent = confirmText;
 
         // Focus trap: Tab cycles inside modal, Escape closes
-        // Destructive dialogs start on Cancel so a stray Enter never deletes.
+        // Destructive dialogs start on Cancel so a stray Enter never deletes (focused the
+        // trap's way, so opening with the mouse shows no focus ring).
         const trap = createFocusTrap(bg, {
             onEscape: () => close(false),
             ...(danger ? { initialFocus: cancelBtn } : {}),
@@ -470,6 +486,7 @@ function openConfirmModal(title, message = '', options = {}) {
                 if (generation === _confirmGeneration) {
                     bg.classList.add('hidden');
                     resetConfirmButton(confirmBtn);
+                    container.classList.remove('is-danger');
                 }
                 resolve(val);
             }, 300);

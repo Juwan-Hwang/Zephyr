@@ -20,7 +20,7 @@
 
 import { getConnections, closeConnection, closeAllConnections, isCoreReachable } from '../api.js';
 import { showNotification } from '../ui/notifications.js';
-import { translations, currentLang, applyTranslations } from '../i18n.js';
+import { translations, currentLang, applyTranslations, t as tFmt } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { formatBytes, formatSpeed } from '../utils/format.js';
 import { connectionsLogger } from '../utils/logger.js';
@@ -41,6 +41,14 @@ let closedConnections = [];
 let currentConnTab = 'active'; // 'active' | 'closed'
 const MAX_CLOSED_CONNS = 200;
 
+/**
+ * Connections closed (and archived) by the user. A poll that was already in
+ * flight still lists them; drop them from it so they are not shown as active
+ * again and archived twice. An id leaves the set once the core stops listing it.
+ * @type {Set<string>}
+ */
+const userClosedIds = new Set();
+
 /** Sort state: { key: string, dir: 'asc'|'desc' } or null */
 /** @type {{ key: string, dir: string } | null} */
 let connSortState = null;
@@ -53,6 +61,9 @@ let connAccumulators = {};
 let activeDetailConnId = null;
 /** @type {string|null} */
 let activeDetailMode = null;
+
+/** Refresh paused by the user (Pause button). */
+let _connPaused = false;
 
 /** Debounce flag to prevent overlapping fetches */
 let isFetching = false;
@@ -84,53 +95,41 @@ const PAGE_HTML = `
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
-            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
+            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner pe-9">
+            <button id="connections-search-clear" type="button" class="conn-search-clear hidden" data-i18n-title="clearSearch" data-i18n-aria-label="clearSearch" title="Clear search" aria-label="Clear search">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
         <!-- Close All / Clear All Button -->
         <button id="close-all-conns-btn" class="btn-danger">
             <svg id="action-btn-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             <span id="action-btn-text" data-i18n="closeAll">Close All</span>
         </button>
-        <!-- Refresh Button -->
-        <button id="refresh-conns-btn" class="btn-ghost">
-            <svg id="conns-refresh-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-            <span data-i18n="refresh">Refresh</span>
+        <!-- Pause / resume the 2 s refresh (rows stop moving so one can be clicked) -->
+        <button id="pause-conns-btn" type="button" class="btn-ghost" aria-pressed="false">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            <span id="pause-conns-text" data-i18n="pause">Pause</span>
         </button>
     </div>
 </header>
 
-<!-- Stats Bar - 4 columns: Total | ↓Total | ↑Total | Active -->
-<div id="conn-stats-bar" class="glass-card p-4 relative z-10 shrink-0 grid grid-cols-4 gap-4">
-    <div class="flex flex-col items-center justify-center">
-        <span id="stat-total" class="text-xl font-extralight text-[var(--text-primary)] tabular-nums">0</span>
-        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="totalConn">Total</span>
-    </div>
-    <div class="flex flex-col items-center justify-center">
-        <span id="stat-dl-total" class="text-lg font-semibold text-download tabular-nums">0 B</span>
-        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="dlTotal">↓ Total</span>
-    </div>
-    <div class="flex flex-col items-center justify-center">
-        <span id="stat-ul-total" class="text-lg font-semibold text-upload tabular-nums">0 B</span>
-        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="ulTotal">↑ Total</span>
-    </div>
-    <div class="flex flex-col items-center justify-center">
-        <span id="stat-active" class="text-lg font-semibold text-emerald-400 tabular-nums">0</span>
-        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="activeConn">Active</span>
-    </div>
-</div>
-
 <!-- Connection List Container with Tabs -->
-<div id="connections-list-container" class="glass-card flex-1 overflow-hidden relative z-10 flex flex-col min-h-0">
+<div id="connections-list-container" data-conn-page="1" class="glass-card flex-1 overflow-hidden relative z-10 flex flex-col min-h-0">
     <!-- Tab Bar + Table Header -->
     <div class="shrink-0">
         <!-- Tabs -->
         <div class="flex items-center px-4 pt-4 pb-1 gap-2">
             <div class="seg-tabs" role="tablist">
                 <button type="button" id="conn-tab-active" role="tab" aria-selected="true" class="conn-tab seg-tab active" data-i18n="activeTab">Active</button>
-                <button type="button" id="conn-tab-closed" role="tab" aria-selected="false" class="conn-tab seg-tab" data-i18n="closedTab">Closed</button>
+                <button type="button" id="conn-tab-closed" role="tab" aria-selected="false" class="conn-tab seg-tab"><span data-i18n="closedTab">Closed</span><span id="conn-tab-closed-count"></span></button>
             </div>
             <div class="flex-1"></div>
-            <span id="closed-count-badge" class="hidden text-xs text-[var(--text-muted)] tabular-nums pe-1"></span>
+            <!-- One quiet line instead of the old 4-card stats bar: count · ↓ total · ↑ total -->
+            <span id="conn-summary" class="conn-summary tabular-nums">
+                <span id="stat-total">0</span>
+                <span class="conn-summary-num text-download">↓ <span id="stat-dl-total">0 B</span></span>
+                <span class="conn-summary-num text-upload">↑ <span id="stat-ul-total">0 B</span></span>
+            </span>
         </div>
         <!-- Table Header (clickable for sort). Two lines per column mirror the two-line rows. -->
         <div class="conn-grid conn-head" id="conn-table-header">
@@ -142,11 +141,11 @@ const PAGE_HTML = `
                 <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="chains" data-i18n="chainsCol">Chains</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
+                <span class="sortable" id="conn-head-dl" role="button" tabindex="0" aria-pressed="false" data-sort="dlSpeed" data-i18n="dlSpeedCol">↓ Speed</span>
                 <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="dlTotal" data-i18n="dlTotalCol">↓ Total</span>
             </div>
             <div class="conn-head-cell conn-num">
-                <span class="sortable" role="button" tabindex="0" aria-pressed="false" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
+                <span class="sortable" id="conn-head-ul" role="button" tabindex="0" aria-pressed="false" data-sort="ulSpeed" data-i18n="ulSpeedCol">↑ Speed</span>
                 <span class="sortable conn-head-sub" role="button" tabindex="0" aria-pressed="false" data-sort="ulTotal" data-i18n="ulTotalCol">↑ Total</span>
             </div>
         </div>
@@ -182,7 +181,7 @@ export function initConnectionsPage() {
     if (!container) return;
 
     // Inject template if not already present
-    if (!document.getElementById('conn-stats-bar')) {
+    if (!document.querySelector('[data-conn-page]')) {
         // eslint-disable-next-line no-unsanitized/property -- static HTML template (PAGE_HTML is a hardcoded string)
         container.innerHTML = PAGE_HTML; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         // Apply i18n translations to newly injected DOM elements
@@ -218,7 +217,7 @@ export function initConnectionsPage() {
             if (generation !== _pollGeneration) return;
             const pageEl = document.querySelector('[data-page="connections"]');
             if (pageEl && !pageEl.classList.contains('hidden') && !document.hidden) {
-                await fetchAndRenderConnections();
+                if (!_connPaused) await fetchAndRenderConnections();
             } else {
                 // Window or page is hidden — pause the poll loop entirely.
                 // The visibilitychange handler will restart it when appropriate.
@@ -241,7 +240,7 @@ export function initConnectionsPage() {
         const pageEl = document.querySelector('[data-page="connections"]');
         const isPageActive = pageEl && !pageEl.classList.contains('hidden');
         if (!document.hidden && isPageActive && connectionsPollTimer == null && generation === _pollGeneration) {
-            void fetchAndRenderConnections();
+            if (!_connPaused) void fetchAndRenderConnections();
             schedulePoll();
         }
     };
@@ -280,6 +279,13 @@ function bindConnTabEvents() {
 /** @param {string} tab */
 function switchConnTab(tab) {
     currentConnTab = tab;
+    updateConnStats(cachedConnections);
+    // Closed tab: the speed columns become "Duration" / "Closed at".
+    const tt = /** @type {any} */ (translations)[currentLang] ?? {};
+    const headDl = document.getElementById('conn-head-dl');
+    const headUl = document.getElementById('conn-head-ul');
+    if (headDl) { headDl.dataset.i18n = tab === 'closed' ? 'connDurationCol' : 'dlSpeedCol'; headDl.textContent = tab === 'closed' ? (tt.connDurationCol || 'Duration') : (tt.dlSpeedCol || '↓ Speed'); }
+    if (headUl) { headUl.dataset.i18n = tab === 'closed' ? 'connClosedAtCol' : 'ulSpeedCol'; headUl.textContent = tab === 'closed' ? (tt.connClosedAtCol || 'Closed at') : (tt.ulSpeedCol || '↑ Speed'); }
     const activeTab = document.getElementById('conn-tab-active');
     const closedTab = document.getElementById('conn-tab-closed');
     const actionBtn = document.querySelector('button#close-all-conns-btn');
@@ -332,18 +338,21 @@ function switchConnTab(tab) {
 function bindConnectionsEvents() {
     const searchClone = bindOnce(document.getElementById('connections-search-input'));
     const closeAllClone = bindOnce(document.getElementById('close-all-conns-btn'));
-    const refreshClone = bindOnce(document.getElementById('refresh-conns-btn'));
 
     if (searchClone) {
         searchClone.addEventListener('input', (e) => {
             const target = /** @type {HTMLInputElement} */ (e.target);
             connectionsSearchQuery = target.value.trim().toLowerCase();
+            document.getElementById('connections-search-clear')?.classList.toggle('hidden', target.value === '');
             renderConnectionList(
                 currentConnTab === 'active' ? cachedConnections : closedConnections,
                 currentConnTab
             );
         });
     }
+
+    const searchClearClone = bindOnce(document.getElementById('connections-search-clear'));
+    if (searchClearClone) searchClearClone.addEventListener('click', clearConnectionsSearch);
 
     if (closeAllClone) {
         closeAllClone.addEventListener('click', () => {
@@ -352,8 +361,25 @@ function bindConnectionsEvents() {
         });
     }
 
-    if (refreshClone) {
-        refreshClone.addEventListener('click', () => fetchAndRenderConnections());
+    const pauseBtn = bindOnce(document.getElementById('pause-conns-btn'));
+    if (pauseBtn) {
+        const syncPauseButton = () => {
+            const t = /** @type {any} */ (translations)[currentLang] ?? {};
+            pauseBtn.setAttribute('aria-pressed', String(_connPaused));
+            const label = document.getElementById('pause-conns-text');
+            if (label) {
+                label.dataset.i18n = _connPaused ? 'resume' : 'pause';
+                label.textContent = _connPaused ? (t.resume || 'Resume') : (t.pause || 'Pause');
+            }
+        };
+        // Re-entering the page starts live again; the kept button must say so too.
+        _connPaused = false;
+        syncPauseButton();
+        pauseBtn.addEventListener('click', () => {
+            _connPaused = !_connPaused;
+            syncPauseButton();
+            if (!_connPaused) void fetchAndRenderConnections();
+        });
     }
 
     // Bind sortable header clicks
@@ -370,7 +396,14 @@ async function fetchAndRenderConnections() {
 
     try {
         const data = await getConnections();
-        const incomingConns = (/** @type {any} */ (data)).connections || [];
+        const rawConns = (/** @type {any} */ (data)).connections || [];
+        if (userClosedIds.size > 0) {
+            const listed = new Set(rawConns.map(/** @param {any} c */ (c) => c.id));
+            for (const id of userClosedIds) if (!listed.has(id)) userClosedIds.delete(id);
+        }
+        const incomingConns = userClosedIds.size > 0
+            ? rawConns.filter(/** @param {any} c */ (c) => !userClosedIds.has(c.id))
+            : rawConns;
 
         // ── Phase 1: Detect dead connections & archive them ──
         const aliveIds = new Set(incomingConns.map(/** @param {any} c */ (c) => c.id));
@@ -397,7 +430,9 @@ async function fetchAndRenderConnections() {
 
             if (!connAccumulators[id]) {
                 // First time seeing this connection — baseline, speed starts at 0
-                connAccumulators[id] = { dl: 0, ul: 0, prevDl: curDl, prevUl: curUl, seenAt: now, prevTs: now, dlSpeed: 0, ulSpeed: 0 };
+                // Totals start from the core's own cumulative counters (they used to start at 0
+                // when the page opened); speed still comes from the delta between polls.
+                connAccumulators[id] = { dl: curDl, ul: curUl, prevDl: curDl, prevUl: curUl, seenAt: now, prevTs: now, dlSpeed: 0, ulSpeed: 0 };
             } else {
                 const acc = connAccumulators[id];
                 const dt = (now - acc.prevTs) / 1000; // seconds since last poll
@@ -425,6 +460,10 @@ async function fetchAndRenderConnections() {
         cachedConnections = incomingConns;
 
         // ── Phase 3: Update UI ──
+        const d = /** @type {any} */ (data);
+        _coreTotals = Number.isFinite(Number(d?.downloadTotal)) && Number.isFinite(Number(d?.uploadTotal))
+            ? { dl: Number(d.downloadTotal), ul: Number(d.uploadTotal) }
+            : null;
         updateConnStats(incomingConns);
 
         renderConnectionList(
@@ -458,15 +497,19 @@ async function fetchAndRenderConnections() {
 // Stats Computation
 // ============================================
 
+/** Core-wide totals from /connections (downloadTotal/uploadTotal), when the core reports them. */
+/** @type {{ dl: number, ul: number } | null} */
+let _coreTotals = null;
+
 /** @param {any[]} conns */
 function updateConnStats(conns) {
     const totalEl = document.getElementById('stat-total');
     const dlTotalEl = document.getElementById('stat-dl-total');
     const ulTotalEl = document.getElementById('stat-ul-total');
-    const activeEl = document.getElementById('stat-active');
 
-    const total = conns.length + closedConnections.length;
-    const active = conns.filter(/** @param {any} c */ (c) => (c.download ?? 0) > 0 || (c.upload ?? 0) > 0).length;
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    // The Closed tab counts its history, not the live connections.
+    const total = currentConnTab === 'closed' ? closedConnections.length : conns.length;
 
     let grandDl = 0, grandUl = 0;
     for (const acc of Object.values(connAccumulators)) {
@@ -478,13 +521,25 @@ function updateConnStats(conns) {
         grandUl += c.ulTotal ?? 0;
     }
 
+    // Same totals as the home page: the core's counters since it started.
+    if (_coreTotals) {
+        grandDl = _coreTotals.dl;
+        grandUl = _coreTotals.ul;
+    }
+
     _totalDownloaded = grandDl;
     _totalUploaded = grandUl;
 
-    if (totalEl) totalEl.textContent = String(total);
+    if (totalEl) {
+        // The count is bold, the unit words are not: "**12** connections".
+        const [pre = '', post = ''] = (t.connCountLabel || '@@count@@ connections').split('@@count@@');
+        const num = document.createElement('strong');
+        num.className = 'conn-summary-count';
+        num.textContent = String(total);
+        totalEl.replaceChildren(pre, num, post);
+    }
     if (dlTotalEl) dlTotalEl.textContent = formatBytes(grandDl);
     if (ulTotalEl) ulTotalEl.textContent = formatBytes(grandUl);
-    if (activeEl) activeEl.textContent = String(active);
 }
 
 // ============================================
@@ -500,6 +555,84 @@ const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 
 /** @type {{ active: HTMLElement | null, closed: HTMLElement | null }} */
 const emptyTemplates = { active: null, closed: null };
+
+/**
+ * Connections matching the search box (host, IP, port, rule, chain, process).
+ * @param {any[]} connections
+ * @returns {any[]}
+ */
+function filterConnsBySearch(connections) {
+    if (!connectionsSearchQuery) return connections;
+    const q = connectionsSearchQuery;
+    return connections.filter(/** @param {any} c */ (c) => {
+        const m = c.metadata ?? {};
+        return (m.host ?? '').toLowerCase().includes(q)
+            || (m.destinationIP ?? '').toLowerCase().includes(q)
+            || String(m.destinationPort ?? '').toLowerCase().includes(q)
+            || (c.rule ?? '').toLowerCase().includes(q)
+            || (c.chains ?? []).join(' ').toLowerCase().includes(q)
+            || (m.process ?? '').toLowerCase().includes(q);
+    });
+}
+
+/** While searching, "Close all" only closes what the search shows — and says so. */
+/** A bulk close is running: polls must not re-enable or relabel its button. */
+let _bulkCloseInFlight = false;
+
+function syncCloseMatchingButton(/** @type {number} */ count) {
+    const btn = /** @type {HTMLButtonElement|null} */ (document.getElementById('close-all-conns-btn'));
+    const text = document.getElementById('action-btn-text');
+    if (!btn || !text || currentConnTab !== 'active' || _bulkCloseInFlight) return;
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    if (connectionsSearchQuery) {
+        text.textContent = (t.closeMatchingConns || 'Close @@count@@ matching').replace('@@count@@', String(count));
+        btn.disabled = count === 0;
+    } else {
+        text.textContent = t.closeAll || 'Close All';
+        btn.disabled = false;
+    }
+}
+
+/** Empty the search box and show every connection again. */
+function clearConnectionsSearch() {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById('connections-search-input'));
+    if (input) { input.value = ''; input.dispatchEvent(new Event('input')); input.focus(); }
+}
+
+/**
+ * Clock time a connection closed. A stored language that is not a valid locale
+ * tag falls back to the system locale instead of throwing.
+ * @param {number|string} ts
+ * @returns {string}
+ */
+function formatClosedTime(ts) {
+    const d = new Date(ts);
+    try {
+        return d.toLocaleTimeString(currentLang || undefined, { hour12: false });
+    } catch {
+        return d.toLocaleTimeString(undefined, { hour12: false });
+    }
+}
+
+/** Empty state for a search with no matches, with a "clear search" action. */
+function buildSearchEmptyState() {
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    const wrap = document.createElement('div');
+    wrap.className = 'empty-state conn-search-empty';
+    wrap.dataset.query = connectionsSearchQuery;
+    wrap.dataset.lang = currentLang;
+    wrap.insertAdjacentHTML('beforeend', '<svg class="w-12 h-12 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>');
+    const title = document.createElement('p');
+    title.className = 'conn-search-empty-title';
+    title.textContent = (t.connSearchNoMatch || 'No connections match “@@query@@”').replace('@@query@@', connectionsSearchQuery);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-ghost';
+    btn.textContent = t.clearSearch || 'Clear search';
+    btn.addEventListener('click', clearConnectionsSearch);
+    wrap.append(title, btn);
+    return wrap;
+}
 
 /**
  * @param {any[]} connections
@@ -518,18 +651,20 @@ function renderConnectionList(connections, mode) {
     const closedEmptyState = emptyTemplates.closed;
     if (!container) return;
 
-    let filtered = connections;
-    if (connectionsSearchQuery) {
-        const q = connectionsSearchQuery;
-        filtered = connections.filter(/** @param {any} c */ (c) => {
-            const m = c.metadata ?? {};
-            return (m.host ?? '').toLowerCase().includes(q)
-                || (m.destinationIP ?? '').toLowerCase().includes(q)
-                || String(m.destinationPort ?? '').toLowerCase().includes(q)
-                || (c.rule ?? '').toLowerCase().includes(q)
-                || (c.chains ?? []).join(' ').toLowerCase().includes(q)
-                || (m.process ?? '').toLowerCase().includes(q);
-        });
+    const filtered = filterConnsBySearch(connections);
+    if (mode === 'active') syncCloseMatchingButton(filtered.length);
+
+    if (filtered.length === 0 && connectionsSearchQuery && connections.length > 0) {
+        // Nothing matches the search — say that, not "no active connections".
+        // Keep the one already shown for this query: rebuilding it every poll
+        // would take keyboard focus off its "Clear search" button.
+        const shown = container.firstElementChild;
+        if (container.childElementCount === 1 && shown instanceof HTMLElement && shown.classList.contains('conn-search-empty')
+            && shown.dataset.query === connectionsSearchQuery && shown.dataset.lang === currentLang) return;
+        container.replaceChildren();
+        resetKeyedList(container);
+        container.appendChild(buildSearchEmptyState());
+        return;
     }
 
     if (filtered.length === 0) {
@@ -619,9 +754,9 @@ function getConnSortValue(conn, key, mode) {
         case 'host': return (conn.metadata?.host ?? '').toLowerCase();
         case 'rule': return (conn.rule ?? '').toLowerCase();
         case 'chains': return (conn.chains ?? []).join(' → ').toLowerCase();
-        case 'dlSpeed': return mode === 'closed' ? (conn.dlSpeed ?? 0) : (connAccumulators[conn.id]?.dlSpeed ?? 0);
+        case 'dlSpeed': return mode === 'closed' ? Math.max(0, (conn.closedAt ?? 0) - connStartMs(conn)) : (connAccumulators[conn.id]?.dlSpeed ?? 0);
         case 'dlTotal': return mode === 'closed' ? (conn.dlTotal ?? 0) : (connAccumulators[conn.id]?.dl ?? 0);
-        case 'ulSpeed': return mode === 'closed' ? (conn.ulSpeed ?? 0) : (connAccumulators[conn.id]?.ulSpeed ?? 0);
+        case 'ulSpeed': return mode === 'closed' ? (conn.closedAt ?? 0) : (connAccumulators[conn.id]?.ulSpeed ?? 0);
         case 'ulTotal': return mode === 'closed' ? (conn.ulTotal ?? 0) : (connAccumulators[conn.id]?.ul ?? 0);
         default: return 0;
     }
@@ -714,15 +849,14 @@ function bindHeaderSortEvents() {
         });
         cell.addEventListener('click', () => {
             const key = /** @type {HTMLElement} */ (cell).dataset.sort;
-            if (!connSortState) {
-                // No active sort → set this column, default descending
-                connSortState = { key: /** @type {string} */ (key), dir: 'desc' };
-            } else if (connSortState.key !== key) {
-                // Different column → switch to new column, default descending
-                connSortState = { key: /** @type {string} */ (key), dir: 'desc' };
-            } else if (connSortState.dir === 'desc') {
-                // Same column → cycle: desc → asc → null (off)
-                connSortState.dir = 'asc';
+            // Text columns start A→Z, number columns start largest first; a second click flips,
+            // a third turns sorting off.
+            const first = SORT_TEXT_KEYS.has(/** @type {string} */ (key)) ? 'asc' : 'desc';
+            const second = first === 'asc' ? 'desc' : 'asc';
+            if (!connSortState || connSortState.key !== key) {
+                connSortState = { key: /** @type {string} */ (key), dir: first };
+            } else if (connSortState.dir === first) {
+                connSortState.dir = second;
             } else {
                 connSortState = null; // turn off sorting
             }
@@ -773,7 +907,7 @@ function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode), id
     const host = _esc(meta.host ?? '-');
     const process = _esc(meta.process ?? '');
     const destIP = _esc(meta.destinationIP ?? '-');
-    const destPort = _esc(meta.destinationPort ?? '-');
+    const destPort = _esc(String(meta.destinationPort ?? '-'));
     const rule = _esc(conn.rule || 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ');
 
@@ -813,6 +947,7 @@ function buildConnectionRow(conn, mode, stats = resolveConnStats(conn, mode), id
             <span class="conn-main conn-rate conn-rate--up">${ulSpeed}</span>
             <span class="conn-sub">${ulTotal}</span>
         </div>
+        ${mode === 'active' ? `<button type="button" class="conn-row-close" data-close-conn="${id}" title="${_esc(closeOneLabel())}" aria-label="${_esc(closeOneLabel())}: ${host}"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>` : ''}
     </div>`;
 }
 
@@ -914,6 +1049,33 @@ function rowFromEvent(container, target) {
     return row && container.contains(row) ? row : null;
 }
 
+/** Label for the per-row close button. */
+function closeOneLabel() {
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    return t.closeThisConn || 'Close this connection';
+}
+
+/**
+ * Close one connection from its row.
+ * @param {string} id
+ * @param {HTMLElement} btn
+ */
+async function closeSingleConnection(id, btn) {
+    if (!id) return;
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    btn.setAttribute('disabled', '');
+    try {
+        await closeConnection(id);
+        // A poll already in flight may still list it: keep it out of the active list.
+        userClosedIds.add(id);
+        showNotification(t.connClosedOne || 'Connection closed', 'success');
+        await fetchAndRenderConnections();
+    } catch {
+        btn.removeAttribute('disabled');
+        showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
+    }
+}
+
 /** @param {HTMLElement} row */
 function openRowDetail(row) {
     const connId = row.dataset.connId;
@@ -932,6 +1094,13 @@ function bindRowClickDelegate(container) {
     if (_rowClickBound.has(container)) return;
     _rowClickBound.add(container);
     container.addEventListener('click', (e) => {
+        // Hover ✕ on a row closes that one connection directly (no detour through the details).
+        const closeBtn = e.target instanceof Element ? e.target.closest('[data-close-conn]') : null;
+        if (closeBtn instanceof HTMLElement) {
+            e.stopPropagation();
+            void closeSingleConnection(closeBtn.dataset.closeConn || '', closeBtn);
+            return;
+        }
         const row = rowFromEvent(container, e.target);
         if (row) openRowDetail(row);
     });
@@ -1000,22 +1169,22 @@ function showConnDetail(conn, mode, openerRow = null) {
     const host = _esc(meta.host ?? '-');
     const process = _esc(meta.process ?? '-');
     const destIP = _esc(meta.destinationIP ?? '-');
-    const destPort = _esc(meta.destinationPort ?? '-');
+    const destPort = _esc(String(meta.destinationPort ?? '-'));
     const rule = _esc(conn.rule || 'Match');
     const chains = (conn.chains ?? []).map(_esc).join(' → ') || '-';
     const ruleColorClass = getRuleColorClass(rule);
 
     // Resolve stats (speed + total) via shared resolver
     const { dlSpeed, ulSpeed, dlTotal, ulTotal } = resolveConnStats(conn, mode);
+    // The connection's real start is `conn.start` (ISO string), not when this page first saw it.
+    const startMs = connStartMs(conn);
     let duration = '-';
-    if (mode === 'closed' && conn.closedAt && conn.metadata?.start) {
-        const ms = conn.closedAt - (typeof conn.metadata.start === 'number' ? conn.metadata.start : Date.now());
-        duration = fmtDuration(ms > 0 ? ms : 0);
-    } else if (mode === 'closed' && conn.closedAt) {
-        duration = fmtDuration(0);
+    if (mode === 'closed' && conn.closedAt) {
+        duration = startMs ? fmtDuration(Math.max(0, conn.closedAt - startMs)) : '-';
     } else if (mode === 'active') {
         const acc = connAccumulators[conn.id];
-        duration = acc ? fmtDuration(Date.now() - acc.seenAt) : '-';
+        const from = startMs || acc?.seenAt;
+        duration = from ? fmtDuration(Date.now() - from) : '-';
     }
 
     // Network info
@@ -1031,7 +1200,7 @@ function showConnDetail(conn, mode, openerRow = null) {
 
     // Build close button HTML (only for active connections)
     const closeBtnHtml = mode === 'active'
-        ? `<button id="detail-close-btn" class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-sm bg-rose-500/10 border border-rose-500/20 text-2xs font-bold text-rose-400 hover:bg-rose-500/20 transition-colors uppercase tracking-wider">
+        ? `<button id="detail-close-btn" type="button" class="btn-danger mt-5 w-full justify-center">
              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
              <span>${t.closeConn || 'Close Connection'}</span>
            </button>`
@@ -1043,7 +1212,6 @@ function showConnDetail(conn, mode, openerRow = null) {
         <div class="flex items-start justify-between mb-5">
             <div class="min-w-0 flex-1 pe-4">
                 <h3 class="dialog-title truncate" id="conn-detail-title">${host}</h3>
-                <p class="text-2xs text-[var(--text-muted)] mt-0.5 font-mono truncate">${id}</p>
             </div>
             <button id="detail-dismiss-btn" aria-label="${escapeHtml(t.dismiss || 'Close')}" class="shrink-0 w-8 h-8 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-input)] transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1053,7 +1221,8 @@ function showConnDetail(conn, mode, openerRow = null) {
         <!-- Rule & Chains -->
         <div class="flex items-center gap-3 mb-5">
             <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ruleColorClass}">${rule}</span>
-            <span class="text-xs text-[var(--text-secondary)] truncate">${chains}</span>
+            ${conn.rulePayload ? `<span class="text-xs font-mono text-[var(--text-primary)] truncate">${_esc(conn.rulePayload)}</span>` : ''}
+            <span class="text-xs text-[var(--text-secondary)] truncate">→ ${chains}</span>
         </div>
 
         <!-- Stats Grid -->
@@ -1200,6 +1369,9 @@ function showConnDetail(conn, mode, openerRow = null) {
                 await closeConnection(id);
                 closedConnections.unshift(archiveConnection(conn, Date.now()));
                 delete connAccumulators[conn.id];
+                // Already archived: the refresh below must not archive it a second time.
+                userClosedIds.add(conn.id);
+                cachedConnections = cachedConnections.filter((/** @type {any} */ c) => c.id !== conn.id);
                 showNotification(t.connClosed || 'Connection closed', 'success');
                 dismiss();
                 await fetchAndRenderConnections();
@@ -1237,17 +1409,52 @@ function refreshDetailPanel(connId, mode) {
 
     if (mode === 'active') {
         const acc = connAccumulators[connId];
-        if (acc) {
-            dlSpeedEl.textContent = formatSpeed(acc.dlSpeed ?? 0);
-            dlTotalEl.textContent = formatBytes(acc.dl);
-            ulSpeedEl.textContent = formatSpeed(acc.ulSpeed ?? 0);
-            ulTotalEl.textContent = formatBytes(acc.ul);
+        if (!acc) {
+            // The connection ended while its details were open: freeze the numbers, mark it
+            // closed and drop the "close connection" button.
+            markDetailDisconnected();
+            activeDetailMode = 'closed';
+            return;
         }
-        // Update duration
+        dlSpeedEl.textContent = formatSpeed(acc.dlSpeed ?? 0);
+        dlTotalEl.textContent = formatBytes(acc.dl);
+        ulSpeedEl.textContent = formatSpeed(acc.ulSpeed ?? 0);
+        ulTotalEl.textContent = formatBytes(acc.ul);
         const durEl = document.getElementById('detail-duration');
-        if (durEl) durEl.textContent = fmtDuration(Date.now() - acc.seenAt);
+        const live = cachedConnections.find((/** @type {any} */ c) => c.id === connId);
+        const from = (live && connStartMs(live)) || acc.seenAt;
+        if (durEl) durEl.textContent = fmtDuration(Date.now() - from);
     }
     // Closed connections: values are static, no update needed
+}
+
+/**
+ * Start time of a connection in ms, from mihomo's `start` (ISO string); 0 if unknown.
+ * @param {any} conn
+ */
+function connStartMs(conn) {
+    const raw = conn?.start ?? conn?.metadata?.start;
+    if (typeof raw === 'number') return raw;
+    const ms = typeof raw === 'string' ? Date.parse(raw) : Number.NaN;
+    return Number.isFinite(ms) ? ms : 0;
+}
+
+/** Detail panel: the connection is gone. */
+function markDetailDisconnected() {
+    document.getElementById('detail-close-btn')?.remove();
+    const title = document.getElementById('conn-detail-title');
+    if (title && !document.getElementById('detail-disconnected')) {
+        const t = /** @type {any} */ (translations)[currentLang] ?? {};
+        const tag = document.createElement('span');
+        tag.id = 'detail-disconnected';
+        tag.className = 'conn-detail-closed-tag';
+        tag.textContent = t.connDisconnected || 'Closed';
+        title.after(tag);
+    }
+    for (const id of ['detail-dl-speed', 'detail-ul-speed']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+    }
 }
 
 /** Helper: render a key-value detail row */
@@ -1284,21 +1491,69 @@ async function handleCloseAllConnections() {
     const btn = document.getElementById('close-all-conns-btn');
     if (!btn) return;
 
+    if (_bulkCloseInFlight) return;
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    _bulkCloseInFlight = true;
     setButtonLoading(btn, t, 'closing');
 
     try {
-        await closeAllConnections();
         const now = Date.now();
-        for (const conn of cachedConnections) {
-            closedConnections.unshift(archiveConnection(conn, now));
+        let failed = 0;
+        let closedMatching = 0;
+        // A poll running during the close may have archived some of them already.
+        /** @param {any} conn */
+        const archiveOnce = (conn) => {
+            if (!closedConnections.some((/** @type {any} */ c) => c.id === conn.id)) {
+                closedConnections.unshift(archiveConnection(conn, now));
+            }
+        };
+        if (connectionsSearchQuery) {
+            // Searching: close only the connections the list is showing, and archive
+            // only those the core actually closed.
+            const matching = filterConnsBySearch(cachedConnections);
+            const results = await Promise.allSettled(matching.map((/** @type {any} */ c) => closeConnection(c.id)));
+            /** @type {Set<string>} */
+            const closedIds = new Set();
+            results.forEach((r, i) => {
+                if (r.status !== 'fulfilled') { failed += 1; return; }
+                const conn = matching[i];
+                closedIds.add(conn.id);
+                userClosedIds.add(conn.id);
+                archiveOnce(conn);
+                delete connAccumulators[conn.id];
+            });
+            closedMatching = closedIds.size;
+            // Already archived: the refresh below must not archive them a second time.
+            cachedConnections = cachedConnections.filter((/** @type {any} */ c) => !closedIds.has(c.id));
+        } else {
+            // Archive what the core holds right now, not the last poll's snapshot
+            // (connections opened since, or already gone, would be wrong).
+            let live = cachedConnections;
+            try {
+                const data = /** @type {any} */ (await getConnections());
+                if (Array.isArray(data?.connections)) live = data.connections.filter((/** @type {any} */ c) => !userClosedIds.has(c.id));
+            } catch { /* fall back to the last poll */ }
+            // Connections from the last poll that the core already dropped would never
+            // reach the Closed tab once the cache is emptied: archive them too.
+            const liveIds = new Set(live.map((/** @type {any} */ c) => c.id));
+            const ended = cachedConnections.filter((/** @type {any} */ c) => !liveIds.has(c.id) && !userClosedIds.has(c.id));
+            await closeAllConnections();
+            for (const conn of [...ended, ...live]) {
+                userClosedIds.add(conn.id);
+                archiveOnce(conn);
+            }
+            connAccumulators = {};
+            cachedConnections = [];
         }
-        connAccumulators = {};
-        showNotification(t.connsClosed || 'All connections closed', 'success');
+        if (closedConnections.length > MAX_CLOSED_CONNS) closedConnections.length = MAX_CLOSED_CONNS;
+        if (failed > 0) showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
+        else if (connectionsSearchQuery) showNotification(tFmt('matchingConnsClosed', { count: closedMatching }), 'success');
+        else showNotification(t.connsClosed || 'All connections closed', 'success');
         await fetchAndRenderConnections();
     } catch {
         showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
     } finally {
+        _bulkCloseInFlight = false;
         switchConnTab(currentConnTab);
     }
 }
@@ -1311,12 +1566,17 @@ async function handleClearClosedConnections() {
     setButtonLoading(btn, t, 'clearing');
 
     try {
-        closedConnections = [];
+        // While searching, clear only what the search shows (as "Close N matching" does).
+        if (connectionsSearchQuery) {
+            const shown = new Set(filterConnsBySearch(closedConnections));
+            closedConnections = closedConnections.filter((/** @type {any} */ c) => !shown.has(c));
+        } else {
+            closedConnections = [];
+        }
         showNotification(t.connsCleared || 'Closed history cleared', 'success');
-        renderConnectionList([], 'closed');
+        renderConnectionList(connectionsSearchQuery ? filterConnsBySearch(closedConnections) : [], 'closed');
 
-        const badge = document.getElementById('closed-count-badge');
-        if (badge) badge.classList.add('hidden');
+        updateClosedBadge();
     } catch {
         showNotification(t.clearConnsFailed || 'Failed to clear history', 'error');
     } finally {
@@ -1329,15 +1589,11 @@ async function handleClearClosedConnections() {
 // ============================================
 
 function updateClosedBadge() {
-    const badge = document.getElementById('closed-count-badge');
-    if (!badge) return;
-    const t = /** @type {any} */ (translations)[currentLang] ?? {};
-    if (closedConnections.length > 0) {
-        badge.textContent = `${closedConnections.length} ${t.closedItems ?? ''}`;
-        badge.classList.remove('hidden');
-    } else {
-        badge.classList.add('hidden');
-    }
+    // The count rides on the tab itself: "Closed · 3". It has its own span, so a
+    // language change (which rewrites [data-i18n] text) keeps it.
+    const count = document.getElementById('conn-tab-closed-count');
+    if (!count) return;
+    count.textContent = ` · ${closedConnections.length}`;
 }
 
 // Removed: updateMetaLine — connections-meta line deleted from UI
@@ -1414,7 +1670,9 @@ function resetButton(btn, iconSvg, text) {
  * @param {number} closedAt
  */
 function archiveConnection(conn, closedAt) {
-    const acc = connAccumulators[conn.id] ?? { dl: 0, ul: 0, dlSpeed: 0, ulSpeed: 0 };
+    // Opened since the last poll (no accumulator yet): the core's own counters are its totals.
+    const acc = connAccumulators[conn.id]
+        ?? { dl: conn.download ?? 0, ul: conn.upload ?? 0, dlSpeed: 0, ulSpeed: 0 };
     return {
         ...conn,
         closedAt,
@@ -1441,17 +1699,22 @@ function archiveConnection(conn, closedAt) {
  */
 function resolveConnStats(conn, mode) {
     if (mode === 'closed') {
+        // A closed connection has no speed: show how long it lasted and when it closed.
+        const start = connStartMs(conn);
         return {
-            dlSpeed: formatSpeed(conn.dlSpeed ?? 0),
-            ulSpeed: formatSpeed(conn.ulSpeed ?? 0),
+            dlSpeed: start && conn.closedAt ? fmtDuration(Math.max(0, conn.closedAt - start)) : '—',
+            ulSpeed: conn.closedAt ? formatClosedTime(conn.closedAt) : '—',
             dlTotal: formatBytes(conn.dlTotal ?? 0),
             ulTotal: formatBytes(conn.ulTotal ?? 0),
         };
     }
-    const acc = connAccumulators[conn.id] ?? { dl: 0, ul: 0, dlSpeed: 0, ulSpeed: 0 };
+    // Opened since the last poll (no accumulator yet): the core's own counters are its totals.
+    const acc = connAccumulators[conn.id]
+        ?? { dl: conn.download ?? 0, ul: conn.upload ?? 0, dlSpeed: 0, ulSpeed: 0 };
+    const speed = (/** @type {number} */ v) => formatSpeed(Math.max(0, v));
     return {
-        dlSpeed: formatSpeed(acc.dlSpeed ?? 0),
-        ulSpeed: formatSpeed(acc.ulSpeed ?? 0),
+        dlSpeed: speed(acc.dlSpeed ?? 0),
+        ulSpeed: speed(acc.ulSpeed ?? 0),
         dlTotal: formatBytes(acc.dl),
         ulTotal: formatBytes(acc.ul),
     };

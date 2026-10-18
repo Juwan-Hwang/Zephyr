@@ -1066,7 +1066,9 @@ export function initSubscriptionSettings({
                 invoke(COMMANDS.LIST_CONFIGS).catch(() => []),
             ]);
 
-            const files = /** @type {{filename: string, rule_count: number, source: string}[]} */ (ruleFilesData || []);
+            // Files switched off in the rule library are parked as .disabled and cannot be read; leave them out.
+            const files = /** @type {{filename: string, rule_count: number, source: string, enabled?: boolean}[]} */ (ruleFilesData || [])
+                .filter((f) => f.enabled !== false);
             const groupsList = /** @type {{name: string, files: string[]}[]} */ ((groupData?.groups) || []);
             // All profile stems (for "exclude one profile" logic when unchecking global rules)
             const allProfileStems = (/** @type {any[]} */ (allConfigs || []))
