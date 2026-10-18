@@ -30,6 +30,24 @@ const NOTIFICATION_PRIORITY = {
 const MAX_NOTIFICATIONS = 5;
 
 /**
+ * The toast to drop at capacity: the least important tier is last, and within a
+ * tier toasts are in arrival order, so its first member is the oldest one.
+ * @param {HTMLElement} container
+ * @returns {HTMLElement|null}
+ */
+function oldestOfLowestTier(container) {
+    const last = /** @type {HTMLElement|null} */ (container.lastElementChild);
+    if (!last) return null;
+    let victim = last;
+    let prev = /** @type {HTMLElement|null} */ (last.previousElementSibling);
+    while (prev && prev.dataset.priority === last.dataset.priority) {
+        victim = prev;
+        prev = /** @type {HTMLElement|null} */ (prev.previousElementSibling);
+    }
+    return victim;
+}
+
+/**
  * @param {string} message
  * @param {'info'|'success'|'warning'|'error'} [type]
  * @param {string|null} [title]
@@ -40,14 +58,22 @@ export function showNotification(message, type = 'info', title = null, { log = t
     const container = document.getElementById('notif-container');
     if (!container) return;
 
-    // Evict oldest when at capacity
+    // At capacity, drop the oldest of the least important toasts. Children are
+    // kept in priority order (errors first). When everything shown
+    // outranks the new toast, the new one is the least important: skip it.
+    const incomingPriority = NOTIFICATION_PRIORITY[type] ?? 2;
     while (container.children.length >= MAX_NOTIFICATIONS) {
-        const oldest = container.firstElementChild;
-        if (oldest) oldest.remove();
+        const victim = oldestOfLowestTier(container);
+        if (!victim) break;
+        if (Number(victim.dataset.priority) < incomingPriority) {
+            if (log) _forwardNotification(type, title, message);
+            return;
+        }
+        victim.remove();
     }
 
     const notif = document.createElement('div');
-    notif.className = 'toast glass-card transition-all duration-[var(--zephyr-time-page)] notif-offscreen opacity-0 pointer-events-auto min-w-0 max-w-[420px]';
+    notif.className = 'toast glass-card transition-all duration-[var(--zephyr-time-page)] notif-offscreen opacity-0 min-w-0';
     notif.dataset.type = type in NOTIFICATION_PRIORITY ? type : 'info';
     notif.dataset.priority = String(NOTIFICATION_PRIORITY[type] ?? 2);
 
@@ -62,18 +88,32 @@ export function showNotification(message, type = 'info', title = null, { log = t
     body.className = 'toast-body';
     if (title) {
         const titleDiv = document.createElement('div');
-        titleDiv.className = 'toast-title break-all line-clamp-2';
+        titleDiv.className = 'toast-title line-clamp-2';
         titleDiv.textContent = title;
         body.appendChild(titleDiv);
     }
 
     const msgDiv = document.createElement('div');
-    msgDiv.className = 'toast-msg break-all line-clamp-3';
+    msgDiv.className = 'toast-msg line-clamp-3';
     msgDiv.textContent = message;
     body.appendChild(msgDiv);
-    // Full path tooltip on hover
-    notif.title = title || message;
+    // Full text on hover (the body is clamped to three lines)
+    notif.title = title ? `${title}\n${message}` : message;
     notif.appendChild(body);
+
+    // Errors and warnings stay long enough to read, pause while hovered and can be
+    // dismissed; success/info are brief and let clicks through to the controls below.
+    const sticky = type === 'error' || type === 'warning';
+    if (sticky) {
+        notif.classList.add('toast-sticky');
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'toast-close';
+        closeBtn.setAttribute('aria-label', _tr('dismiss', 'Dismiss'));
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => dismiss());
+        notif.appendChild(closeBtn);
+    }
 
     // Priority insert — higher priority notifications appear first
     const priority = NOTIFICATION_PRIORITY[type] ?? 2;
@@ -92,12 +132,51 @@ export function showNotification(message, type = 'info', title = null, { log = t
         notif.classList.remove('notif-offscreen', 'opacity-0');
     });
 
-    setTimeout(() => {
+    let dismissed = false;
+    const dismiss = () => {
+        if (dismissed) return;
+        dismissed = true;
+        clearTimeout(timer);
         notif.classList.add('notif-offscreen', 'opacity-0');
         setTimeout(() => notif.remove(), 500);
-    }, title ? 4000 : 3000);
+    };
+    let lifetime = title ? 3500 : 2500;
+    if (sticky) lifetime = 7000;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer = setTimeout(dismiss, lifetime);
+    if (sticky) {
+        const hold = () => clearTimeout(timer);
+        /** @param {Event} e */
+        const release = (e) => {
+            if (dismissed) return;
+            // Keep holding while the pointer is still over it or focus is still inside.
+            if (e.type === 'mouseleave' && notif.contains(document.activeElement)) return;
+            if (e.type === 'focusout') {
+                const next = /** @type {FocusEvent} */ (e).relatedTarget;
+                if (notif.matches(':hover') || (next instanceof Node && notif.contains(next))) return;
+            }
+            clearTimeout(timer);
+            timer = setTimeout(dismiss, 2500);
+        };
+        notif.addEventListener('mouseenter', hold);
+        notif.addEventListener('focusin', hold);
+        notif.addEventListener('mouseleave', release);
+        notif.addEventListener('focusout', release);
+    }
 
     if (log) _forwardNotification(type, title, message);
+}
+
+/**
+ * Current-language string with a fallback (toasts can fire before i18n settles).
+ * @param {string} key
+ * @param {string} fallback
+ */
+function _tr(key, fallback) {
+    const lang = appStore.get('currentLang') || 'en';
+    /** @type {any} */
+    const table = /** @type {any} */ (translations)[lang] || translations.en;
+    return table?.[key] || fallback;
 }
 
 /**
@@ -141,10 +220,24 @@ function unlockScroll() {
  * @returns {Promise<string|HTMLElement|null>}
  */
 let _modalOpen = false;
+/** Settles when the shared modal is released; confirmations wait on it. */
+let _modalReleased = Promise.resolve();
+let _releaseModal = () => {};
+
+/** Both dialog kinds share #modal-bg: claim it so neither can take over the other's handlers. */
+function claimModal() {
+    _modalOpen = true;
+    _modalReleased = new Promise((r) => { _releaseModal = () => r(undefined); });
+}
+
+function releaseModal() {
+    _modalOpen = false;
+    _releaseModal();
+}
 
 export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', /** @type {((contentArea: HTMLElement, close: (val: string|HTMLElement|null) => void) => void)|undefined} */ onReady = undefined) {
     if (_modalOpen) return Promise.resolve(null);
-    _modalOpen = true;
+    claimModal();
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -154,6 +247,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
         const cancelBtn = document.getElementById('modal-cancel');
 
         if (!bg || !container || !titleEl || !contentArea || !confirmBtn || !cancelBtn) {
+            releaseModal();
             resolve(null);
             return;
         }
@@ -195,7 +289,10 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(null) });
 
+        let closed = false;
         const close = (/** @type {string|HTMLElement|null} */ val) => {
+            if (closed) return;
+            closed = true;
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
             unlockScroll();
@@ -210,8 +307,10 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
                     confirmBtn.classList.remove('hidden');
                 }
                 bg.classList.add('hidden');
-                _modalOpen = false;
+                // Resolve first, so the caller's cleanup (e.g. restoring button text) runs
+                // before a queued confirmation takes the dialog over.
                 resolve(val);
+                releaseModal();
             }, 300);
         };
 
@@ -265,13 +364,40 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
     });
 }
 
+/** Confirm dialogs share one modal: queue them so a second request cannot take over the first. */
+let _confirmQueue = Promise.resolve();
+
 /**
  * Show a confirmation modal dialog.
  * @param {string} title
- * @param {string} message
+ * @param {string} [message]
+ * @param {{ danger?: boolean, confirmText?: string }} [options]
+ *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
+ *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const run = _confirmQueue.then(async () => {
+        while (_modalOpen) await _modalReleased;
+        claimModal();
+        try {
+            return await openConfirmModal(title, message, options);
+        } finally {
+            releaseModal();
+        }
+    });
+    _confirmQueue = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+/**
+ * @param {string} title
+ * @param {string} [message]
+ * @param {{ danger?: boolean, confirmText?: string }} [options]
+ * @returns {Promise<boolean>}
+ */
+function openConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '' } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -292,21 +418,38 @@ export function showConfirmModal(title, message = '') {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = danger
+                ? 'text-sm leading-6 text-[var(--text-secondary)]'
+                : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }
 
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
+
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(false) });
 
+        let closed = false;
         const close = (/** @type {boolean} */ val) => {
+            if (closed) return;
+            closed = true;
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
+                if (danger) {
+                    confirmBtn.classList.remove('btn-danger');
+                    confirmBtn.classList.add('btn-primary');
+                }
+                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
@@ -317,16 +460,15 @@ export function showConfirmModal(title, message = '') {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
             trap.activate();
+            // Destructive dialogs start on Cancel so a stray Enter never deletes.
+            if (danger) cancelBtn.focus();
         });
 
         confirmBtn.onclick = () => close(true);
         cancelBtn.onclick = () => close(false);
         bg.onclick = (e) => { if (e.target === bg) close(false); };
-        // Focus managed by trap.activate() — no need for manual confirmBtn.focus()
-        confirmBtn.onkeydown = (e) => {
-            if (e.key === 'Enter') close(true);
-            // Escape handled by focus trap
-        };
+        // Focus managed by trap.activate(); Enter on the confirm button activates it natively.
+        confirmBtn.onkeydown = null;
         cancelBtn.onkeydown = (_e) => {
             // Escape handled by focus trap
         };
