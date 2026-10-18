@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: security-${{ github.ref }}
@@ -163,6 +162,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -175,7 +175,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Semgrep
-        run: python -m pip install semgrep==1.170.0
+        run: 'python -m pip install --only-binary :all: semgrep==1.170.0'
 
       - name: Semgrep scan (open source + custom rules)
         run: |
@@ -269,6 +269,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

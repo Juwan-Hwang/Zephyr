@@ -29,7 +29,7 @@ import {
     overrideImport,
 } from './prism.js';
 import { SVG_ICONS } from './icons.js';
-import { stopSmartAutoTest, startSmartAutoTest, renderProxies } from './proxies.js';
+import { stopSmartAutoTest, startSmartAutoTest, refreshProxies } from './proxies.js';
 import { t } from '../i18n.js';
 import { showNotification, showModal } from './notifications.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
@@ -142,7 +142,7 @@ export function initPlugins() {
                 });
             }
         });
-        loadOverrides();
+        void loadOverrides();
     });
 
     const closePanel = () => {
@@ -186,7 +186,7 @@ export function initPlugins() {
         scriptArea?.classList.add('hidden');
         if (scriptEditorView) { scriptEditorView.destroy(); scriptEditorView = null; }
         // Refresh list to reflect any changes
-        loadOverrides();
+        void loadOverrides();
     });
 
     // ── Script validate ─────────────────────────────────────────────
@@ -243,7 +243,7 @@ export function initPlugins() {
             // Wait for Mihomo to finish reloading, then refresh proxies page
             setTimeout(() => {
                 startSmartAutoTest();
-                renderProxies();
+                void refreshProxies();
             }, 1000);
 
             const lines = [];
@@ -335,11 +335,11 @@ function setupNewOverrideDropdown(_panel) {
         if (!(target instanceof Element)) return;
         const actionEl = target.closest('[data-action]');
         const action = actionEl instanceof HTMLElement ? actionEl.dataset.action : undefined;
-        if (action === 'new-js') createNewOverride('js');
-        else if (action === 'new-prism') createNewOverride('prism.yaml');
-        else if (action === 'import-url') importFromUrl();
-        else if (action === 'export-all') exportAllOverrides();
-        else if (action === 'import-file') importFromFile();
+        if (action === 'new-js') void createNewOverride('js');
+        else if (action === 'new-prism') void createNewOverride('prism.yaml');
+        else if (action === 'import-url') void importFromUrl();
+        else if (action === 'export-all') void exportAllOverrides();
+        else if (action === 'import-file') void importFromFile();
         dropdown.classList.add('hidden');
     });
 }
@@ -358,7 +358,7 @@ async function createNewOverride(ext) {
     try {
         await overrideCreate(name.trim(), ext, 'local', null);
         showNotification(t('overrideCreated') ?? 'Override created', 'success');
-        loadOverrides();
+        void loadOverrides();
     } catch (err) {
         showNotification(String(err), 'error');
     }
@@ -396,7 +396,7 @@ async function importFromUrl() {
             trimmedUrl,
         );
         showNotification(t('overrideCreated') ?? 'Override created', 'success');
-        loadOverrides();
+        void loadOverrides();
     } catch (err) {
         showNotification(String(err), 'error');
     }
@@ -442,7 +442,7 @@ async function importFromFile() {
                 (t('overrideImportSuccess') ?? 'Imported @@count@@ overrides').replace('@@count@@', String(count)),
                 'success'
             );
-            loadOverrides();
+            void loadOverrides();
         } catch (err) {
             showNotification(String(err), 'error');
         }
@@ -503,7 +503,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     saveBtn.textContent = t('confirm') ?? 'OK';
     saveBtn.disabled = true; // Disabled until profiles are loaded
 
-    (async () => {
+    void (async () => {
         let configs = [];
         try {
             const { invoke } = await import('../api.js');
@@ -588,7 +588,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
                 profileIds: isGlobal ? [] : selectedProfiles,
             });
             overlay.remove();
-            loadOverrides();
+            void loadOverrides();
         } catch (err) {
             showNotification(String(err), 'error');
             overlay.remove();
@@ -1099,7 +1099,7 @@ function buildOverrideCard(item) {
 
     // ── Click: card body → edit ─────────────────────────────────
     card.addEventListener('click', () => {
-        openEditor(item.id, item.name ?? '', item.ext ?? 'js');
+        void openEditor(item.id, item.name ?? '', item.ext ?? 'js');
     });
 
     // ── Click: delete ──────────────────────────────────────────
@@ -1111,23 +1111,23 @@ function buildOverrideCard(item) {
     // ── Reorder buttons ────────────────────────────────────────
     card.querySelector('.override-up-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        reorderItem(item.id, -1);
+        void reorderItem(item.id, -1);
     });
     card.querySelector('.override-down-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        reorderItem(item.id, 1);
+        void reorderItem(item.id, 1);
     });
 
     // ── Inline toggle button ─────────────────────────────────
     card.querySelector('.override-toggle-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggleOverride(item.id, !item.enabled);
+        void toggleOverride(item.id, !item.enabled);
     });
 
     // ── Inline toggle: click status dot ───────────────────────
     card.querySelector('.rounded-full')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggleOverride(item.id, !item.enabled);
+        void toggleOverride(item.id, !item.enabled);
     });
 
     // ── Click: scope badge → edit scope ───────────────────────
@@ -1328,7 +1328,7 @@ function showDeleteConfirm(overrideId, overrideName) {
         try {
             await overrideDelete(overrideId);
             overlay.remove();
-            loadOverrides();
+            void loadOverrides();
         } catch (err) {
             showNotification(String(err), 'error');
             overlay.remove();
@@ -1382,7 +1382,7 @@ function initFullscreenEditor() {
         }
         // Ctrl/Cmd + Enter to run
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            runFullscreenEditor();
+            void runFullscreenEditor();
         }
     });
 
@@ -1563,7 +1563,7 @@ async function runFullscreenEditor() {
         // Wait for Mihomo to finish reloading, then refresh proxies page
         setTimeout(() => {
             startSmartAutoTest();
-            renderProxies();
+            void refreshProxies();
         }, 1000);
 
         const lines = [];

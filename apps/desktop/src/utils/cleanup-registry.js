@@ -91,7 +91,7 @@ export function runCleanup() {
     const noop = () => {};
     let resolveCleanup = noop;
     cleanupPromise = new Promise((resolve) => { resolveCleanup = resolve; });
-    Promise.all(
+    void Promise.all(
         fns.map((fn) => {
             try {
                 return Promise.resolve(fn()).catch(() => {});

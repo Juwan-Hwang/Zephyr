@@ -144,7 +144,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
 
         // Wait for node switch to complete, then let syncCoreConfig() handle display
         // Run as non-blocking IIFE to prevent UI lag
-        (async () => {
+        void (async () => {
             try {
                 await waitForCurrentNode(targetGroup, name);
                 if (_switchSessionCounter !== currentSession) return;
@@ -333,7 +333,7 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
         showDropdown(trigger, dropdown);
 
         if (currentEl && scrollContainer) {
-            /** @type {HTMLElement} */ (scrollContainer).offsetHeight;
+            /** @type {HTMLElement} */ (scrollContainer).getBoundingClientRect();
             /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'auto';
             /** @type {HTMLElement} */ (currentEl).scrollIntoView?.({ block: 'center' });
             setTimeout(() => { /** @type {HTMLElement} */ (scrollContainer).style.scrollBehavior = 'smooth'; }, 50);

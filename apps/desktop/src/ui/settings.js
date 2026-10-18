@@ -73,8 +73,16 @@ import { initSubscriptionSettings } from './settings/subscriptions.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
 let __langDropdown = null;
-/** @type {(() => void) | null} */
+/** @type {(() => Promise<void>) | null} */
 let _dropUnlisten = null;
+
+/**
+ * Release a Tauri event listener; a failed unlisten is logged, never thrown.
+ * @param {() => Promise<void>} unlisten
+ */
+function dropListener(unlisten) {
+    unlisten().catch(e => settingsLogger.warn('Failed to remove event listener', e));
+}
 
 // ---------------------------------------------------------------------------
 //  Utility: extract a human-readable name from a subscription URL
@@ -694,7 +702,7 @@ function initLogSettingsModal() {
             const from = /** @type {HTMLInputElement} */ (modal.querySelector('#log-export-from'))?.value || threeDaysAgo;
             const to = /** @type {HTMLInputElement} */ (modal.querySelector('#log-export-to'))?.value || today;
             const level = /** @type {HTMLSelectElement} */ (modal.querySelector('#log-export-level'))?.value || null;
-            (async () => {
+            void (async () => {
                 try {
                     showNotification(t.logExporting || 'Exporting logs...');
                     const path = await invoke('export_logs', {
@@ -758,7 +766,7 @@ function initFakeClient() {
     customInput.value = savedCustom;
 
     // Sync UA to backend on init so scheduler uses it from the start
-    syncUserAgentToBackend();
+    void syncUserAgentToBackend();
 
     // Owns the lookup: single in-flight request, exponential backoff on
     // failure/empty replies, and a bounded number of automatic retries.
@@ -791,7 +799,7 @@ function initFakeClient() {
         onChange: (val) => {
             localStorage.setItem('fakeClientType', val);
             updateVisibility();
-            syncUserAgentToBackend();
+            void syncUserAgentToBackend();
         },
     });
 
@@ -858,7 +866,7 @@ function initFakeClient() {
         if (toggle.checked) versionFetcher.retryNow();
         else versionFetcher.pause();
         updateVisibility();
-        syncUserAgentToBackend();
+        void syncUserAgentToBackend();
         if (!toggle.checked) {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
@@ -873,7 +881,7 @@ function initFakeClient() {
 
 document.getElementById('fake-client-custom-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
-    pasteWithFeedback(customInput, showNotification, translations, appStore.get('currentLang') || 'en');
+    void pasteWithFeedback(customInput, showNotification, translations, appStore.get('currentLang') || 'en');
 });
 
     if (savedEnabled) {
@@ -1000,7 +1008,7 @@ export async function initSettings() {
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = (e) => {
             e.preventDefault();
-            openUrl('https://github.com/Juwan-Hwang/Zephyr');
+            openUrl('https://github.com/Juwan-Hwang/Zephyr').catch(err => settingsLogger.warn('Failed to open GitHub page', err));
         };
     }
 
@@ -1014,7 +1022,7 @@ export async function initSettings() {
 document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
     if (customArgsInput) {
-        pasteWithFeedback(customArgsInput, showNotification, translations, appStore.get('currentLang') || 'en');
+        void pasteWithFeedback(customArgsInput, showNotification, translations, appStore.get('currentLang') || 'en');
     }
 });
 
@@ -1058,7 +1066,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 setLanguage(value);
                 appStore.set('currentLang', value);
                 Bus.emit(Events.LANGUAGE_CHANGED, value);
-                renderConfigs();
+                void renderConfigs();
             },
         });
 
@@ -1317,7 +1325,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
                 // Reset theme mode
                 settings.theme_mode = 'auto';
-                _themeApi.setThemeMode('auto', false);
+                void _themeApi.setThemeMode('auto', false);
                 successItems.push('themeMode');
 
                 // Reset the proxy mode preference explicitly. A full-snapshot save
@@ -1548,7 +1556,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     };
     closeTrayToggle?.addEventListener('change', () => {
         syncLightweightState();
-        save();
+        void save();
     });
     lightweightModeToggle?.addEventListener('change', save);
     silentStartToggle?.addEventListener('change', save);
@@ -1585,7 +1593,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             return;
         }
         appStore.set('encryptConfigs', enabled);
-        (async () => {
+        void (async () => {
             try {
                 await invoke(COMMANDS.PATCH_SETTINGS, { patch: { encrypt_configs: enabled } });
                 showNotification(
@@ -1858,7 +1866,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
         const ring = createStatusRing(updateGeoBtn);
         ring.show();
-        /** @type {(() => void) | undefined} */
+        /** @type {(() => Promise<void>) | undefined} */
         let unlisten;
 
         /** @type {any} */
@@ -1888,13 +1896,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             ring.setError();
             const error = toError(err);
             showNotification(error.toString(), 'error');
-} finally {
-if (unlisten) unlisten();
-setTimeout(() => {
-ring.destroy();
-appStore.set('isNetworkUpdating', false);
-}, 3500);
-}
+        } finally {
+            if (unlisten) dropListener(unlisten);
+            setTimeout(() => {
+                ring.destroy();
+                appStore.set('isNetworkUpdating', false);
+            }, 3500);
+        }
     });
 
     // ---- Backup & Restore ----
@@ -1938,7 +1946,7 @@ appStore.set('isNetworkUpdating', false);
             showNotification(result, 'success');
             // Reload settings and restart core in the background to avoid
             // blocking the UI. The import is already complete at this point.
-            (async () => {
+            void (async () => {
                 try {
                     const importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
                     const configPath = importedSettings.last_config || 'config.yaml';
@@ -2024,7 +2032,8 @@ appStore.set('isNetworkUpdating', false);
 
     // ---- Drag-and-drop import listener ----
     if (_dropUnlisten) {
-        _dropUnlisten();
+        dropListener(_dropUnlisten);
+        _dropUnlisten = null;
     }
     if (typeof listen === 'function') {
         listen('profiles-imported', (/** @type {{ payload: number }} */ event) => {
@@ -2036,7 +2045,7 @@ appStore.set('isNetworkUpdating', false);
                 if (typeof /** @type {any} */ (window).refreshConfigs === 'function') {
                     /** @type {any} */ (window).refreshConfigs();
                 }
-                renderConfigs();
+                void renderConfigs();
             }
         }).then(unlisten => {
             _dropUnlisten = unlisten;
@@ -2063,7 +2072,7 @@ appStore.set('isNetworkUpdating', false);
             }
         }
     };
-    loadCoreVersion();
+    void loadCoreVersion();
 
     // ---- App version ----
     const appVersionText = document.getElementById('app-version-text');
@@ -2076,7 +2085,7 @@ appStore.set('isNetworkUpdating', false);
         }
     }
 
-    loadSettingsFromCore();
+    void loadSettingsFromCore();
 
     // ---- Auto-update check ----
     /**
@@ -2092,7 +2101,7 @@ appStore.set('isNetworkUpdating', false);
 
         const ring = createStatusRing(checkUpdateBtn);
         ring.show();
-        /** @type {(() => void) | undefined} */
+        /** @type {(() => Promise<void>) | undefined} */
         let unlisten;
 
         try {
@@ -2133,7 +2142,7 @@ appStore.set('isNetworkUpdating', false);
             const error = toError(err);
             showNotification(error.toString(), 'error');
         } finally {
-            if (unlisten) unlisten();
+            if (unlisten) dropListener(unlisten);
             setTimeout(() => ring.destroy(), 3500);
         }
     };
@@ -2147,7 +2156,7 @@ appStore.set('isNetworkUpdating', false);
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         const ring = createStatusRing(checkUpdateBtn);
         ring.show();
-        /** @type {(() => void) | undefined} */
+        /** @type {(() => Promise<void>) | undefined} */
         let unlisten;
         try {
             unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
@@ -2162,7 +2171,7 @@ appStore.set('isNetworkUpdating', false);
             ring.setError();
             showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
         } finally {
-            if (unlisten) unlisten();
+            if (unlisten) dropListener(unlisten);
             setTimeout(() => ring.destroy(), 3500);
         }
     };
@@ -2357,7 +2366,7 @@ appStore.set('isNetworkUpdating', false);
                         console.error('Error in smart toggle change handler:', err);
                     }
                 }
-                (async () => {
+                void (async () => {
                     try {
                         await syncAutoTestState();
                     } catch (err) {

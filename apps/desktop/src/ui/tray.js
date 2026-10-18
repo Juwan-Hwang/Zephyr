@@ -300,7 +300,7 @@ export async function initTrayEventListeners() {
 
                 const proxiesPage = document.querySelector('[data-page="proxies"]');
                 if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
-                    import('./proxies.js').then(m => m.renderProxies());
+                    import('./proxies.js').then(m => m.refreshProxies()).catch(() => {});
                 }
 
                 updateTrayMenu(true).catch(() => {});
@@ -354,7 +354,7 @@ export function startUnifiedSync() {
     }
 
     // Crash recovery: if ownership marker exists from a previous crash, restore proxy immediately
-    (async () => {
+    void (async () => {
         try {
             const [sysProxyOn, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),

@@ -198,7 +198,7 @@ export function initConnectionsPage() {
 
     bindConnectionsEvents();
     bindConnTabEvents();
-    fetchAndRenderConnections();
+    void fetchAndRenderConnections();
 
     // Re-apply sort arrows when i18n/theme changes wipe header text.
     // initConnectionsPage() runs on every visit, so drop the previous
@@ -241,7 +241,7 @@ export function initConnectionsPage() {
         const pageEl = document.querySelector('[data-page="connections"]');
         const isPageActive = pageEl && !pageEl.classList.contains('hidden');
         if (!document.hidden && isPageActive && connectionsPollTimer == null && generation === _pollGeneration) {
-            fetchAndRenderConnections();
+            void fetchAndRenderConnections();
             schedulePoll();
         }
     };
@@ -347,8 +347,8 @@ function bindConnectionsEvents() {
 
     if (closeAllClone) {
         closeAllClone.addEventListener('click', () => {
-            if (currentConnTab === 'closed') handleClearClosedConnections();
-            else handleCloseAllConnections();
+            if (currentConnTab === 'closed') void handleClearClosedConnections();
+            else void handleCloseAllConnections();
         });
     }
 
