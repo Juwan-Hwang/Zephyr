@@ -8,6 +8,7 @@
 
 import { getCurrentWindow, invoke, listen } from '../api.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
+import { uiLogger } from '../utils/logger.js';
 
 /**
  * Initialize window control event listeners.
@@ -19,7 +20,11 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-            getCurrentWindow().close();
+            // close() can throw synchronously when IPC is missing; the
+            // Promise.resolve().then wrapper turns that into a rejection too.
+            Promise.resolve()
+                .then(() => getCurrentWindow().close())
+                .catch((err) => uiLogger.warn('Failed to close window', err));
         });
     }
 
@@ -56,7 +61,7 @@ export function initWindowControls() {
     const scheduleSync = () => {
         if (disposed) return;
         if (syncTimer !== null) clearTimeout(syncTimer);
-        syncTimer = setTimeout(() => { syncTimer = null; syncMaximized(); }, 120);
+        syncTimer = setTimeout(() => { syncTimer = null; void syncMaximized(); }, 120);
     };
     // Register cleanup immediately so teardown during async listen still works.
     registerCleanup(() => {
@@ -68,10 +73,10 @@ export function initWindowControls() {
     // and listen() resolving.
     listen('tauri://resize', scheduleSync).then((unlisten) => {
         if (disposed) { Promise.resolve(unlisten()).catch(() => {}); return; }
-        syncMaximized();
+        void syncMaximized();
         registerCleanup(() => { Promise.resolve(unlisten()).catch(() => {}); });
     }).catch(() => {
         // Non-Tauri environment or listener failed — still try initial sync.
-        syncMaximized();
+        void syncMaximized();
     });
 }

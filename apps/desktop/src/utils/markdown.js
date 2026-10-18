@@ -11,6 +11,23 @@
 
 import { escapeHtml, sanitizeHtml } from './sanitize.js';
 
+/**
+ * Pick one private-use character absent from the input to delimit code
+ * placeholders, so no input text is altered or mistaken for a placeholder.
+ * Linear in the input length and always a single character.
+ * @param {string} text
+ * @returns {string}
+ */
+function pickSentinel(text) {
+    for (let code = 0xE000; code <= 0xF8FF; code++) {
+        const ch = String.fromCodePoint(code);
+        if (!text.includes(ch)) return ch;
+    }
+    // Every private-use character occurs in the input: unreachable for real
+    // release notes, and markdownToHtml strips this one before converting.
+    return '\uE000';
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -30,7 +47,8 @@ export function markdownToHtml(md) {
 
     // --- Token-level processing (order matters) ---
 
-    let html = processed;
+    const PH = pickSentinel(processed);
+    let html = processed.includes(PH) ? processed.replaceAll(PH, '') : processed;
 
     // Use placeholders for code blocks and inline code so that
     // escapeHtml in subsequent steps doesn't double-escape the generated HTML tags.
@@ -41,14 +59,14 @@ export function markdownToHtml(md) {
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
         const idx = placeholders.length;
         placeholders.push(`<pre class="bg-[var(--zephyr-bg-input)] rounded-lg p-3 my-3 text-xs overflow-x-auto leading-relaxed"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
-        return `\x00CODEBLOCK_${idx}\x00`;
+        return `${PH}CODEBLOCK_${idx}${PH}`;
     });
 
     // 2. Inline code — before bold/italic to avoid matching inside code
     html = html.replace(/`([^`]+)`/g, (_, code) => {
         const idx = placeholders.length;
         placeholders.push(`<code class="bg-[var(--zephyr-bg-input)] px-2 py-0.5 rounded text-xs align-middle">${escapeHtml(code)}</code>`);
-        return `\x00INLINECODE_${idx}\x00`;
+        return `${PH}INLINECODE_${idx}${PH}`;
     });
 
     // 3. Escape HTML once globally — prevents XSS and avoids nested-formatting bugs
@@ -103,10 +121,19 @@ export function markdownToHtml(md) {
     html = html.replace(/^\d+\. (.+)$/gm, (_, t) => `<li class="ms-4 list-decimal text-xs text-[var(--text-secondary)] leading-relaxed py-0.5">${t}</li>`);
 
     // 14. Paragraphs: wrap remaining loose lines that aren't already HTML tags or code block placeholders
-    html = html.replace(/^(?!\s*<[a-z/]|\s*\x00CODEBLOCK)(.*\S.*)$/gm, (_, t) => `<p class="text-xs text-[var(--text-secondary)] leading-relaxed my-2">${t}</p>`);
+    html = html.replace(/^(.*\S.*)$/gm, (line) => {
+        const lead = line.trimStart();
+        if (/^<[a-z/]/.test(lead) || lead.startsWith(`${PH}CODEBLOCK`)) return line;
+        return `<p class="text-xs text-[var(--text-secondary)] leading-relaxed my-2">${line}</p>`;
+    });
 
     // --- Restore placeholders (before sanitizeHtml) ---
-    html = html.replace(/\x00(?:CODEBLOCK|INLINECODE)_(\d+)\x00/g, (_, idx) => placeholders[parseInt(idx, 10)]);
+    // PH occurs only in placeholders, so after splitting on it every odd part
+    // is a placeholder name ("CODEBLOCK_3" / "INLINECODE_7").
+    html = html.split(PH).map((part, i) => {
+        if (i % 2 === 0) return part;
+        return placeholders[Number.parseInt(part.slice(part.indexOf('_') + 1), 10)] ?? '';
+    }).join('');
 
     // --- Post-processing ---
     html = html.replace(/\n{3,}/g, '\n\n');

@@ -187,7 +187,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
                 e.preventDefault();
                 e.stopPropagation();
                 const lang = appStore.get('currentLang') || 'en';
-                pasteWithFeedback(input, showNotification, translations, lang);
+                void pasteWithFeedback(input, showNotification, translations, lang);
             });
             contentArea.appendChild(wrapper);
         }

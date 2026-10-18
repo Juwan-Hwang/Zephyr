@@ -24,7 +24,7 @@ let statusCheckPromise = null;
  * @returns {Promise<boolean>}
  */
 async function checkStatus() {
-    if (statusCheckPromise) return statusCheckPromise;
+    if (statusCheckPromise !== null) return statusCheckPromise;
     statusCheckPromise = _checkStatusInner();
     try {
         return await statusCheckPromise;
@@ -240,9 +240,9 @@ export async function initNetworkOptim() {
     btn.addEventListener('click', () => {
         if (isLoading) return;
         if (isApplied) {
-            showRevertModal();
+            void showRevertModal();
         } else {
-            showApplyModal();
+            void showApplyModal();
         }
     });
 }

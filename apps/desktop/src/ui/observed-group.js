@@ -155,7 +155,7 @@ function _scheduleNext() {
     const interval = isCoreReachable() ? POLL_INTERVAL : 15000;
     _timer = setTimeout(() => {
         _timer = null;
-        _poll().finally(() => {
+        void _poll().finally(() => {
             _scheduleNext();
         });
     }, interval);

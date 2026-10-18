@@ -22,7 +22,7 @@ import { apiLogger } from '../utils/logger.js';
 /**
  * Initialize deep link event listener.
  * Should be called once during app startup.
- * @returns {Promise<() => void>} Unlisten function
+ * @returns {Promise<() => Promise<void>>} Unlisten function
  */
 export async function initDeepLink() {
     return listen('deep-link', async (/** @type {{ payload: DeepLinkPayload }} */ event) => {

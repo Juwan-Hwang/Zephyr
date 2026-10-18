@@ -61,7 +61,7 @@ function initPluginsPage() {
             discoverBtn.disabled = true;
             try {
                 const plugins = await prism.pluginDiscover();
-                renderPluginsList(plugins);
+                void renderPluginsList(plugins);
             } catch (e) { showNotification(String(e), 'error'); }
             finally { discoverBtn.disabled = false; }
         });
@@ -86,14 +86,14 @@ function initPluginsPage() {
                 const keys = await prism.kvKeys();
                 for (const key of keys) await prism.kvDelete(key);
                 showNotification(`Cleared ${keys.length} KV entries`, 'success');
-                loadKvStore();
+                void loadKvStore();
             } catch (e) { showNotification(String(e), 'error'); }
         });
     }
 
-    loadKvStore();
-    loadHooksList();
-    loadPermissionsList();
+    void loadKvStore();
+    void loadHooksList();
+    void loadPermissionsList();
 }
 
 /**
@@ -165,7 +165,7 @@ async function renderPluginsList(plugins) {
                     showNotification(`Plugin ${id} deleted`, 'success');
                 }
                 const updated = await prism.pluginDiscover();
-                renderPluginsList(updated);
+                void renderPluginsList(updated);
             } catch (e) { showNotification(String(e), 'error'); }
         });
     });
@@ -282,7 +282,7 @@ async function loadKvStore() {
                 try {
                     await prism.kvDelete(key);
                     showNotification(`Deleted: ${key}`, 'success');
-                    loadKvStore();
+                    void loadKvStore();
                 } catch (e) { showNotification(String(e), 'error'); }
             });
         });
@@ -299,7 +299,7 @@ async function loadKvStore() {
                 try {
                     await prism.kvSet(key, JSON.parse(newVal));
                     showNotification(`Updated: ${key}`, 'success');
-                    loadKvStore();
+                    void loadKvStore();
                 } catch (e) { showNotification(String(e), 'error'); }
             });
         });
@@ -397,7 +397,7 @@ function initScriptsSection() {
             }
         });
     }
-    loadSandboxConfig();
+    void loadSandboxConfig();
 
     // Limits config
     const limitsSaveBtn = document.getElementById('limits-save-btn');
@@ -411,11 +411,11 @@ function initScriptsSection() {
                     maxRecursionDepth: getNumberInput('limit-recursion', 32),
                 });
                 showNotification('Script limits saved', 'success');
-                loadLimitsConfig();
+                void loadLimitsConfig();
             } catch (e) { showNotification(String(e), 'error'); }
         });
     }
-    loadLimitsConfig();
+    void loadLimitsConfig();
 }
 
 async function loadSandboxConfig() {
@@ -450,9 +450,9 @@ async function loadLimitsConfig() {
 // ═══════════════════════════════════════════════════════════════════════
 
 function initSmartPage() {
-    loadSmartConfig();
-    loadFailoverPolicy();
-    loadSmartRankings();
+    void loadSmartConfig();
+    void loadFailoverPolicy();
+    void loadSmartRankings();
 
     // Save smart config (with validation)
     const saveSmartBtn = document.getElementById('smart-save-config-btn');
@@ -477,7 +477,7 @@ function initSmartPage() {
             try {
                 await prism.smartClearHistory();
                 showNotification('Smart history cleared', 'success');
-                loadSmartRankings();
+                void loadSmartRankings();
             } catch (e) { showNotification(String(e), 'error'); }
         });
     }
@@ -525,13 +525,13 @@ function initSmartPage() {
             try {
                 await prism.smartTrimHistory(max);
                 showNotification(`History trimmed to ${max} records`, 'success');
-                loadSmartRankings();
+                void loadSmartRankings();
             } catch (e) { showNotification(String(e), 'error'); }
         });
     }
 
     // Load scheduler config display
-    loadSchedulerConfig();
+    void loadSchedulerConfig();
 }
 
 async function loadSmartConfig() {
