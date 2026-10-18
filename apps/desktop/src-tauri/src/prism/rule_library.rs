@@ -58,12 +58,17 @@ pub fn rule_list(state: State<PrismState>) -> Result<Vec<RuleFileInfo>, String> 
     let mut files = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".prism.yaml") {
+        // Disabled files are renamed to `<name>.prism.yaml.disabled`; list them
+        // under their base name so the library can show and re-enable them.
+        let enabled = !name.ends_with(".disabled");
+        let base = name.strip_suffix(".disabled").unwrap_or(&name).to_owned();
+        if base.ends_with(".prism.yaml") {
             let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
             files.push(RuleFileInfo {
-                filename: name,
+                filename: base,
                 rule_count: count_rules(&content),
                 source: detect_source(&content).to_owned(),
+                enabled,
             });
         }
     }

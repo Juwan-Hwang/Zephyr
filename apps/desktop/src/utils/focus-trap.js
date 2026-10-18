@@ -17,6 +17,62 @@ const FOCUSABLE =
     'select:not([disabled]), textarea:not([disabled]), ' +
     '[tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
 
+// ── Input modality ─────────────────────────────────────────────────────────
+// A dialog opened with the mouse should not greet the user with a heavy focus
+// ring on its first button; one opened from the keyboard should. Track which
+// input the user used last and focus quietly after a pointer interaction.
+
+/** @type {'pointer'|'keyboard'} */
+let lastModality = 'keyboard';
+const QUIET_CLASS = 'focus-quiet';
+
+if (typeof document !== 'undefined') {
+    const toPointer = () => { lastModality = 'pointer'; };
+    document.addEventListener('pointerdown', toPointer, true);
+    document.addEventListener('mousedown', toPointer, true);
+    document.addEventListener('keydown', (e) => {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        lastModality = 'keyboard';
+        // The user switched to the keyboard: show the ring again wherever focus is.
+        document.querySelectorAll(`.${QUIET_CLASS}`).forEach((el) => el.classList.remove(QUIET_CLASS));
+    }, true);
+}
+
+/** @returns {'pointer'|'keyboard'} Last input modality the user used. */
+export function getInputModality() {
+    return lastModality;
+}
+
+/**
+ * Text fields always show where the caret is; every other control is focused
+ * without the ring after a pointer interaction.
+ * @param {HTMLElement} el
+ */
+function isTextEntry(el) {
+    if (el instanceof HTMLTextAreaElement || el.isContentEditable) return true;
+    if (!(el instanceof HTMLInputElement)) return false;
+    return !['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'file', 'image'].includes(el.type);
+}
+
+/**
+ * Focus an element; after a pointer interaction, non-text controls get no
+ * focus ring (`:focus-visible` still applies as soon as a key is pressed).
+ * @param {HTMLElement} el
+ */
+export function focusRespectingModality(el) {
+    const quiet = lastModality === 'pointer' && !isTextEntry(el);
+    if (quiet) {
+        el.classList.add(QUIET_CLASS);
+        el.addEventListener('blur', () => el.classList.remove(QUIET_CLASS), { once: true });
+    }
+    try {
+        // focusVisible is honoured by Chromium / Firefox; the class covers the rest.
+        el.focus(/** @type {FocusOptions} */ ({ focusVisible: !quiet }));
+    } catch {
+        el.focus();
+    }
+}
+
 /**
  * @typedef {Object} FocusTrapHandle
  * @property {() => void} activate  Start trapping focus.
@@ -90,7 +146,7 @@ export function createFocusTrap(container, options = {}) {
 
         const target = options.initialFocus || getFocusableElements()[0];
         if (target instanceof HTMLElement) {
-            requestAnimationFrame(() => target.focus());
+            requestAnimationFrame(() => focusRespectingModality(target));
         }
     }
 
@@ -100,7 +156,7 @@ export function createFocusTrap(container, options = {}) {
         document.removeEventListener('keydown', onKeyDown, true);
 
         if (previousFocus && previousFocus.isConnected) {
-            previousFocus.focus();
+            focusRespectingModality(previousFocus);
         }
         previousFocus = null;
     }
