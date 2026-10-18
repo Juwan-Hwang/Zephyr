@@ -64,7 +64,10 @@ function dlTotalOf(row) {
 }
 
 async function refresh() {
-    /** @type {HTMLElement} */ (document.getElementById('refresh-conns-btn')).click();
+    // No refresh button any more: pause + resume fetches immediately.
+    const pause = /** @type {HTMLElement} */ (document.getElementById('pause-conns-btn'));
+    pause.click();
+    pause.click();
     await flush();
 }
 
@@ -87,7 +90,8 @@ describe('connections page list rendering', () => {
         await flush();
         const first = rows();
         expect(first.map(hostOf)).toEqual(['a.example', 'b.example']);
-        expect(first.map(dlTotalOf)).toEqual(['0 B', '0 B']);
+        // Totals start from the core's cumulative counters, not from 0.
+        expect(first.map(dlTotalOf)).toEqual(['100.00 B', '100.00 B']);
 
         vi.setSystemTime(Date.now() + 2000);
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 1100), conn('2', 'b.example', 100)] });
@@ -96,8 +100,8 @@ describe('connections page list rendering', () => {
         const second = rows();
         expect(second[0]).toBe(first[0]);
         expect(second[1]).toBe(first[1]);
-        expect(dlTotalOf(second[0])).toBe('1.00 KB');
-        expect(dlTotalOf(second[1])).toBe('0 B');
+        expect(dlTotalOf(second[0])).toBe('1.10 KB');
+        expect(dlTotalOf(second[1])).toBe('100.00 B');
     });
 
     it('adds and removes rows as connections come and go', async () => {
@@ -140,6 +144,35 @@ describe('connections page list rendering', () => {
         await refresh();
         expect(rows()).toHaveLength(1);
         expect(list().querySelector('#connections-empty')).toBeNull();
+    });
+
+    it('says a search found nothing and clears it from the box or the empty state', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const input = /** @type {HTMLInputElement} */ (document.getElementById('connections-search-input'));
+        const clear = /** @type {HTMLElement} */ (document.getElementById('connections-search-clear'));
+        expect(clear.classList.contains('hidden')).toBe(true);
+
+        input.value = 'zzzz';
+        input.dispatchEvent(new Event('input'));
+        expect(rows()).toHaveLength(0);
+        expect(list().querySelector('.conn-search-empty')).not.toBeNull();
+        expect(list().querySelector('#connections-empty')).toBeNull();
+        expect(clear.classList.contains('hidden')).toBe(false);
+        const closeBtn = /** @type {HTMLButtonElement} */ (document.getElementById('close-all-conns-btn'));
+        expect(closeBtn.disabled).toBe(true);
+
+        clear.click();
+        expect(input.value).toBe('');
+        expect(rows()).toHaveLength(2);
+        expect(clear.classList.contains('hidden')).toBe(true);
+        expect(closeBtn.disabled).toBe(false);
+
+        input.value = 'zzzz';
+        input.dispatchEvent(new Event('input'));
+        /** @type {HTMLElement} */ (list().querySelector('.conn-search-empty button')).click();
+        expect(rows()).toHaveLength(2);
     });
 
     it('exposes every sort control as a toggle before the first sort pass', async () => {
@@ -324,12 +357,12 @@ describe('connections page list rendering', () => {
         expect(rows().map(hostOf)).toEqual(['a.example', 'b.example']);
         const byHost = new Map(rows().map((r) => [hostOf(r), r]));
 
-        // Sort by host (first click = descending).
+        // Sort by host (text column: first click = A→Z, second = Z→A).
         const hostHeader = /** @type {HTMLElement} */ (document.querySelector('#conn-table-header [data-sort="host"]'));
         hostHeader.click();
-        expect(rows().map(hostOf)).toEqual(['b.example', 'a.example']);
-        hostHeader.click(); // ascending
         expect(rows().map(hostOf)).toEqual(['a.example', 'b.example']);
+        hostHeader.click(); // descending
+        expect(rows().map(hostOf)).toEqual(['b.example', 'a.example']);
         for (const r of rows()) expect(r).toBe(byHost.get(hostOf(r)));
     });
 });

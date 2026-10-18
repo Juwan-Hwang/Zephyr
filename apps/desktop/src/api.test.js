@@ -492,9 +492,14 @@ describe('closeConnection', () => {
     });
 
     it('accepts array of IDs', async () => {
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+        vi.stubGlobal('fetch', fetchMock);
 
         await expect(closeConnection(['id1', 'id2'])).resolves.toBeUndefined();
+        // One DELETE /connections/:id each; never the bare close-all endpoint
+        const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+        expect(urls.some((u) => u.endsWith('/connections/id1'))).toBe(true);
+        expect(urls.some((u) => u.endsWith('/connections/id2'))).toBe(true);
         vi.unstubAllGlobals();
     });
 });

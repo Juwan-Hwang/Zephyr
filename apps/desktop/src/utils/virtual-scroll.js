@@ -447,7 +447,11 @@ export function createVirtualScroll(/** @type {VirtualScrollOptions} */ opts) {
 
         linesContainer.replaceChildren();
         spacerTop.style.height = '0';
-        spacerBottom.style.height = '0';
+        // Keep the list's estimated height while it is empty: a container sized by its
+        // content (no fixed height, e.g. inside a dialog) would otherwise collapse to 0,
+        // computeRange() would see a 0px viewport and nothing would be mounted again.
+        ensureOffsets();
+        spacerBottom.style.height = `${offsetsArr[n] || 0}px`;
 
         lastRenderedScrollTop = -1;
         prevStart = 0;
