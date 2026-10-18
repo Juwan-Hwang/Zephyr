@@ -34,8 +34,10 @@ jobs:
     steps:
       - name: Check whether Snyk is configured
         id: guard
+        env:
+          SNYK_TOKEN_VALUE: ${{ secrets.SNYK_TOKEN }}
         run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+          if [ -n "$SNYK_TOKEN_VALUE" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"

@@ -32,8 +32,10 @@ jobs:
     steps:
       - name: Check whether GitGuardian is configured
         id: guard
+        env:
+          GG_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
         run: |
-          if [ -n "${{ secrets.GITGUARDIAN_API_KEY }}" ]; then
+          if [ -n "$GG_API_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
