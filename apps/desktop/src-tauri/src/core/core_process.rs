@@ -3386,20 +3386,20 @@ mod tests {
         // 1. Preferred profile is valid
         let (name, yaml, port, proxy) =
             select_runtime_config(&paths, "pref.yaml", &preferred_path, "sec123", None).unwrap();
-        assert_eq!(name, Some("pref.yaml".to_string()));
+        assert_eq!(name, Some("pref.yaml".to_owned()));
         assert_eq!(port, 9090);
         assert_eq!(proxy, Some(ProxyEndpoint::http(7890)));
         assert!(yaml.contains("secret: sec123"));
 
         // 2. Preferred profile is invalid, secondary fallback profile is valid
         let invalid_path = paths.profiles_dir.join("invalid.yaml");
-        std::fs::write(&invalid_path, "::invalid yaml syntax::").unwrap();
+        std::fs::write(&invalid_path, "{ invalid yaml: [").unwrap();
         let fallback_path = paths.profiles_dir.join("fallback.yaml");
         std::fs::write(&fallback_path, "port: 7895\nmode: rule").unwrap();
 
         let (fb_name, fb_yaml, fb_port, fb_proxy) =
             select_runtime_config(&paths, "invalid.yaml", &invalid_path, "sec456", None).unwrap();
-        assert_eq!(fb_name, Some("fallback.yaml".to_string()));
+        assert_eq!(fb_name, Some("fallback.yaml".to_owned()));
         assert_eq!(fb_port, 9090);
         assert_eq!(fb_proxy, Some(ProxyEndpoint::http(7895)));
         assert!(fb_yaml.contains("secret: sec456"));
@@ -3407,7 +3407,7 @@ mod tests {
         // 3. Preferred profile invalid and no valid fallbacks exist
         let (_temp2, empty_paths) = setup_test_app_paths();
         let bad_path = empty_paths.profiles_dir.join("bad.yaml");
-        std::fs::write(&bad_path, "::invalid yaml::").unwrap();
+        std::fs::write(&bad_path, "{ invalid yaml: [").unwrap();
 
         let (no_name, min_yaml, min_port, min_proxy) =
             select_runtime_config(&empty_paths, "bad.yaml", &bad_path, "sec789", None).unwrap();
@@ -3440,19 +3440,22 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        // Spawn mock server for one request
+        // Spawn mock server to handle multiple requests (200 check + 401 check)
         let server_handle = tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
+            while let Ok((mut stream, _)) = listener.accept().await {
                 let mut buf = [0u8; 512];
-                let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
-                let req = String::from_utf8_lossy(&buf);
-
-                if req.contains("Authorization: Bearer test_secret") {
-                    let resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
-                } else {
-                    let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
-                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                if tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await.is_ok() {
+                    let req = String::from_utf8_lossy(&buf);
+                    if req.contains("Authorization: Bearer test_secret-x") {
+                        let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                    } else if req.contains("Authorization: Bearer test_secret") {
+                        let resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                    } else {
+                        let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                    }
                 }
             }
         });
@@ -3462,6 +3465,6 @@ mod tests {
                 .await;
 
         assert!(success);
-        let _ = server_handle.await;
+        server_handle.abort();
     }
 }
