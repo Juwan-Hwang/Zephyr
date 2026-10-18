@@ -14,8 +14,21 @@ import { advancedLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
 import { validateConfig } from './prism.js';
+import { translations, currentLang, t as tCount } from '../i18n.js';
 
 // --- Helpers ---
+
+/**
+ * Current-language string with an English fallback (sync; the page renders after i18n is loaded).
+ * @param {string} key
+ * @param {string} fallback
+ * @returns {string}
+ */
+function tr(key, fallback) {
+    const all = /** @type {Record<string, Record<string, unknown>>} */ (/** @type {unknown} */ (translations));
+    const v = all[currentLang]?.[key] ?? all.en?.[key];
+    return typeof v === 'string' && v ? v : fallback;
+}
 
 /**
  * @param {*} value
@@ -258,6 +271,31 @@ function buildNestedPayload(path, value) {
 
 // --- Render functions ---
 
+/** Top-level key to bring into view after the next render (e.g. 'tun'). */
+/** @type {string|null} */
+let pendingFocusKey = null;
+
+/**
+ * Open the advanced page scrolled to one top-level section of the core config.
+ * The page renders asynchronously, so the key is applied after that render.
+ * @param {string} key
+ */
+export function focusAdvancedSection(key) {
+    pendingFocusKey = key;
+}
+
+/** @param {HTMLElement} container */
+function applyPendingFocus(container) {
+    const key = pendingFocusKey;
+    pendingFocusKey = null;
+    if (!key) return;
+    const card = /** @type {HTMLElement|null} */ (container.querySelector(`[data-key="${CSS.escape(key)}"]`));
+    if (!card) return;
+    card.scrollIntoView({ block: 'start', behavior: 'auto' });
+    card.classList.add('adv-flash');
+    setTimeout(() => card.classList.remove('adv-flash'), 1600);
+}
+
 export async function renderAdvancedSettings() {
     const container = document.getElementById('advanced-settings-container');
     if (!container) return;
@@ -275,6 +313,7 @@ export async function renderAdvancedSettings() {
 
         container.replaceChildren();
         container.appendChild(fragment);
+        applyPendingFocus(container);
     } catch (err) {
         advancedLogger.error('Advanced settings render error', err);
         container.replaceChildren();
@@ -355,7 +394,7 @@ function renderArrayContent(container, arr, parentKey, _depth) {
     if (arr.length === 0) {
         const empty = document.createElement('div');
         empty.className = "text-xs text-[var(--text-muted)] italic";
-        empty.textContent = "(empty array)";
+        empty.textContent = tr('advancedEmptyList', 'Empty');
         container.appendChild(empty);
         return;
     }
@@ -445,24 +484,19 @@ function renderSimpleArrayEditor(container, arr, fullKey) {
  */
 function renderConfigItem(key, value, fullKey) {
     const row = document.createElement('div');
-    row.className = "flex items-center justify-between w-full gap-4 py-1";
+    row.className = "flex items-center justify-between w-full gap-4 py-1 min-h-[40px]";
     row.dataset.fullKey = fullKey;
 
     // Label
     const labelContainer = document.createElement('div');
     labelContainer.className = "shrink-0 min-w-0";
 
-    if (key) {
-        const label = document.createElement('p');
-        label.className = "text-xs font-medium text-[var(--text-secondary)] capitalize truncate";
-        label.textContent = key.replace(/-/g, ' ');
-        labelContainer.appendChild(label);
-    }
-
-    const subLabel = document.createElement('p');
-    subLabel.className = "text-2xs text-[var(--text-tertiary)] font-mono truncate";
-    subLabel.textContent = fullKey.split('.').pop() || '';
-    labelContainer.appendChild(subLabel);
+    // The config key itself is the label (it is what the YAML says); no second, re-cased copy.
+    const label = document.createElement('p');
+    label.className = "text-xs font-medium font-mono text-[var(--text-secondary)] truncate";
+    label.textContent = key || (fullKey.split('.').pop() || '');
+    label.title = fullKey;
+    labelContainer.appendChild(label);
 
     row.appendChild(labelContainer);
 
@@ -505,7 +539,7 @@ function renderConfigItem(key, value, fullKey) {
 
         const badge = document.createElement('span');
         badge.className = "type-badge";
-        badge.textContent = value.length === 1 ? `1 item` : `${value.length} items`;
+        badge.textContent = tCount('advancedItems', value.length);
         wrapper.appendChild(badge);
 
         if (value.length > 0 && typeof value[0] !== 'object') {
@@ -520,7 +554,7 @@ function renderConfigItem(key, value, fullKey) {
         const badge = document.createElement('span');
         badge.className = "type-badge";
         const keyCount = Object.keys(value).length;
-        badge.textContent = keyCount === 1 ? `1 field` : `${keyCount} fields`;
+        badge.textContent = tCount('advancedFields', keyCount);
         valueContainer.appendChild(badge);
     } else if (value === null || value === undefined) {
         const wrapper = document.createElement('div');
@@ -534,7 +568,7 @@ function renderConfigItem(key, value, fullKey) {
         const setBtn = document.createElement('button');
         setBtn.type = "button";
         setBtn.className = "text-2xs text-accent hover:text-accent/80 px-1.5 py-0.5 rounded-sm transition-colors";
-        setBtn.title = "Set value";
+        setBtn.title = tr('advancedSetValue', 'Set value');
         setBtn.setAttribute('aria-label', 'Set value for ' + fullKey);
         // eslint-disable-next-line no-unsanitized/property -- static SVG constant
         setBtn.innerHTML = SVG_ICONS.plus; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
