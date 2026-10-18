@@ -374,7 +374,7 @@ let _confirmGeneration = 0;
  * @param {HTMLElement} btn
  */
 function resetConfirmButton(btn) {
-    btn.classList.remove('btn-danger');
+    btn.classList.remove('btn-danger', 'is-solid');
     btn.classList.add('btn-primary');
     const key = btn.dataset.i18n;
     const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] || translations.en;
@@ -444,7 +444,7 @@ function openConfirmModal(title, message = '', options = {}) {
         resetConfirmButton(confirmBtn);
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
-            confirmBtn.classList.add('btn-danger');
+            confirmBtn.classList.add('btn-danger', 'is-solid');
         }
         if (confirmText) confirmBtn.textContent = confirmText;
 
