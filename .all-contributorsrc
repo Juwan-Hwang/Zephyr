@@ -253,13 +253,14 @@
       "avatar_url": "https://avatars.githubusercontent.com/in/4706?v=4",
       "profile": "https://github.com/apps/imgbot",
       "contributions": [
-        "infra"
+        "infra",
+        "review"
       ]
     },
     {
       "login": "allcontributors[bot]",
       "name": "allcontributors[bot]",
-      "avatar_url": "https://avatars.githubusercontent.com/u/649578?v=4",
+      "avatar_url": "https://avatars.githubusercontent.com/in/23186?v=4",
       "profile": "https://github.com/apps/allcontributors",
       "contributions": [
         "infra"
@@ -337,5 +338,7 @@
         "code"
       ]
     }
-  ]
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular"
 }
