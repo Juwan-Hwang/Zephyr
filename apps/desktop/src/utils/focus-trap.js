@@ -30,6 +30,8 @@ const FOCUSABLE =
  * @param {HTMLElement} container
  * @param {Object} [options]
  * @param {() => void} [options.onEscape] Called when Escape is pressed.
+ * @param {() => boolean} [options.passEscape] When it returns true, Escape is left to whatever
+ *   sits above the trap (a nested dialog, an editor popup) instead of being handled here.
  * @param {HTMLElement} [options.initialFocus] Element to focus on activate (default: first focusable).
  * @returns {FocusTrapHandle}
  */
@@ -42,6 +44,7 @@ export function createFocusTrap(container, options = {}) {
         if (!active) return;
 
         if (e.key === 'Escape') {
+            if (options.passEscape?.()) return;
             e.preventDefault();
             e.stopPropagation();
             options.onEscape?.();
