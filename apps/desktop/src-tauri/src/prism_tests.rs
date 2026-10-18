@@ -31,8 +31,9 @@ mod tests {
 
     // Import private items from prism.rs (two levels up)
     use super::super::{
-        count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml, parse_position,
-        read_groups, sanitize_filename, write_groups, RuleGroup, RuleGroups,
+        check_input_size, count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml,
+        parse_position, read_groups, rule_create_in_dir, sanitize_filename, write_groups,
+        MAX_INPUT_SIZE, RuleGroup, RuleGroups,
     };
 
     // ========================================================================
@@ -1201,7 +1202,122 @@ rules:
     }
 
     // ========================================================================
-    // 8. parse_position tests
+    // 8. Rule creation validation and logic tests
+    // ========================================================================
+
+    mod rule_create_tests {
+        use super::{
+            check_input_size, ensure_prism_ext, fs, rule_create_in_dir, sanitize_filename,
+            MAX_INPUT_SIZE,
+        };
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+        fn unique_temp_dir() -> PathBuf {
+            let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("zephyr_rule_create_test_{n}"));
+            let _ = fs::create_dir_all(&dir);
+            dir
+        }
+
+        fn cleanup(dir: &std::path::Path) {
+            let _ = fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn test_rule_create_success() {
+            let dir = unique_temp_dir();
+            let name = "my_custom_rules";
+            let content = "rules:\n  - DOMAIN-SUFFIX,example.com,PROXY\n";
+
+            let res = rule_create_in_dir(&dir, name, content);
+            assert!(res.is_ok(), "rule creation should succeed: {res:?}");
+            let created_filename = res.expect("expected filename");
+            assert_eq!(created_filename, "my_custom_rules.prism.yaml");
+
+            let file_path = dir.join(&created_filename);
+            assert!(file_path.exists(), "file should exist on disk");
+            let read_content = fs::read_to_string(&file_path).expect("failed to read created file");
+            assert_eq!(read_content, content);
+
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn test_rule_create_duplicate() {
+            let dir = unique_temp_dir();
+            let name = "adblock_rules";
+            let content = "rules:\n  - DOMAIN-SUFFIX,ads.com,REJECT\n";
+
+            let first = rule_create_in_dir(&dir, name, content);
+            assert!(first.is_ok());
+
+            let second = rule_create_in_dir(&dir, name, content);
+            assert!(second.is_err(), "duplicate creation should fail");
+            let err_msg = second.expect_err("expected error on duplicate");
+            assert!(
+                err_msg.contains("already exists"),
+                "error message should state file already exists: {err_msg}"
+            );
+
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn test_rule_create_oversized_content() {
+            let dir = unique_temp_dir();
+            let name = "large_rules";
+            // Create content exceeding MAX_INPUT_SIZE (10 MB)
+            let oversized_content = "a".repeat(MAX_INPUT_SIZE + 100);
+
+            let res = rule_create_in_dir(&dir, name, &oversized_content);
+            assert!(res.is_err(), "oversized rule content should be rejected");
+            let err = res.expect_err("expected error for oversized content");
+            assert!(
+                err.contains("too large"),
+                "error message should indicate content is too large: {err}"
+            );
+
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn test_rule_create_filename_sanitization() {
+            let dir = unique_temp_dir();
+            let traversal_name = "../../etc/passwd_rule";
+            let content = "rules:\n  - DOMAIN,test.com,DIRECT\n";
+
+            let res = rule_create_in_dir(&dir, traversal_name, content);
+            assert!(res.is_ok(), "path traversal input should be sanitized to safe filename");
+            let filename = res.expect("expected sanitized filename");
+            assert_eq!(filename, "....etcpasswd_rule.prism.yaml");
+            assert!(dir.join(&filename).exists());
+
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn test_rule_create_empty_or_disallowed_filename() {
+            let dir = unique_temp_dir();
+            let content = "rules:\n  - DOMAIN,test.com,DIRECT\n";
+
+            let empty_res = rule_create_in_dir(&dir, "", content);
+            assert!(empty_res.is_err(), "empty filename should be rejected");
+
+            let invalid_res = rule_create_in_dir(&dir, "\0\x01\x02", content);
+            assert!(
+                invalid_res.is_err(),
+                "filename with only disallowed/control characters should be rejected"
+            );
+
+            cleanup(&dir);
+        }
+    }
+
+    // ========================================================================
+    // 9. parse_position tests
     // ========================================================================
 
     mod parse_position_tests {

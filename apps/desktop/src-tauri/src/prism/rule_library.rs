@@ -78,21 +78,30 @@ pub fn rule_read(state: State<PrismState>, filename: String) -> Result<String, S
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read rule file: {e}"))
 }
 
+/// Core logic for creating a rule file in a specified directory.
+pub fn rule_create_in_dir(
+    prism_dir: &std::path::Path,
+    name: &str,
+    content: &str,
+) -> Result<String, String> {
+    check_input_size(content, "Rule content")?;
+    let filename = ensure_prism_ext(&sanitize_filename(name)?);
+    let path = prism_dir.join(&filename);
+    if path.exists() {
+        return Err(format!("Rule file '{filename}' already exists"));
+    }
+    write_file_secure(&path, content)?;
+    Ok(filename)
+}
+
 #[tauri::command]
 pub fn rule_create(
     state: State<PrismState>,
     name: String,
     content: String,
 ) -> Result<String, String> {
-    check_input_size(&content, "Rule content")?;
     let prism_dir = state.get_prism_workspace()?;
-    let filename = ensure_prism_ext(&sanitize_filename(&name)?);
-    let path = prism_dir.join(&filename);
-    if path.exists() {
-        return Err(format!("Rule file '{filename}' already exists"));
-    }
-    write_file_secure(&path, &content)?;
-    Ok(filename)
+    rule_create_in_dir(&prism_dir, &name, &content)
 }
 
 #[tauri::command]
