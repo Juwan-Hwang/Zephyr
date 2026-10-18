@@ -1,3 +1,4 @@
+use crate::core_manager::core::ProxyEndpoint;
 use crate::core_manager::{self, MihomoState};
 use flate2::read::GzDecoder;
 use futures_util::StreamExt as _;
@@ -130,14 +131,419 @@ fn current_platform_tags() -> Result<(&'static str, &'static str), String> {
     Ok((os_tag, arch_tag))
 }
 
-fn build_github_client() -> Result<reqwest::Client, String> {
-    let version = env!("CARGO_PKG_VERSION");
-    reqwest::Client::builder()
-        .user_agent(format!("Zephyr/{version}"))
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())
+/// The HTTP clients used for update traffic.
+///
+/// Two routes, tried in order:
+///
+/// 1. **Direct**, which is what every update request did before the managed
+///    proxy was introduced, and which still works whenever the network reaches
+///    GitHub on its own.
+/// 2. **Via the app's own core**, only when the direct route fails. This is what
+///    makes updating possible on a network where only the proxy reaches GitHub.
+///    Direct-first matters: routing updates exclusively through the core would
+///    mean a dead or blocked node — exactly when a user may need an update —
+///    also blocks updating.
+///
+/// Ambient and environment proxies are never used on either route: an
+/// `ALL_PROXY` value can be set by unrelated local software, and the loopback
+/// drain request in particular must not be routable through one.
+#[derive(Clone)]
+struct UpdateClients {
+    direct: reqwest::Client,
+    via_core: Option<reqwest::Client>,
+}
+
+impl UpdateClients {
+    /// Issue a GET over the direct route, falling back to the managed core when
+    /// the direct route cannot be used.
+    ///
+    /// Two triggers, matching what the subscription download path already does:
+    ///
+    /// - The request failed outright (DNS, connect, TLS, timeout).
+    /// - The response is a 5xx: middleboxes answer blocked GitHub traffic with
+    ///   502/503/504, and the subscription path retries every non-4xx status.
+    /// - The response carries a *route-dependent* status. GitHub answers 403/407/
+    ///   408/429/451 to some networks for reasons that have nothing to do with
+    ///   the resource — a regional block or a CDN policy decision is exactly the
+    ///   situation the managed core exists to route around — so retrying through
+    ///   it recovers. Deterministic answers (a genuine 404, a 4xx from a bad
+    ///   path) are left alone: retrying those would only repeat them.
+    ///
+    /// The direct response is returned untouched when there is no managed-core
+    /// client, so callers still see the real status and can report it.
+    async fn get(&self, url: &str) -> Result<reqwest::Response, String> {
+        let direct = self.direct.get(url).send().await;
+        let Some(core_client) = &self.via_core else {
+            return direct.map_err(|e| e.to_string());
+        };
+        let direct_failure = match direct {
+            Ok(response)
+                if !response.status().is_server_error()
+                    && !core_manager::core::fetch_util::is_route_dependent_status(
+                        response.status().as_u16(),
+                    ) =>
+            {
+                return Ok(response);
+            }
+            Ok(response) => format!("direct request returned {}", response.status()),
+            Err(e) => format!("direct request failed: {e}"),
+        };
+        core_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|core_err| format!("{direct_failure}; via managed core: {core_err}"))
+    }
+
+    /// Re-issue a request through the managed core after a body transfer failed
+    /// partway through.
+    ///
+    /// Always the core, whichever route served the failed body: a body served
+    /// by the core means the direct route had already failed (that is the only
+    /// way [`Self::get`] reaches the core), so retrying direct would only repeat
+    /// that failure; a body served directly gets the core as its alternative.
+    /// The retry starts from zero, so the caller must discard what it wrote.
+    async fn retry_via_core(&self, url: &str) -> Result<reqwest::Response, String> {
+        let Some(core_client) = &self.via_core else {
+            return Err("no managed-core route available".to_owned());
+        };
+        core_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("retry via managed core failed: {e}"))
+    }
+
+    /// Fetch a URL and read the whole body, retrying once through the core if
+    /// the transfer fails *after* the headers arrived.
+    ///
+    /// [`Self::get`] only decides once the headers are in, so a body
+    /// that resets or stalls between them got no fallback at all: the update check
+    /// simply failed, having never tried the route that would have worked. The
+    /// streamed asset path got this treatment when the mid-transfer retry was added;
+    /// these responses are a few kilobytes rather than tens of megabytes, but the
+    /// shape of the failure is the same and the fix is the same.
+    ///
+    /// One retry, like the asset path — a body that fails on both routes is a real
+    /// failure, not a route problem. Bodies are capped at [`METADATA_MAX_BYTES`]
+    /// on both routes.
+    async fn get_text(&self, url: &str) -> Result<String, String> {
+        self.get_text_capped(url, METADATA_MAX_BYTES).await
+    }
+
+    /// [`Self::get_text`] with a tighter body cap, so a small document (a
+    /// signature) stops reading at its own limit instead of the metadata one.
+    async fn get_text_capped(&self, url: &str, max_bytes: usize) -> Result<String, String> {
+        let response = self.get(url).await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("HTTP {status}"));
+        }
+        match read_text_capped(response, max_bytes).await {
+            Ok(body) => Ok(body),
+            Err(BodyError::Invalid(msg)) => Err(msg),
+            Err(BodyError::Transfer(err)) if self.via_core.is_some() => {
+                let retry = self
+                    .retry_via_core(url)
+                    .await
+                    .map_err(|retry_err| format!("{err}; {retry_err}"))?;
+                let retry_status = retry.status();
+                if !retry_status.is_success() {
+                    return Err(format!("{err}; retry returned status {retry_status}"));
+                }
+                read_text_capped(retry, max_bytes)
+                    .await
+                    .map_err(|retry_err| {
+                        format!("{err}; retry body failed: {}", retry_err.message())
+                    })
+            }
+            Err(BodyError::Transfer(err)) => Err(err),
+        }
+    }
+}
+
+/// Upper bound for an update-metadata body (release JSON, Atom feed, digest
+/// files). Real bodies are kilobytes; this only stops a hostile or broken
+/// upstream on either route from growing one without limit in memory.
+const METADATA_MAX_BYTES: usize = 10 * 1024 * 1024;
+
+enum BodyError {
+    /// Too large or not UTF-8: a property of the body, retrying will not help.
+    Invalid(String),
+    /// The transfer failed after the headers; the other route may succeed.
+    Transfer(String),
+}
+
+impl BodyError {
+    fn message(self) -> String {
+        match self {
+            Self::Invalid(msg) | Self::Transfer(msg) => msg,
+        }
+    }
+}
+
+async fn read_text_capped(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, BodyError> {
+    let too_large = || BodyError::Invalid(format!("response exceeds {max_bytes} bytes"));
+    if response
+        .content_length()
+        .is_some_and(|len| usize::try_from(len).map_or(true, |n| n > max_bytes))
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(next) = stream.next().await {
+        let chunk = next.map_err(|e| BodyError::Transfer(e.to_string()))?;
+        if body.len() + chunk.len() > max_bytes {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).map_err(|e| BodyError::Invalid(format!("invalid UTF-8 body: {e}")))
+}
+
+/// Upper bound for one geo database (`geoip.dat` / `geosite.dat`).
+///
+/// Real files are single-digit to low-double-digit megabytes; this is a backstop
+/// against an endless response filling the disk, not a size expectation. It
+/// matters because the streamed clients now carry a 30-minute transfer window
+/// with a per-read timeout that resets on every successful read, so a server
+/// that keeps trickling would otherwise be bounded by nothing at all. Matches
+/// the release-asset ceiling, which these files never approach either.
+const GEO_DATA_MAX_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Stream a response body into `dest_path` and fsync it, retrying once through
+/// the managed core if the transfer fails at any point.
+///
+/// The retry truncates the partial file and restarts from zero (there is no
+/// range resume), so the reported progress restarts too. A transfer that
+/// connects, delivers a little and then stalls is exactly the case the
+/// managed-core route exists for, so retrying after bytes were written is
+/// intended.
+///
+/// `on_chunk` receives the running byte count, the known content length (0 when
+/// unknown) and the computed progress font size.
+async fn stream_asset_to_file(
+    clients: &UpdateClients,
+    url: &str,
+    dest_path: &std::path::Path,
+    max_size: u64,
+    create_error: &str,
+    mut on_chunk: impl FnMut(u64, u64, u8),
+) -> Result<u64, String> {
+    use std::io::Write as _;
+
+    let mut response = clients
+        .get(url)
+        .await
+        .map_err(|e| format!("Failed to download: {e}"))?;
+    // Checked here, not only on the retried response: `get` returns a
+    // non-success response as `Ok` when there is no managed-core client or when
+    // the status is not route-dependent (a plain 404 or 500). Streaming that body
+    // would write the error page to disk and let the caller fail later at
+    // checksum verification with a misleading "SHA256 mismatch".
+    let initial_status = response.status();
+    if !initial_status.is_success() {
+        return Err(format!("Download failed with status: {initial_status}"));
+    }
+    let mut attempt = 0;
+    loop {
+        // Taken per attempt: the retried response comes from another route and
+        // carries its own length, which must pass the same ceiling.
+        let total_size = response.content_length().unwrap_or(0);
+        if total_size > max_size {
+            let _ = std::fs::remove_file(dest_path);
+            return Err(format!("Update package too large: {total_size} bytes"));
+        }
+        let mut downloaded = 0_u64;
+        let mut stream = response.bytes_stream();
+        // On a retry the first attempt's partial file is still on disk.
+        let mut file = std::fs::File::create(dest_path).map_err(|e| {
+            let _ = std::fs::remove_file(dest_path);
+            format!("{create_error}: {e}")
+        })?;
+        let mut stream_error: Option<String> = None;
+
+        while let Some(item) = stream.next().await {
+            let chunk = match item {
+                Ok(c) => c,
+                Err(e) => {
+                    stream_error = Some(e.to_string());
+                    break;
+                }
+            };
+            downloaded += chunk.len() as u64;
+            if downloaded > max_size {
+                // Close the handle first: Windows refuses to delete an open file.
+                drop(file);
+                let _ = std::fs::remove_file(dest_path);
+                return Err("Update package exceeded size limit".to_owned());
+            }
+            if let Err(e) = file.write_all(&chunk) {
+                drop(file);
+                let _ = std::fs::remove_file(dest_path);
+                return Err(format!("Failed to write chunk: {e}"));
+            }
+            let progress = if total_size > 0 {
+                // Integer-only progress: ratio ∈ [0, 1000] maps to font size [24, 80]
+                let ratio_x1000 = downloaded
+                    .checked_mul(1000)
+                    .unwrap_or(0)
+                    .checked_div(total_size)
+                    .unwrap_or(0);
+                let font_size = 24 + ((ratio_x1000 * 56) / 1000);
+                u8::try_from(font_size).unwrap_or(52)
+            } else {
+                52
+            };
+            on_chunk(downloaded, total_size, progress);
+        }
+
+        match stream_error {
+            None => {
+                // fsync through this write handle: Windows' FlushFileBuffers
+                // rejects a read-only handle, so callers must not reopen the
+                // file just to sync it.
+                if let Err(e) = file.sync_all() {
+                    drop(file);
+                    let _ = std::fs::remove_file(dest_path);
+                    return Err(format!("Failed to sync downloaded file: {e}"));
+                }
+                return Ok(downloaded);
+            }
+            Some(err) => {
+                // Every path below deletes or recreates the file, and Windows
+                // cannot delete one that is still open.
+                drop(file);
+                if attempt > 0 {
+                    let _ = std::fs::remove_file(dest_path);
+                    return Err(err);
+                }
+                // One retry through the managed core; `File::create` above
+                // truncates the partial file, so nothing is spliced together.
+                attempt += 1;
+                match clients.retry_via_core(url).await {
+                    Ok(retried) => {
+                        let status = retried.status();
+                        if !status.is_success() {
+                            let _ = std::fs::remove_file(dest_path);
+                            // Both halves: what triggered the fallback and what
+                            // the fallback returned. Reporting only the status
+                            // loses the reset or stall that caused this at all.
+                            return Err(format!("{err}; retry returned status {status}"));
+                        }
+                        response = retried;
+                    }
+                    Err(retry_err) => {
+                        let _ = std::fs::remove_file(dest_path);
+                        return Err(format!("{err}; {retry_err}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The managed core's configured proxy endpoint (port + scheme), if the core is
+/// running and its configuration is readable before a short deadline.
+async fn managed_proxy_endpoint(app: &tauri::AppHandle) -> Option<ProxyEndpoint> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    core_manager::core::fetch_util::read_active_runtime_config(Some(app), deadline)
+        .await
+        .and_then(|(endpoint, _ranges)| endpoint)
+}
+
+/// Build the clients used by *streamed* update/asset requests.
+async fn build_github_client(app: Option<&tauri::AppHandle>) -> Result<UpdateClients, String> {
+    build_update_clients(app, || {
+        reqwest::Client::builder()
+            .user_agent(format!("Zephyr/{}", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(10))
+            // These clients stream multi-megabyte assets (`bytes_stream()`), and
+            // `timeout` covers the *whole* exchange — including body reads. A
+            // short total budget therefore aborted large downloads on slow or
+            // proxied links and the partial file was discarded, restarting from
+            // zero on the next attempt.
+            //
+            // Two bounds replace it: a generous ceiling for the entire transfer
+            // (long enough for a large core over a slow link, short enough that a
+            // genuinely stuck download still ends), and a per-read timeout that
+            // resets on every successful read and so catches a stalled transfer
+            // without penalising a slow one.
+            .timeout(Duration::from_secs(60 * 30))
+            .read_timeout(Duration::from_secs(30))
+            .no_proxy()
+    })
+    .await
+}
+
+/// Build the clients for release *metadata*: release JSON, digests, shasums.
+///
+/// Same routing and user agent as [`build_github_client`], but a short total
+/// timeout. These responses are a few kilobytes and the caller is waiting on
+/// them before it can report anything to the user, so the long budget that
+/// streamed assets need would only turn a stalled source into a silent wait: a
+/// server that keeps trickling data never trips the per-read timeout, so
+/// `get_latest_version` would sit there for the whole asset budget before
+/// falling back to another source. A minute is generous for this traffic.
+async fn build_metadata_client(app: Option<&tauri::AppHandle>) -> Result<UpdateClients, String> {
+    build_update_clients(app, || {
+        reqwest::Client::builder()
+            .user_agent(format!("Zephyr/{}", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
+            .no_proxy()
+    })
+    .await
+}
+
+/// Build the update clients: one direct, plus one relaying through the managed
+/// core when it exposes a proxy endpoint.
+///
+/// `base` supplies only what genuinely differs between callers (user agent,
+/// overall timeout). Everything else — resolving the endpoint and turning it into
+/// a proxied client — is the same for all update traffic and lives here, so the
+/// two call sites cannot drift apart on the part that matters for routing.
+async fn build_update_clients<F>(
+    app: Option<&tauri::AppHandle>,
+    base: F,
+) -> Result<UpdateClients, String>
+where
+    F: Fn() -> reqwest::ClientBuilder,
+{
+    let direct = base().build().map_err(|e| e.to_string())?;
+    let via_core = match app {
+        Some(app_handle) => match managed_proxy_endpoint(app_handle).await {
+            Some(endpoint) => {
+                let proxy_url = endpoint.proxy_url();
+                // The managed-core route is the *optional* half of a direct-first
+                // policy, so failing to build it must not take the direct route
+                // down with it: an unusable proxy URL, or a client build error,
+                // would otherwise fail every update request before the direct
+                // client is ever used.
+                let built = reqwest::Proxy::all(&proxy_url)
+                    .map_err(|e| e.to_string())
+                    .and_then(|proxy| base().proxy(proxy).build().map_err(|e| e.to_string()));
+                match built {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        crate::emit_warn!(
+                            Updater,
+                            UPDATE_DOWNLOAD_FAILED,
+                            "Managed-core update route unavailable ({proxy_url}): {e}; update traffic will use the direct route only"
+                        );
+                        None
+                    }
+                }
+            }
+            None => None,
+        },
+        None => None,
+    };
+    Ok(UpdateClients { direct, via_core })
 }
 
 /// Emit a download status event with component identification.
@@ -165,34 +571,31 @@ fn build_asset_download_url(version: &str, asset_name: &str) -> String {
     format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}")
 }
 
+/// Latest release tag (without the `v` prefix) of a GitHub repository, or
+/// `fallback` when it cannot be fetched or parsed. Goes through `get_text`, so
+/// the body is capped and retried on the other route like other metadata.
+async fn latest_release_version(client: &UpdateClients, url: &str, fallback: &str) -> String {
+    match client.get_text(url).await {
+        Ok(body) => serde_json::from_str::<GithubRelease>(&body).map_or_else(
+            |_| fallback.to_owned(),
+            |release| strip_version_prefix(&release.tag_name).to_owned(),
+        ),
+        Err(_) => fallback.to_owned(),
+    }
+}
+
 /// Fetch the latest release info from the GitHub REST API (primary source).
 ///
 /// Returns full release information including the complete asset list.
 /// Subject to rate limiting (60 req/hour unauthenticated).
-async fn fetch_release_from_api(client: reqwest::Client) -> Result<GithubRelease, String> {
-    let response = client
-        .get(MIHOMO_RELEASE_API)
-        .send()
+async fn fetch_release_from_api(client: UpdateClients) -> Result<GithubRelease, String> {
+    // `get_text` caps the body and retries the other route when it fails after
+    // the headers.
+    let body = client
+        .get_text(MIHOMO_RELEASE_API)
         .await
         .map_err(|e| format!("Failed to fetch release info: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!("GitHub API returned status: {}", response.status()));
-    }
-
-    // Limit response body size to prevent memory exhaustion from malicious responses
-    const MAX_RELEASE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
-    let content_length = response.content_length().unwrap_or(0);
-    if content_length > MAX_RELEASE_SIZE {
-        return Err(format!(
-            "Release info too large: {content_length} bytes (max {MAX_RELEASE_SIZE} bytes)"
-        ));
-    }
-
-    response
-        .json::<GithubRelease>()
-        .await
-        .map_err(|e| format!("Failed to parse release info: {e}"))
+    serde_json::from_str(&body).map_err(|e| format!("Failed to parse release info: {e}"))
 }
 
 /// Returns `true` if the version tag looks like a pre-release
@@ -282,21 +685,13 @@ fn parse_tag_from_atom_feed(xml: &str) -> Result<String, String> {
 /// The Atom feed (`/releases.atom`) is served from the web frontend and
 /// is **not** subject to the REST API rate limit.  It returns XML; we
 /// extract the first `<entry>`'s `<title>` which is the latest release tag.
-async fn fetch_tag_from_atom_feed(client: reqwest::Client) -> Result<String, String> {
-    let response = client
-        .get(MIHOMO_ATOM_FEED)
-        .send()
+async fn fetch_tag_from_atom_feed(client: UpdateClients) -> Result<String, String> {
+    // `get_text` also retries the other route when the body fails after the
+    // headers, which a bare `get` + `.text()` could not.
+    let text = client
+        .get_text(MIHOMO_ATOM_FEED)
         .await
         .map_err(|e| format!("Failed to fetch Atom feed: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!("Atom feed returned status: {}", response.status()));
-    }
-
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read Atom feed: {e}"))?;
 
     parse_tag_from_atom_feed(&text)
 }
@@ -338,8 +733,8 @@ fn construct_release_from_tag(tag: &str) -> Result<GithubRelease, String> {
     })
 }
 
-async fn fetch_latest_release() -> Result<GithubRelease, String> {
-    let client = build_github_client()?;
+async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRelease, String> {
+    let client = build_metadata_client(app).await?;
 
     // ── Dual-source racing: REST API vs Atom Feed ──
     //
@@ -438,7 +833,11 @@ fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(),
 ///    REST API path succeeds.  Zero network I/O; bypasses rate limiting.
 /// 2. **REST API fallback** — fetches `/releases/tags/{version}` and extracts
 ///    the `digest` field.  Subject to 60 req/hour unauthenticated rate limit.
-async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
+async fn get_expected_sha256(
+    app: Option<&tauri::AppHandle>,
+    version: &str,
+    asset_name: &str,
+) -> Result<String, String> {
     // ── 1. Check digest cache ──
     if let Ok(cache) = DIGEST_CACHE.lock() {
         if let Some((cached_tag, digests)) = &*cache {
@@ -453,23 +852,17 @@ async fn get_expected_sha256(version: &str, asset_name: &str) -> Result<String, 
     }
 
     // ── 2. Fall back to REST API ──
-    let client = build_github_client()?;
+    let client = build_metadata_client(app).await?;
     let api_url = format!("https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/{version}");
 
-    let response = client
-        .get(&api_url)
-        .send()
+    // `get_text` retries the other route when the body fails after the headers.
+    let body = client
+        .get_text(&api_url)
         .await
         .map_err(|e| format!("Failed to fetch release info: {e}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!("GitHub API returned status: {}", response.status()));
-    }
-
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     let assets = json
         .get("assets")
@@ -502,76 +895,25 @@ async fn download_release_asset(
         return Err("Untrusted download URL: only github.com is allowed".to_owned());
     }
 
-    let client = build_github_client()?;
+    let clients = build_github_client(Some(window.app_handle())).await?;
     emit_download_status_ext(window, Some(component), "Downloading from GitHub...", 24);
 
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to download: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Download failed with status: {}",
-            response.status()
-        ));
-    }
-
-    let total_size = response.content_length().unwrap_or(0);
-    if total_size > 100 * 1024 * 1024 {
-        return Err(format!("Update package too large: {total_size} bytes"));
-    }
-
-    let mut downloaded = 0_u64;
-    let mut stream = response.bytes_stream();
-    let mut file =
-        std::fs::File::create(dest_path).map_err(|e| format!("Failed to create temp file: {e}"))?;
-
-    while let Some(item) = stream.next().await {
-        let chunk = match item {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = std::fs::remove_file(dest_path);
-                return Err(e.to_string());
-            }
-        };
-        downloaded += chunk.len() as u64;
-        if downloaded > 100 * 1024 * 1024 {
-            let _ = std::fs::remove_file(dest_path);
-            return Err("Update package exceeded size limit".to_owned());
-        }
-        use std::io::Write as _;
-        if let Err(e) = file.write_all(&chunk) {
-            let _ = std::fs::remove_file(dest_path);
-            return Err(format!("Failed to write chunk: {e}"));
-        }
-
-        #[allow(clippy::manual_hash_one)]
-        let progress = if total_size > 0 {
-            // Integer-only progress: ratio ∈ [0, 1000] maps to font size [24, 80]
-            let ratio_x1000 = downloaded
-                .checked_mul(1000)
-                .unwrap_or(0)
-                .checked_div(total_size)
-                .unwrap_or(0);
-            let font_size = 24 + ((ratio_x1000 * 56) / 1000);
-            u8::try_from(font_size).unwrap_or(52)
-        } else {
-            52
-        };
-        emit_download_status_ext(
-            window,
-            Some(component),
-            format!("Downloading... {progress}%"),
-            progress,
-        );
-    }
-
-    if let Err(e) = file.sync_all() {
-        let _ = std::fs::remove_file(dest_path);
-        return Err(e.to_string());
-    }
+    stream_asset_to_file(
+        &clients,
+        url,
+        dest_path,
+        100 * 1024 * 1024,
+        "Failed to create temp file",
+        |_downloaded, _total_size, progress| {
+            emit_download_status_ext(
+                window,
+                Some(component),
+                format!("Downloading... {progress}%"),
+                progress,
+            );
+        },
+    )
+    .await?;
     Ok(())
 }
 
@@ -683,7 +1025,9 @@ fn extract_from_zip(
         if file.is_symlink() {
             return Err("Refusing to extract symlink from ZIP".to_owned());
         }
-        let name = file.name();
+        let name = file
+            .name()
+            .map_err(|e| format!("Invalid ZIP entry name: {e}"))?;
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
             return Err(format!("Malicious ZIP path detected: {name}"));
         }
@@ -840,57 +1184,37 @@ pub struct ClientVersions {
 }
 
 #[command]
-pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Zephyr/Update-Checker")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+pub async fn get_latest_client_versions(app: tauri::AppHandle) -> Result<ClientVersions, String> {
+    // Same policy as the other update traffic: direct first, then the app's own
+    // managed core when the direct route fails. No ambient proxies on either.
+    // Only the user agent and the (much shorter, metadata-only) timeout differ.
+    let client = build_update_clients(Some(&app), || {
+        reqwest::Client::builder()
+            .user_agent("Zephyr/Update-Checker")
+            .timeout(Duration::from_secs(10))
+            .no_proxy()
+    })
+    .await?;
 
-    let verge_res = match client
-        .get("https://api.github.com/repos/clash-verge-rev/clash-verge-rev/releases/latest")
-        .send()
-        .await
-    {
-        Ok(res) if res.status().is_success() => {
-            if let Ok(release) = res.json::<GithubRelease>().await {
-                strip_version_prefix(&release.tag_name).to_owned()
-            } else {
-                "1.7.5".to_owned()
-            }
-        }
-        _ => "1.7.5".to_owned(),
-    };
-
-    let party_res = match client
-        .get("https://api.github.com/repos/mihomo-party-org/mihomo-party/releases/latest")
-        .send()
-        .await
-    {
-        Ok(res) if res.status().is_success() => {
-            if let Ok(release) = res.json::<GithubRelease>().await {
-                strip_version_prefix(&release.tag_name).to_owned()
-            } else {
-                "1.0.0".to_owned()
-            }
-        }
-        _ => "1.0.0".to_owned(),
-    };
-
-    let flclash_res = match client
-        .get("https://api.github.com/repos/chen08209/Flclash/releases/latest")
-        .send()
-        .await
-    {
-        Ok(res) if res.status().is_success() => {
-            if let Ok(release) = res.json::<GithubRelease>().await {
-                strip_version_prefix(&release.tag_name).to_owned()
-            } else {
-                "0.8.92".to_owned()
-            }
-        }
-        _ => "0.8.92".to_owned(),
-    };
+    // Independent lookups: concurrent, so a network that blocks GitHub waits
+    // for one direct-then-core round trip instead of three in a row.
+    let (verge_res, party_res, flclash_res) = tokio::join!(
+        latest_release_version(
+            &client,
+            "https://api.github.com/repos/clash-verge-rev/clash-verge-rev/releases/latest",
+            "1.7.5",
+        ),
+        latest_release_version(
+            &client,
+            "https://api.github.com/repos/mihomo-party-org/mihomo-party/releases/latest",
+            "1.0.0",
+        ),
+        latest_release_version(
+            &client,
+            "https://api.github.com/repos/chen08209/Flclash/releases/latest",
+            "0.8.92",
+        ),
+    );
 
     Ok(ClientVersions {
         verge: format!("clash-verge/{verge_res}"),
@@ -900,8 +1224,8 @@ pub async fn get_latest_client_versions() -> Result<ClientVersions, String> {
 }
 
 #[command]
-pub async fn get_latest_version() -> Result<UpdateInfo, String> {
-    let release = fetch_latest_release().await?;
+pub async fn get_latest_version(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let release = fetch_latest_release(Some(&app)).await?;
     let asset = select_release_asset(&release.assets)?;
     let version = release.tag_name;
 
@@ -1043,7 +1367,11 @@ async fn update_core_inner(
         "Verifying file integrity...",
         82,
     );
-    let expected_hash = get_expected_sha256(&version, &asset_name).await?;
+    let expected_hash = get_expected_sha256(Some(app), &version, &asset_name)
+        .await
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&archive_path);
+        })?;
     verify_sha256(&archive_path, &expected_hash).inspect_err(|e| {
         let _ = std::fs::remove_file(&archive_path);
         let _ = e;
@@ -1074,8 +1402,30 @@ async fn update_core_inner(
         92,
     );
 
-    // Stop core and wait for it to fully exit
-    let _ = core_manager::stop_core_inner(app, &state);
+    // Stop core and wait for it to fully exit. A failed stop must abort the
+    // update: replacing the executable underneath a running (on macOS a
+    // root-owned) core would leave the old binary executing while the updater
+    // reports success, and the subsequent restart would then fail on the ports
+    // it still holds. The extracted binary is removed first, so an aborted
+    // update does not leave a full core binary behind in the core directory.
+    //
+    // The stop blocks — on macOS TUN mode it waits up to 30 s for the
+    // administrator prompt and then polls for up to 8 s more — so it runs on a
+    // blocking task like every other caller (`stop_core`, `start_core_inner`)
+    // instead of parking a tokio worker for the whole wait. A panicked blocking
+    // task is reported through the same channel as a failed stop, so the
+    // extracted binary is cleaned up either way.
+    let app_for_stop = app.clone();
+    let stop_res = tokio::task::spawn_blocking(move || {
+        let stop_state = app_for_stop.state::<MihomoState>();
+        core_manager::stop_core_inner(&app_for_stop, &stop_state)
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("Failed to stop core: {e}")));
+    if let Err(e) = stop_res {
+        let _ = std::fs::remove_file(&temp_exe_path);
+        return Err(e);
+    }
 
     // Wait for the process to fully exit (give it some time)
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -1095,9 +1445,12 @@ async fn update_core_inner(
     if exe_path.exists() {
         // Clean up stale backup first
         let _ = std::fs::remove_file(&backup_path);
-        std::fs::rename(&exe_path, &backup_path).map_err(|e| {
-            format!("Failed to move current binary to backup (update aborted for safety): {e}")
-        })?;
+        if let Err(e) = std::fs::rename(&exe_path, &backup_path) {
+            let _ = std::fs::remove_file(&temp_exe_path);
+            return Err(format!(
+                "Failed to move current binary to backup (update aborted for safety): {e}"
+            ));
+        }
     }
 
     // Step 2: Move new binary into place (target no longer exists, so rename will work)
@@ -1168,7 +1521,6 @@ async fn update_core_inner(
         app.clone(),
         state,
         last_config,
-        false,
         last_args,
         last_secret,
         Some(true),
@@ -1230,11 +1582,26 @@ pub async fn update_core(
         .and_then(std::convert::identity)
 }
 
+/// Removes the listed files when dropped; missing files are ignored.
+struct TempFileGuard(Vec<std::path::PathBuf>);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[command]
 pub async fn update_geo_data(window: Window) -> Result<String, String> {
     let app = window.app_handle();
     let paths = core_manager::ensure_app_storage(app)?;
-    let client = build_github_client()?;
+    let client = build_github_client(Some(app)).await?;
+    // The checksum files are a few bytes: fetch them with the short-budget
+    // metadata client so a trickling server cannot stall the update for the
+    // streamed-asset ceiling before either data file starts downloading.
+    let meta_client = build_metadata_client(Some(app)).await?;
 
     let geoip_url =
         "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat";
@@ -1252,42 +1619,20 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         5,
     );
 
-    let geoip_sha_res = client
-        .get(geoip_sha_url)
-        .send()
+    let geoip_sha_text = meta_client
+        .get_text(geoip_sha_url)
         .await
         .map_err(|e| format!("Failed to fetch GeoIP hash: {e}"))?;
-    if !geoip_sha_res.status().is_success() {
-        return Err(format!(
-            "Failed to fetch GeoIP hash: HTTP {}",
-            geoip_sha_res.status()
-        ));
-    }
-    let geoip_sha_text = geoip_sha_res
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read GeoIP hash: {e}"))?;
     let geoip_expected_hash = geoip_sha_text
         .split_whitespace()
         .next()
         .ok_or("Invalid GeoIP hash format")?
         .to_owned();
 
-    let geosite_sha_res = client
-        .get(geosite_sha_url)
-        .send()
+    let geosite_sha_text = meta_client
+        .get_text(geosite_sha_url)
         .await
         .map_err(|e| format!("Failed to fetch GeoSite hash: {e}"))?;
-    if !geosite_sha_res.status().is_success() {
-        return Err(format!(
-            "Failed to fetch GeoSite hash: HTTP {}",
-            geosite_sha_res.status()
-        ));
-    }
-    let geosite_sha_text = geosite_sha_res
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read GeoSite hash: {e}"))?;
     let geosite_expected_hash = geosite_sha_text
         .split_whitespace()
         .next()
@@ -1305,42 +1650,23 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         10,
     );
     let geoip_path = paths.core_dir.join(format!("geoip_{temp_suffix}.dat.tmp"));
-    let response = client
-        .get(geoip_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to download GeoIP: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download GeoIP: HTTP {}",
-            response.status()
-        ));
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut file = std::fs::File::create(&geoip_path)
-        .map_err(|e| format!("Failed to create geoip temp file: {e}"))?;
-
-    while let Some(item) = stream.next().await {
-        let chunk = match item {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = std::fs::remove_file(&geoip_path);
-                return Err(e.to_string());
-            }
-        };
-        use std::io::Write as _;
-        if let Err(e) = file.write_all(&chunk) {
-            let _ = std::fs::remove_file(&geoip_path);
-            return Err(format!("Failed to write geoip chunk: {e}"));
-        }
-    }
-
-    if let Err(e) = file.sync_all() {
-        let _ = std::fs::remove_file(&geoip_path);
-        return Err(e.to_string());
-    }
+    let geosite_path = paths
+        .core_dir
+        .join(format!("geosite_{temp_suffix}.dat.tmp"));
+    // Every early return below (a failed transfer or hash check, a failed
+    // backup rename) must not leave a temp file behind: the names are random,
+    // so nothing would ever reuse or remove it. Files already renamed into
+    // place no longer exist under these names, so the guard is a no-op then.
+    let _temp_files = TempFileGuard(vec![geoip_path.clone(), geosite_path.clone()]);
+    stream_asset_to_file(
+        &client,
+        geoip_url,
+        &geoip_path,
+        GEO_DATA_MAX_BYTES,
+        "Failed to create geoip temp file",
+        |_, _, _| {},
+    )
+    .await?;
 
     emit_download_status_ext(
         &window,
@@ -1348,10 +1674,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         "Verifying GeoIP...",
         45,
     );
-    verify_sha256(&geoip_path, &geoip_expected_hash).inspect_err(|e| {
-        let _ = std::fs::remove_file(&geoip_path);
-        let _ = e;
-    })?;
+    verify_sha256(&geoip_path, &geoip_expected_hash)?;
 
     // Download GeoSite
     emit_download_status_ext(
@@ -1360,45 +1683,15 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         "Downloading GeoSite...",
         50,
     );
-    let geosite_path = paths
-        .core_dir
-        .join(format!("geosite_{temp_suffix}.dat.tmp"));
-    let response = client
-        .get(geosite_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to download GeoSite: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download GeoSite: HTTP {}",
-            response.status()
-        ));
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut file = std::fs::File::create(&geosite_path)
-        .map_err(|e| format!("Failed to create geosite temp file: {e}"))?;
-
-    while let Some(item) = stream.next().await {
-        let chunk = match item {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = std::fs::remove_file(&geosite_path);
-                return Err(e.to_string());
-            }
-        };
-        use std::io::Write as _;
-        if let Err(e) = file.write_all(&chunk) {
-            let _ = std::fs::remove_file(&geosite_path);
-            return Err(format!("Failed to write geosite chunk: {e}"));
-        }
-    }
-
-    if let Err(e) = file.sync_all() {
-        let _ = std::fs::remove_file(&geosite_path);
-        return Err(e.to_string());
-    }
+    stream_asset_to_file(
+        &client,
+        geosite_url,
+        &geosite_path,
+        GEO_DATA_MAX_BYTES,
+        "Failed to create geosite temp file",
+        |_, _, _| {},
+    )
+    .await?;
 
     emit_download_status_ext(
         &window,
@@ -1406,10 +1699,7 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         "Verifying GeoSite...",
         90,
     );
-    verify_sha256(&geosite_path, &geosite_expected_hash).inspect_err(|e| {
-        let _ = std::fs::remove_file(&geosite_path);
-        let _ = e;
-    })?;
+    verify_sha256(&geosite_path, &geosite_expected_hash)?;
 
     // Apply updates — atomic swap pattern with rollback on failure.
     // Both geo files must succeed or neither is applied.
@@ -1439,18 +1729,24 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
     }
     if final_geosite.exists() {
         std::fs::rename(&final_geosite, &old_geosite).map_err(|e| {
+            // geoip.dat was already moved aside: put it back before aborting.
+            if old_geoip.exists() {
+                let _ = std::fs::rename(&old_geoip, &final_geoip);
+            }
             format!("Failed to backup geosite.dat (update aborted for safety): {e}")
         })?;
     }
 
     // Apply geoip (target path is now free)
     if let Err(e) = std::fs::rename(&geoip_path, &final_geoip) {
-        // Restore old geoip (target should be free since rename failed)
+        // Restore both backups: geosite.dat was already moved aside, and
+        // deleting that backup here would lose the user's working file.
         if old_geoip.exists() {
             let _ = std::fs::rename(&old_geoip, &final_geoip);
         }
-        let _ = std::fs::remove_file(&geosite_path);
-        let _ = std::fs::remove_file(&old_geosite);
+        if old_geosite.exists() {
+            let _ = std::fs::rename(&old_geosite, &final_geosite);
+        }
         return Err(format!("Failed to apply geoip: {e}"));
     }
 
@@ -1465,8 +1761,8 @@ pub async fn update_geo_data(window: Window) -> Result<String, String> {
         if old_geosite.exists() {
             let _ = std::fs::rename(&old_geosite, &final_geosite);
         }
-        let _ = std::fs::remove_file(&old_geoip);
-        let _ = std::fs::remove_file(&old_geosite);
+        // No backup cleanup here: a restored backup no longer exists, and one
+        // whose restore failed is the only copy of the user's working file.
         return Err(format!(
             "Failed to apply geosite: {e}. Both geo files rolled back."
         ));
@@ -1547,22 +1843,15 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
 
 /// Check for the latest Zephyr client version.
 #[command]
-pub async fn get_latest_client_version() -> Result<ClientUpdateInfo, String> {
-    let client = build_github_client()?;
+pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUpdateInfo, String> {
+    let client = build_metadata_client(Some(&app)).await?;
 
-    let response = client
-        .get(ZEPHYR_RELEASE_API)
-        .send()
+    let body = client
+        .get_text(ZEPHYR_RELEASE_API)
         .await
         .map_err(|e| format!("Failed to fetch Zephyr release info: {e}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!("GitHub API returned status: {}", response.status()));
-    }
-
-    let release: GithubRelease = response
-        .json()
-        .await
+    let release: GithubRelease = serde_json::from_str(&body)
         .map_err(|e| format!("Failed to parse Zephyr release info: {e}"))?;
 
     let asset = select_client_asset(&release.assets)?;
@@ -1596,7 +1885,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         5,
     );
 
-    let info = get_latest_client_version().await?;
+    let info = get_latest_client_version(window.app_handle().clone()).await?;
 
     // Compare with current version
     let current = env!("CARGO_PKG_VERSION");
@@ -1632,31 +1921,29 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     )
     .await?;
 
-    // Verify SHA256 if digest is available from GitHub API
-    if let Some(digest) = &info.download_digest {
-        if let Some(hash) = digest
+    // The release must carry a well-formed SHA256 digest: a missing or
+    // unparseable one means the installer cannot be checked, so it is refused.
+    let Some(hash) = info.download_digest.as_deref().and_then(|digest| {
+        digest
             .strip_prefix("sha256:")
             .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
-        {
-            emit_download_status_ext(
-                &window,
-                Some(UpdateComponent::Client),
-                "Verifying installer integrity...",
-                93,
-            );
-            verify_sha256(&dest_path, hash).map_err(|e| {
-                let _ = std::fs::remove_file(&dest_path);
-                format!("SHA256 verification failed: {e}. Installer deleted for security.")
-            })?;
-        }
-    } else {
-        // No digest available — refuse to open unverified installer for security
+    }) else {
         let _ = std::fs::remove_file(&dest_path);
         return Err(
-            "No integrity digest available for this release. Installer was deleted for security."
+            "No valid integrity digest available for this release. Installer was deleted for security."
                 .to_owned(),
         );
-    }
+    };
+    emit_download_status_ext(
+        &window,
+        Some(UpdateComponent::Client),
+        "Verifying installer integrity...",
+        93,
+    );
+    verify_sha256(&dest_path, hash).map_err(|e| {
+        let _ = std::fs::remove_file(&dest_path);
+        format!("SHA256 verification failed: {e}. Installer deleted for security.")
+    })?;
 
     // Verify Minisign Ed25519 signature
     let minisig_url = format!("{}.minisig", info.download_url);
@@ -1667,41 +1954,26 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         94,
     );
 
-    let sig_client = build_github_client()?;
-    let sig_response = sig_client.get(&minisig_url).send().await.map_err(|e| {
-        let _ = std::fs::remove_file(&dest_path);
-        format!("Failed to download signature: {e}. Installer deleted for security.")
-    })?;
-
-    if !sig_response.status().is_success() {
-        let _ = std::fs::remove_file(&dest_path);
-        return Err(
-            "Minisign signature not available for this release. Installer was deleted for security."
-                .to_owned(),
-        );
-    }
-
-    // Stream signature with size limit (4 KB is more than enough for a Minisign signature)
-    let mut sig_stream = sig_response.bytes_stream();
-    let mut sig_bytes = Vec::new();
-    const MAX_SIG_SIZE: usize = 4096;
-    while let Some(chunk_result) = sig_stream.next().await {
-        let chunk = chunk_result.map_err(|e| {
+    // A signature is metadata: the short metadata budget, not the 30-minute
+    // asset window, so a trickling server cannot stall the update here.
+    let sig_client = build_metadata_client(Some(window.app_handle()))
+        .await
+        .map_err(|e| {
             let _ = std::fs::remove_file(&dest_path);
-            format!("Failed to download signature chunk: {e}. Installer deleted for security.")
+            format!("Failed to prepare signature download: {e}. Installer deleted for security.")
         })?;
-        if sig_bytes.len() + chunk.len() > MAX_SIG_SIZE {
+    // 4 KB is more than enough for a Minisign signature. The cap is enforced
+    // while reading, so an oversized body stops at 4 KB instead of buffering
+    // the full metadata budget first. `get_text_capped` retries once through
+    // the managed core when the body fails after the headers arrived.
+    const MAX_SIG_SIZE: usize = 4096;
+    let signature_content = sig_client
+        .get_text_capped(&minisig_url, MAX_SIG_SIZE)
+        .await
+        .map_err(|e| {
             let _ = std::fs::remove_file(&dest_path);
-            return Err(
-                "Signature file exceeded size limit. Installer deleted for security.".to_owned(),
-            );
-        }
-        sig_bytes.extend_from_slice(&chunk);
-    }
-    let signature_content = String::from_utf8(sig_bytes).map_err(|e| {
-        let _ = std::fs::remove_file(&dest_path);
-        format!("Invalid UTF-8 in signature: {e}. Installer deleted for security.")
-    })?;
+            format!("Failed to download signature: {e}. Installer deleted for security.")
+        })?;
 
     emit_download_status_ext(
         &window,

@@ -107,10 +107,7 @@ reason = "unic-ucd-ident unmaintained; transitive dep"
 
 # ── Rust: upstream-blocked soundness fixes ──
 
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0097"
-ignoreUntil = 2027-12-31
-reason = "rand 0.8 unsound; transitive via tauri ecosystem, our code pins rand 0.10.1"
+# RUSTSEC-2026-0097: RESOLVED — all locked rand versions are patched (0.8.6, 0.9.4, 0.10.1)
 
 # RUSTSEC-2026-0098 / RUSTSEC-2026-0099: RESOLVED — rustls-webpki 0.103.13 (>=0.103.12)
 

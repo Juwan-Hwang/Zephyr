@@ -25,7 +25,7 @@ let saveQueue = Promise.resolve();
 /**
  * Save a single field to settings.json (atomic backend patch).
  *
- * @param {string} key   - Field name in the Settings struct (e.g. "mode", "tun_enabled").
+ * @param {string} key   - Field name in the Settings struct (e.g. "theme_mode", "tun_enabled").
  * @param {*}      value - The value to store. Pass `null` to clear (fall back to YAML default).
  * @returns {Promise<void>}
  */
