@@ -35,10 +35,12 @@
 import { readCoreLog } from '../api.js';
 import { translations, currentLang } from '../i18n.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
-import { escapeHtml } from '../utils/sanitize.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
 import { renderLogLineHtml, parseCoreLogLine, renderStructuredLogHtml } from './log-highlight.js';
-import { getExtLogEvents, subscribeToEvents, unsubscribeFromEvents } from '../modules/backend-events.js';
+import { getExtLogEvents, clearExtLogEvents, subscribeToEvents, unsubscribeFromEvents } from '../modules/backend-events.js';
+import { appLogLabel, formatAppLogMessage, appLogLevel } from './app-log-format.js';
+
+/** @typedef {import('./app-log-format.js').AppLogEntry} AppLogEntry */
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -104,6 +106,8 @@ let _pollTimer = null;
 let _offset = 0;
 /** @type {boolean} */
 let _autoScroll = true;
+/** Reading paused by the user (Pause button); new lines wait in the core log. */
+let _logsPaused = false;
 /** @type {'all'|'debug'|'info'|'warn'|'error'} */
 let _levelFilter = 'all';
 /** @type {string} */
@@ -124,6 +128,8 @@ let _spacerBottom = null;
 let _lineCountEl = null;
 /** @type {HTMLElement|null} */
 let _autoScrollBtn = null;
+/** Matching lines that arrived while the user was scrolled up (shown on the jump pill). */
+let _newWhileAway = 0;
 /** @type {number|null} */
 let _debounceTimer = null;
 /** @type {number} */
@@ -149,7 +155,7 @@ let _extAutoScroll = true;
 /** @type {ReturnType<typeof createVirtualScroll>|null} */
 let _vs = null;
 
-/** @type {((entry: { type: string, message: string, timestamp: string, source?: string }) => void) | null} */
+/** @type {((entry: AppLogEntry) => void) | null} */
 let _extLogCb = null;
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -162,13 +168,15 @@ export async function initLogsPage() {
     _container = document.querySelector('[data-page="logs"]');
     if (!_container) return;
 
-    // If already initialized, just reset and restart
+    // If already initialized, just reset and restart — keeping the tab, level and search
+    // the user had chosen, so leaving the page and coming back does not lose the filter.
     if (_initialized) {
-        resetState();
+        resetState({ keepFilters: true });
         // eslint-disable-next-line no-unsanitized/property -- static HTML template from buildPageHTML()
         _container.innerHTML = buildPageHTML(); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         cacheDOMRefs();
         bindEvents();
+        restoreFilterUI();
         createVirtualScrollInstance();
         await fetchLogs();
         startPolling();
@@ -213,21 +221,29 @@ export function destroyLogsPage() {
 
 // ── State Management ───────────────────────────────────────────────────────
 
-function resetState() {
+/**
+ * @param {{keepFilters?: boolean}} [opts] - keepFilters: keep tab / level / search (page re-entry)
+ */
+function resetState(opts = {}) {
+    const keep = !!opts.keepFilters;
     stopPolling();
     _fetchGen++;
     _offset = 0;
     _allLines = [];
     _filteredIndices = [];
     _autoScroll = true;
-    _levelFilter = 'all';
-    _searchQuery = '';
+    _newWhileAway = 0;
+    _logsPaused = false;
+    if (!keep) {
+        _levelFilter = 'all';
+        _searchQuery = '';
+        _extLogTabActive = false;
+        _extLevelFilter = 'all';
+        _extSearchQuery = '';
+    }
     _lastRenderedFilterHash = -1;
     _vs?.destroy();
     _vs = null;
-    _extLogTabActive = false;
-    _extLevelFilter = 'all';
-    _extSearchQuery = '';
     _extAutoScroll = true;
     if (_debounceTimer) {
         clearTimeout(_debounceTimer);
@@ -285,10 +301,19 @@ function buildPageHTML() {
                 </div>
             </div>
             <div class="flex items-center gap-3">
-                <span id="log-line-count" class="text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
-                <button id="log-auto-scroll-btn" class="btn-ghost active" title="${t('autoScroll')}" data-i18n-title="autoScroll">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-                    <span data-i18n="autoScroll">${t('autoScroll')}</span>
+                <!-- Pause / clear / export. Following the newest line is automatic: scrolling up
+                     stops it and a "jump to latest" pill brings it back. -->
+                <button id="log-pause-btn" type="button" class="btn-ghost" aria-pressed="false">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+                    <span id="log-pause-text" data-i18n="pause">${t('pause')}</span>
+                </button>
+                <button id="log-clear-btn" type="button" class="btn-ghost">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                    <span data-i18n="logClear">${t('logClear')}</span>
+                </button>
+                <button id="log-export-open-btn" type="button" class="btn-ghost">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                    <span data-i18n="logExportShort">${t('logExportShort')}</span>
                 </button>
             </div>
         </header>
@@ -297,11 +322,14 @@ function buildPageHTML() {
         <div id="log-panel-core" class="flex-1 min-h-0 flex flex-col gap-4 relative z-10">
             <!-- Filter bar -->
             <div class="flex items-center gap-2 flex-wrap relative z-10">
-                <button class="log-level-btn active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
-                <button class="log-level-btn" data-level="debug" data-i18n="logLevelDebug">${t('logLevelDebug')}</button>
-                <button class="log-level-btn" data-level="info" data-i18n="logLevelInfo">${t('logLevelInfo')}</button>
-                <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
-                <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
+                <!-- "Debug" was identical to "All" (filter = level and above): four honest steps instead. -->
+                <div class="seg-tabs" role="radiogroup" aria-label="${t('logLevelAll')}">
+                    <button type="button" class="log-level-seg seg-tab active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
+                    <button type="button" class="log-level-seg seg-tab" data-level="info" data-i18n="logLevelInfoUp">${t('logLevelInfoUp')}</button>
+                    <button type="button" class="log-level-seg seg-tab" data-level="warn" data-i18n="logLevelWarnUp">${t('logLevelWarnUp')}</button>
+                    <button type="button" class="log-level-seg seg-tab" data-level="error" data-i18n="logLevelErrorOnly">${t('logLevelErrorOnly')}</button>
+                </div>
+                <span id="log-line-count" class="ms-2 text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
                 <div class="flex-1"></div>
                 <!-- Search Box -->
                 <div class="relative group flex items-center">
@@ -320,6 +348,11 @@ function buildPageHTML() {
                 <div id="log-lines-container"></div>
                 <div id="log-spacer-bottom" style="height:0"></div>
             </div>
+            <button id="log-jump-latest" type="button" class="log-jump-latest hidden">
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                <span data-i18n="logJumpLatest">${t('logJumpLatest')}</span>
+                <span id="log-jump-new" class="hidden"></span>
+            </button>
         </div>
 
         <!-- App Logs Panel -->
@@ -331,6 +364,7 @@ function buildPageHTML() {
                 <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
                 <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
                 <button class="log-level-btn" data-level="fatal" data-i18n="logLevelFatal">${t('logLevelFatal')}</button>
+                <span id="log-ext-line-count" class="ms-2 text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
                 <div class="flex-1"></div>
                 <!-- Search Box -->
                 <div class="relative group flex items-center">
@@ -391,6 +425,9 @@ function bindEvents() {
         panelCore?.classList.add('hidden');
         panelCore?.classList.remove('flex', 'flex-col', 'gap-4');
         updateExtLineCount();
+        // Entries that arrived while hidden could not scroll it: catch up when following.
+        const extEl = _container?.querySelector('#log-ext-content');
+        if (extEl && _extAutoScroll) extEl.scrollTop = extEl.scrollHeight;
     };
 
     tabCore?.addEventListener('click', switchToCoreTab);
@@ -407,6 +444,54 @@ function bindEvents() {
 
     // Rebuild ext-log DOM from accumulated events (if any)
     rebuildExtLogDOM();
+
+    // Pause / resume reading
+    const pauseBtn = _container?.querySelector('#log-pause-btn');
+    pauseBtn?.addEventListener('click', () => {
+        _logsPaused = !_logsPaused;
+        pauseBtn.setAttribute('aria-pressed', String(_logsPaused));
+        const label = _container?.querySelector('#log-pause-text');
+        if (label instanceof HTMLElement) {
+            label.dataset.i18n = _logsPaused ? 'resume' : 'pause';
+            label.textContent = t(_logsPaused ? 'resume' : 'pause');
+        }
+        if (!_logsPaused) {
+            void fetchLogs();
+            // App events kept arriving in the buffer while paused: show them now.
+            rebuildExtLogDOM();
+        }
+    });
+    // Clear the view (the log file itself is untouched)
+    _container?.querySelector('#log-clear-btn')?.addEventListener('click', () => {
+        if (_extLogTabActive) {
+            clearExtLogEvents();
+            rebuildExtLogDOM();
+            return;
+        }
+        _allLines = [];
+        _filteredIndices = [];
+        invalidateFilter();
+        updateLineCount();
+        render();
+    });
+    // Export: the same dialog as in Settings
+    _container?.querySelector('#log-export-open-btn')?.addEventListener('click', () => {
+        document.getElementById('log-export-btn')?.click();
+    });
+    // Back to the newest line and keep following
+    _container?.querySelector('#log-jump-latest')?.addEventListener('click', () => {
+        _autoScroll = true;
+        updateJumpPill();
+        if (_logContent) _logContent.scrollTop = _logContent.scrollHeight;
+        render();
+    });
+
+    // App logs follow new events only while scrolled to the bottom, like the core panel.
+    const extContent = _container?.querySelector('#log-ext-content');
+    extContent?.addEventListener('scroll', () => {
+        const el = /** @type {HTMLElement} */ (extContent);
+        _extAutoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < STICKY_THRESHOLD;
+    }, { passive: true });
 
     // Auto scroll toggle (shared by both tabs)
     _autoScrollBtn?.addEventListener('click', () => {
@@ -427,13 +512,15 @@ function bindEvents() {
     });
 
     // Level filter buttons (core panel)
-    _container.querySelectorAll('#log-panel-core .log-level-btn').forEach(btn => {
+    _container.querySelectorAll('#log-panel-core .log-level-seg').forEach(btn => {
         btn.addEventListener('click', () => {
             if (!_container) return;
-            _container.querySelectorAll('#log-panel-core .log-level-btn').forEach(b => b.classList.remove('active'));
+            _container.querySelectorAll('#log-panel-core .log-level-seg').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
             invalidateFilter();
+            updateLineCount();
+            resetNewLineCount();
             render();
         });
     });
@@ -445,6 +532,8 @@ function bindEvents() {
         _debounceTimer = setTimeout(() => {
             _searchQuery = (searchInput?.value || '').trim();
             invalidateFilter();
+            updateLineCount();
+            resetNewLineCount();
             render();
             _debounceTimer = null;
         }, DEBOUNCE_MS);
@@ -474,6 +563,25 @@ function bindEvents() {
 
 }
 
+/** Reflect the kept filter state in a freshly built page (re-entry). */
+function restoreFilterUI() {
+    if (!_container) return;
+    _container.querySelectorAll('#log-panel-core .log-level-seg').forEach((b) => {
+        b.classList.toggle('active', /** @type {HTMLElement} */ (b).dataset.level === _levelFilter);
+    });
+    _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach((b) => {
+        b.classList.toggle('active', /** @type {HTMLElement} */ (b).dataset.level === _extLevelFilter);
+    });
+    const search = /** @type {HTMLInputElement|null} */ (_container.querySelector('#log-search'));
+    if (search) search.value = _searchQuery;
+    const extSearch = /** @type {HTMLInputElement|null} */ (_container.querySelector('#log-ext-search'));
+    if (extSearch) extSearch.value = _extSearchQuery;
+    if (_extLogTabActive) {
+        /** @type {HTMLElement|null} */ (_container.querySelector('#log-tab-ext'))?.click();
+    }
+    rebuildExtLogDOM();
+}
+
 // ── Scroll Handler (auto-scroll detection only; quantization handled by shared module) ──
 
 function onScroll() {
@@ -485,6 +593,28 @@ function onScroll() {
     if (!atBottom && _autoScroll) {
         _autoScroll = false;
         _autoScrollBtn?.classList.remove('active');
+    } else if (atBottom && !_autoScroll) {
+        _autoScroll = true;
+    }
+    updateJumpPill();
+}
+
+/** The count was taken under the old filter; it no longer describes what is shown. */
+function resetNewLineCount() {
+    _newWhileAway = 0;
+    updateJumpPill();
+}
+
+/** Show the jump pill while scrolled up, with the count of lines that arrived meanwhile. */
+function updateJumpPill() {
+    if (_autoScroll) _newWhileAway = 0;
+    _container?.querySelector('#log-jump-latest')?.classList.toggle('hidden', _autoScroll);
+    const extra = _container?.querySelector('#log-jump-new');
+    if (extra instanceof HTMLElement) {
+        extra.classList.toggle('hidden', _newWhileAway === 0);
+        extra.textContent = _newWhileAway > 0
+            ? `· ${t('logNewLines').replace('{count}', String(_newWhileAway))}`
+            : '';
     }
 }
 
@@ -496,6 +626,7 @@ let _fetchGen = 0;
 let _inFlightGen = -1;
 
 async function fetchLogs() {
+    if (_logsPaused) return;
     // setInterval keeps firing while a slow read is pending; skip the tick
     // instead of stacking concurrent reads that would append out of order.
     const gen = _fetchGen;
@@ -506,6 +637,8 @@ async function fetchLogs() {
         // The page was reset while this read was pending: its offset and
         // lines belong to the old state.
         if (gen !== _fetchGen) return;
+        // Paused while the read was pending: keep the offset, read it again on resume.
+        if (_logsPaused) return;
         if (!result || result.lines.length === 0) return;
 
         // Detect log rotation via backend signal or offset regression
@@ -521,6 +654,10 @@ async function fetchLogs() {
 
         // Append new lines
         _allLines.push(...result.lines);
+        if (!_autoScroll) {
+            _newWhileAway += result.lines.filter((l) => lineMatchesFilter(l)).length;
+            updateJumpPill();
+        }
 
         // Ring buffer trim from head
         if (_allLines.length > MAX_LINES) {
@@ -569,24 +706,19 @@ function rebuildFilteredIndices() {
         return;
     }
 
-    const minPriority = _levelFilter === 'all' ? -1 : LEVEL_PRIORITY[_levelFilter];
-    const query = _searchQuery ? _searchQuery.toLowerCase() : '';
-
     _filteredIndices = [];
     for (let i = 0; i < _allLines.length; i++) {
-        const line = _allLines[i];
-
-        // Level filter — inclusive: selected level and above (industry standard)
-        if (minPriority >= 0) {
-            const level = parseLogLevel(line);
-            if (LEVEL_PRIORITY[level] < minPriority) continue;
-        }
-
-        // Search filter
-        if (query && !line.toLowerCase().includes(query)) continue;
-
-        _filteredIndices.push(i);
+        if (lineMatchesFilter(_allLines[i])) _filteredIndices.push(i);
     }
+}
+
+/**
+ * Whether a line passes the level filter (selected level and above) and the search.
+ * @param {string} line
+ */
+function lineMatchesFilter(line) {
+    if (_levelFilter !== 'all' && LEVEL_PRIORITY[parseLogLevel(line)] < LEVEL_PRIORITY[_levelFilter]) return false;
+    return !_searchQuery || line.toLowerCase().includes(_searchQuery.toLowerCase());
 }
 
 // ── Virtual Scroll Instance ─────────────────────────────────────────────────
@@ -661,14 +793,18 @@ function render() {
 
 function updateLineCount() {
     if (_lineCountEl) {
-        _lineCountEl.textContent = `${_allLines.length} ${t('logLines')}`;
+        // While filtering, show how many of the lines are visible ("22 / 80 lines").
+        const filtering = _levelFilter !== 'all' || !!_searchQuery;
+        if (filtering) rebuildFilteredIndices();
+        _lineCountEl.textContent = filtering
+            ? t('logShownOf').replace('{shown}', String(_filteredIndices.length)).replace('{total}', String(_allLines.length))
+            : `${_allLines.length} ${t('logLines')}`;
     }
 }
 
 function updateExtLineCount() {
-    if (_lineCountEl) {
-        _lineCountEl.textContent = `${getExtLogEvents().length} ${t('logLines')}`;
-    }
+    const el = _container?.querySelector('#log-ext-line-count');
+    if (el) el.textContent = `${getExtLogEvents().length} ${t('logLines')}`;
 }
 
 // ── Extension Logs Rendering ────────────────────────────────────────────────
@@ -683,152 +819,38 @@ const EXT_EVENT_COLORS = Object.freeze({
     RulesChanged:   '#f472b6',
 });
 
+/** Current translation table (for the app-log formatter). */
+function dict() {
+    const langKey = /** @type {'en'|'zh'} */ (currentLang);
+    return /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[langKey] || translations.en);
+}
+
 /**
- * 根据事件类型和 payload 生成富文本消息 HTML。
- * 对 6 种 PrismEvent 类型分别做特殊渲染：
- *   - WatcherStatus: 显示 "Watcher started/stopped, watching N files"
- *   - RulesChanged:   显示 "+N added, -M removed, ~K modified"
- *   - PatchApplied:   显示 patch_id + 统计（added/removed/modified/duration）
- *   - PatchFailed:    显示 patch_id + error
- *   - ConfigReloaded: 显示 success/fail + message
- *   - WatcherEvent:   显示 file + change_type
- *
- * @param {{ type: string, message: string, timestamp: string, source?: string }} entry
- * @returns {string} 安全的 HTML 片段
+ * Whether an app-log entry matches the search query (localized text, raw message, type, time).
+ * @param {AppLogEntry} entry
+ * @param {string} query - lower-case
  */
-function formatExtLogMessage(entry) {
-    // Backend events: render with level-colored dot
-    if (entry.source === 'backend') {
-        /** @type {Record<string, string>} */
-        const levelColor = {
-            error: 'var(--color-red-400, #ef4444)',
-            fatal: 'var(--color-red-400, #ef4444)',
-            warn: 'var(--color-amber-400, #f59e0b)',
-            info: 'var(--color-blue-400, #60a5fa)',
-        };
-        const color = levelColor[entry.type] || 'var(--color-gray-400, #a1a1aa)';
-        return `<span style="color:${color}">&#9679;</span> ${escapeHtml(entry.message)}`;
-    }
-
-    // 尝试从 message 中解析出 JSON payload（后端可能将 payload 序列化在 message 字段中）
-    let payload = null;
-    try {
-        // message 可能是 JSON 字符串，也可能是纯文本
-        const parsed = JSON.parse(entry.message);
-        if (parsed && typeof parsed === 'object') payload = parsed;
-    } catch {
-        // 不是 JSON，使用原始 message
-    }
-
-    switch (entry.type) {
-        // ── WatcherStatus: Watcher 启停状态 ──
-        case 'WatcherStatus': {
-            if (payload) {
-                const running = payload.running ?? payload.status === 'running';
-                const fileCount = payload.file_count ?? payload.files ?? 0;
-                const statusText = running ? 'started' : 'stopped';
-                const icon = running
-                    ? '<span style="color:#34d399">&#9679;</span>'
-                    : '<span style="color:#ef4444">&#9679;</span>';
-                return `${icon} Watcher ${statusText}, watching <b>${escapeHtml(String(fileCount))}</b> files`;
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── RulesChanged: 规则变更统计 ──
-        case 'RulesChanged': {
-            if (payload) {
-                const added = payload.added ?? payload.added_count ?? 0;
-                const removed = payload.removed ?? payload.removed_count ?? 0;
-                const modified = payload.modified ?? payload.modified_count ?? 0;
-                const parts = [];
-                if (added > 0) parts.push(`<span style="color:#34d399">+${added} added</span>`);
-                if (removed > 0) parts.push(`<span style="color:#ef4444">-${removed} removed</span>`);
-                if (modified > 0) parts.push(`<span style="color:#f59e0b">~${modified} modified</span>`);
-                if (parts.length === 0) parts.push('<span style="color:#a1a1aa">no changes</span>');
-                return parts.join(', ');
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── PatchApplied: 补丁应用成功 ──
-        case 'PatchApplied': {
-            if (payload) {
-                const patchId = payload.patch_id ?? payload.id ?? '';
-                const added = payload.added ?? payload.added_count ?? 0;
-                const removed = payload.removed ?? payload.removed_count ?? 0;
-                const modified = payload.modified ?? payload.modified_count ?? 0;
-                const duration = payload.duration ?? payload.elapsed ?? '';
-                const durationStr = duration ? ` in ${escapeHtml(String(duration))}` : '';
-                const parts = [];
-                if (added > 0) parts.push(`<span style="color:#34d399">+${added}</span>`);
-                if (removed > 0) parts.push(`<span style="color:#ef4444">-${removed}</span>`);
-                if (modified > 0) parts.push(`<span style="color:#f59e0b">~${modified}</span>`);
-                const statsStr = parts.length > 0 ? ` [${parts.join(' ')}]` : '';
-                return `<b>${escapeHtml(String(patchId))}</b>${statsStr}${durationStr}`;
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── PatchFailed: 补丁应用失败 ──
-        case 'PatchFailed': {
-            if (payload) {
-                const patchId = payload.patch_id ?? payload.id ?? '';
-                const error = payload.error ?? payload.message ?? entry.message;
-                return `<b>${escapeHtml(String(patchId))}</b> — <span style="color:#ef4444">${escapeHtml(String(error))}</span>`;
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── ConfigReloaded: 配置重载结果 ──
-        case 'ConfigReloaded': {
-            if (payload) {
-                const success = payload.success ?? payload.ok ?? true;
-                const msg = payload.message ?? payload.detail ?? '';
-                const icon = success
-                    ? '<span style="color:#34d399">&#10003;</span>'
-                    : '<span style="color:#ef4444">&#10007;</span>';
-                const label = success ? 'success' : 'failed';
-                const msgStr = msg ? ` — ${escapeHtml(String(msg))}` : '';
-                return `${icon} ${label}${msgStr}`;
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── WatcherEvent: 文件变更事件 ──
-        case 'WatcherEvent': {
-            if (payload) {
-                const file = payload.file ?? payload.path ?? '';
-                const changeType = payload.change_type ?? payload.kind ?? payload.event ?? 'unknown';
-                // 变更类型颜色映射
-                /** @type {Record<string, string>} */
-                const changeColors = {
-                    create: '#34d399', created: '#34d399', add: '#34d399',
-                    modify: '#f59e0b', modified: '#f59e0b', change: '#f59e0b',
-                    remove: '#ef4444', removed: '#ef4444', delete: '#ef4444',
-                };
-                const ctColor = changeColors[String(changeType).toLowerCase()] || '#22d3ee';
-                return `<span style="color:${ctColor}">${escapeHtml(String(changeType))}</span> <span class="font-mono">${escapeHtml(String(file))}</span>`;
-            }
-            return escapeHtml(entry.message);
-        }
-
-        // ── 未知类型：原始消息 ──
-        default:
-            return escapeHtml(entry.message);
-    }
+function extEntryMatches(entry, query) {
+    const tr = dict();
+    return formatAppLogMessage(entry, tr).text.toLowerCase().includes(query)
+        || entry.message.toLowerCase().includes(query)
+        || appLogLabel(entry, tr).toLowerCase().includes(query)
+        || entry.type.toLowerCase().includes(query)
+        || entry.timestamp.toLowerCase().includes(query);
 }
 
 /**
  * 渲染单条扩展日志到 ext-log 列表。
 * 支持 6 种 PrismEvent 类型的富文本渲染。
-* @param {{ type: string, message: string, timestamp: string, source?: string }} entry
+* @param {AppLogEntry} entry
 */
 function renderExtLogEntry(entry) {
     // When the page is not mounted, skip DOM rendering — the event is
     // already collected and will be batch-rendered on the next initLogsPage().
     const listEl = _container?.querySelector('#log-ext-list');
     if (!listEl) return;
+    // Paused: the entry stays in the buffer and is drawn on resume.
+    if (_logsPaused) return;
 
     // Update line count first (before filtering) to keep total count consistent
     if (_extLogTabActive) updateExtLineCount();
@@ -836,21 +858,12 @@ function renderExtLogEntry(entry) {
     // Apply level filter (inclusive: selected level and above, same as core logs)
     if (_extLevelFilter !== 'all') {
         const minPriority = LEVEL_PRIORITY[_extLevelFilter];
-        const type = entry.type.toLowerCase();
-        const priority = LEVEL_PRIORITY[type];
-        // Events without a log level (e.g. PrismEvent types) default to info priority
-        if ((priority ?? 1) < minPriority) return;
+        // Prism events have no level of their own: failures count as errors.
+        if (LEVEL_PRIORITY[appLogLevel(entry)] < minPriority) return;
     }
 
     // Apply search filter
-    if (_extSearchQuery) {
-        const query = _extSearchQuery.toLowerCase();
-        if (!entry.message.toLowerCase().includes(query) &&
-            !entry.type.toLowerCase().includes(query) &&
-            !entry.timestamp.toLowerCase().includes(query)) {
-            return;
-        }
-    }
+    if (_extSearchQuery && !extEntryMatches(entry, _extSearchQuery.toLowerCase())) return;
 
     // Hide empty placeholder
     const emptyEl = _container?.querySelector('#log-ext-empty');
@@ -868,7 +881,7 @@ function renderExtLogEntry(entry) {
 /**
  * Create a DOM row element for an extension log entry.
  * Shared by both incremental `renderExtLogEntry` and batch `rebuildExtLogDOM`.
- * @param {{ type: string, message: string, timestamp: string, source?: string }} entry
+ * @param {AppLogEntry} entry
  * @returns {HTMLDivElement}
  */
 function createExtLogRow(entry) {
@@ -889,14 +902,12 @@ function createExtLogRow(entry) {
     badge.className = 'shrink-0 px-1.5 py-0.5 rounded-sm text-2xs font-bold';
     badge.style.color = color;
     badge.style.backgroundColor = `${color}15`;
-    badge.textContent = entry.source === 'backend'
-        ? entry.type.toUpperCase()
-        : entry.type;
+    badge.textContent = appLogLabel(entry, dict());
 
     const msg = document.createElement('span');
     msg.className = 'text-[var(--text-secondary)] [overflow-wrap:anywhere] min-w-0';
-    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatExtLogMessage
-    msg.innerHTML = formatExtLogMessage(entry); // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+    // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml in formatAppLogMessage
+    msg.innerHTML = formatAppLogMessage(entry, dict()).html; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
 
     row.appendChild(ts);
     row.appendChild(badge);
@@ -917,22 +928,14 @@ function rebuildExtLogDOM() {
     // Apply level filter (inclusive: selected level and above, same as core logs)
     if (_extLevelFilter !== 'all') {
         const minPriority = LEVEL_PRIORITY[_extLevelFilter];
-        events = events.filter(e => {
-            const type = e.type.toLowerCase();
-            const priority = LEVEL_PRIORITY[type];
-            // Events without a log level (e.g. PrismEvent types) default to info priority
-            return (priority ?? 1) >= minPriority;
-        });
+        // Prism events have no level of their own: failures count as errors.
+        events = events.filter(e => LEVEL_PRIORITY[appLogLevel(e)] >= minPriority);
     }
 
     // Apply search filter
     if (_extSearchQuery) {
         const query = _extSearchQuery.toLowerCase();
-        events = events.filter(e =>
-            e.message.toLowerCase().includes(query) ||
-            e.type.toLowerCase().includes(query) ||
-            e.timestamp.toLowerCase().includes(query)
-        );
+        events = events.filter(e => extEntryMatches(e, query));
     }
 
     // Clear existing content
@@ -942,6 +945,7 @@ function rebuildExtLogDOM() {
     if (events.length === 0) {
         const emptyEl = _container?.querySelector('#log-ext-empty');
         if (emptyEl instanceof HTMLElement) emptyEl.style.display = 'flex';
+        if (_extLogTabActive) updateExtLineCount();
         return;
     }
 
@@ -957,9 +961,9 @@ function rebuildExtLogDOM() {
     // Update line count if on Extension tab
     if (_extLogTabActive) updateExtLineCount();
 
-    // Scroll to bottom
+    // Scroll to bottom, unless the reader has scrolled up
     const extContent = _container?.querySelector('#log-ext-content');
-    if (extContent) {
+    if (extContent && _extAutoScroll) {
         extContent.scrollTop = extContent.scrollHeight;
     }
 }
