@@ -6,7 +6,7 @@
  * @module ui/proxies
  */
 
-import { switchProxy, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES } from '../api.js';
+import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -30,6 +30,30 @@ import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup
 import { renderTunStatus } from './tun-status.js';
 
 // Re-export switchPage for external consumers that import from this module
+
+/**
+ * Node switch failed: say what happened (title), that nothing changed, and the
+ * core's reason when there is one, instead of a bare error string.
+ * @param {unknown} [err]
+ */
+export function notifySwitchFailed(err) {
+    const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] || translations.en;
+    const title = tr.proxySwitchFailed || translations.en.proxySwitchFailed;
+    const detail = err ? String(/** @type {any} */ (err)?.message ?? err).replace(/^Error:\s*/, '').trim() : '';
+    // A transport failure (no HTTP status) may have reached the core anyway, so
+    // don't claim the old node was kept; re-read the core's selection instead.
+    const anyErr = /** @type {any} */ (err);
+    const unknownOutcome = err instanceof TypeError
+        || (anyErr?.name === 'ApiError' && anyErr?.status == null);
+    if (unknownOutcome) {
+        showNotification(detail || title, 'error', title);
+        void syncCoreConfig().catch((e) => proxyLogger.warn('Failed to resync after an unconfirmed switch', e));
+        return;
+    }
+    const kept = tr.proxySwitchKept || translations.en.proxySwitchKept;
+    showNotification(detail ? `${kept}\n${detail}` : kept, 'error', title);
+}
+
 export { switchPage } from './navigation.js';
 
 // --- Constants ---
@@ -697,7 +721,7 @@ export async function updateSysProxyUI() {
             statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
-            statusText.textContent = /** @type {any} */ (translations)[currentLang].proxyStatusReady || 'Ready to protect your traffic';
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
             statusText.classList.remove('text-accent');
             statusText.classList.add('text-[var(--text-muted)]');
         }
@@ -1946,7 +1970,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             }
 
             try {
-                const success = await switchProxy(mainGroup, name);
+                const { ok: success, reason: switchRejection } = await switchProxyResult(mainGroup, name);
                 invalidateProxiesCache();
 
                 card.classList.remove('opacity-50', 'pointer-events-none');
@@ -1976,8 +2000,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         .then(() => syncCoreConfig())
                         .catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
-                    const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
-                    showNotification(t.proxySwitchFailed || 'Failed to switch proxy', 'error');
+                    notifySwitchFailed(switchRejection);
                 }
             } catch (err) {
                 card.classList.remove('opacity-50', 'pointer-events-none');
@@ -1985,7 +2008,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
                     latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 }
-                showNotification(String(err), 'error');
+                notifySwitchFailed(err);
             }
         };
 
