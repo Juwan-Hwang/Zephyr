@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use zephyr_core::config::sanitizer::{sanitize_base_filename, url_decode_complete};
+use zephyr_core::config::sanitizer::{
+    sanitize_base_filename, url_decode_complete, validate_path_within_dir,
+};
 
 /// Maximum allowed size for user-supplied text inputs (10 MB).
 pub const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
@@ -166,7 +168,9 @@ pub fn resolve_rule_path(
     if !safe.ends_with(".prism.yaml") {
         return Err("Filename must end with .prism.yaml".to_owned());
     }
-    Ok(prism_dir.join(&safe))
+    let target = prism_dir.join(&safe);
+    validate_path_within_dir(&target, prism_dir).map_err(|e| e.to_string())?;
+    Ok(target)
 }
 
 #[must_use]

@@ -12,7 +12,9 @@ use crate::prism::types::{
     resolve_rule_path, sanitize_filename, RuleFileInfo,
 };
 use crate::prism::PrismState;
-use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
+use zephyr_core::config::sanitizer::{
+    remove_dangerous_keys_internal_pub as remove_dangerous_keys, validate_path_within_dir,
+};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt as _;
@@ -88,6 +90,7 @@ pub fn rule_create(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    validate_path_within_dir(&path, &prism_dir).map_err(|e| e.to_string())?;
     if path.exists() {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -144,6 +147,9 @@ pub fn rule_rename(
     let safe_new = ensure_prism_ext(&sanitize_filename(&new_filename)?);
     let old_path = prism_dir.join(&safe_old);
     let new_path = prism_dir.join(&safe_new);
+
+    validate_path_within_dir(&old_path, &prism_dir).map_err(|e| e.to_string())?;
+    validate_path_within_dir(&new_path, &prism_dir).map_err(|e| e.to_string())?;
 
     if !old_path.exists() {
         return Err(format!("Rule file '{safe_old}' not found"));
@@ -253,6 +259,7 @@ pub fn rule_extract_from_profile(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    validate_path_within_dir(&path, &prism_dir).map_err(|e| e.to_string())?;
     if path.exists() {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -285,6 +292,7 @@ pub fn rule_import_text(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    validate_path_within_dir(&path, &prism_dir).map_err(|e| e.to_string())?;
     if path.exists() {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -351,6 +359,7 @@ pub fn rule_import_file(
 
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
+    validate_path_within_dir(&target, &prism_dir).map_err(|e| e.to_string())?;
     if target.exists() {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -393,6 +402,7 @@ pub async fn rule_import_url(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
+    validate_path_within_dir(&target, &prism_dir).map_err(|e| e.to_string())?;
     if target.exists() {
         return Err(format!("Rule file '{filename}' already exists"));
     }

@@ -990,6 +990,23 @@ DOMAIN-SUFFIX,cdn.example-e.co.uk,Reject
         }
 
         #[test]
+        fn resolve_rule_path_valid() {
+            let dir = unique_temp_dir();
+            let path = super::super::resolve_rule_path(&dir, "adblock.prism.yaml").unwrap();
+            assert_eq!(path, dir.join("adblock.prism.yaml"));
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn resolve_rule_path_traversal_sanitized() {
+            let dir = unique_temp_dir();
+            // Path traversal separators are stripped, keeping it safely inside prism_dir
+            let path = super::super::resolve_rule_path(&dir, "../../etc/passwd.prism.yaml").unwrap();
+            assert!(path.starts_with(&dir));
+            cleanup(&dir);
+        }
+
+        #[test]
         fn delete_rule_file() {
             let dir = unique_temp_dir();
             let filename = "adblock.prism.yaml";
