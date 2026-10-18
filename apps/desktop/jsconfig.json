@@ -6,6 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "target": "ES2022",
+    "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
@@ -13,5 +14,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "src/js-yaml.min.js", "src/**/*.test.js"]
+  "exclude": ["node_modules", "src/js-yaml.min.js", "src/**/*.test.js", "src/**/*.test.tsx"]
 }
