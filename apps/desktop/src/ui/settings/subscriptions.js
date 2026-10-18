@@ -30,6 +30,27 @@ import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.
 import { initCustomDropdown } from '../dropdown.js';
 import * as prism from '../prism.js';
 
+/** Longest wait for another network operation before giving up on activating a new profile. */
+const NETWORK_IDLE_TIMEOUT_MS = 15000;
+
+/**
+ * Wait until no other subscription/network operation holds isNetworkUpdating,
+ * then take it in the same step so nothing can claim it in between.
+ * @returns {Promise<boolean>} true when this caller now owns the lock; false
+ *   when it is still held by someone else after the timeout
+ */
+async function acquireNetworkLock() {
+    const until = Date.now() + NETWORK_IDLE_TIMEOUT_MS;
+    for (;;) {
+        if (!appStore.get('isNetworkUpdating')) {
+            appStore.set('isNetworkUpdating', true);
+            return true;
+        }
+        if (Date.now() >= until) return false;
+        await new Promise((r) => setTimeout(r, 200));
+    }
+}
+
 const normalizeConfigName = (/** @type {string | null | undefined} */ configName) => typeof configName === 'string' ? configName.toLowerCase().replace(/\.(ya?ml)$/i, '') : '';
 
 /**
@@ -486,6 +507,29 @@ export function initSubscriptionSettings({
                     const customArgs = subSettings.custom_args || [];
                     await restartCore(savedConfigName, customArgs);
                     await postRestartRecovery(savedConfigName);
+                } else if (appStore.get('noSubscription')) {
+                    // The first subscription: nothing is loaded yet, so start using it
+                    // (otherwise the empty state stays up after adding it). It is saved
+                    // either way, so a failed switch is a warning, not a failed add.
+                    try {
+                        // Only take the lock when it is free: another operation still
+                        // holding it keeps it, and the saved profile waits for the user.
+                        if (!(await acquireNetworkLock())) {
+                            /** @type {any} */
+                            const tBusy = /** @type {any} */ (translations)[appStore.get('currentLang')] || translations.en;
+                            throw new Error(tBusy.consoleSubUpdateBusy || 'Update in progress, please wait');
+                        }
+                        try {
+                            if (appStore.get('noSubscription')) {
+                                await switchToConfig(savedConfigName, subSettings.custom_args || []);
+                            }
+                        } finally {
+                            appStore.set('isNetworkUpdating', false);
+                        }
+                    } catch (switchErr) {
+                        rulesLogger.warn('[settings] Activating the first subscription failed:', switchErr);
+                        showNotification(String(switchErr instanceof Error ? switchErr.message : switchErr), 'warning');
+                    }
                 }
 
                 /** @type {any} */
