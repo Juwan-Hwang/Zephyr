@@ -408,7 +408,7 @@ This project uses [MIT License](LICENSE).
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/codecov" title="codecov[bot]"><img src="https://avatars.githubusercontent.com/in/254?v=4&s=100" width="80" height="80" alt="codecov[bot]"/></a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/dependabot" title="dependabot[bot]"><img src="https://avatars.githubusercontent.com/in/29110?v=4&s=100" width="80" height="80" alt="dependabot[bot]"/></a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/imgbot" title="imgbot[bot]"><img src="https://avatars.githubusercontent.com/in/4706?v=4&s=100" width="80" height="80" alt="imgbot[bot]"/></a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/allcontributors" title="allcontributors[bot]"><img src="https://avatars.githubusercontent.com/u/649578?v=4&s=100" width="80" height="80" alt="allcontributors[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/allcontributors" title="allcontributors[bot]"><img src="https://avatars.githubusercontent.com/in/23186?v=4&s=100" width="80" height="80" alt="allcontributors[bot]"/></a></td>
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/google-integrations" title="google-integrations[bot]"><img src="https://avatars.githubusercontent.com/in/1153133?v=4&s=100" width="80" height="80" alt="google-integrations[bot]"/></a></td>
