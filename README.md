@@ -356,6 +356,48 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
 
 ---
 
+## 贡献者
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Juwan-Hwang"><img src="https://avatars.githubusercontent.com/u/180104975?v=4?s=100" width="100px;" alt="Juwan"/><br /><sub><b>Juwan</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/commits?author=Juwan-Hwang" title="Code">💻</a> <a href="#design-Juwan-Hwang" title="Design">🎨</a> <a href="#ideas-Juwan-Hwang" title="Ideas, Planning, & Feedback">🤔</a> <a href="#maintenance-Juwan-Hwang" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MatrixNeoKozak"><img src="https://avatars.githubusercontent.com/u/261791209?v=4?s=100" width="100px;" alt="KozakLordOfMatrix"/><br /><sub><b>KozakLordOfMatrix</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/commits?author=MatrixNeoKozak" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/meta-muse-ai"><img src="https://avatars.githubusercontent.com/u/333466691?v=4?s=100" width="100px;" alt="meta-muse-ai[bot]"/><br /><sub><b>meta-muse-ai[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/commits?author=meta-muse-ai[bot]" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/google-ai-studio"><img src="https://avatars.githubusercontent.com/u/223464005?v=4?s=100" width="100px;" alt="google-ai-studio[bot]"/><br /><sub><b>google-ai-studio[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/commits?author=google-ai-studio[bot]" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/codebuddy-connector"><img src="https://avatars.githubusercontent.com/u/256159322?v=4?s=100" width="100px;" alt="codebuddy-connector[bot]"/><br /><sub><b>codebuddy-connector[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/commits?author=codebuddy-connector[bot]" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/coderabbitai"><img src="https://avatars.githubusercontent.com/u/136622811?v=4?s=100" width="100px;" alt="coderabbitai[bot]"/><br /><sub><b>coderabbitai[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Acoderabbitai[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/sourcery-ai"><img src="https://avatars.githubusercontent.com/u/58596630?v=4?s=100" width="100px;" alt="sourcery-ai[bot]"/><br /><sub><b>sourcery-ai[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Asourcery-ai[bot]" title="Reviewed Pull Requests">👀</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/qodo-code-review"><img src="https://avatars.githubusercontent.com/u/151058649?v=4?s=100" width="100px;" alt="qodo-code-review[bot]"/><br /><sub><b>qodo-code-review[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Aqodo-code-review[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/chatgpt-codex-connector"><img src="https://avatars.githubusercontent.com/u/199175422?v=4?s=100" width="100px;" alt="chatgpt-codex-connector[bot]"/><br /><sub><b>chatgpt-codex-connector[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Achatgpt-codex-connector[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/copilot-pull-request-reviewer"><img src="https://avatars.githubusercontent.com/u/175728472?v=4?s=100" width="100px;" alt="Copilot"/><br /><sub><b>Copilot</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3ACopilot" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/greptile-apps"><img src="https://avatars.githubusercontent.com/u/165735046?v=4?s=100" width="100px;" alt="greptile-apps[bot]"/><br /><sub><b>greptile-apps[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Agreptile-apps[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/gitar-bot"><img src="https://avatars.githubusercontent.com/u/159877585?v=4?s=100" width="100px;" alt="gitar-bot[bot]"/><br /><sub><b>gitar-bot[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Agitar-bot[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/mergestorm-vortex"><img src="https://avatars.githubusercontent.com/u/289498075?v=4?s=100" width="100px;" alt="mergestorm-vortex[bot]"/><br /><sub><b>mergestorm-vortex[bot]</b></sub></a><br /><a href="https://github.com/Juwan-Hwang/Zephyr/pulls?q=is%3Apr+reviewed-by%3Amergestorm-vortex[bot]" title="Reviewed Pull Requests">👀</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/sonarqubecloud"><img src="https://avatars.githubusercontent.com/u/39514782?v=4?s=100" width="100px;" alt="sonarqubecloud[bot]"/><br /><sub><b>sonarqubecloud[bot]</b></sub></a><br /><a href="#infra-sonarqubecloud[bot]" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/snyk"><img src="https://avatars.githubusercontent.com/u/46543249?v=4?s=100" width="100px;" alt="snyk[bot]"/><br /><sub><b>snyk[bot]</b></sub></a><br /><a href="#security-snyk[bot]" title="Security">🛡️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/gitguardian"><img src="https://avatars.githubusercontent.com/u/57676739?v=4?s=100" width="100px;" alt="gitguardian[bot]"/><br /><sub><b>gitguardian[bot]</b></sub></a><br /><a href="#security-gitguardian[bot]" title="Security">🛡️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/pre-commit-ci"><img src="https://avatars.githubusercontent.com/u/66853113?v=4?s=100" width="100px;" alt="pre-commit-ci[bot]"/><br /><sub><b>pre-commit-ci[bot]</b></sub></a><br /><a href="#infra-pre-commit-ci[bot]" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/codecov"><img src="https://avatars.githubusercontent.com/u/22429695?v=4?s=100" width="100px;" alt="codecov[bot]"/><br /><sub><b>codecov[bot]</b></sub></a><br /><a href="#infra-codecov[bot]" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/dependabot"><img src="https://avatars.githubusercontent.com/u/49699333?v=4?s=100" width="100px;" alt="dependabot[bot]"/><br /><sub><b>dependabot[bot]</b></sub></a><br /><a href="#maintenance-dependabot[bot]" title="Maintenance">🚧</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
+
 ## 致谢
 
 
