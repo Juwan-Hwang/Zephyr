@@ -259,6 +259,7 @@
                         <div class="flex items-center gap-2 shrink-0">
                             <input
                                 id="plugin-search-input"
+                                aria-label="Search overrides" data-i18n-aria-label="overrideSearchPlaceholder"
                                 class="form-control form-control-md form-control-mono flex-1"
                                 placeholder="搜索覆写..." data-i18n-placeholder="overrideSearchPlaceholder"
                             />
@@ -414,12 +415,12 @@
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="language">Language</p>
+                                        <p id="setting-lang-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="language">Language</p>
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="languageDesc">Choose your interface language</p>
                                     </div>
                                 </div>
                                 <div id="setting-lang-wrap" class="relative w-40">
-                                    <button id="setting-lang-trigger" type="button" class="select-common w-full flex items-center justify-between">
+                                    <button id="setting-lang-trigger" type="button" aria-labelledby="setting-lang-title setting-lang-label" class="select-common w-full flex items-center justify-between">
                                         <span id="setting-lang-label">English</span>
                                         <svg id="setting-lang-arrow" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="m6 9 6 6 6-6"></path>
@@ -443,7 +444,7 @@
                                             <button type="button" data-lang-value="ur" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">اردو</button>
                                         </div>
                                     </div>
-                                    <select id="setting-lang" class="hidden">
+                                    <select id="setting-lang" class="hidden" aria-label="Language" data-i18n-aria-label="language">
                                         <option value="en">English</option>
                                         <option value="zh">简体中文</option>
                                         <option value="ja">日本語</option>
@@ -502,7 +503,7 @@
                                     <div data-theme="orange" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div data-theme="pink" class="w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></div>
                                     <div class="relative group">
-                                        <input type="color" id="custom-theme-color" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
+                                        <input type="color" id="custom-theme-color" aria-label="Theme Color" data-i18n-aria-label="themeColor" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
                                         <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 via-emerald-500 to-amber-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
                                     </div>
                                 </div>
@@ -523,7 +524,7 @@
                                 </div>
                                 <div class="flex items-center gap-3">
                                     <span class="text-2xs text-[var(--text-secondary)] w-6" id="opacity-val-text">100%</span>
-                                    <input type="range" id="setting-opacity" min="10" max="100" value="100" class="w-24 h-1 bg-[var(--zephyr-bg-muted)] rounded-full appearance-none cursor-pointer accent-accent">
+                                    <input type="range" id="setting-opacity" aria-label="App Transparency" data-i18n-aria-label="appOpacity" min="10" max="100" value="100" class="w-24 h-1 bg-[var(--zephyr-bg-muted)] rounded-full appearance-none cursor-pointer accent-accent">
                                 </div>
                             </div>
 
@@ -946,9 +947,9 @@
                                 <div id="fake-client-options" class="w-full ps-9 pe-2 transition-all duration-[var(--zephyr-time-standard)] max-h-0 opacity-0 overflow-hidden">
                                     <div class="glass-card rounded-[var(--radius-md)] p-3 mt-2 space-y-3">
                                         <div>
-                                            <label class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientType">Client Type</label>
+                                            <span id="fake-client-title" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientType">Client Type</span>
                                             <div id="fake-client-select-wrap" class="relative">
-                                                <button id="fake-client-trigger" type="button" class="select-common w-full flex items-center justify-between">
+                                                <button id="fake-client-trigger" type="button" aria-labelledby="fake-client-title fake-client-label" class="select-common w-full flex items-center justify-between">
                                                     <span id="fake-client-label">Clash Verge Rev</span>
                                                     <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                                                 </button>
@@ -961,7 +962,7 @@
                                                         <button type="button" data-value="custom" data-label="Custom..." data-i18n="custom" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Custom...</button>
                                                     </div>
                                                 </div>
-                                                <select id="fake-client-select" class="hidden">
+                                                <select id="fake-client-select" class="hidden" aria-label="Client Type" data-i18n-aria-label="fakeClientType">
                                                     <option value="clash-verge/1.6.0">Clash Verge Rev</option>
                                                     <option value="mihomo-party/1.0.0">mihomo-party</option>
                                                     <option value="Flclash/1.0.0">Flclash</option>

@@ -59,7 +59,9 @@ export async function checkForClientUpdate() {
                 'success'
             );
         } finally {
-            unlisten();
+            unlisten().catch((/** @type {unknown} */ err) => {
+                apiLogger.warn('[ClientUpdater] unlisten failed:', err);
+            });
         }
     } catch (err) {
         const message = err?.toString?.() || 'Unknown error';
