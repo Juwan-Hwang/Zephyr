@@ -858,7 +858,7 @@ DOMAIN-SUFFIX,cdn.example-e.co.uk,Reject
     mod rule_file_integration_tests {
         use super::{
             count_rules, detect_source, ensure_prism_ext, fs, normalize_to_prism_yaml,
-            sanitize_filename,
+            resolve_rule_path, sanitize_filename,
         };
         use std::path::PathBuf;
         use std::sync::atomic::{AtomicUsize, Ordering};
