@@ -336,6 +336,17 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "imgbot",
+      "name": "Imgbot",
+      "avatar_url": "https://avatars.githubusercontent.com/u/80986210?v=4",
+      "profile": "https://imgbot.net",
+      "contributions": [
+        "review"
+      ]
     }
-  ]
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular"
 }
