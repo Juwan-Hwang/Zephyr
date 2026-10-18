@@ -3354,7 +3354,10 @@ mod tests {
         // Rejects run_config.yaml directly
         let res = resolve_profile_path(&paths, "run_config.yaml");
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "Cannot switch to run_config.yaml directly");
+        assert_eq!(
+            res.unwrap_err(),
+            "Cannot switch to run_config.yaml directly"
+        );
 
         // Creates default config when profiles directory is empty
         let (name, path) = resolve_profile_path(&paths, "nonexistent.yaml").unwrap();
@@ -3454,12 +3457,9 @@ mod tests {
             }
         });
 
-        let success = authenticated_health_check_once(
-            port,
-            "test_secret",
-            std::time::Duration::from_secs(1),
-        )
-        .await;
+        let success =
+            authenticated_health_check_once(port, "test_secret", std::time::Duration::from_secs(1))
+                .await;
 
         assert!(success);
         let _ = server_handle.await;
