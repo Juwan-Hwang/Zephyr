@@ -1,0 +1,72 @@
+# ============================================================
+# Snyk scanning for the JavaScript/TypeScript side of the repo.
+# Rust coverage in Snyk is limited on the free plan (dependency
+# scanning only via SBOM, Snyk Code for Rust is Enterprise early
+# access), so Rust stays with cargo audit, cargo-deny and CodeQL.
+# The job stays green until the SNYK_TOKEN repository secret is
+# configured; after that it scans automatically.
+# All GitHub Actions are pinned to immutable commit SHAs.
+# ============================================================
+
+name: Snyk Scan
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snyk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snyk:
+    name: "🐶 Snyk Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check whether Snyk is configured
+        id: guard
+        env:
+          SNYK_TOKEN_VALUE: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -n "$SNYK_TOKEN_VALUE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SNYK_TOKEN is not set yet, skipping the Snyk scan."
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Set up Snyk CLI
+        if: steps.guard.outputs.ready == 'true'
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Snyk dependency test (JavaScript)
+        if: steps.guard.outputs.ready == 'true'
+        run: snyk test --all-projects --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # Observation mode for now: Snyk Code has to be enabled in the
+      # Snyk organization settings first, and its findings should be
+      # reviewed before this becomes a blocking check.
+      - name: Snyk Code test
+        # !cancelled() lets the code scan still run when the dependency
+        # test above failed on a high-severity finding.
+        if: ${{ !cancelled() && steps.guard.outputs.ready == 'true' }}
+        run: snyk code test --severity-threshold=high
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

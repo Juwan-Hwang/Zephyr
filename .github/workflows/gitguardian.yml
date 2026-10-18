@@ -1,0 +1,63 @@
+# ============================================================
+# GitGuardian secret scanning (ggshield)
+# Complements the TruffleHog job in security.yml: TruffleHog only
+# reports verified secrets, while ggshield also catches generic
+# API keys, passwords and private keys in commit history.
+# The job stays green until the GITGUARDIAN_API_KEY repository
+# secret is configured; after that it scans automatically.
+# All GitHub Actions are pinned to immutable commit SHAs.
+# ============================================================
+
+name: GitGuardian Scan
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Push runs each get their own group: ggshield scans the pushed commit
+  # range, and a shared group would let a newer push replace a queued scan
+  # (or cancel a running one), leaving those commits unscanned. Pull request
+  # runs share a group so a new push to the PR replaces the stale run.
+  group: gitguardian-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ggshield:
+    name: "🛡️ GitGuardian Secret Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check whether GitGuardian is configured
+        id: guard
+        env:
+          GG_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+        run: |
+          if [ -n "$GG_API_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GITGUARDIAN_API_KEY is not set yet, skipping the GitGuardian scan."
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: GitGuardian scan
+        if: steps.guard.outputs.ready == 'true'
+        uses: GitGuardian/ggshield-action@10e9055712b4630c3d514ec16dca25c94b752b52 # v1.56.0
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
