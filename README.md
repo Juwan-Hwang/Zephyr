@@ -422,7 +422,6 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/copilot-swe-agent" title="copilot-swe-agent[bot]"><img src="https://avatars.githubusercontent.com/in/1143301?v=4&s=100" width="80" height="80" alt="copilot-swe-agent[bot]"/></a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://imgbot.net" title="Imgbot"><img src="https://avatars.githubusercontent.com/u/80986210?v=4&s=100" width="80" height="80" alt="imgbot"/></a></td>
     </tr>
   </tbody>
 </table>

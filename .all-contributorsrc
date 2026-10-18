@@ -253,7 +253,8 @@
       "avatar_url": "https://avatars.githubusercontent.com/in/4706?v=4",
       "profile": "https://github.com/apps/imgbot",
       "contributions": [
-        "infra"
+        "infra",
+        "review"
       ]
     },
     {
@@ -335,15 +336,6 @@
       "profile": "https://github.com/apps/copilot-swe-agent",
       "contributions": [
         "code"
-      ]
-    },
-    {
-      "login": "imgbot",
-      "name": "Imgbot",
-      "avatar_url": "https://avatars.githubusercontent.com/u/80986210?v=4",
-      "profile": "https://imgbot.net",
-      "contributions": [
-        "review"
       ]
     }
   ],
