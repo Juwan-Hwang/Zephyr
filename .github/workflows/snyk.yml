@@ -63,7 +63,9 @@ jobs:
       # Snyk organization settings first, and its findings should be
       # reviewed before this becomes a blocking check.
       - name: Snyk Code test
-        if: steps.guard.outputs.ready == 'true'
+        # !cancelled() lets the code scan still run when the dependency
+        # test above failed on a high-severity finding.
+        if: ${{ !cancelled() && steps.guard.outputs.ready == 'true' }}
         run: snyk code test --severity-threshold=high
         continue-on-error: true
         env:

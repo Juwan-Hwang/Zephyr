@@ -22,7 +22,9 @@ permissions:
 
 concurrency:
   group: gitguardian-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a push scan: ggshield scans the pushed commit range,
+  # so a cancelled run would leave those commits unscanned.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ggshield:
