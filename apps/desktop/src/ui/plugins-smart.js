@@ -103,7 +103,7 @@ async function renderPluginsList(plugins) {
     const container = document.getElementById('plugins-list');
     if (!container) return;
     if (!plugins || plugins.length === 0) {
-         
+
     container.innerHTML = '<div class="glass-card p-6 text-center text-[var(--text-tertiary)] text-xs">No plugins found.</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
         return;
     }
@@ -179,7 +179,7 @@ async function loadHooksList() {
     try {
         const hooks = /** @type {Array<{name: string, isHighFrequency?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListHooks('*')));
         if (!hooks || hooks.length === 0) {
-             
+
     container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No hooks available</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
@@ -220,7 +220,7 @@ async function loadPermissionsList() {
     try {
         const perms = /** @type {Array<{name: string, displayName: string, allowedForConfigPlugin?: boolean, allowedForUiExtension?: boolean}>} */ (/** @type {unknown} */ (await prism.pluginListPermissions('*')));
         if (!perms || perms.length === 0) {
-             
+
     container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">No permissions</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
@@ -251,7 +251,7 @@ async function loadKvStore() {
     try {
         const keys = await prism.kvKeys();
         if (!keys || keys.length === 0) {
-             
+
     container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-2">KV Store is empty</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }
@@ -621,7 +621,7 @@ async function loadSmartRankings() {
     try {
         const rankings = await prism.smartRank();
         if (!rankings || rankings.length === 0) {
-             
+
     container.innerHTML = '<div class="text-[var(--text-tertiary)] text-xs text-center py-4">No ranking data. Run speed tests first.</div>'; // nosemgrep: js-innerhtml-assignment — static HTML
             return;
         }

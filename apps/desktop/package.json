@@ -15,6 +15,7 @@
     "dev:css": "pnpm run copy-shared && pnpm run build:tokens && pnpm run dev:uno",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text",
     "typecheck": "tsc -p jsconfig.json --noEmit"
   },
   "dependencies": {

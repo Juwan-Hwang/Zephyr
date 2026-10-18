@@ -936,7 +936,7 @@ function rebuildExtLogDOM() {
     }
 
     // Clear existing content
-     
+
     listEl.replaceChildren();
 
     if (events.length === 0) {
