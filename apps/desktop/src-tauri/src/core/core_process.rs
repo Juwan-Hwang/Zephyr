@@ -1214,11 +1214,14 @@ fn attach_log_file(cmd: &mut Command, log_path: &Path) {
 /// Spawn mihomo, detect immediate exit, and retry on cache lock issues.
 ///
 /// Returns the successfully spawned `Child` process and the log file path, or an error string.
+/// `attempted_log` always holds the log of the latest attempt, so a failed start
+/// can still point the log viewer at the output of the run that failed.
 async fn spawn_with_cache_retry(
     exe_path: &Path,
     safe_custom_args: &[String],
     core_dir: &Path,
     app_data_dir: &Path,
+    attempted_log: &mut Option<PathBuf>,
 ) -> Result<(std::process::Child, PathBuf), String> {
     let spawn_cmd = |log_suffix: &str| -> (Command, PathBuf) {
         let mut cmd = Command::new(exe_path);
@@ -1329,6 +1332,7 @@ async fn spawn_with_cache_retry(
 
     let (mut cmd, log_path) = spawn_cmd("run");
     attach_log_file(&mut cmd, &log_path);
+    *attempted_log = Some(log_path.clone());
 
     let mut child = cmd
         .spawn()
@@ -1354,6 +1358,7 @@ async fn spawn_with_cache_retry(
 
                 let (mut retry_cmd, retry_log_path) = spawn_cmd("retry");
                 attach_log_file(&mut retry_cmd, &retry_log_path);
+                *attempted_log = Some(retry_log_path.clone());
 
                 match retry_cmd.spawn() {
                     Ok(mut retry_child) => {
@@ -1529,6 +1534,15 @@ fn store_child_in_core_state(
     lock.set_started_at(Some(started_at));
     drop(lock);
     Ok(())
+}
+
+/// Point `read_core_log` at the log of a start that failed, so the error card's
+/// log view shows that run instead of an older one (or nothing at all).
+fn remember_failed_log(state: &MihomoState, log_path: Option<&Path>) {
+    let Some(path) = log_path else { return };
+    if let Ok(mut lock) = state.0.lock() {
+        lock.set_last_log_path(Some(path.to_string_lossy().into_owned()));
+    }
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -2327,13 +2341,22 @@ pub async fn start_core_inner(
     }
 
     // Spawn mihomo (stdout/stderr redirected to log file internally)
-    let (child, log_path) = spawn_with_cache_retry(
+    let mut attempted_log = None;
+    let spawned = spawn_with_cache_retry(
         &exe_path,
         &safe_custom_args,
         &paths.core_dir,
         &paths.app_data_dir,
+        &mut attempted_log,
     )
-    .await?;
+    .await;
+    let (child, log_path) = match spawned {
+        Ok(spawned) => spawned,
+        Err(e) => {
+            remember_failed_log(&state, attempted_log.as_deref());
+            return Err(e);
+        }
+    };
     let started_at = std::time::Instant::now();
 
     // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
@@ -2362,6 +2385,7 @@ pub async fn start_core_inner(
     // wrong core.
     if let Err(e) = authenticated_health_check(port, &resolved_secret).await {
         let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        remember_failed_log(&state, Some(&log_path));
         return Err(e);
     }
 

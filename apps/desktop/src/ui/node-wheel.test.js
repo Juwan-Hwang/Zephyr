@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
     switchProxy: vi.fn().mockResolvedValue(true),
+    lastSwitchRejection: null,
     abortLatencyTests: vi.fn(),
     closeAllConnections: vi.fn().mockResolvedValue(undefined),
 }));
@@ -16,6 +17,12 @@ vi.mock('./proxies.js', () => ({
     sortProxiesByLatency: vi.fn(),
     syncCoreConfig: vi.fn().mockResolvedValue(undefined),
     renderProxies: vi.fn(),
+    notifySwitchFailed: vi.fn(),
+    resolveLeafNode: vi.fn((/** @type {string} */ n, /** @type {any} */ map) => {
+        let cur = n; const seen = new Set();
+        while (map?.[cur]?.now && map[map[cur].now] && !seen.has(cur)) { seen.add(cur); cur = map[cur].now; }
+        return cur;
+    }),
 }));
 vi.mock('./state.js', () => ({ appStore: { get: vi.fn(() => null) } }));
 vi.mock('./cache.js', () => ({
@@ -258,6 +265,24 @@ describe('node quick-switch wheel', () => {
         expect(isShown(dom.dropdown)).toBe(false);
         await vi.advanceTimersByTimeAsync(0);
         expect(api.switchProxy).toHaveBeenCalledWith('Proxy', 'JP 01');
+    });
+
+    it('restores the old node name and reports an error when the switch fails or throws', async () => {
+        const api = await import('../api.js');
+        const proxies = await import('./proxies.js');
+        for (const fail of [() => Promise.resolve(false), () => Promise.reject(new Error('boom'))]) {
+            /** @type {any} */ (api.switchProxy).mockImplementationOnce(fail);
+            await hoverOpen();
+            const jp = /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === 'JP 01'));
+            jp.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(document.getElementById('current-node-name')?.textContent).toBe('HK 02');
+        }
+        // Same titled toast as the proxies page; a thrown error carries its reason.
+        expect(proxies.notifySwitchFailed).toHaveBeenCalledTimes(2);
+        expect(proxies.notifySwitchFailed).toHaveBeenNthCalledWith(1, null);
+        expect(/** @type {any} */ (proxies.notifySwitchFailed).mock.calls[1][0]).toBeInstanceOf(Error);
     });
 
     it('is keyboard operable: Enter opens on the current node, arrows move, Escape returns focus', async () => {

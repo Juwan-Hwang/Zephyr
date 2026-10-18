@@ -9,6 +9,25 @@
 import { getCurrentWindow, invoke, listen } from '../api.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { uiLogger } from '../utils/logger.js';
+import { getSettingsCached } from './cache.js';
+import { sendOSNotification } from './os-notification.js';
+import { t } from '../i18n.js';
+
+const TRAY_HINT_KEY = 'zephyr.trayHintShown';
+
+/**
+ * The first time the close button only hides the window (close-to-tray), say once,
+ * via a system notification, that Zephyr keeps running in the tray.
+ */
+async function maybeShowTrayHint() {
+    try {
+        if (localStorage.getItem(TRAY_HINT_KEY)) return;
+        const settings = await getSettingsCached();
+        if (!settings?.close_to_tray) return;
+        // Only remember the hint once the OS took it, so a failed send retries next close.
+        if (await sendOSNotification('Zephyr', t('trayStillRunning'))) localStorage.setItem(TRAY_HINT_KEY, '1');
+    } catch { /* non-critical */ }
+}
 
 /**
  * Initialize window control event listeners.
@@ -20,6 +39,7 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
+            void maybeShowTrayHint();
             // close() can throw synchronously when IPC is missing; the
             // Promise.resolve().then wrapper turns that into a rejection too.
             Promise.resolve()

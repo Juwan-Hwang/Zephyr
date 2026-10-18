@@ -560,6 +560,13 @@ export async function getProxiesMerged(existingData) {
 }
 
 /**
+ * Reason the backend gave for the latest switchProxy() that returned false,
+ * so callers can show it to the user. Cleared at the start of every call.
+ * @type {unknown}
+ */
+export let lastSwitchRejection = null;
+
+/**
  * 切换代理组中的选中节点
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
@@ -567,6 +574,7 @@ export async function getProxiesMerged(existingData) {
  * @throws {ApiError}
  */
 export async function switchProxy(group, name) {
+  lastSwitchRejection = null;
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
@@ -589,6 +597,7 @@ export async function switchProxy(group, name) {
     // no longer contains node '<name>'"). Callers only see the boolean, so keep
     // the reason in the log instead of dropping it.
     apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
+    lastSwitchRejection = err;
     return false;
   }
 }
@@ -842,7 +851,7 @@ export async function restartCore(configPath, customArgs = []) {
   setWsSecret(coreResult.secret);
   setCoreReachable(true);
   clearProviderCache();
-  Bus.emit(Events.CORE_RESTARTED);
+  Bus.emit(Events.CORE_RESTARTED, { activeConfig: coreResult.active_config });
   return coreResult;
 }
 

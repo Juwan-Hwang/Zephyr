@@ -6,14 +6,14 @@
  * and executes the corresponding UI actions.
  */
 
-import { listen, invoke, getCurrentWindow, closeAllConnections } from '../api.js';
+import { listen, invoke, getCurrentWindow } from '../api.js';
 import { showNotification } from './notifications.js';
+import { sendOSNotification } from './os-notification.js';
 import { translations } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { toggleSysProxy } from './sysproxy.js';
 import { updateTrayStatus, updateTrayMenu } from './tray.js';
-import { invalidateSettingsCache } from './cache.js';
-import { updateModeUI } from './modes.js';
+import { applyMode } from './modes.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from '../utils/logger.js';
@@ -507,23 +507,42 @@ async function toggleWindow() {
     }
 }
 
+/**
+ * Report a shortcut result where the user can see it: shortcuts are mostly used
+ * with the window hidden in the tray, where an in-app toast would go unseen.
+ * @param {string} message
+ * @param {'info'|'success'|'warning'|'error'} type
+ */
+async function reportShortcutResult(message, type) {
+    let visible = true;
+    try { visible = await getCurrentWindow().isVisible(); } catch { /* non-Tauri */ }
+    if (visible) showNotification(message, type);
+    else void sendOSNotification('Zephyr', message);
+}
+
 async function toggleProxy() {
     if (_actionLock) return;
     _actionLock = true;
     const lang = localStorage.getItem('lang') || 'en';
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
+        // Without a subscription the system proxy would only reach DIRECT; the
+        // switches open Add subscription instead, so the shortcut must not enable it.
+        if (appStore.get('noSubscription') && !appStore.get('isSysProxyEnabled')) {
+            void reportShortcutResult(t.sysProxyNeedsSubscription || 'Available once a subscription is added', 'warning');
+            return;
+        }
         const newState = await toggleSysProxy();
         if (newState) {
-            showNotification(t.proxyActive || 'System proxy enabled', 'success');
+            void reportShortcutResult(t.proxyActive || 'System proxy enabled', 'success');
         } else {
-            showNotification(t.proxyInactive || 'System proxy disabled', 'info');
+            void reportShortcutResult(t.proxyInactive || 'System proxy disabled', 'info');
         }
         // Update tray after toggle
         await updateTrayStatus();
         updateTrayMenu().catch(() => {});
     } catch (err) {
-        showNotification(err?.toString?.() || 'Unknown error', 'error');
+        void reportShortcutResult(err?.toString?.() || 'Unknown error', 'error');
     } finally {
         _actionLock = false;
     }
@@ -559,48 +578,17 @@ async function switchMode(/** @type {string} */ mode) {
     const lang = localStorage.getItem('lang') || 'en';
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[lang] || /** @type {any} */ (translations).en);
     try {
-        // Route through the backend so the user-mode generation bump happens
-        // under the restore lock; an in-flight fallback restore must not
-        // overwrite the user's choice. The backend persists the accepted mode
-        // to settings.json itself.
-        await invoke(COMMANDS.SWITCH_MODE, { mode });
-        // Keep the store in step (console mode indicator, tray), as the mode
-        // buttons do through MODE_CHANGED.
-        appStore.set('currentOutboundMode', mode);
-        // The backend writes settings.json, so drop the cached snapshot: readers
-        // such as proxies.js / console-home.js take the mode from
-        // `getSettingsCached()` and would otherwise keep the previous value
-        // until the cache TTL expires.
-        invalidateSettingsCache();
-        // Closing existing connections is a follow-up, not part of the mode
-        // change: `switch_mode` has already been applied and persisted by the
-        // backend. When the core is stopped this rejects, and awaiting it inside
-        // this try block would report "Mode switch failed" for a switch that
-        // did happen — leaving the UI on the old mode while the backend holds
-        // the new one. Fire-and-forget, matching the mode buttons in modes.js.
-        closeAllConnections().catch((e) =>
-            apiLogger.warn('[GlobalShortcut] closeAllConnections failed after mode switch', e)
-        );
+        const outcome = await applyMode(mode, { silent: true });
+        if (!outcome) return;
         const modeNames = /** @type {Record<string, string>} */ ({ rule: t.modeRule || 'Rule', global: t.modeGlobal || 'Global', direct: t.modeDirect || 'Direct' });
-        showNotification(`${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`, 'success');
-        // Update mode UI and tray
-        updateModeUI(mode);
+        const switched = `${t.switchedTo || 'Switched to'} ${modeNames[mode] || mode}`;
+        // The node could not carry over: one warning, on the channel the user can see.
+        if (outcome === 'partial') void reportShortcutResult(`${switched} — ${t.notifSwitchFailed || 'Failed to switch node'}`, 'warning');
+        else void reportShortcutResult(switched, 'success');
         await updateTrayStatus();
         updateTrayMenu().catch(() => {});
     } catch (err) {
-        showNotification(`${t.modeSwitchFailed || 'Mode switch failed'}: ${err}`, 'error');
-        // The backend can apply the mode to the core and still fail (e.g. the
-        // settings write failed after the core PUT), so reconcile the buttons
-        // with the live core instead of leaving the previous mode highlighted.
-        // Awaited while _actionLock is held, as in modes.js: an un-awaited
-        // reconcile could finish after a newer switch and overwrite its UI
-        // with this older /configs snapshot.
-        try {
-            const m = await import('./proxies.js');
-            await m.syncCoreConfig();
-        } catch (e) {
-            apiLogger.warn('[GlobalShortcut] Failed to reconcile mode after switch failure', e);
-        }
+        void reportShortcutResult(`${t.modeSwitchFailed || 'Mode switch failed'}: ${err}`, 'error');
     } finally {
         _actionLock = false;
     }

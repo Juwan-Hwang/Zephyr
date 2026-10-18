@@ -10,6 +10,7 @@ vi.mock('../api.js', () => ({
     getProxies: vi.fn().mockResolvedValue({ proxies: {} }),
     testProxy: vi.fn().mockResolvedValue({ delay: 100 }),
     switchProxy: vi.fn().mockResolvedValue(true),
+    lastSwitchRejection: null,
     getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
     closeAllConnections: vi.fn().mockResolvedValue(true),
 }));
