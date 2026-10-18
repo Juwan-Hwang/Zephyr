@@ -130,15 +130,6 @@ function saveShortcuts(/** @type {string} */ action, /** @type {string} */ accel
     localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
 }
 
-function _removeShortcut(/** @type {string} */ action) {
-    const shortcuts = loadShortcuts();
-    shortcuts[action] = '';
-    localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
-    try {
-        invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action }).catch(() => {});
-    } catch { /* ignore */ }
-}
-
 function getTranslations(/** @type {string} */ lang) {
     const all = /** @type {any} */ (translations);
     return all[lang] || all.en || {};

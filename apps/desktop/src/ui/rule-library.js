@@ -84,12 +84,12 @@ export async function initRuleLibraryPage() {
 
         document.getElementById('rl-btn-new-group')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleNewGroup();
+            void handleNewGroup();
         });
 
         document.getElementById('rl-btn-import')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleImportRules();
+            void handleImportRules();
         });
 
         // Re-render tab bar text when language changes
@@ -134,7 +134,7 @@ async function refreshData(options) {
     } catch (err) {
         showNotification(String(err), 'error');
     }
-    updateStatusBar();
+    void updateStatusBar();
 }
 
 async function updateStatusBar() {
@@ -311,15 +311,15 @@ function renderRuleSets(container) {
 
         document.getElementById('rl-btn-extract')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleExtractFromSubscription();
+            void handleExtractFromSubscription();
         });
         document.getElementById('rl-btn-import-empty')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleImportRules();
+            void handleImportRules();
         });
         document.getElementById('rl-btn-create-file')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleCreateRuleFile();
+            void handleCreateRuleFile();
         });
         return;
     }
@@ -453,7 +453,7 @@ function buildFileCard(file, _fileMap) {
     // Double-click to edit
     card.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        handleEditRule(file.filename);
+        void handleEditRule(file.filename);
     });
 
     return card;
@@ -585,7 +585,7 @@ function renderActiveRules(container) {
 
     toolbar.querySelector('#rl-btn-insert-rule')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        handleInsertRule();
+        void handleInsertRule();
     });
 
     // Virtual scroll container
@@ -1547,7 +1547,7 @@ async function handleImportRules() {
         </div>
     `;
 
-    showModal(
+    void showModal(
         t.ruleLibraryImport || 'Import Rules',
         '',
         '',
@@ -1557,11 +1557,11 @@ async function handleImportRules() {
             // Wire up paste buttons
 contentArea.querySelector('#rl-import-paste-btn')?.addEventListener('click', () => {
     const textarea = /** @type {HTMLTextAreaElement | null} */ (contentArea.querySelector('#rl-import-text'));
-    if (textarea) pasteWithFeedback(textarea, showNotification, translations, currentLang);
+    if (textarea) void pasteWithFeedback(textarea, showNotification, translations, currentLang);
 });
 contentArea.querySelector('#rl-import-url-paste-btn')?.addEventListener('click', () => {
     const urlInput = /** @type {HTMLInputElement | null} */ (contentArea.querySelector('#rl-import-url-input'));
-    if (urlInput) pasteWithFeedback(urlInput, showNotification, translations, currentLang);
+    if (urlInput) void pasteWithFeedback(urlInput, showNotification, translations, currentLang);
 });
 
             // Wire up import tab switching

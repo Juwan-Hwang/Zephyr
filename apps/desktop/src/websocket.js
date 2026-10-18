@@ -443,7 +443,7 @@ export function connectTraffic(callback) {
   }
 
   /* ---- kick off ---- */
-  connect();
+  void connect();
 
   /* ---- handle object ---- */
   const handle = {
@@ -477,7 +477,7 @@ export function connectTraffic(callback) {
       _generation++;
       abortController.abort();
       abortController = new AbortController();
-      connect();
+      void connect();
     },
 
     /**

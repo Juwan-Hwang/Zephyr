@@ -236,9 +236,6 @@ let _rovingInstance = null;
 /** Maps container elements to their virtual proxy data (replaces container._virtData) */
 const _virtState = new Map();
 
-/** Maps container elements to their MutationObserver (replaces container._virtObserver) */
-const _virtObservers = new Map();
-
 // --- Sorting ---
 
 /**
@@ -333,7 +330,7 @@ class SmartScoreBatcher {
             const item = this._queue.shift();
             if (!item) break;
             this._running++;
-            updateSmartScore(item.name, item.latencyMs, item.success).finally(() => {
+            void updateSmartScore(item.name, item.latencyMs, item.success).finally(() => {
                 this._running--;
                 this._flush();
                 if (this._running === 0 && this._queue.length === 0) {
@@ -602,7 +599,7 @@ export async function syncCoreConfig() {
         // updateTrayStatus is handled by the main ui.js module
         try {
             const { updateTrayStatus } = await import('./tray.js');
-            updateTrayStatus();
+            void updateTrayStatus();
         } catch (_) {}
     }
 
@@ -849,7 +846,7 @@ export function initProxyControls() {
                     // Report to failover engine if enabled
                     if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
                         const failoverSuccess = delay > 0 && delay < 999999;
-                        reportFailover(name, failoverSuccess);
+                        void reportFailover(name, failoverSuccess);
                     }
                 };
 
@@ -930,7 +927,7 @@ export function initProxyControls() {
             const t = /** @type {any} */ (translations)[currentLang];
             const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
             if (sortLabel) sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')];
-            renderProxies();
+            void refreshProxies();
             if (appStore.get('currentSortMode') === 'smart') {
                 await applySmartSortToDom();
             }
@@ -940,7 +937,7 @@ export function initProxyControls() {
     // Smart Select Best: one-click switch to the best-scoring node
     const selectBestBtn = document.getElementById('select-best-btn');
     if (selectBestBtn) {
-        syncSmartUiVisibility();
+        void syncSmartUiVisibility();
         selectBestBtn.onclick = async () => {
             try {
                 const best = await smartSelectBest();
@@ -1030,7 +1027,7 @@ async function reportFailover(name, success) {
     try {
         const action = await failoverReport(name, success);
         if (action) {
-            (async () => {
+            void (async () => {
                 try { await handleFailoverAction(action); }
                 catch { /* ignore failover action errors */ }
             })();
@@ -1103,7 +1100,7 @@ async function handleFailoverAction(action) {
                 t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
                 'success'
             );
-            (async () => {
+            void (async () => {
                 try {
                     await closeAllConnections();
                     invalidateProxiesCache();
@@ -1595,7 +1592,7 @@ function renderProviderPollExhausted(container, tObj) {
         tObj.retry || 'Retry',
         () => {
             _providerPollExhaustedGroup = undefined;
-            renderProxies().catch(() => {});
+            void refreshProxies();
         },
         undefined,
         'retry'
@@ -1631,7 +1628,7 @@ function startProviderPoll(preferredGroupName, exhaustionKey, attempt = 0) {
         // Polling exhausted — mark this group and re-render to show a terminal state
         // with a retry button instead of leaving the user stuck on a loading spinner.
         _providerPollExhaustedGroup = exhaustionKey ?? preferredGroupName ?? undefined;
-        renderProxies().catch(() => {});
+        void refreshProxies();
         return;
     }
 
@@ -1672,7 +1669,7 @@ function startProviderPoll(preferredGroupName, exhaustionKey, attempt = 0) {
             if (result && !result.providerLoading && !_hasMissingDetails) {
                 // Nodes have arrived — invalidate cache + re-render
                 invalidateProxiesCache();
-                renderProxies().catch(() => {});
+                void refreshProxies();
             } else {
                 // Still loading — keep polling
                 startProviderPoll(preferredGroupName, exhaustionKey, attempt + 1);
@@ -1974,9 +1971,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    closeAllConnections().then(() => {
-                        syncCoreConfig();
-                    });
+                    void closeAllConnections()
+                        .catch((err) => proxyLogger.warn('Failed to close connections after proxy switch', err))
+                        .then(() => syncCoreConfig())
+                        .catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
                     showNotification(t.proxySwitchFailed || 'Failed to switch proxy', 'error');
@@ -2031,6 +2029,17 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
     });
 
     return fragment;
+}
+
+/**
+ * Fire-and-forget variant of renderProxies(): never rejects, logs failures.
+ * Use it wherever the caller does not await the render.
+ * @returns {Promise<void>}
+ */
+export function refreshProxies() {
+    return renderProxies().catch((err) => {
+        proxyLogger.warn('renderProxies failed', err);
+    });
 }
 
 /**
@@ -2263,16 +2272,11 @@ export async function renderProxies() {
         // Guard: if a newer render started while updating, abort.
         if (_renderGen !== _renderGeneration) return;
         // Still backfill scores even on in-place updates (badges may not exist yet on first render)
-        backfillSmartScores(container);
+        void backfillSmartScores(container);
         return;
     }
 
     // --- Full render path ---
-    const existingObserver = _virtObservers.get(container);
-    if (existingObserver) {
-        existingObserver.disconnect();
-    }
-
     const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName || '');
      
     container.replaceChildren();
@@ -2330,7 +2334,7 @@ async function syncSmartUiVisibility() {
 Bus.on(Events.CONFIG_UPDATED, async () => {
     invalidateRunConfigCache();
     await syncSmartUiVisibility();
-    renderProxies();
+    void refreshProxies();
 });
 
 Bus.on(Events.CORE_RESTARTED, () => {
@@ -2339,7 +2343,7 @@ Bus.on(Events.CORE_RESTARTED, () => {
     // Do NOT reset uiGroupName here — restoreProxySelection depends on it
     // to restore the correct group after core restart. The resolver will
     // re-validate uiGroupName against the new proxyMap on next render.
-    renderProxies();
+    void refreshProxies();
 });
 
 // --- Observed Group Watcher: start/stop with page visibility ---
@@ -2356,7 +2360,7 @@ document.addEventListener('visibilitychange', () => {
             // Re-render to restart provider polling if the group is still
             // loading — stopProviderPoll() cleared the timer and exhaustion
             // state on hide, so renderProxies() will start a fresh poll.
-            renderProxies().catch(() => {});
+            void refreshProxies();
         }
     }
 });
@@ -2498,7 +2502,7 @@ const _autoTest = {
                         }
                         // Report to failover engine if enabled
                         if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
-                            reportFailover(name, success);
+                            void reportFailover(name, success);
                         }
                     } catch { /* skip individual failures */ }
                 }

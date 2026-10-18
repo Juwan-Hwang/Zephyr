@@ -161,7 +161,7 @@ async function handleConfigUpdate(path, value) {
         if (!persisted) {
             const { t } = await import('../i18n.js');
             showNotification(`${t('errorPrefix')}: ${t('notifNoActiveConfig')}`, 'error');
-            renderAdvancedSettings();
+            void renderAdvancedSettings();
             return;
         }
 
@@ -174,7 +174,7 @@ async function handleConfigUpdate(path, value) {
         const { t } = await import('../i18n.js');
         const errorObj = toError(err);
         showNotification(`${t('errorPrefix')}: ${errorObj.message}`, 'error');
-        renderAdvancedSettings();
+        void renderAdvancedSettings();
     }
 }
 
@@ -430,7 +430,7 @@ function renderSimpleArrayEditor(container, arr, fullKey) {
 
     textarea.onchange = () => {
         const newValue = textarea.value.split('\n').filter(line => line.trim() !== '');
-        handleConfigUpdate(fullKey, newValue);
+        void handleConfigUpdate(fullKey, newValue);
     };
 
     wrapper.appendChild(textarea);
@@ -556,7 +556,7 @@ function renderConfigItem(key, value, fullKey) {
                     else if (val.startsWith('{') || val.startsWith('[')) {
                         try { parsed = JSON.parse(val); } catch {}
                     }
-                    handleConfigUpdate(fullKey, parsed);
+                    void handleConfigUpdate(fullKey, parsed);
                 } else if (ev.key === 'Escape') {
                     wrapper.replaceChildren();
                     wrapper.appendChild(badge);

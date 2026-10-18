@@ -144,7 +144,7 @@ export function initThemeSettings({
             }
         }
     }
-    setThemeMode(effectiveThemeMode, false);
+    void setThemeMode(effectiveThemeMode, false);
 
     if (!themeModeContainer?.dataset.bound) {
         if (themeModeContainer) themeModeContainer.dataset.bound = '1';
@@ -152,7 +152,7 @@ export function initThemeSettings({
             /** @type {HTMLElement} */ (btn).onclick = () => {
                 const mode = btn.getAttribute('data-theme-mode');
                 if (!mode) return;
-                setThemeMode(mode, true);
+                void setThemeMode(mode, true);
             };
         });
     }
@@ -197,7 +197,7 @@ export function initThemeSettings({
             applyColorTheme(color);
             appStore.set('currentTheme', currentTheme);
             Bus.emit(Events.THEME_CHANGED, currentTheme);
-            save();
+            void save();
         };
     }
 
@@ -208,7 +208,7 @@ export function initThemeSettings({
             applyTheme(theme);
             appStore.set('currentTheme', theme);
             Bus.emit(Events.THEME_CHANGED, theme);
-            save();
+            void save();
         };
     });
 
@@ -223,7 +223,7 @@ export function initThemeSettings({
 
         const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
             document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
-            saveSetting('app_opacity', Number(val));
+            void saveSetting('app_opacity', Number(val));
         }, 50);
 
         opacitySlider.addEventListener('input', (e) => {
