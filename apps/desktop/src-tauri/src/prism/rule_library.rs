@@ -149,8 +149,8 @@ pub fn rule_rename(
     let safe_old = old_path
         .file_name()
         .and_then(|f| f.to_str())
-        .ok_or_else(|| "Invalid old filename".to_string())?
-        .to_string();
+        .ok_or_else(|| "Invalid old filename".to_owned())?
+        .to_owned();
 
     let safe_new = ensure_prism_ext(&sanitize_filename(&new_filename)?);
     let new_path = prism_dir.join(&safe_new);
