@@ -560,13 +560,14 @@ export async function getProxiesMerged(existingData) {
 }
 
 /**
- * 切换代理组中的选中节点
+ * 切换代理组中的选中节点，并带回这一次被拒绝的原因
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
- * @returns {Promise<boolean>} 是否成功
+ * @returns {Promise<{ ok: boolean, reason: unknown }>} reason is the backend's
+ *   rejection for this request (null when it succeeded or gave none)
  * @throws {ApiError}
  */
-export async function switchProxy(group, name) {
+export async function switchProxyResult(group, name) {
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
@@ -575,22 +576,32 @@ export async function switchProxy(group, name) {
     // "Global" keep the direct HTTP PUT.
     if (group === 'GLOBAL') {
       await invoke(COMMANDS.SWITCH_GLOBAL_NODE, { name });
-      return true;
+      return { ok: true, reason: null };
     }
     const res = await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
       method: 'PUT',
       body: JSON.stringify({ name }),
     });
-    return res.ok;
+    return { ok: res.ok, reason: null };
   } catch (err) {
     if (err instanceof ApiError) throw err;
     // The backend rejects with a plain Error carrying the real reason (e.g.
     // "Subscription update in progress, please try again", "GLOBAL proxy group
-    // no longer contains node '<name>'"). Callers only see the boolean, so keep
-    // the reason in the log instead of dropping it.
+    // no longer contains node '<name>'").
     apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
-    return false;
+    return { ok: false, reason: err };
   }
+}
+
+/**
+ * 切换代理组中的选中节点
+ * @param {string} group - 代理组名称
+ * @param {string} name  - 目标节点名称
+ * @returns {Promise<boolean>} 是否成功
+ * @throws {ApiError}
+ */
+export async function switchProxy(group, name) {
+  return (await switchProxyResult(group, name)).ok;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -842,7 +853,7 @@ export async function restartCore(configPath, customArgs = []) {
   setWsSecret(coreResult.secret);
   setCoreReachable(true);
   clearProviderCache();
-  Bus.emit(Events.CORE_RESTARTED);
+  Bus.emit(Events.CORE_RESTARTED, { activeConfig: coreResult.active_config });
   return coreResult;
 }
 

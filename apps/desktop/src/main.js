@@ -87,6 +87,8 @@ import { initProxyToggle, refreshSysProxyStatus } from './ui/sysproxy.js';
 import { initWindowControls } from './ui/window-controls.js';
 import { initDeepLink } from './ui/deep-link.js';
 import { sendOSNotification } from './ui/os-notification.js';
+import { showCoreStartError, hideCoreStartError } from './ui/core-error.js';
+import { initNoSubscriptionState } from './ui/no-subscription.js';
 import { initGlobalShortcut, registerDefaultShortcuts, initShortcutSettings } from './ui/global-shortcut.js';
 import { bind } from './ui/bind.js';
 import { appStore } from './ui/state.js';
@@ -248,6 +250,9 @@ async function retryStartWithoutTun(settings, startArgs, startErr) {
  * Returns true on success, false on failure (error already shown to user).
  * @returns {Promise<boolean>}
  */
+/** Raw error of the last failed start_core, shown on the in-app error card. */
+let lastCoreStartError = '';
+
 async function startCoreAndConfigure() {
   /** @type {string|null} */
   let secret = null;
@@ -297,6 +302,8 @@ async function startCoreAndConfigure() {
       }
     }
 
+    appStore.set('noSubscription', coreResult.active_config === null);
+
     secret = coreResult.secret;
     const port = coreResult.port;
 
@@ -339,7 +346,7 @@ async function startCoreAndConfigure() {
     const message = err?.toString?.() || 'Core start failed';
     apiLogger.error('Failed to start core', err);
     sendOSNotification('Zephyr', message).catch(() => {});
-    alert(message);
+    lastCoreStartError = message;
     return false;
   }
   return true;
@@ -406,10 +413,12 @@ function scheduleAutoUpdateCheck() {
 
       // Notify the user about available updates
       if (coreHasUpdate && clientHasUpdate) {
+        // showNotification(message, type, title): the bold title says both have
+        // updates, the body carries the recommendation.
         showNotification(
-          t.bothUpdateAvailable || 'Both core and client have updates',
+          t.recommendFullVersion || 'Recommend installing Full version',
           'warning',
-          t.recommendFullVersion || 'Recommend installing Full version'
+          t.bothUpdateAvailable || 'Both core and client have updates'
         );
       } else if (coreHasUpdate) {
         showNotification(
@@ -493,7 +502,12 @@ async function initApp() {
   }, 50);
 
   // 5. Start core and configure endpoints
-  if (!(await startCoreAndConfigure())) return;
+  // A failed start shows an error card with Retry instead of a native alert;
+  // startup continues from here once a retry succeeds.
+  while (!(await startCoreAndConfigure())) {
+    await showCoreStartError(lastCoreStartError);
+  }
+  hideCoreStartError();
 
   // 6. Initialize all UI modules
   const tUI = performance.now();
@@ -514,6 +528,7 @@ async function initApp() {
     },
   });
   registerCleanup(initNavTooltips());
+  initNoSubscriptionState();
   initChart();
   initTrayEventListeners().catch((err) => apiLogger.warn('[Zephyr] tray listener init failed', err));
   await initProxyToggle();

@@ -620,57 +620,9 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
         return Ok((fallback_name, fallback));
     }
 
-    // No config file found - create a default one
-    let default_path = paths.profiles_dir.join("config.yaml");
-    create_default_config(&default_path)?;
-    Ok(("config.yaml".to_owned(), default_path))
-}
-
-/// Create a minimal default configuration file for first-time users
-fn create_default_config(path: &Path) -> Result<(), String> {
-    let default_config = r"# Zephyr Default Configuration
-# This is a minimal config file created for first-time setup.
-# Please add your proxy nodes or import a subscription.
-
-port: 7890
-socks-port: 7891
-mixed-port: 7892
-allow-lan: false
-bind-address: '*'
-mode: rule
-log-level: info
-ipv6: false
-external-controller: 127.0.0.1:9090
-
-dns:
-  enable: true
-  ipv6: false
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.0/16
-  fake-ip-filter:
-    - '*.lan'
-    - localhost.ptlogin2.qq.com
-  nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-  fallback:
-    - tls://8.8.8.8:853
-    - tls://1.1.1.1:853
-
-proxies: []
-
-proxy-groups: []
-
-rules:
-  - GEOIP,CN,DIRECT
-  - MATCH,DIRECT
-";
-
-    write_file_secure(path, default_config)
-        .map_err(|e| format!("Failed to create default config: {e}"))?;
-
-    emit_info!(Config, CONFIG_CREATED_DEFAULT, "Created default config");
-    Ok(())
+    // No profile yet: the start runs the built-in minimal config and the app
+    // shows its no-subscription state, so nothing is written here.
+    Ok((config_file_name, resolved_path))
 }
 
 /// Contents of the profile a start with `config_path` runs: the bare file name
@@ -1024,17 +976,19 @@ fn select_runtime_config(
     secret: &str,
     prefs: Option<&GlobalPreferences>,
 ) -> Result<(Option<String>, String, u16, Option<ProxyEndpoint>), String> {
-    let preferred_content = super::crypto::read_profile_file(preferred_path)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
-    if let Some((final_config, config_port, proxy_port)) =
-        prepare_runtime_config(&preferred_content, secret, prefs)
-    {
-        return Ok((
-            Some(preferred_name.to_owned()),
-            final_config,
-            config_port,
-            proxy_port,
-        ));
+    if preferred_path.exists() {
+        let preferred_content = super::crypto::read_profile_file(preferred_path)
+            .map_err(|e| format!("Failed to read config: {e}"))?;
+        if let Some((final_config, config_port, proxy_port)) =
+            prepare_runtime_config(&preferred_content, secret, prefs)
+        {
+            return Ok((
+                Some(preferred_name.to_owned()),
+                final_config,
+                config_port,
+                proxy_port,
+            ));
+        }
     }
 
     let mut fallback_profiles = Vec::new();
@@ -1086,11 +1040,13 @@ fn select_runtime_config(
         }
     }
 
-    emit_warn!(
-        Config,
-        CONFIG_PARSE_FAILED,
-        "Requested config {preferred_name} is not valid, falling back to minimal config"
-    );
+    if preferred_path.exists() {
+        emit_warn!(
+            Config,
+            CONFIG_PARSE_FAILED,
+            "Requested config {preferred_name} is not valid, falling back to minimal config"
+        );
+    }
     let (final_config, api_port, proxy_port) = build_minimal_runtime_config(secret);
     Ok((None, final_config, api_port, proxy_port))
 }
@@ -1214,11 +1170,14 @@ fn attach_log_file(cmd: &mut Command, log_path: &Path) {
 /// Spawn mihomo, detect immediate exit, and retry on cache lock issues.
 ///
 /// Returns the successfully spawned `Child` process and the log file path, or an error string.
+/// `attempted_log` always holds the log of the latest attempt, so a failed start
+/// can still point the log viewer at the output of the run that failed.
 async fn spawn_with_cache_retry(
     exe_path: &Path,
     safe_custom_args: &[String],
     core_dir: &Path,
     app_data_dir: &Path,
+    attempted_log: &mut Option<PathBuf>,
 ) -> Result<(std::process::Child, PathBuf), String> {
     let spawn_cmd = |log_suffix: &str| -> (Command, PathBuf) {
         let mut cmd = Command::new(exe_path);
@@ -1329,6 +1288,7 @@ async fn spawn_with_cache_retry(
 
     let (mut cmd, log_path) = spawn_cmd("run");
     attach_log_file(&mut cmd, &log_path);
+    *attempted_log = Some(log_path.clone());
 
     let mut child = cmd
         .spawn()
@@ -1354,6 +1314,7 @@ async fn spawn_with_cache_retry(
 
                 let (mut retry_cmd, retry_log_path) = spawn_cmd("retry");
                 attach_log_file(&mut retry_cmd, &retry_log_path);
+                *attempted_log = Some(retry_log_path.clone());
 
                 match retry_cmd.spawn() {
                     Ok(mut retry_child) => {
@@ -1529,6 +1490,15 @@ fn store_child_in_core_state(
     lock.set_started_at(Some(started_at));
     drop(lock);
     Ok(())
+}
+
+/// Point `read_core_log` at the log of a start that failed, so the error card's
+/// log view shows that run instead of an older one (or nothing at all).
+fn remember_failed_log(state: &MihomoState, log_path: Option<&Path>) {
+    let Some(path) = log_path else { return };
+    if let Ok(mut lock) = state.0.lock() {
+        lock.set_last_log_path(Some(path.to_string_lossy().into_owned()));
+    }
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -1862,6 +1832,12 @@ pub async fn start_core_inner(
         .await
         .map_err(|e| format!("Failed to stop core: {e}"))??;
     }
+    // Preflight passed and the old core is stopped: forget the previous run's log, so a failure
+    // before this run writes one shows "no log" instead of an older run's.
+    if let Ok(mut lock) = state.0.lock() {
+        lock.set_last_log_path(None);
+    }
+
     // When tun_active is true, stop_core_inner is skipped to preserve the root
     // TUN daemon across preflight. Any tracked unprivileged child is likewise
     // left running until root authorization succeeds: the privileged script
@@ -2327,13 +2303,22 @@ pub async fn start_core_inner(
     }
 
     // Spawn mihomo (stdout/stderr redirected to log file internally)
-    let (child, log_path) = spawn_with_cache_retry(
+    let mut attempted_log = None;
+    let spawned = spawn_with_cache_retry(
         &exe_path,
         &safe_custom_args,
         &paths.core_dir,
         &paths.app_data_dir,
+        &mut attempted_log,
     )
-    .await?;
+    .await;
+    let (child, log_path) = match spawned {
+        Ok(spawned) => spawned,
+        Err(e) => {
+            remember_failed_log(&state, attempted_log.as_deref());
+            return Err(e);
+        }
+    };
     let started_at = std::time::Instant::now();
 
     // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
@@ -2362,6 +2347,7 @@ pub async fn start_core_inner(
     // wrong core.
     if let Err(e) = authenticated_health_check(port, &resolved_secret).await {
         let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        remember_failed_log(&state, Some(&log_path));
         return Err(e);
     }
 
@@ -2670,6 +2656,25 @@ pub(crate) fn get_core_version_with_io<I: ProcessIo>(
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_profile_runs_minimal_config_without_writing_one() {
+        let dir = std::env::temp_dir().join(format!("zephyr-no-profile-{}", std::process::id()));
+        let profiles_dir = dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        let paths = AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.join("core"),
+            profiles_dir,
+        };
+        let (name, path) = resolve_profile_path(&paths, "config.yaml").unwrap();
+        assert_eq!(name, "config.yaml");
+        assert!(!path.exists());
+        let (active, _, _, _) = select_runtime_config(&paths, &name, &path, "s", None).unwrap();
+        assert!(active.is_none());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_core_binary_name() {
