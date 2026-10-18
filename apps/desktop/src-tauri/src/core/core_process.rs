@@ -1958,17 +1958,20 @@ pub async fn start_core_inner(
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
-        let ps = std::process::Command::new("sh")
-            .args(["-c", "ps aux | grep mihomo | grep -v grep"])
-            .output()
-            .ok();
-        if let Some(o) = ps {
-            emit_info!(
-                Core,
-                CORE_START_FAILED,
-                "mihomo processes before spawn:\n{}",
-                String::from_utf8_lossy(&o.stdout)
-            );
+        if let Ok(output) = std::process::Command::new("ps").arg("aux").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let filtered: Vec<&str> = stdout
+                .lines()
+                .filter(|line| line.contains("mihomo"))
+                .collect();
+            if !filtered.is_empty() {
+                emit_info!(
+                    Core,
+                    CORE_START_FAILED,
+                    "mihomo processes before spawn:\n{}",
+                    filtered.join("\n")
+                );
+            }
         }
     }
 
