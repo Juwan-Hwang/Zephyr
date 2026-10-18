@@ -269,9 +269,13 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
+ * @param {{ danger?: boolean, confirmText?: string }} [options]
+ *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
+ *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '' } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -292,10 +296,19 @@ export function showConfirmModal(title, message = '') {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = danger
+                ? 'text-sm leading-6 text-[var(--text-secondary)]'
+                : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }
+
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger', 'is-solid');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
 
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(false) });
@@ -307,6 +320,11 @@ export function showConfirmModal(title, message = '') {
             trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
+                if (danger) {
+                    confirmBtn.classList.remove('btn-danger', 'is-solid');
+                    confirmBtn.classList.add('btn-primary');
+                }
+                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
@@ -317,6 +335,8 @@ export function showConfirmModal(title, message = '') {
             bg.classList.remove('opacity-0');
             container.classList.remove('scale-95');
             trap.activate();
+            // Destructive dialogs start on Cancel so a stray Enter never deletes.
+            if (danger) cancelBtn.focus();
         });
 
         confirmBtn.onclick = () => close(true);

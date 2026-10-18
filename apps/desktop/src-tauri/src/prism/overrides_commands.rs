@@ -27,8 +27,11 @@ pub fn override_list(state: State<PrismState>) -> Result<Vec<OverrideItem>, Stri
     items.sort_by_key(|i| i.order);
     // Populate last_success from execution logs
     for item in &mut items {
-        if let Ok(success) = overrides_store::read_log_success(&state, &item.id) {
+        if let Ok((success, error)) = overrides_store::read_log_status(&state, &item.id) {
             item.last_success = Some(success);
+            if !success {
+                item.last_error = error;
+            }
         }
     }
     Ok(items)
@@ -353,6 +356,7 @@ pub async fn override_set_content(
     id: String,
     content: String,
     dry_run: Option<bool>,
+    save_only: Option<bool>,
 ) -> Result<OverrideLog, String> {
     check_input_size(&content, "Override content")?;
 
@@ -366,6 +370,21 @@ pub async fn override_set_content(
         if let Err(e) = runtime.validate(&content) {
             return Err(format!("Script validation failed: {e}"));
         }
+    }
+
+    // Save only: persist the (validated) content without executing it.
+    if save_only.unwrap_or(false) {
+        overrides_store::write_content(&state, &id, &content)?;
+        return Ok(OverrideLog {
+            script_id: item.id,
+            script_name: item.name,
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_us: 0,
+            success: true,
+            config_modified: false,
+            error: None,
+            logs: Vec::new(),
+        });
     }
 
     let dry = dry_run.unwrap_or(false);
@@ -382,8 +401,11 @@ pub async fn override_set_content(
         execute_override_write(&state, &item, &content)?
     };
 
-    // Persist log
-    overrides_store::save_log(&state, &id, &log)?;
+    // Persist the log of real runs only: a dry run (syntax check) must not
+    // replace the last-run status shown for the override.
+    if !dry {
+        overrides_store::save_log(&state, &id, &log)?;
+    }
 
     Ok(log)
 }
