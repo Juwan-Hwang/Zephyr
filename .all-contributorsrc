@@ -1,0 +1,341 @@
+{
+  "projectName": "Zephyr",
+  "projectOwner": "Juwan-Hwang",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "Juwan-Hwang",
+      "name": "Juwan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/180104975?v=4",
+      "profile": "https://github.com/Juwan-Hwang",
+      "contributions": [
+        "code",
+        "design",
+        "ideas",
+        "maintenance"
+      ]
+    },
+    {
+      "login": "MatrixNeoKozak",
+      "name": "KozakLordOfMatrix",
+      "avatar_url": "https://avatars.githubusercontent.com/u/261791209?v=4",
+      "profile": "https://github.com/MatrixNeoKozak",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "meta-muse-ai[bot]",
+      "name": "meta-muse-ai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/5063603?v=4",
+      "profile": "https://github.com/apps/meta-muse-ai",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "google-ai-studio[bot]",
+      "name": "google-ai-studio[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1690828?v=4",
+      "profile": "https://github.com/apps/google-ai-studio",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "codebuddy-connector[bot]",
+      "name": "codebuddy-connector[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/2695408?v=4",
+      "profile": "https://github.com/apps/codebuddy-connector",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "gemini-code-assist[bot]",
+      "name": "gemini-code-assist[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/956858?v=4",
+      "profile": "https://github.com/apps/gemini-code-assist",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "traeagent",
+      "name": "traeagent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/272135137?v=4",
+      "profile": "https://github.com/traeagent",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "coderabbitai[bot]",
+      "name": "coderabbitai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/347564?v=4",
+      "profile": "https://github.com/apps/coderabbitai",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "sourcery-ai[bot]",
+      "name": "sourcery-ai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/48477?v=4",
+      "profile": "https://github.com/apps/sourcery-ai",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "qodo-code-review[bot]",
+      "name": "qodo-code-review[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/484649?v=4",
+      "profile": "https://github.com/apps/qodo-code-review",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "qodo-free-for-open-source-projects[bot]",
+      "name": "qodo-free-for-open-source-projects[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1068000?v=4",
+      "profile": "https://github.com/apps/qodo-free-for-open-source-projects",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "chatgpt-codex-connector[bot]",
+      "name": "chatgpt-codex-connector[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1144995?v=4",
+      "profile": "https://github.com/apps/chatgpt-codex-connector",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "Copilot",
+      "name": "Copilot",
+      "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+      "profile": "https://github.com/apps/copilot-pull-request-reviewer",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "greptile-apps[bot]",
+      "name": "greptile-apps[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/867647?v=4",
+      "profile": "https://github.com/apps/greptile-apps",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "gitar-bot[bot]",
+      "name": "gitar-bot[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/827041?v=4",
+      "profile": "https://github.com/apps/gitar-bot",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "mergestorm-vortex[bot]",
+      "name": "mergestorm-vortex[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/3924858?v=4",
+      "profile": "https://github.com/apps/mergestorm-vortex",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "cubic-dev-ai[bot]",
+      "name": "cubic-dev-ai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1082092?v=4",
+      "profile": "https://github.com/apps/cubic-dev-ai",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "llamapreview[bot]",
+      "name": "llamapreview[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1023541?v=4",
+      "profile": "https://github.com/apps/llamapreview",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "graphite-app[bot]",
+      "name": "graphite-app[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/158384?v=4",
+      "profile": "https://github.com/apps/graphite-app",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "sonarqubecloud[bot]",
+      "name": "sonarqubecloud[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+      "profile": "https://github.com/apps/sonarqubecloud",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "snyk[bot]",
+      "name": "snyk[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/23347?v=4",
+      "profile": "https://github.com/apps/snyk",
+      "contributions": [
+        "security"
+      ]
+    },
+    {
+      "login": "gitguardian[bot]",
+      "name": "gitguardian[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/46505?v=4",
+      "profile": "https://github.com/apps/gitguardian",
+      "contributions": [
+        "security"
+      ]
+    },
+    {
+      "login": "github-advanced-security[bot]",
+      "name": "github-advanced-security[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/57789?v=4",
+      "profile": "https://github.com/apps/github-advanced-security",
+      "contributions": [
+        "security"
+      ]
+    },
+    {
+      "login": "pre-commit-ci[bot]",
+      "name": "pre-commit-ci[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/68672?v=4",
+      "profile": "https://github.com/apps/pre-commit-ci",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "codecov[bot]",
+      "name": "codecov[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/254?v=4",
+      "profile": "https://github.com/apps/codecov",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "dependabot[bot]",
+      "name": "dependabot[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+      "profile": "https://github.com/apps/dependabot",
+      "contributions": [
+        "maintenance"
+      ]
+    },
+    {
+      "login": "imgbot[bot]",
+      "name": "imgbot[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/4706?v=4",
+      "profile": "https://github.com/apps/imgbot",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "allcontributors[bot]",
+      "name": "allcontributors[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/649578?v=4",
+      "profile": "https://github.com/apps/allcontributors",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "google-integrations[bot]",
+      "name": "google-integrations[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1153133?v=4",
+      "profile": "https://github.com/apps/google-integrations",
+      "contributions": [
+        "infra"
+      ]
+    },
+    {
+      "login": "fossa-integration[bot]",
+      "name": "fossa-integration[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1014311?v=4",
+      "profile": "https://github.com/apps/fossa-integration",
+      "contributions": [
+        "security"
+      ]
+    },
+    {
+      "login": "qoderai[bot]",
+      "name": "qoderai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1396158?v=4",
+      "profile": "https://github.com/apps/qoderai",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "tencent-buddy-agent[bot]",
+      "name": "tencent-buddy-agent[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/3780970?v=4",
+      "profile": "https://github.com/apps/tencent-buddy-agent",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "opencode-console[bot]",
+      "name": "opencode-console[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1734192?v=4",
+      "profile": "https://github.com/apps/opencode-console",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "trae-ai[bot]",
+      "name": "trae-ai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1095633?v=4",
+      "profile": "https://github.com/apps/trae-ai",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "google-labs-jules[bot]",
+      "name": "google-labs-jules[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/842251?v=4",
+      "profile": "https://github.com/apps/google-labs-jules",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "copilot-swe-agent[bot]",
+      "name": "copilot-swe-agent[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/in/1143301?v=4",
+      "profile": "https://github.com/apps/copilot-swe-agent",
+      "contributions": [
+        "code"
+      ]
+    }
+  ]
+}
