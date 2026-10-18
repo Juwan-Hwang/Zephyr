@@ -366,6 +366,20 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
 
 /** Confirm dialogs share one modal: queue them so a second request cannot take over the first. */
 let _confirmQueue = Promise.resolve();
+/** Bumped by each confirm dialog that opens (see the close handler). */
+let _confirmGeneration = 0;
+
+/**
+ * Put the shared confirm button back to its default style and translated label.
+ * @param {HTMLElement} btn
+ */
+function resetConfirmButton(btn) {
+    btn.classList.remove('btn-danger');
+    btn.classList.add('btn-primary');
+    const key = btn.dataset.i18n;
+    const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] || translations.en;
+    if (key) btn.textContent = tr[key] || /** @type {any} */ (translations.en)[key] || btn.textContent;
+}
 
 /**
  * Show a confirmation modal dialog.
@@ -425,7 +439,9 @@ function openConfirmModal(title, message = '', options = {}) {
             contentArea.appendChild(msgDiv);
         }
 
-        const originalConfirmLabel = confirmBtn.textContent;
+        // A previous dialog may still be closing and not have restored the shared
+        // button yet: start from its default look and label every time.
+        resetConfirmButton(confirmBtn);
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
             confirmBtn.classList.add('btn-danger');
@@ -433,7 +449,14 @@ function openConfirmModal(title, message = '', options = {}) {
         if (confirmText) confirmBtn.textContent = confirmText;
 
         // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+        // Destructive dialogs start on Cancel so a stray Enter never deletes.
+        const trap = createFocusTrap(bg, {
+            onEscape: () => close(false),
+            ...(danger ? { initialFocus: cancelBtn } : {}),
+        });
+        // The shared modal may be reopened before this one's close animation ends;
+        // only the latest dialog may touch it then.
+        const generation = ++_confirmGeneration;
 
         let closed = false;
         const close = (/** @type {boolean} */ val) => {
@@ -444,12 +467,10 @@ function openConfirmModal(title, message = '', options = {}) {
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
-                bg.classList.add('hidden');
-                if (danger) {
-                    confirmBtn.classList.remove('btn-danger');
-                    confirmBtn.classList.add('btn-primary');
+                if (generation === _confirmGeneration) {
+                    bg.classList.add('hidden');
+                    resetConfirmButton(confirmBtn);
                 }
-                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
