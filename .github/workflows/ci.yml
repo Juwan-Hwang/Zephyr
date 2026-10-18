@@ -59,10 +59,7 @@ jobs:
       - name: TypeScript/JSDoc typecheck
         run: pnpm typecheck
 
-      - name: Run frontend tests
-        run: pnpm test
-
-      - name: Run frontend tests with coverage
+      - name: Run frontend tests (with coverage)
         run: pnpm --filter @zephyr/desktop run test:coverage
 
       - name: Upload frontend coverage to Codecov
