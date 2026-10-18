@@ -13,6 +13,31 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
 import { saveSetting } from '../settings-helpers.js';
+import { t } from '../../i18n.js';
+
+/** i18n keys naming each preset accent. */
+const PRESET_NAME_KEYS = /** @type {Record<string, string>} */ ({
+    blue: 'themeColorBlue',
+    green: 'themeColorGreen',
+    orange: 'themeColorOrange',
+    pink: 'themeColorPink',
+});
+
+/**
+ * Subtitle naming the accent in use, e.g. "Current: Blue (default)".
+ * @param {string} theme
+ * @returns {string}
+ */
+export function themeColorSummary(theme) {
+    const value = String(theme || '').toLowerCase();
+    if (value.startsWith('#')) return t('themeColorCurrent', { name: `${t('themeColorCustom')} ${value.toUpperCase()}` });
+    const key = PRESET_NAME_KEYS[value];
+    if (!key) return t('themeColorDesc');
+    const name = t(key);
+    return t(value === DEFAULT_THEME ? 'themeColorCurrentDefault' : 'themeColorCurrent', { name });
+}
+
+let languageListenerBound = false;
 
 /**
  * Initialize theme-related settings controls.
@@ -53,6 +78,32 @@ export function initThemeSettings({
      */
     const applyColorTheme = (themeStr) => {
         applyTheme(themeStr);
+        syncThemeSelection(themeStr);
+    };
+
+    /**
+     * Mark the accent colour in use: ring + tick on its swatch; the custom swatch shows
+     * the chosen colour instead of the rainbow once one is picked.
+     * @param {string} theme
+     */
+    const syncThemeSelection = (theme) => {
+        const value = String(theme || '').toLowerCase();
+        themeCircles.forEach((circle) => {
+            const on = (circle.getAttribute('data-theme') || '').toLowerCase() === value;
+            circle.classList.toggle('is-selected', on);
+            circle.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        const desc = document.getElementById('theme-color-desc');
+        if (desc) {
+            desc.removeAttribute('data-i18n');
+            desc.textContent = themeColorSummary(value);
+        }
+        const swatch = document.getElementById('custom-theme-swatch');
+        if (swatch) {
+            const isCustom = value.startsWith('#');
+            swatch.classList.toggle('is-selected', isCustom);
+            swatch.style.background = isCustom ? value : '';
+        }
     };
 
     // ---- Theme mode handling ----
@@ -202,10 +253,21 @@ export function initThemeSettings({
     }
 
     // ---- Theme circles ----
+    syncThemeSelection(currentTheme);
+    if (!languageListenerBound) {
+        languageListenerBound = true;
+        Bus.on(Events.LANGUAGE_CHANGED, () => syncThemeSelection(currentTheme));
+    }
     themeCircles.forEach(circle => {
+        circle.setAttribute('role', 'button');
+        circle.setAttribute('tabindex', '0');
+        circle.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); /** @type {HTMLElement} */ (circle).click(); }
+        });
         /** @type {HTMLElement} */ (circle).onclick = () => {
             const theme = circle.getAttribute('data-theme') || '';
             applyTheme(theme);
+            syncThemeSelection(theme);
             appStore.set('currentTheme', theme);
             Bus.emit(Events.THEME_CHANGED, theme);
             void save();

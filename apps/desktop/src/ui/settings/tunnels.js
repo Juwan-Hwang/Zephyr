@@ -13,6 +13,7 @@ import { showModal, showNotification } from '../notifications.js';
 import { SVG_ICONS } from '../icons.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { translations } from '../../i18n.js';
+import { escapeHtml } from '../../utils/sanitize.js';
 
 /**
  * Validate an address string (IPv4:port, [IPv6]:port, hostname:port).
@@ -93,7 +94,7 @@ export function initTunnelSettings({
 
             const protocolBadge = document.createElement('span');
             protocolBadge.className = 'type-badge text-[var(--text-secondary)]';
-            protocolBadge.textContent = tunnel.network.join(', ');
+            protocolBadge.textContent = (Array.isArray(tunnel.network) ? tunnel.network : [tunnel.network]).map((/** @type {string} */ n) => String(n).toUpperCase()).join(' + ');
 
             const target = document.createElement('span');
             target.className = 'text-xs font-medium text-[var(--text-primary)]';
@@ -113,6 +114,8 @@ export function initTunnelSettings({
 
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
+            delBtn.type = 'button';
+            delBtn.setAttribute('aria-label', `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`);
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
@@ -133,30 +136,37 @@ export function initTunnelSettings({
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         const cancelText = t.cancel || 'Cancel';
-        const confirmText = t.confirm || 'Confirm';
+        const confirmText = t.add || 'Add';
+        const esc = (/** @type {string} */ v) => escapeHtml(String(v ?? ''));
         const customHtml = `
             <div class="space-y-4">
                 <div>
-                    <label for="tunnel-protocol-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelProtocol || 'Protocol'}</label>
-                    <input type="text" id="tunnel-protocol-input" placeholder="tcp, udp, or tcp,udp" value="tcp,udp" class="form-control form-control-md form-control-mono">
-                </div>
-                <div>
-                    <label for="tunnel-address-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelNetwork || 'Listen Network'}</label>
-                    <div class="input-paste-wrapper">
-                        <input type="text" id="tunnel-address-input" placeholder="e.g., 127.0.0.1:6553" class="form-control form-control-md form-control-mono">
-                        ${renderPasteButtonHtml('tunnel-address-paste-btn', `${t.paste || 'Paste'} (${t.tunnelNetwork || 'Listen Network'})`, false, null)}
+                    <span class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${esc(t.tunnelProtocol || 'Protocol')}</span>
+                    <div id="tunnel-protocol-seg" class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-label="${esc(t.tunnelProtocol || 'Protocol')}">
+                        <button type="button" role="radio" aria-checked="false" data-network="tcp" class="seg-tab flex-1 justify-center">TCP</button>
+                        <button type="button" role="radio" aria-checked="false" data-network="udp" class="seg-tab flex-1 justify-center">UDP</button>
+                        <button type="button" role="radio" aria-checked="true" data-network="tcp,udp" class="seg-tab active flex-1 justify-center">TCP + UDP</button>
                     </div>
                 </div>
                 <div>
-                    <label for="tunnel-target-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${t.tunnelTarget || 'Target Address'}</label>
+                    <label for="tunnel-address-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${esc(t.tunnelNetwork || 'Local listen address')}</label>
                     <div class="input-paste-wrapper">
-                        <input type="text" id="tunnel-target-input" placeholder="e.g., 8.8.8.8:53" class="form-control form-control-md form-control-mono">
-                        ${renderPasteButtonHtml('tunnel-target-paste-btn', `${t.paste || 'Paste'} (${t.tunnelTarget || 'Target Address'})`, false, null)}
+                        <input type="text" id="tunnel-address-input" placeholder="127.0.0.1:6553" spellcheck="false" autocomplete="off" aria-describedby="tunnel-address-hint" class="form-control form-control-md form-control-mono">
+                        ${renderPasteButtonHtml('tunnel-address-paste-btn', `${t.paste || 'Paste'} (${t.tunnelNetwork || 'Local listen address'})`, false, null)}
                     </div>
+                    <p id="tunnel-address-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1">${esc(t.tunnelAddressHint || 'Connections to this address are forwarded')}</p>
+                </div>
+                <div>
+                    <label for="tunnel-target-input" class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">${esc(t.tunnelTarget || 'Forward to')}</label>
+                    <div class="input-paste-wrapper">
+                        <input type="text" id="tunnel-target-input" placeholder="8.8.8.8:53" spellcheck="false" autocomplete="off" aria-describedby="tunnel-target-hint" class="form-control form-control-md form-control-mono">
+                        ${renderPasteButtonHtml('tunnel-target-paste-btn', `${t.paste || 'Paste'} (${t.tunnelTarget || 'Forward to'})`, false, null)}
+                    </div>
+                    <p id="tunnel-target-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1">${esc(t.tunnelTargetHint || 'Reached through the current proxy')}</p>
                 </div>
                 <div class="flex gap-3 justify-end pt-2">
-                    <button id="tunnel-cancel-btn" class="btn-ghost">${cancelText}</button>
-                    <button id="tunnel-confirm-btn" class="btn-primary">${confirmText}</button>
+                    <button type="button" id="tunnel-cancel-btn" class="btn-ghost">${esc(cancelText)}</button>
+                    <button type="button" id="tunnel-confirm-btn" class="btn-primary">${esc(confirmText)}</button>
                 </div>
             </div>
         `;
@@ -165,7 +175,20 @@ export function initTunnelSettings({
             t.addPortForwarding || "Add Port Forwarding",
             "", "", true, customHtml,
             (contentArea, closeModal) => {
-                const protocolInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-protocol-input'));
+                /** @type {string} */
+                let protocolStrValue = 'tcp,udp';
+                const protocolButtons = /** @type {HTMLElement[]} */ (Array.from(contentArea.querySelectorAll('[data-network]')));
+                // role is not on the modal sanitiser's allow-list; set it here.
+                contentArea.querySelector('#tunnel-protocol-seg')?.setAttribute('role', 'radiogroup');
+                protocolButtons.forEach((b) => b.setAttribute('role', 'radio'));
+                protocolButtons.forEach((b) => b.addEventListener('click', () => {
+                    protocolStrValue = b.dataset.network || 'tcp,udp';
+                    protocolButtons.forEach((x) => {
+                        const on = x === b;
+                        x.classList.toggle('active', on);
+                        x.setAttribute('aria-checked', String(on));
+                    });
+                }));
                 const addressInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-address-input'));
                 const targetInput = /** @type {HTMLInputElement} */ (contentArea.querySelector('#tunnel-target-input'));
                 const cancelBtn = contentArea.querySelector('#tunnel-cancel-btn');
@@ -190,7 +213,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                     if (confirmBtn.disabled) return;
                     confirmBtn.disabled = true;
 
-                    const protocolStr = protocolInput?.value?.trim() || '';
+                    const protocolStr = protocolStrValue;
                     const address = addressInput?.value?.trim() || '';
                     const target = targetInput?.value?.trim() || '';
 
