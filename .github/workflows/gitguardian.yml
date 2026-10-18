@@ -21,9 +21,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: gitguardian-${{ github.ref }}
-  # Never cancel a push scan: ggshield scans the pushed commit range,
-  # so a cancelled run would leave those commits unscanned.
+  # Push runs each get their own group: ggshield scans the pushed commit
+  # range, and a shared group would let a newer push replace a queued scan
+  # (or cancel a running one), leaving those commits unscanned. Pull request
+  # runs share a group so a new push to the PR replaces the stale run.
+  group: gitguardian-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
