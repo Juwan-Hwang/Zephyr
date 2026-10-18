@@ -225,9 +225,9 @@
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="subscriptions">Subscriptions</h2>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button id="open-plugins-btn" class="btn-ghost" title="Plugins" data-i18n-title="plugins">
+                        <button id="open-plugins-btn" class="btn-ghost" title="Override Scripts" data-i18n-title="overrideTitle">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                            <span data-i18n="plugins">Plugins</span>
+                            <span data-i18n="overrideTitle">Override Scripts</span>
                         </button>
                         <button id="update-all-sub-btn" class="btn-ghost" title="Update All" data-i18n-title="updateAll">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -250,17 +250,31 @@
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
-                            <h3 class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
-                            <button id="close-plugins-btn" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                            <h3 id="plugin-panel-title" class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
+                            <!-- While editing: ‹ Override Scripts / name [JS] ● Unsaved -->
+                            <nav id="plugin-script-crumb" class="hidden flex items-center gap-2 min-w-0 text-base" aria-label="Breadcrumb">
+                                <button id="plugin-script-back-btn" type="button" class="flex items-center gap-1 shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+                                    <span data-i18n="overrideTitle">覆写脚本</span>
+                                </button>
+                                <span class="text-[var(--text-tertiary)]" aria-hidden="true">/</span>
+                                <h3 id="plugin-script-title" class="dialog-title truncate" aria-current="page"></h3>
+                                <span id="plugin-script-type" class="text-2xs font-semibold px-1.5 py-0.5 rounded-sm shrink-0"></span>
+                                <span id="plugin-script-dirty" class="hidden flex shrink-0 items-center gap-1 text-xs text-[var(--zephyr-color-warning)]">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-current" aria-hidden="true"></span>
+                                    <span data-i18n="overrideUnsaved">未保存</span>
+                                </span>
+                            </nav>
+                            <button id="close-plugins-btn" type="button" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" aria-label="Close" data-i18n-aria-label="dismiss">
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
-                        <!-- Toolbar: search + new + bulk actions -->
-                        <div class="flex items-center gap-2 shrink-0">
+                        <!-- Toolbar: search + new + bulk actions (hidden while editing a script) -->
+                        <div id="plugin-toolbar" class="flex items-center gap-2 shrink-0">
                             <input
                                 id="plugin-search-input"
-                                class="form-control form-control-md form-control-mono flex-1"
-                                placeholder="搜索覆写..." data-i18n-placeholder="overrideSearchPlaceholder"
+                                class="form-control form-control-md flex-1"
+                                placeholder="搜索覆写" data-i18n-placeholder="overrideSearchPlaceholder"
                             />
                             <!-- New override dropdown -->
                             <div class="relative">
@@ -278,45 +292,47 @@
                                     <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
                                 </div>
                             </div>
-                            <button id="plugin-enable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideEnableAll">启用全部</button>
-                            <button id="plugin-disable-all-btn" class="btn-ghost text-xs px-2 py-1.5" data-i18n="overrideDisableAll">禁用全部</button>
+                            <!-- More: bulk enable / disable -->
+                            <div class="relative">
+                                <button id="plugin-more-btn" type="button" class="btn-ghost plugin-more-btn" aria-haspopup="menu" aria-expanded="false" title="更多" aria-label="更多" data-i18n-title="overrideMore" data-i18n-aria-label="overrideMore">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                                </button>
+                                <div id="plugin-more-dropdown" role="menu" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[140px]">
+                                    <button id="plugin-enable-all-btn" type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-i18n="overrideEnableAll">启用全部</button>
+                                    <button id="plugin-disable-all-btn" type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-i18n="overrideDisableAll">禁用全部</button>
+                                </div>
+                            </div>
                         </div>
                         <!-- Override cards list -->
-                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 -mb-8 custom-scrollbar">
+                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 pb-1 custom-scrollbar">
                             <!-- Override cards rendered by plugins.js -->
                         </div>
                         <!-- Script editor area -->
-                        <div id="plugin-script-area" class="hidden flex flex-col flex-1 overflow-hidden" style="min-height: 0;">
-                            <div class="flex items-center justify-between shrink-0 mb-3">
-                                <h4 id="plugin-script-title" class="text-sm font-semibold text-[var(--text-primary)]"></h4>
-                                <button id="plugin-script-back-btn" class="btn-ghost text-xs flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-                                    <span data-i18n="overrideBack">返回</span>
+                        <div id="plugin-script-area" class="hidden flex flex-col flex-1 gap-3 overflow-hidden" style="min-height: 0;">
+                            <!-- CodeMirror editor -->
+                            <div id="plugin-script-cm6" data-code-editor class="w-full flex-1 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg overflow-hidden" style="min-height: 240px;"></div>
+                            <!-- Status + actions -->
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span id="plugin-script-cursor" class="text-2xs text-[var(--text-tertiary)] tabular-nums whitespace-nowrap me-auto"></span>
+                                <button id="plugin-script-fullscreen-btn" type="button" class="btn-ghost text-xs !px-2" data-i18n-title="overrideFullscreen" data-i18n-aria-label="overrideFullscreen" title="全屏" aria-label="全屏">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                                </button>
+                                <button id="plugin-script-validate-btn" type="button" class="btn-ghost text-xs" data-i18n="overrideCheckSyntax">检查语法</button>
+                                <button id="plugin-script-save-btn" type="button" class="btn-ghost text-xs" aria-keyshortcuts="Control+S">
+                                    <span data-i18n="overrideSave">保存</span><kbd class="script-kbd">Ctrl S</kbd>
+                                </button>
+                                <button id="plugin-script-run-btn" type="button" class="btn-primary text-xs" aria-keyshortcuts="Control+Enter">
+                                    <span data-i18n="overrideSaveApply">保存并应用</span><kbd class="script-kbd">Ctrl ↵</kbd>
                                 </button>
                             </div>
-                            <!-- Scrollable content area -->
-                            <div id="plugin-script-scroll-area" class="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-                                <!-- CodeMirror editor -->
-                                <div id="plugin-script-cm6" data-code-editor class="w-full bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg overflow-hidden" style="height: 240px; min-height: 120px;"></div>
-                                <!-- Action buttons -->
-                                <div class="flex items-center gap-2 shrink-0">
-                                    <button id="plugin-script-validate-btn" class="btn-ghost text-xs" data-i18n="overrideValidate">验证</button>
-                                    <button id="plugin-script-run-btn" class="btn-accent text-xs" data-i18n="overrideSaveAndRun">保存并执行</button>
-                                    <button id="plugin-script-fullscreen-btn" class="btn-ghost text-xs flex items-center gap-1" data-i18n-title="overrideFullscreen" title="全屏编辑">
-                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-                                        <span data-i18n="overrideFullscreen">全屏</span>
-                                    </button>
-                                    <span id="plugin-script-status" class="text-2xs ms-auto"></span>
-                                </div>
-                                <!-- Collapsible output -->
-                                <div id="plugin-script-output-wrap" class="bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg shrink-0">
-                                    <button id="plugin-script-output-toggle" class="w-full flex items-center justify-between px-4 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors rounded-sm">
-                                        <span id="plugin-script-output-label" data-i18n="overrideOutput">输出</span>
-                                        <svg id="plugin-script-output-chevron" class="w-3.5 h-3.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-                                    </button>
-                                    <div id="plugin-script-output" class="script-output px-4 pb-3 text-[var(--text-secondary)] whitespace-pre-wrap break-all custom-scrollbar" style="display:none; max-height: 120px; overflow-y: auto;"></div>
-                                </div>
+                            <!-- One-line result of the last check / save / apply -->
+                            <div id="plugin-script-result" class="hidden shrink-0 flex items-center gap-2 px-4 py-2.5 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg text-xs min-w-0" role="status" aria-live="polite">
+                                <span id="plugin-script-result-icon" class="w-4 h-4 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold" aria-hidden="true"></span>
+                                <span id="plugin-script-status" class="font-semibold text-[var(--text-primary)] shrink-0"></span>
+                                <span id="plugin-script-result-detail" class="text-[var(--text-tertiary)] truncate min-w-0"></span>
+                                <button id="plugin-script-log-btn" type="button" class="hidden ms-auto shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline" data-i18n="overrideViewLog">查看日志</button>
                             </div>
+                            <div id="plugin-script-output" class="script-output hidden shrink-0 px-4 py-2 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg text-[var(--text-secondary)] whitespace-pre-wrap break-all custom-scrollbar" style="max-height: 120px; overflow-y: auto;"></div>
                         </div>
                     </div>
                 </div>
@@ -1456,8 +1472,8 @@
                     <!-- Status Bar -->
                     <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
                         <div class="flex items-center gap-4" style="color: var(--text-muted);">
-                            <span id="fullscreen-editor-cursor-pos">行 1, 列 1</span>
-                            <span id="fullscreen-editor-char-count">0 字符</span>
+                            <span id="fullscreen-editor-cursor-pos" class="tabular-nums"></span>
+                            <span id="fullscreen-editor-char-count" class="tabular-nums"></span>
                         </div>
                         <span id="fullscreen-editor-status"></span>
                     </div>
@@ -1477,7 +1493,7 @@
                         </div>
                     </div>
                     <div id="fullscreen-editor-output" class="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar text-[var(--text-secondary)]">
-                        <div class="text-[var(--text-muted)] italic">点击"保存并执行"查看输出...</div>
+                        <div class="text-[var(--text-tertiary)]" data-i18n="overrideOutputEmpty">No output</div>
                     </div>
                 </div>
             </div>

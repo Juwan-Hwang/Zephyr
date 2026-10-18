@@ -400,7 +400,7 @@ describe('applyTranslations', () => {
         const btnEl = document.getElementById('btn-el');
 
         expect(textEl?.textContent).toBe('保存');
-        expect(inputEl?.placeholder).toBe('搜索覆写...');
+        expect(inputEl?.placeholder).toBe('搜索覆写');
         expect(btnEl?.getAttribute('title')).toBe('粘贴');
         expect(btnEl?.getAttribute('aria-label')).toBe('粘贴');
     });
