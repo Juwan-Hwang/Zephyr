@@ -3444,17 +3444,23 @@ mod tests {
         let server_handle = tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
                 let mut buf = [0u8; 512];
-                if tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await.is_ok() {
+                if tokio::io::AsyncReadExt::read(&mut stream, &mut buf)
+                    .await
+                    .is_ok()
+                {
                     let req = String::from_utf8_lossy(&buf);
                     if req.contains("Authorization: Bearer test_secret-x") {
                         let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                        let _ =
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
                     } else if req.contains("Authorization: Bearer test_secret") {
                         let resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                        let _ =
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
                     } else {
                         let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                        let _ =
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
                     }
                 }
             }
