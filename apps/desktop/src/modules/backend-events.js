@@ -21,10 +21,10 @@ let _extLogEvents = [];
 /** @type {Set<string>} */
 const _recentErrors = new Set();
 
-/** @type {(() => void) | null} */
+/** @type {(() => Promise<void>) | null} */
 let _prismEventUnlisten = null;
 
-/** @type {(() => void) | null} */
+/** @type {(() => Promise<void>) | null} */
 let _backendEventUnlisten = null;
 
 /** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string }) => void>} */
@@ -316,8 +316,11 @@ export async function initBackendEventListeners() {
  * @returns {void}
  */
 export function cleanupBackendEventListeners() {
-    _prismEventUnlisten?.();
-    _backendEventUnlisten?.();
+    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten]) {
+        unlisten?.().catch((/** @type {unknown} */ err) => {
+            logger.warn('unlisten failed:', err);
+        });
+    }
     _prismEventUnlisten = null;
     _backendEventUnlisten = null;
 }
