@@ -11,6 +11,7 @@ import * as prism from './prism.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { t } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
+import { queueSmartConfigWrite } from './settings/auto-switch.js';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Navigation
@@ -553,25 +554,28 @@ async function loadSmartConfig() {
 
 async function saveSmartConfig() {
     try {
-        // Fetch current config to preserve the enabled state
-        const currentConfig = /** @type {Record<string, any>} */ (await prism.smartConfig().catch(() => ({})));
-        await prism.smartConfigSave({
-            enabled: currentConfig.enabled ?? false,
-            score: {
-                type: 'ema',
-                weights: {
-                    latency_p90: getNumberInput('smart-weight-latency', 0.4),
-                    success_rate: getNumberInput('smart-weight-success', 0.4),
-                    stability: getNumberInput('smart-weight-stability', 0.2),
+        // Read-modify-write in the auto-switch queue, so neither overwrites the other's enabled state.
+        await queueSmartConfigWrite(async () => {
+            // Fetch current config to preserve the enabled state
+            const currentConfig = /** @type {Record<string, any>} */ (await prism.smartConfig().catch(() => ({})));
+            await prism.smartConfigSave({
+                enabled: currentConfig.enabled ?? false,
+                score: {
+                    type: 'ema',
+                    weights: {
+                        latency_p90: getNumberInput('smart-weight-latency', 0.4),
+                        success_rate: getNumberInput('smart-weight-success', 0.4),
+                        stability: getNumberInput('smart-weight-stability', 0.2),
+                    },
+                    decay: { half_life_hours: getNumberInput('smart-decay-half-life', 1.0) },
                 },
-                decay: { half_life_hours: getNumberInput('smart-decay-half-life', 1.0) },
-            },
-            scheduler: {
-                base_interval_secs: getNumberInput('smart-base-interval', 300),
-                adaptive: getCheckboxValue('smart-adaptive-toggle'),
-                max_interval_secs: 3600,
-                min_interval_secs: 10,
-            },
+                scheduler: {
+                    base_interval_secs: getNumberInput('smart-base-interval', 300),
+                    adaptive: getCheckboxValue('smart-adaptive-toggle'),
+                    max_interval_secs: 3600,
+                    min_interval_secs: 10,
+                },
+            });
         });
         showNotification('Smart config saved', 'success');
     } catch (e) { showNotification(String(e), 'error'); }
