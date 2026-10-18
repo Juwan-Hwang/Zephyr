@@ -39,7 +39,7 @@ import { pasteWithFeedback } from '../utils/clipboard.js';
 import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery } from './lifecycle.js';
-import { saveSetting, saveSettings } from './settings-helpers.js';
+import { saveSetting, saveSettingChecked, saveSettings } from './settings-helpers.js';
 import { initNetworkOptim } from './network-optim.js';
 import {
     DEFAULT_DNS_CONFIG,
@@ -53,6 +53,7 @@ import {
 import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
+import { initSettingsNav } from './settings-nav.js';
 import { normalizeVersion, isRemoteNewer } from '../utils/version-utils.js';
 import { createStatusRing } from './status-ring.js';
 import * as prism from './prism.js';
@@ -69,6 +70,7 @@ import { updateModeUI } from './modes.js';
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
 import { initTunnelSettings } from './settings/tunnels.js';
+import { applyAutoSwitch, deriveAutoSwitch, readAutoSwitchState, queueSmartConfigWrite } from './settings/auto-switch.js';
 import { initSubscriptionSettings } from './settings/subscriptions.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
@@ -158,7 +160,7 @@ const debouncedSyncUA = debounce(() => syncUserAgentToBackend(), 500);
 /**
  * Initialize the "Copy Proxy Env" settings row:
  * - Copy button: copies env vars in the configured format
- * - Gear button: opens a modal to select the shell format
+ * - Format chip: shows the shell format and opens a menu to change it
  */
 function initCopyEnvSettings() {
     const copyBtn = document.getElementById('copy-env-btn');
@@ -206,113 +208,104 @@ function initCopyEnvSettings() {
             copyBtn.dataset._copyTimeout = String(timeoutId);
         } catch (err) {
             settingsLogger.error('[copy-env] Failed to copy:', err);
-            showNotification(toError(err).message, 'error');
+            showNotification(`${getT().copyFailed || 'Copy failed'}: ${toError(err).message}`, 'error');
         }
     });
 
-    // --- Format selection modal (gear icon) ---
-    formatBtn?.addEventListener('click', async () => {
-        // Clean up any existing modal and its Escape listener
-        const existingModal = document.getElementById('copy-env-format-modal');
-        if (existingModal) {
-            const existingHandler = /** @type {any} */ (existingModal)._escapeHandler;
-            if (existingHandler) document.removeEventListener('keydown', existingHandler);
-            existingModal.remove();
-        }
+    // --- Shell format: a visible chip next to Copy, opening a small menu ---
+    const formatLabel = document.getElementById('copy-env-format-label');
+    const formatMenu = document.getElementById('copy-env-format-menu');
+    const formatList = formatMenu?.querySelector('.menu-scroll');
+    const formats = [
+        { key: 'bash', label: 'Bash / Zsh', short: 'Bash' },
+        { key: 'fish', label: 'Fish', short: 'Fish' },
+        { key: 'cmd', label: 'CMD', short: 'CMD' },
+        { key: 'powershell', label: 'PowerShell', short: 'PowerShell' },
+        { key: 'nushell', label: 'Nushell', short: 'Nushell' },
+    ];
+    /** @type {string} */
+    let currentFormat = 'bash';
 
-        const t = getT();
-        const settings = await invoke(COMMANDS.GET_SETTINGS);
-        const { resolveEnvFormat: resolveEnvFormatImported } = await import('./tray.js');
-        const currentFormat = resolveEnvFormatImported(settings.copy_env_format);
-
-        const formats = [
-            { key: 'bash', label: 'Bash / Zsh' },
-            { key: 'fish', label: 'Fish' },
-            { key: 'cmd', label: 'CMD' },
-            { key: 'powershell', label: 'PowerShell' },
-            { key: 'nushell', label: 'Nushell' },
-        ];
-
-        const modal = document.createElement('div');
-        modal.id = 'copy-env-format-modal';
-        modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-        // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-        modal.innerHTML = `
-            <div class="glass-card w-[360px] p-6 space-y-4">
-                <div class="flex items-center justify-between">
-                    <h3 class="dialog-title">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
-                    <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
-                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                    </button>
-                </div>
-                <div class="space-y-1">
-                    ${formats.map(f => `
-                        <button type="button" class="copy-env-format-option w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-start transition-colors hover:bg-[var(--zephyr-bg-muted)] ${f.key === currentFormat ? 'bg-[var(--zephyr-bg-muted)]' : ''}" data-format="${f.key}" aria-pressed="${f.key === currentFormat ? 'true' : 'false'}">
-                            <span class="text-xs text-[var(--text-primary)]">${escapeHtml(f.label)}</span>
-                            ${f.key === currentFormat ? '<svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-        document.body.style.overflow = 'hidden';
-
-        // Animate in
-        requestAnimationFrame(() => {
-            const panel = modal.querySelector('.glass-card');
-            if (panel instanceof HTMLElement) {
-                panel.style.transform = 'scale(0.96)';
-                panel.style.opacity = '0';
-                requestAnimationFrame(() => {
-                    panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
-                    panel.style.transform = 'scale(1)';
-                    panel.style.opacity = '1';
-                });
-            }
+    /** @param {string} key */
+    const showFormat = (key) => {
+        currentFormat = key;
+        if (formatLabel) formatLabel.textContent = formats.find(f => f.key === key)?.short || key;
+        formatList?.querySelectorAll('[data-format]').forEach(el => {
+            const on = /** @type {HTMLElement} */ (el).dataset.format === key;
+            el.setAttribute('aria-checked', String(on));
+            el.classList.toggle('is-selected', on);
         });
+    };
 
-        // Escape key to close modal
-        /** @param {KeyboardEvent} e */
-        let onEscape = /** @type {(e: KeyboardEvent) => void} */ (() => {});
+    if (formatList) {
+        formatList.replaceChildren(...formats.map(f => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('role', 'menuitemradio');
+            b.dataset.format = f.key;
+            b.className = 'env-format-option w-full flex items-center justify-between px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors text-start';
+            const span = document.createElement('span');
+            span.textContent = f.label;
+            b.appendChild(span);
+            return b;
+        }));
+    }
 
-        const closeModalInner = () => {
-            document.body.style.overflow = '';
-            document.removeEventListener('keydown', onEscape);
-            const panel = modal.querySelector('.glass-card');
-            if (panel instanceof HTMLElement) {
-                panel.style.transition = 'all 0.15s ease-in';
-                panel.style.transform = 'scale(0.96)';
-                panel.style.opacity = '0';
-                setTimeout(() => modal.remove(), 150);
-            } else {
-                modal.remove();
-            }
-        };
+    const closeMenu = () => {
+        formatMenu?.classList.add('hidden');
+        formatBtn?.setAttribute('aria-expanded', 'false');
+    };
+    const openMenu = () => {
+        formatMenu?.classList.remove('hidden');
+        formatBtn?.setAttribute('aria-expanded', 'true');
+        /** @type {HTMLElement|null|undefined} */ (formatList?.querySelector('[aria-checked="true"]'))?.focus();
+    };
 
-        onEscape = (e) => { if (e.key === 'Escape') closeModalInner(); };
-        document.addEventListener('keydown', onEscape);
-        // Store handler on modal for cleanup if modal is removed directly
-        /** @type {any} */ (modal)._escapeHandler = onEscape;
-
-        document.getElementById('copy-env-modal-close')?.addEventListener('click', closeModalInner);
-        modal.addEventListener('click', (e) => { if (e.target === modal) closeModalInner(); });
-
-        // Format selection
-        modal.querySelectorAll('.copy-env-format-option').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const selectedFormat = btn.getAttribute('data-format');
-                if (!selectedFormat) return;
-                try {
-                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { copy_env_format: selectedFormat } });
-                } catch (err) {
-                    settingsLogger.error('[copy-env] Failed to save format:', err);
-                }
-                closeModalInner();
-            });
-        });
+    formatBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (formatMenu?.classList.contains('hidden')) openMenu(); else closeMenu();
     });
+    formatList?.addEventListener('click', async (e) => {
+        const btn = /** @type {HTMLElement|null} */ ((/** @type {HTMLElement} */ (e.target)).closest('[data-format]'));
+        const key = btn?.dataset.format;
+        if (!key) return;
+        const previous = currentFormat;
+        showFormat(key);
+        closeMenu();
+        formatBtn?.focus();
+        try {
+            await invoke(COMMANDS.PATCH_SETTINGS, { patch: { copy_env_format: key } });
+        } catch (err) {
+            settingsLogger.error('[copy-env] Failed to save format:', err);
+            // Copy reads the saved format: the chip must not claim one that was not saved.
+            showFormat(previous);
+            const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+            showNotification(tr.saveFailed || 'Failed to save', 'error');
+        }
+    });
+    formatMenu?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeMenu(); formatBtn?.focus(); return; }
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault();
+        const items = /** @type {HTMLElement[]} */ (Array.from(formatList?.querySelectorAll('[data-format]') || []));
+        const i = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+        items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+    });
+    document.addEventListener('click', (e) => {
+        if (!formatMenu || formatMenu.classList.contains('hidden')) return;
+        if (!(/** @type {HTMLElement} */ (e.target)).closest('#copy-env-format-wrap')) closeMenu();
+    });
+
+    const loadFormat = async () => {
+        try {
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const { resolveEnvFormat } = await import('./tray.js');
+            showFormat(resolveEnvFormat(settings.copy_env_format));
+        } catch { showFormat(currentFormat); }
+    };
+    void loadFormat();
+    // Restore Defaults clears the format; it emits CONFIG_UPDATED when done.
+    Bus.on(Events.CONFIG_UPDATED, () => { void loadFormat(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -389,76 +382,52 @@ function initLogSettingsModal() {
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
         // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
-            <div class="glass-card w-[400px] p-6 space-y-4">
+            <div class="glass-card w-[420px] p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="log-modal-title">
                 <div class="flex items-center justify-between">
-                    <h3 class="dialog-title">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
-                    <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                    <h3 id="log-modal-title" class="dialog-title">${escapeHtml(t.logSettingsTitle || 'Log Settings')}</h3>
+                    <button type="button" id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.close || 'Close')}">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
 
-                <!-- Tab switcher -->
-                <div class="seg-tabs seg-tabs-lg w-full" role="tablist">
-                    <button id="log-tab-app" type="button" role="tab" aria-selected="true" class="seg-tab active flex-1 justify-center">${escapeHtml(t.logAppTab || 'App Logs')}</button>
-                    <button id="log-tab-core" type="button" role="tab" aria-selected="false" class="seg-tab flex-1 justify-center">${escapeHtml(t.logCoreTab || 'Core Logs')}</button>
-                </div>
-
-                <!-- App Logs Tab -->
-                <div id="log-panel-app" class="log-tab-panel space-y-3">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs text-[var(--text-primary)]">${escapeHtml(t.logAppEnabled || 'Persist App Logs')}</span>
-                        <label class="ios-switch">
+                <div class="space-y-3">
+                    <label class="flex items-center justify-between gap-4 cursor-pointer">
+                        <span class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logAppEnabled || 'Save app logs')}</span>
+                        <span class="ios-switch">
                             <input type="checkbox" id="log-app-toggle" ${logAppEnabled ? 'checked' : ''}>
                             <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
-                            <div class="flex items-center gap-1">
-                                <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
-                            </div>
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
-                            <div class="flex items-center gap-1">
-                                <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Core Logs Tab -->
-                <div id="log-panel-core" class="log-tab-panel space-y-3" style="display:none">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs text-[var(--text-primary)]">${escapeHtml(t.logCoreEnabled || 'Persist Core Logs')}</span>
-                        <label class="ios-switch">
+                        </span>
+                    </label>
+                    <label class="flex items-center justify-between gap-4 cursor-pointer">
+                        <span class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logCoreEnabled || 'Save core logs')}</span>
+                        <span class="ios-switch">
                             <input type="checkbox" id="log-core-toggle" ${logCoreEnabled ? 'checked' : ''}>
                             <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Retention Days')}</label>
-                            <div class="flex items-center gap-1">
-                                <input id="log-retention-days-2" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logDaysUnit || 'days')}</span>
-                            </div>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                <div id="log-limits" class="grid grid-cols-2 gap-3">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="log-retention-days" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logRetentionDays || 'Keep for')}</label>
+                        <div class="input-unit">
+                            <input id="log-retention-days" type="number" min="1" max="30" value="${retentionDays}" class="form-control form-control-md form-control-mono">
+                            <span class="input-unit-label">${escapeHtml(t.logDaysUnit || 'days')}</span>
                         </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max File Size')}</label>
-                            <div class="flex items-center gap-1">
-                                <input id="log-max-file-mb-2" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
-                                <span class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logMbUnit || 'MB')}</span>
-                            </div>
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                        <label for="log-max-file-mb" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logMaxFileMb || 'Max file size')}</label>
+                        <div class="input-unit">
+                            <input id="log-max-file-mb" type="number" min="1" max="500" value="${maxFileMb}" class="form-control form-control-md form-control-mono">
+                            <span class="input-unit-label">${escapeHtml(t.logMbUnit || 'MB')}</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex justify-end pt-1">
-                    <button id="log-modal-done" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.done || 'Done')}</button>
+                    <button type="button" id="log-modal-done" class="btn-primary">${escapeHtml(t.done || 'Done')}</button>
                 </div>
             </div>
         `;
@@ -481,6 +450,7 @@ function initLogSettingsModal() {
         });
 
         const closeModal = () => {
+            logTrap.deactivate();
             document.body.style.overflow = '';
             const panel = modal.querySelector('.glass-card');
             if (panel instanceof HTMLElement) {
@@ -493,49 +463,39 @@ function initLogSettingsModal() {
             }
         };
 
+        // Esc closes; Tab stays inside the dialog.
+        // closeModal() releases it, whichever control closes the dialog.
+        const logTrap = createFocusTrap(modal, { onEscape: () => closeModal() });
+        logTrap.activate();
         document.getElementById('log-modal-close')?.addEventListener('click', closeModal);
         modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
         document.getElementById('log-modal-done')?.addEventListener('click', closeModal);
 
-        // Tab switching
-        const tabApp = /** @type {HTMLElement} */ (modal.querySelector('#log-tab-app'));
-        const tabCore = /** @type {HTMLElement} */ (modal.querySelector('#log-tab-core'));
-        const panelApp = /** @type {HTMLElement} */ (modal.querySelector('#log-panel-app'));
-        const panelCore = /** @type {HTMLElement} */ (modal.querySelector('#log-panel-core'));
-
-        const activateTab = (/** @type {HTMLElement} */ tab, /** @type {HTMLElement} */ p) => {
-            [tabApp, tabCore].forEach(tb => {
-                tb.classList.toggle('active', tb === tab);
-                tb.setAttribute('aria-selected', String(tb === tab));
-            });
-            [panelApp, panelCore].forEach(pn => { pn.style.display = 'none'; });
-            p.style.display = '';
-        };
-        activateTab(tabApp, panelApp);
-        tabApp.onclick = () => activateTab(tabApp, panelApp);
-        tabCore.onclick = () => activateTab(tabCore, panelCore);
-
-        // Sync retention/max inputs between tabs
         const retentionInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-retention-days'));
-        const retentionInput2 = /** @type {HTMLInputElement} */ (modal.querySelector('#log-retention-days-2'));
         const maxFileInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-max-file-mb'));
-        const maxFileInput2 = /** @type {HTMLInputElement} */ (modal.querySelector('#log-max-file-mb-2'));
+        const limits = modal.querySelector('#log-limits');
+        retentionInput?.addEventListener('input', () => saveSettings());
+        maxFileInput?.addEventListener('input', () => saveSettings());
 
-        retentionInput?.addEventListener('input', () => { if (retentionInput2) retentionInput2.value = retentionInput.value; saveSettings(); });
-        retentionInput2?.addEventListener('input', () => { if (retentionInput) retentionInput.value = retentionInput2.value; saveSettings(); });
-        maxFileInput?.addEventListener('input', () => { if (maxFileInput2) maxFileInput2.value = maxFileInput.value; saveSettings(); });
-        maxFileInput2?.addEventListener('input', () => { if (maxFileInput) maxFileInput.value = maxFileInput2.value; saveSettings(); });
-
-        // Toggle handlers
+        // Toggle handlers. Retention and size apply to both files; they are dimmed when neither is saved.
         const appToggle = /** @type {HTMLInputElement} */ (modal.querySelector('#log-app-toggle'));
         const coreToggle = /** @type {HTMLInputElement} */ (modal.querySelector('#log-core-toggle'));
+        const syncLimits = () => {
+            const any = !!(appToggle?.checked || coreToggle?.checked);
+            limits?.classList.toggle('opacity-50', !any);
+            if (retentionInput) retentionInput.disabled = !any;
+            if (maxFileInput) maxFileInput.disabled = !any;
+        };
+        syncLimits();
 
         appToggle?.addEventListener('change', () => {
             appStore.set('logAppEnabled', appToggle.checked);
+            syncLimits();
             saveSettings();
         });
         coreToggle?.addEventListener('change', () => {
             appStore.set('logCoreEnabled', coreToggle.checked);
+            syncLimits();
             saveSettings();
         });
 
@@ -569,6 +529,9 @@ function initLogSettingsModal() {
         document.getElementById('log-export-modal')?.remove();
 
         const t = getT();
+        /** "INFO and above"; FATAL and TRACE read fine on their own. */
+        const levelLabel = (/** @type {string} */ lv) => escapeHtml(
+            lv === 'FATAL' ? lv : String(t.logLevelAndAbove || '@@level@@ and above').replace('@@level@@', lv));
         const formatDate = (/** @type {Date} */ date) => {
             const yyyy = date.getFullYear();
             const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -585,61 +548,67 @@ function initLogSettingsModal() {
         modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
         // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         modal.innerHTML = `
-            <div class="glass-card w-[480px] p-6 space-y-4">
+            <div class="glass-card w-[480px] p-6 space-y-4" role="dialog" aria-modal="true" aria-labelledby="log-export-title">
                 <div class="flex items-center justify-between">
-                    <h3 class="dialog-title">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
-                    <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                    <h3 id="log-export-title" class="dialog-title">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
+                    <button type="button" id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.close || 'Close')}">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex flex-col gap-1">
-                        <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportFrom || 'From')}</label>
+                        <label for="log-export-from" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logExportFrom || 'From')}</label>
                         <input id="log-export-from" type="date" value="${threeDaysAgo}" class="form-control form-control-md form-control-mono">
                     </div>
                     <div class="flex flex-col gap-1">
-                        <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportTo || 'To')}</label>
+                        <label for="log-export-to" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logExportTo || 'To')}</label>
                         <input id="log-export-to" type="date" value="${today}" class="form-control form-control-md form-control-mono">
                     </div>
                 </div>
 
                 <div class="flex flex-col gap-1">
-                    <label class="text-2xs text-[var(--text-muted)]">${escapeHtml(t.logExportLevel || 'Severity Level')}</label>
+                    <span class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logExportLevel || 'Minimum level')}</span>
                     <div id="log-level-wrap" class="relative w-full">
                         <button id="log-level-trigger" type="button" class="select-common w-full flex items-center justify-between">
-                            <span id="log-level-label">INFO</span>
+                            <span id="log-level-label">${levelLabel('INFO')}</span>
                             <svg class="dropdown-arrow w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="m6 9 6 6 6-6"></path>
                             </svg>
                         </button>
                         <div id="log-level-menu" class="hidden absolute inset-inline-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                             <div class="menu-scroll">
-                                <button type="button" data-value="fatal" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">FATAL</button>
-                                <button type="button" data-value="error" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">ERROR</button>
-                                <button type="button" data-value="warn" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">WARN</button>
-                                <button type="button" data-value="info" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">INFO</button>
-                                <button type="button" data-value="debug" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">DEBUG</button>
-                                <button type="button" data-value="trace" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">TRACE</button>
+                                <button type="button" data-value="fatal" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('FATAL')}</button>
+                                <button type="button" data-value="error" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('ERROR')}</button>
+                                <button type="button" data-value="warn" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('WARN')}</button>
+                                <button type="button" data-value="info" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('INFO')}</button>
+                                <button type="button" data-value="debug" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('DEBUG')}</button>
+                                <button type="button" data-value="trace" class="w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${levelLabel('TRACE')}</button>
                             </div>
                         </div>
                         <select id="log-export-level" class="hidden">
-                            <option value="fatal">FATAL</option>
-                            <option value="error">ERROR</option>
-                            <option value="warn">WARN</option>
-                            <option value="info" selected>INFO</option>
-                            <option value="debug">DEBUG</option>
-                            <option value="trace">TRACE</option>
+                            <option value="fatal">${levelLabel('FATAL')}</option>
+                            <option value="error">${levelLabel('ERROR')}</option>
+                            <option value="warn">${levelLabel('WARN')}</option>
+                            <option value="info" selected>${levelLabel('INFO')}</option>
+                            <option value="debug">${levelLabel('DEBUG')}</option>
+                            <option value="trace">${levelLabel('TRACE')}</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="flex flex-col gap-2">
-                    <button id="log-export-app" class="btn-ghost w-full">${escapeHtml(t.logExportApp || 'Export App Logs')}</button>
-                    <button id="log-export-core" class="btn-ghost w-full">${escapeHtml(t.logExportCore || 'Export Core Logs')}</button>
-                    <button id="log-export-all" class="btn-ghost w-full">${escapeHtml(t.logExportAll || 'Export All')}</button>
+                <div class="flex flex-col gap-1.5">
+                    <span class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.logExportContent || 'Include')}</span>
+                    <div class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-label="${escapeHtml(t.logExportContent || 'Include')}">
+                        <button type="button" role="radio" aria-checked="false" data-log-type="app" class="seg-tab flex-1 justify-center">${escapeHtml(t.logAppTab || 'App logs')}</button>
+                        <button type="button" role="radio" aria-checked="false" data-log-type="core" class="seg-tab flex-1 justify-center">${escapeHtml(t.logCoreTab || 'Core logs')}</button>
+                        <button type="button" role="radio" aria-checked="true" data-log-type="all" class="seg-tab active flex-1 justify-center">${escapeHtml(t.logExportBoth || 'Both')}</button>
+                    </div>
                 </div>
-                <button id="log-open-folder" class="btn-ghost w-full">${escapeHtml(t.logOpenFolder || 'Open Log Folder')}</button>
+                <div class="flex items-center justify-between pt-2">
+                    <button type="button" id="log-open-folder" class="row-action ms-[-10px]">${escapeHtml(t.logOpenFolder || 'Open Log Folder')}</button>
+                    <button type="button" id="log-export-go" class="btn-primary">${escapeHtml(t.logExport || 'Export')}</button>
+                </div>
             </div>
         `;
 
@@ -661,6 +630,7 @@ function initLogSettingsModal() {
         });
 
         const closeModal = () => {
+            exportTrap.deactivate();
             document.body.style.overflow = '';
             const panel = modal.querySelector('.glass-card');
             if (panel instanceof HTMLElement) {
@@ -673,6 +643,9 @@ function initLogSettingsModal() {
             }
         };
 
+        // closeModal() releases it, whichever control closes the dialog.
+        const exportTrap = createFocusTrap(modal, { onEscape: () => closeModal() });
+        exportTrap.activate();
         document.getElementById('log-export-modal-close')?.addEventListener('click', closeModal);
         modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
@@ -720,9 +693,18 @@ function initLogSettingsModal() {
             })();
         };
 
-        modal.querySelector('#log-export-app')?.addEventListener('click', () => doExport('app'));
-        modal.querySelector('#log-export-core')?.addEventListener('click', () => doExport('core'));
-        modal.querySelector('#log-export-all')?.addEventListener('click', () => doExport('all'));
+        /** @type {string} */
+        let logType = 'all';
+        const typeButtons = /** @type {HTMLElement[]} */ (Array.from(modal.querySelectorAll('[data-log-type]')));
+        typeButtons.forEach((b) => b.addEventListener('click', () => {
+            logType = b.dataset.logType || 'all';
+            typeButtons.forEach((x) => {
+                const on = x === b;
+                x.classList.toggle('active', on);
+                x.setAttribute('aria-checked', String(on));
+            });
+        }));
+        modal.querySelector('#log-export-go')?.addEventListener('click', () => doExport(logType));
 
         modal.querySelector('#log-open-folder')?.addEventListener('click', async () => {
             try {
@@ -929,7 +911,57 @@ export async function switchHomePageMode(mode, setHomeModeUI) {
 // ---------------------------------------------------------------------------
 //  initSettings -- main entry point
 // ---------------------------------------------------------------------------
+/** Dependencies for the merged "auto-switch nodes" switch. */
+function autoSwitchDeps() {
+    return {
+        getSmartConfig: () => prism.smartConfig(),
+        saveSmartConfig: (/** @type {any} */ cfg) => prism.smartConfigSave(cfg),
+        // Must reject on failure so the switch can report it and go back.
+        saveSetting: saveSettingChecked,
+        setStore: (/** @type {string} */ k, /** @type {any} */ v) => appStore.set(k, v),
+        startAutoTest: startSmartAutoTest,
+        stopAutoTest: stopSmartAutoTest,
+        onChanged: () => Bus.emit(Events.CONFIG_UPDATED),
+    };
+}
+
+/**
+ * TUN row in the Proxy section: the same switch as the home TUN card (it
+ * drives that card's toggle, so authorisation, errors and rollback stay in
+ * one place) plus a link to the core's tun settings on the advanced page.
+ */
+function initSettingsTun() {
+    const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('settings-tun-toggle'));
+    const configBtn = document.getElementById('settings-tun-config-btn');
+    if (toggle) {
+        const syncFromHome = () => {
+            const home = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
+            toggle.checked = home ? home.checked : !!appStore.get('isTunEnabled');
+        };
+        appStore.subscribe('isTunEnabled', syncFromHome);
+        // A failed switch rolls the home toggle back without a store change; re-read when it settles.
+        appStore.subscribe('isNetworkUpdating', (/** @type {boolean} */ busy) => {
+            toggle.disabled = !!busy;
+            if (!busy) syncFromHome();
+        });
+        syncFromHome();
+        toggle.addEventListener('change', () => {
+            const home = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
+            if (!home) { toggle.checked = !toggle.checked; return; }
+            home.checked = toggle.checked;
+            home.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+    configBtn?.addEventListener('click', async () => {
+        const { focusAdvancedSection } = await import('./advanced.js');
+        focusAdvancedSection('tun');
+        navigateTo('advanced');
+    });
+}
+
 export async function initSettings() {
+    initSettingsNav();
+    initSettingsTun();
     // Portable mode: hide unsupported options
     const isPortable = await invoke(COMMANDS.GET_PORTABLE_MODE);
     if (isPortable) {
@@ -957,7 +989,7 @@ export async function initSettings() {
     const themeCircles = document.querySelectorAll('[data-theme]');
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
-    const failoverToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-failover'));
+    const autoSwitchToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('setting-auto-switch'));
     const encryptConfigsToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-encrypt-configs'));
     const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
     const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
@@ -1125,7 +1157,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     if (autoUpdateClientToggle) autoUpdateClientToggle.checked = settings.auto_update_client || false;
     if (autostartToggle && !isPortable) autostartToggle.checked = await isAutoStartEnabled();
     if (hideTimeoutToggle) hideTimeoutToggle.checked = settings.hide_timeout_nodes || false;
-    if (failoverToggle) failoverToggle.checked = settings.failover_enabled || false;
     if (encryptConfigsToggle) encryptConfigsToggle.checked = settings.encrypt_configs || false;
     appStore.set('failoverEnabled', settings.failover_enabled || false);
     appStore.set('networkOptimAutoApply', settings.network_optim_auto_apply ?? false);
@@ -1199,8 +1230,16 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const confirmed = await showConfirmModal(
-                t.restoreDefaultsTitle || "Restore Defaults",
-                t.restoreDefaultsConfirm || "Are you sure you want to restore all settings to default values?"
+                t.restoreDefaultsConfirmTitle || "Restore default settings?",
+                t.restoreDefaultsConfirmLead || "This only resets the preferences on this page; you can change them again anytime.",
+                {
+                    danger: true,
+                    confirmText: t.restoreDefaultsBtn || 'Restore defaults',
+                    points: [
+                        { tone: 'danger', label: t.restoreDefaultsResetsLabel || 'Resets: ', text: t.restoreDefaultsResetsList || '' },
+                        { tone: 'success', label: t.restoreDefaultsKeepsLabel || 'Keeps: ', text: t.restoreDefaultsKeepsList || '' },
+                    ],
+                }
             );
             if (!confirmed) return;
 
@@ -1248,10 +1287,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         hideTimeoutToggle.dispatchEvent(new Event('change'));
                     }
                 }
-                if (failoverToggle) {
-                    failoverToggle.checked = false;
+                if (autoSwitchToggle) {
+                    autoSwitchToggle.checked = false;
                     settings.failover_enabled = false;
-                    appStore.set('failoverEnabled', false);
+                    await trackResult('autoSwitch', () => applyAutoSwitch(false, autoSwitchDeps()));
                 }
                 if (silentStartToggle) {
                     silentStartToggle.checked = false;
@@ -1384,7 +1423,19 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
                 const appSettingsSaved = await trackResult('appSettings', async () => {
                     settings.home_page_mode = 'minimal';
+                    // Items the reset used to skip (the confirm says "all settings"):
+                    settings.ui_scale = 1;
+                    settings.lightweight_mode = false;
+                    delete settings.copy_env_format;   // missing → backend default for this platform
+                    settings.log_retention_days = 3;
+                    settings.log_max_file_mb = 50;
                     await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                    // The running log writers take a new size limit only through a patch.
+                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { log_max_file_mb: 50 } });
+                    applyUiScale(1);
+                    if (lightweightModeToggle) lightweightModeToggle.checked = false;
+                    appStore.set('logRetentionDays', 3);
+                    appStore.set('logMaxFileMb', 50);
                 });
                 invalidateSettingsCache();
                 // Runs after the snapshot above is saved: a TUN-off restart
@@ -1535,7 +1586,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             if (hideTimeoutToggle) currentSettings.hide_timeout_nodes = hideTimeoutToggle.checked;
-            if (failoverToggle) currentSettings.failover_enabled = failoverToggle.checked;
+            // Owned by the auto-switch switch (applyAutoSwitch keeps the store current);
+            // a legacy partial state must not be turned into failover by an unrelated save.
+            if (autoSwitchToggle) currentSettings.failover_enabled = !!appStore.get('failoverEnabled');
+            if (encryptConfigsToggle) currentSettings.encrypt_configs = encryptConfigsToggle.checked;
             currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').map(a => a.trim()).filter(Boolean);
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
@@ -1577,10 +1631,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         showNotification(t.requireAppRestart || "Changes saved. Restart the app to take effect.", "info");
     });
-    failoverToggle?.addEventListener('change', async () => {
-        appStore.set('failoverEnabled', failoverToggle.checked);
-        await save();
-    });
     encryptConfigsToggle?.addEventListener('change', async () => {
         if (!encryptConfigsToggle) return;
         const enabled = encryptConfigsToggle.checked;
@@ -1588,7 +1638,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         const confirmMsg = enabled
             ? (t.encryptConfigsConfirmEnable || "Enabling encryption will immediately encrypt all existing config files. You will not be able to edit config files with an external editor. Continue?")
             : (t.encryptConfigsConfirmDisable || "Disabling encryption will immediately decrypt all config files to plaintext. Continue?");
-        if (!confirm(confirmMsg)) {
+        // The app's own confirm dialog instead of the browser's native confirm().
+        const ok = await showConfirmModal(
+            enabled ? (t.encryptConfigsConfirmEnableTitle || 'Encrypt config files?') : (t.encryptConfigsConfirmDisableTitle || 'Decrypt config files?'),
+            confirmMsg,
+            { danger: enabled, confirmText: enabled ? (t.encryptConfigsConfirmEnableBtn || 'Encrypt') : (t.encryptConfigsConfirmDisableBtn || 'Decrypt') },
+        );
+        if (!ok) {
             encryptConfigsToggle.checked = !enabled;
             return;
         }
@@ -1631,7 +1687,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     // ---- Save config to core ----
     /**
      * @param {Record<string, any>} patch
-     * @returns {Promise<boolean>}
+     * @returns {Promise<boolean|'restart'>} true when hot-reloaded, 'restart' when saved
+     *   but the core must restart (already announced), false when it failed
      */
     async function saveConfigToCore(patch) {
         try {
@@ -1643,6 +1700,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 /** @type {any} */
                 const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+                return 'restart';
             }
             return true;
         } catch (err) {
@@ -1663,7 +1721,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         if (ok) await saveSetting('unified_delay', unifiedDelayToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
+        if (ok === true) showNotification(t.settingApplied || "Applied", "success");
         else { unifiedDelayToggle.checked = !unifiedDelayToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
@@ -1674,7 +1733,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         if (ok) await saveSetting('ipv6', ipv6Toggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
+        if (ok === true) showNotification(t.settingApplied || "Applied", "success");
         else { ipv6Toggle.checked = !ipv6Toggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
@@ -1685,7 +1745,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         if (ok) await saveSetting('allow_lan', allowLanToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        if (ok) showNotification(t.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+        // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
+        if (ok === true) showNotification(t.settingApplied || "Applied", "success");
         else { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
@@ -1697,6 +1758,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     const portTproxyInput = /** @type {HTMLInputElement|null} */ (document.getElementById('port-tproxy-input'));
     const portCancelBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-cancel'));
     const portSaveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-save'));
+
+    // Redir / TProxy only exist on Linux; elsewhere the fields are hidden and keep their values.
+    if (!navigator.userAgent.toLowerCase().includes('linux')) {
+        document.getElementById('port-linux-group')?.classList.add('hidden');
+    }
 
     /**
      * Validate a port value: must be a decimal integer in [0, 65535] or empty (0 = disabled).
@@ -1826,11 +1892,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     return;
                 }
 
-                // Check for duplicates among the new port values.
-                // Ports set to 0 (disabled) are ignored.
-                const activePorts = ports.filter(p => p.val > 0).map(p => p.val);
-                if (new Set(activePorts).size !== activePorts.length) {
-                    showNotification(t.portDuplicateError || 'Ports must not duplicate each other', 'error');
+                // Two listeners cannot share a port (0 = disabled, ignored).
+                const used = ports.map(p => p.val).filter(v => v > 0);
+                if (new Set(used).size !== used.length) {
+                    showNotification(t.portDuplicateError || 'Each port can only be used once', 'error');
                     return;
                 }
 
@@ -1882,8 +1947,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             await invoke(COMMANDS.UPDATE_GEO_DATA);
             /** @type {any} */
             const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
-
             /** @type {any} */
             const geoSettings = await invoke(COMMANDS.GET_SETTINGS);
             const configPath = geoSettings.last_config || 'config.yaml';
@@ -1892,6 +1955,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             await restartCore(configPath, customArgs);
             await postRestartRecovery(configPath);
             ring.setSuccess();
+            // Only after the restart actually worked.
+            showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
         } catch (err) {
             ring.setError();
             const error = toError(err);
@@ -1936,7 +2001,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             const confirmed = await showConfirmModal(
                 t?.backupImportConfirm || 'Importing will replace your current configuration. Continue?',
-                '',
+                t?.backupImportDesc || 'The core restarts and the window reloads after the import.',
+                { confirmText: t?.backupImportBtn || 'Import and restart' },
             );
             if (!confirmed) {
                 importBackupBtn.classList.remove('opacity-50', 'pointer-events-none');
@@ -2286,99 +2352,43 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         });
     }
 
-    // --- Smart Proxy Selector ---
-    const smartToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-toggle'));
-    const smartConfigBtn = document.getElementById('smart-config-btn');
-
-    if (smartToggle) {
-        // Initialize from backend smart config, fallback to localStorage for migration
-        const initSmartEnabled = async () => {
-            try {
-                /** @type {any} */
-                const config = await prism.smartConfig();
-                smartToggle.checked = config.enabled ?? localStorage.getItem('smartEnabled') === 'true';
-            } catch {
-                smartToggle.checked = localStorage.getItem('smartEnabled') === 'true';
-            }
-            document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
-        };
-
-        smartToggle.onchange = async () => {
-            document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
-            // Always sync to localStorage as fallback for migration scenarios
-            localStorage.setItem('smartEnabled', String(smartToggle.checked));
-            try {
-                /** @type {any} */
-                const config = await prism.smartConfig();
-                config.enabled = smartToggle.checked;
-                await prism.smartConfigSave(config);
-            } catch (err) {
-                settingsLogger.error('[smart] Failed to persist enabled state:', err);
-            }
-            Bus.emit(Events.CONFIG_UPDATED);
-        };
-
-        // Important: initialize smartToggle.checked BEFORE wiring auto-test toggle state.
-        // Otherwise auto-test may be disabled/cleared on startup due to a race.
-        await initSmartEnabled();
-    }
-
-    // Smart Auto-Test toggle
-    const autoTestToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-auto-test-toggle'));
-    if (autoTestToggle) {
-        const savedAutoTest = localStorage.getItem('smartAutoTest');
-        autoTestToggle.checked = savedAutoTest === 'true';
-        // Disable auto-test toggle when smart is off
-        const syncAutoTestState = () => {
-            const smartOn = smartToggle?.checked ?? false;
-            autoTestToggle.disabled = !smartOn;
-            autoTestToggle.closest('.flex')?.classList.toggle('opacity-50', !smartOn);
-            if (!smartOn && autoTestToggle.checked) {
-                autoTestToggle.checked = false;
-                localStorage.setItem('smartAutoTest', 'false');
-                stopSmartAutoTest();
-            }
-        };
-        syncAutoTestState();
-
-        autoTestToggle.onchange = () => {
-            if (autoTestToggle.disabled) {
-                return;
-            }
-            localStorage.setItem('smartAutoTest', String(autoTestToggle.checked));
-            if (autoTestToggle.checked) {
-                startSmartAutoTest();
-            } else {
-                stopSmartAutoTest();
-            }
-        };
-
-        // Re-sync when smart toggle changes (must be set after smartToggle.onchange)
-        if (smartToggle && !/** @type {any} */(smartToggle)._onchangeWrapped) {
-            /** @type {any} */(smartToggle)._onchangeWrapped = true;
-            const origSmartOnChange = /** @type {((e?: Event) => any) | null | undefined} */ (smartToggle.onchange);
-            smartToggle.onchange = async (e) => {
-                if (origSmartOnChange) {
-                    try {
-                        await origSmartOnChange.call(smartToggle, e);
-                    } catch (err) {
-                        // eslint-disable-next-line no-console
-                        console.error('Error in smart toggle change handler:', err);
-                    }
-                }
-                void (async () => {
-                    try {
-                        await syncAutoTestState();
-                    } catch (err) {
-                        // eslint-disable-next-line no-console
-                        console.error('Error syncing auto test state:', err);
-                    }
-                })();
-            };
+    // --- Auto-switch nodes (failover + node scoring + scheduled tests in one switch) ---
+    if (autoSwitchToggle) {
+        const state = await readAutoSwitchState({
+            failoverEnabled: !!appStore.get('failoverEnabled'),
+            getSmartConfig: () => prism.smartConfig(),
+        });
+        const derived = deriveAutoSwitch(state);
+        autoSwitchToggle.checked = derived;
+        document.documentElement.style.setProperty('--smart-enabled', state.smart ? '1' : '0');
+        // An older build may have left only some of the three on: make them match
+        // what the switch shows, so "on" really switches and "off" really stops scoring.
+        if (state.failover !== derived || state.smart !== derived || state.autoTest !== derived) {
+            applyAutoSwitch(derived, autoSwitchDeps())
+                .catch((err) => settingsLogger.warn('[auto-switch] Failed to align legacy state:', err));
         }
+        let autoSwitchSeq = 0;
+        autoSwitchToggle.addEventListener('change', async () => {
+            const on = autoSwitchToggle.checked;
+            const seq = ++autoSwitchSeq;
+            try {
+                await applyAutoSwitch(on, autoSwitchDeps());
+            } catch (err) {
+                settingsLogger.error('[auto-switch] Failed to save:', err);
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+                showNotification(t.saveFailed || 'Failed to save', 'error');
+                // A later choice supersedes this one: never roll back over it.
+                if (seq !== autoSwitchSeq) return;
+                // Put the switch and the three settings back as they were.
+                autoSwitchToggle.checked = !on;
+                applyAutoSwitch(!on, autoSwitchDeps())
+                    .catch((e) => settingsLogger.warn('[auto-switch] Failed to roll back:', e));
+            }
+        });
     }
 
-    // Smart config modal (replaces inline expandable panel)
+    // Auto-switch parameters (scoring weights, test interval)
+    const smartConfigBtn = document.getElementById('smart-config-btn');
     if (smartConfigBtn) {
         smartConfigBtn.onclick = async () => {
             // Remove existing modal if any
@@ -2406,41 +2416,53 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             // here; it would produce visible "&amp;" artifacts in the number inputs.
             // eslint-disable-next-line no-unsanitized/property -- i18n translation keys escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             modal.innerHTML = `
-                <div class="glass-card w-[440px] p-6 space-y-5">
+                <div class="glass-card w-[460px] p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="smart-modal-title">
                     <div class="flex items-center justify-between">
-                        <h3 class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
-                        <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <h3 id="smart-modal-title" class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Auto-Switch Parameters')}</h3>
+                        <button type="button" id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.close || 'Close')}">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightLatency || 'Latency Weight')}</label>
-                            <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
+                    <fieldset class="space-y-2">
+                        <div class="flex items-baseline justify-between">
+                            <legend class="text-xs font-semibold text-[var(--text-secondary)]">${escapeHtml(t.smartProxyWeights || 'Score weights')}</legend>
+                            <span id="smart-weight-sum" class="text-2xs tabular-nums text-[var(--text-muted)]"></span>
                         </div>
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightSuccess || 'Success Rate Weight')}</label>
-                            <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-weight-latency" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightLatency || 'Latency')}</label>
+                                <input id="smart-weight-latency" type="number" step="0.1" min="0" max="1" value="${config.latency_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-weight-success" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightSuccess || 'Success rate')}</label>
+                                <input id="smart-weight-success" type="number" step="0.1" min="0" max="1" value="${config.success_weight ?? 0.4}" class="form-control form-control-md form-control-mono">
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-weight-stability" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightStability || 'Stability')}</label>
+                                <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono">
+                            </div>
                         </div>
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyWeightStability || 'Stability Weight')}</label>
-                            <input id="smart-weight-stability" type="number" step="0.1" min="0" max="1" value="${config.stability_weight ?? 0.2}" class="form-control form-control-md form-control-mono">
+                    </fieldset>
+                    <fieldset class="space-y-2">
+                        <legend class="text-xs font-semibold text-[var(--text-secondary)]">${escapeHtml(t.smartProxyTestInterval || 'Test interval')}</legend>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-min-interval" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMinInterval || 'Min (s)')}</label>
+                                <input id="smart-min-interval" type="number" min="10" step="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono">
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-max-interval" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMaxInterval || 'Max (s)')}</label>
+                                <input id="smart-max-interval" type="number" min="60" step="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono">
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="smart-half-life" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyHalfLife || 'Half-life (h)')}</label>
+                                <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono">
+                            </div>
                         </div>
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyHalfLife || 'Half-life (hours)')}</label>
-                            <input id="smart-half-life" type="number" step="0.5" min="0.1" value="${config.half_life_hours ?? 1.0}" class="form-control form-control-md form-control-mono">
-                        </div>
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMinInterval || 'Min Test Interval (s)')}</label>
-                            <input id="smart-min-interval" type="number" min="10" value="${config.min_interval_secs ?? 60}" class="form-control form-control-md form-control-mono">
-                        </div>
-                        <div class="flex flex-col gap-1.5">
-                            <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.smartProxyMaxInterval || 'Max Test Interval (s)')}</label>
-                            <input id="smart-max-interval" type="number" min="60" value="${config.max_interval_secs ?? 600}" class="form-control form-control-md form-control-mono">
-                        </div>
-                    </div>
-                    <div class="flex justify-end pt-1">
-                        <button id="smart-modal-done" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.done || 'Done')}</button>
+                    </fieldset>
+                    <div class="flex items-center justify-between pt-1">
+                        <button type="button" id="smart-modal-reset" class="row-action ms-[-10px]">${escapeHtml(t.smartProxyResetDefaults || 'Reset to defaults')}</button>
+                        <button type="button" id="smart-modal-done" class="btn-primary">${escapeHtml(t.done || 'Done')}</button>
                     </div>
                 </div>
             `;
@@ -2462,6 +2484,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             });
 
             const closeModal = () => {
+                smartTrap.deactivate();
                 const panel = modal.querySelector('.glass-card');
                 if (panel instanceof HTMLElement) {
                     panel.style.transition = 'all 0.15s ease-in';
@@ -2473,28 +2496,66 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 }
             };
 
+            // closeModal() releases it, whichever control closes the dialog.
+        const smartTrap = createFocusTrap(modal, { onEscape: () => closeModal() });
+            smartTrap.activate();
             document.getElementById('smart-modal-close')?.addEventListener('click', closeModal);
             modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
             document.getElementById('smart-modal-done')?.addEventListener('click', closeModal);
 
-            // Save on input change (debounced)
+            // Save on input change (debounced). Out-of-range values are clamped on save.
             const inputs = /** @type {NodeListOf<HTMLInputElement>} */ (modal.querySelectorAll('input[type="number"]'));
+            /** @param {string} id */
+            const num = (id) => Number.parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector(`#${id}`))?.value ?? '');
+            const sumEl = modal.querySelector('#smart-weight-sum');
+            const showSum = () => {
+                if (!sumEl) return;
+                const sum = [num('smart-weight-latency'), num('smart-weight-success'), num('smart-weight-stability')]
+                    .reduce((a, v) => a + (Number.isFinite(v) ? v : 0), 0);
+                sumEl.textContent = `${t.smartProxyWeightSum || 'Total'} ${sum.toFixed(1)}`;
+                const off = Math.abs(sum - 1) > 0.001;
+                sumEl.classList.toggle('text-[var(--zephyr-color-warning)]', off);
+                sumEl.classList.toggle('text-[var(--text-muted)]', !off);
+            };
+            showSum();
             const saveConfig = debounce(async () => {
                 try {
-                    const configJson = {
-                        latency_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-latency'))?.value || '0.4'),
-                        success_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-success'))?.value || '0.4'),
-                        stability_weight: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-weight-stability'))?.value || '0.2'),
-                        half_life_hours: parseFloat(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-half-life'))?.value || '1.0'),
-                        min_interval_secs: parseInt(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-min-interval'))?.value || '60', 10),
-                        max_interval_secs: parseInt(/** @type {HTMLInputElement|null} */ (modal.querySelector('#smart-max-interval'))?.value || '600', 10),
-                    };
-                    await prism.smartConfigSave(configJson);
+                    const clamp = (/** @type {number} */ v, /** @type {number} */ lo, /** @type {number} */ hi, /** @type {number} */ dflt) =>
+                        (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
+                    const minI = Math.round(clamp(num('smart-min-interval'), 10, 86400, 60));
+                    const maxI = Math.round(clamp(num('smart-max-interval'), minI, 86400, Math.max(600, minI)));
+                    // Read and write in the auto-switch queue: neither can overwrite the
+                    // other's change, and `enabled` stays whatever the switch last saved.
+                    await queueSmartConfigWrite(async () => {
+                        const current = /** @type {any} */ (await prism.smartConfig().catch(() => ({}))) || {};
+                        await prism.smartConfigSave({
+                            ...current,
+                            latency_weight: clamp(num('smart-weight-latency'), 0, 1, 0.4),
+                            success_weight: clamp(num('smart-weight-success'), 0, 1, 0.4),
+                            stability_weight: clamp(num('smart-weight-stability'), 0, 1, 0.2),
+                            half_life_hours: clamp(num('smart-half-life'), 0.1, 168, 1.0),
+                            min_interval_secs: minI,
+                            max_interval_secs: maxI,
+                        });
+                    });
                 } catch (err) {
                     settingsLogger.error('[smart] Failed to save config:', err);
                 }
             }, 500);
-            inputs.forEach(input => input.addEventListener('input', /** @type {EventListener} */ (saveConfig)));
+            inputs.forEach(input => input.addEventListener('input', () => { showSum(); saveConfig(); }));
+            modal.querySelector('#smart-modal-reset')?.addEventListener('click', () => {
+                /** @type {Record<string, string>} */
+                const defaults = {
+                    'smart-weight-latency': '0.4', 'smart-weight-success': '0.4', 'smart-weight-stability': '0.2',
+                    'smart-min-interval': '60', 'smart-max-interval': '600', 'smart-half-life': '1',
+                };
+                for (const [id, v] of Object.entries(defaults)) {
+                    const el = /** @type {HTMLInputElement|null} */ (modal.querySelector(`#${id}`));
+                    if (el) el.value = v;
+                }
+                showSum();
+                saveConfig();
+            });
         };
     }
 
