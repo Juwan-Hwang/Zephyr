@@ -166,7 +166,10 @@ pub fn resolve_rule_path(
     if !safe.ends_with(".prism.yaml") {
         return Err("Filename must end with .prism.yaml".to_owned());
     }
-    Ok(prism_dir.join(&safe))
+    let path = prism_dir.join(&safe);
+    zephyr_core::config::sanitizer::validate_path_within_dir(&path, prism_dir)
+        .map_err(|e| e.to_string())?;
+    Ok(path)
 }
 
 #[must_use]
@@ -287,7 +290,10 @@ pub fn read_json<T: serde::de::DeserializeOwned>(
     filename: &str,
     default: fn() -> T,
 ) -> Result<T, String> {
-    let path = dir.join(filename);
+    let safe = sanitize_filename(filename)?;
+    let path = dir.join(&safe);
+    zephyr_core::config::sanitizer::validate_path_within_dir(&path, dir)
+        .map_err(|e| e.to_string())?;
     if !path.exists() {
         return Ok(default());
     }
@@ -302,7 +308,10 @@ pub fn write_json<T: serde::Serialize>(
     filename: &str,
     data: &T,
 ) -> Result<(), String> {
-    let path = dir.join(filename);
+    let safe = sanitize_filename(filename)?;
+    let path = dir.join(&safe);
+    zephyr_core::config::sanitizer::validate_path_within_dir(&path, dir)
+        .map_err(|e| e.to_string())?;
     let content = serde_json::to_string_pretty(data)
         .map_err(|e| format!("Failed to serialize {filename}: {e}"))?;
     crate::core_manager::write_file_secure(&path, &content)

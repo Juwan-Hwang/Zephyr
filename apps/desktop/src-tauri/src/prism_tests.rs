@@ -32,7 +32,7 @@ mod tests {
     // Import private items from prism.rs (two levels up)
     use super::super::{
         count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml, parse_position,
-        read_groups, sanitize_filename, write_groups, RuleGroup, RuleGroups,
+        read_groups, resolve_rule_path, sanitize_filename, write_groups, RuleGroup, RuleGroups,
     };
 
     // ========================================================================
@@ -1258,7 +1258,9 @@ rules:
     // ========================================================================
 
     mod security_regression_tests {
-        use super::{count_rules, detect_source, ensure_prism_ext, sanitize_filename};
+        use super::{
+            count_rules, detect_source, ensure_prism_ext, resolve_rule_path, sanitize_filename,
+        };
 
         #[test]
         fn sanitize_strips_shell_metacharacters() {
@@ -1392,6 +1394,51 @@ rules:
             let sanitized = sanitize_filename(input).expect("sanitize failed");
             let with_ext = ensure_prism_ext(&sanitized);
             assert_eq!(with_ext, "广告过滤.prism.yaml");
+        }
+
+        #[test]
+        fn resolve_rule_path_valid_filename() {
+            let temp_dir = std::env::temp_dir().join("zephyr_prism_test_resolve_valid");
+            let _ = std::fs::create_dir_all(&temp_dir);
+            let result = resolve_rule_path(&temp_dir, "test.prism.yaml");
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), temp_dir.join("test.prism.yaml"));
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        #[test]
+        fn resolve_rule_path_rejects_non_prism_yaml_extension() {
+            let temp_dir = std::env::temp_dir().join("zephyr_prism_test_resolve_ext");
+            let _ = std::fs::create_dir_all(&temp_dir);
+            let result = resolve_rule_path(&temp_dir, "test.yaml");
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains(".prism.yaml"));
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        #[test]
+        fn resolve_rule_path_rejects_symlink_outside_dir() {
+            let temp_dir = std::env::temp_dir().join("zephyr_prism_test_resolve_symlink");
+            let outside_dir = std::env::temp_dir().join("zephyr_prism_outside");
+            let _ = std::fs::create_dir_all(&temp_dir);
+            let _ = std::fs::create_dir_all(&outside_dir);
+
+            let target_file = outside_dir.join("secret.txt");
+            let _ = std::fs::write(&target_file, "secret");
+
+            let symlink_path = temp_dir.join("evil.prism.yaml");
+            #[cfg(unix)]
+            let _ = std::os::unix::fs::symlink(&target_file, &symlink_path);
+
+            #[cfg(unix)]
+            {
+                let result = resolve_rule_path(&temp_dir, "evil.prism.yaml");
+                assert!(result.is_err());
+                assert!(result.unwrap_err().contains("Path traversal detected"));
+            }
+
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            let _ = std::fs::remove_dir_all(&outside_dir);
         }
     }
 }
