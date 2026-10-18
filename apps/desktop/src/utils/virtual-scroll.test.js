@@ -428,3 +428,21 @@ describe('createVirtualScroll — destroy', () => {
         expect(() => vs.destroy()).not.toThrow();
     });
 });
+
+describe('createVirtualScroll — content-sized container', () => {
+    it('invalidate keeps rows mounted when the viewport height comes from the content', () => {
+        const f = setup({ count: 6, viewport: 0, rowHeight: 44 });
+        // A container without a fixed height (inside a dialog) is as tall as its content.
+        Object.defineProperty(f.container, 'clientHeight', {
+            configurable: true,
+            get: () => (parseFloat(f.spacerTop.style.height) || 0)
+                + (parseFloat(f.spacerBottom.style.height) || 0)
+                + f.linesContainer.children.length * 44,
+        });
+        f.vs.invalidate();
+        expect(f.mounted()).toEqual([0, 1, 2, 3, 4, 5]);
+        f.state.count = 7; // e.g. a rule added at the top
+        f.vs.invalidate();
+        expect(f.mounted().length).toBe(7);
+    });
+});
