@@ -360,12 +360,12 @@ export async function initDnsRewriteToggle() {
 
 document.getElementById('dns-nameservers-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (nameserversInput) pasteWithFeedback(nameserversInput, showNotification, translations, currentLang);
+    if (nameserversInput) void pasteWithFeedback(nameserversInput, showNotification, translations, currentLang);
 });
 
 document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (fallbacksInput) pasteWithFeedback(fallbacksInput, showNotification, translations, currentLang);
+    if (fallbacksInput) void pasteWithFeedback(fallbacksInput, showNotification, translations, currentLang);
 });
 
     // Click outside to close

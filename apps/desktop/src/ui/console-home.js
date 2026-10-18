@@ -378,7 +378,7 @@ function tickUptime() {
     // This runs even when coreUptimeSec is null so we can detect recovery.
     if (++uptimeSyncCounter >= 30) {
         uptimeSyncCounter = 0;
-        fetchCoreUptime();
+        void fetchCoreUptime();
     }
     if (coreUptimeSec === null || coreUptimeSec === undefined) return;
     coreUptimeSec++;
@@ -746,7 +746,7 @@ function scheduleNodeRetry() {
     const delay = NODE_RETRY_DELAYS[nodeRetryCount++];
     nodeRetryTimer = setTimeout(() => {
         nodeRetryTimer = null;
-        refreshNodeData();
+        void refreshNodeData();
     }, delay);
 }
 
@@ -838,7 +838,7 @@ function renderPicker() {
             const row = /** @type {HTMLElement|null} */ (target ? target.closest('.dz-picker-node') : null);
             if (row && listEl.contains(row)) {
                 const idx = Number(row.dataset.idx);
-                if (Number.isInteger(idx)) selectPickerNode(idx);
+                if (Number.isInteger(idx)) void selectPickerNode(idx);
             }
         });
             on(listEl, 'keydown', (/** @type {KeyboardEvent} */ ev) => {
@@ -847,7 +847,7 @@ function renderPicker() {
             if (row && listEl.contains(row) && (ev.key === 'Enter' || ev.key === ' ')) {
                 ev.preventDefault();
                 const idx = Number(row.dataset.idx);
-                if (Number.isInteger(idx)) selectPickerNode(idx);
+                if (Number.isInteger(idx)) void selectPickerNode(idx);
             }
         });
         listEl.dataset.delegated = '1';
@@ -1515,7 +1515,7 @@ function _buildConsoleHome(container) {
             sortIdx = (sortIdx + 1) % SORT_MODES.length;
             const label = $('dz-sort-label');
             if (label) label.textContent = t(SORT_MODES[sortIdx].labelKey);
-            pollConnections();
+            void pollConnections();
         });
     }
 
@@ -1723,7 +1723,7 @@ function _buildConsoleHome(container) {
 
     // ── Proxy events ──
     _cleanups.push(Bus.on(Events.PROXY_SELECTED, () => {
-        refreshNodeData();
+        void refreshNodeData();
     }));
 
     // ── Core restart: reset traffic counters ──
@@ -1750,9 +1750,9 @@ function _buildConsoleHome(container) {
     const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, () => {
         if (!isActive) return; // skip IPC calls when console page is hidden
         nodeRetryCount = 0; // core fully restarted - give retry budget back
-        fetchCoreUptime(); // uptime resets after restart
-        refreshNodeData({ forceInvalidate: true });
-        refreshSubscriptionData();
+        void fetchCoreUptime(); // uptime resets after restart
+        void refreshNodeData({ forceInvalidate: true });
+        void refreshSubscriptionData();
     });
     _cleanups.push(() => _configUpdatedUnsub());
 
@@ -1830,7 +1830,7 @@ function _buildConsoleHome(container) {
         } finally {
             setSubUpdateBtnState(btn, false);
             btn.disabled = false;
-            refreshSubscriptionData();
+            void refreshSubscriptionData();
         }
     });
 
@@ -1924,10 +1924,10 @@ export function activateConsole() {
     loadInitialLogs();
     if (!uptimeTimer) uptimeTimer = setInterval(tickUptime, 1000);
     if (!connPollTimer) connPollTimer = setInterval(pollConnections, 2000);
-    fetchCoreUptime(); // re-sync real uptime from backend
-    refreshNodeData();
-    pollConnections();
-    refreshSubscriptionData();
+    void fetchCoreUptime(); // re-sync real uptime from backend
+    void refreshNodeData();
+    void pollConnections();
+    void refreshSubscriptionData();
     requestAnimationFrame(() => {
         drawChart($('dz-chart'));
     });

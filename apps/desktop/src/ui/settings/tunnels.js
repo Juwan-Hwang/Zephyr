@@ -174,13 +174,13 @@ export function initTunnelSettings({
 contentArea.querySelector('#tunnel-address-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
     if (addressInput) {
-        pasteWithFeedback(addressInput, showNotification, translations, appStore.get('currentLang') || 'en');
+        void pasteWithFeedback(addressInput, showNotification, translations, appStore.get('currentLang') || 'en');
     }
 });
 contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click', (e) => {
     e.preventDefault();
     if (targetInput) {
-        pasteWithFeedback(targetInput, showNotification, translations, appStore.get('currentLang') || 'en');
+        void pasteWithFeedback(targetInput, showNotification, translations, appStore.get('currentLang') || 'en');
     }
 });
 

@@ -109,7 +109,7 @@ export function initModeSelector() {
                     }
                 }
 
-                import('./proxies.js').then(m => m.renderProxies());
+                import('./proxies.js').then(m => m.refreshProxies()).catch(() => {});
                 if (inherited) {
                     showNotification(t.configSuccess, 'success');
                 } else {

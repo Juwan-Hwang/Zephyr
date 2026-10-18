@@ -16,6 +16,16 @@
 import { getProxies, getConfig, SPECIAL_PROXY_NAMES } from '../api.js';
 import { getRunConfigCached } from './run-config-cache.js';
 
+/**
+ * Deterministic code-unit ordering (same order as the default `Array#sort`).
+ * @param {string} a
+ * @param {string} b
+ */
+function compareCodeUnits(a, b) {
+    if (a < b) return -1;
+    return a > b ? 1 : 0;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────
 
 // SPECIAL_PROXY_NAMES imported from api.js (single source of truth)
@@ -118,7 +128,7 @@ function buildOrderedGroups(runConfig, proxyMap) {
 
     // 3. Last resort: all group nodes from proxyMap, sorted by name
     if (all.length === 0) {
-        for (const name of Object.keys(proxyMap).sort()) {
+        for (const name of Object.keys(proxyMap).sort(compareCodeUnits)) {
             if (SPECIAL_PROXY_NAMES.has(name.toUpperCase())) continue;
             const p = proxyMap[name];
             if (!isGroup(p)) continue;
@@ -285,7 +295,7 @@ function determineUiPrimaryGroup(ctx) {
     // 6. Keyword scoring across all writable groups
     const allWritable = Object.keys(proxyMap)
         .filter(name => isWritableGroupType(proxyMap[name]?.type) && !proxyMap[name]?.hidden)
-        .sort();
+        .sort(compareCodeUnits);
     if (allWritable.length > 0) {
         let bestName = allWritable[0];
         let bestScore = keywordScore(bestName);

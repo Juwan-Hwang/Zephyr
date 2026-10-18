@@ -169,7 +169,7 @@ function invoke(cmd, args) {
  *
  * @param {string} event
  * @param {(event: { payload: any, event: string, id: number }) => void} handler
- * @returns {Promise<() => void>}
+ * @returns {Promise<() => Promise<void>>}
  */
 async function listen(event, handler) {
   if (!_t?.transformCallback) throw new Error('[API] Tauri IPC not available');
