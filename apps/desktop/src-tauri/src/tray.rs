@@ -407,11 +407,28 @@ fn toggle_sys_proxy(app: &AppHandle) {
         // Get the managed proxy endpoint (port *and* scheme) from core state
         // (not the API port)
         let state = app.state::<MihomoState>();
-        let endpoint = state
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .last_proxy_endpoint();
+        let (endpoint, has_profile) = {
+            let lock = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                lock.last_proxy_endpoint(),
+                lock.last_config_path().is_some(),
+            )
+        };
+        if !has_profile {
+            // The core runs the built-in direct-only config: there is no subscription to
+            // route through. Refuse here too, since in close-to-tray mode no WebView is
+            // around to undo the switch.
+            emit_error!(
+                System,
+                SYS_PROXY_TOGGLE_FAILED,
+                "System proxy not enabled: add a subscription first"
+            );
+            rebuild_tray_menu_from_state(app);
+            return;
+        }
         let Some(proxy_endpoint) = endpoint else {
             // No managed proxy endpoint: enabling the OS proxy would point it at
             // an unmanaged default port with nothing listening.
