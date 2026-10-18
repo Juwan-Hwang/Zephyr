@@ -1,0 +1,51 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, beforeEach } from 'vitest';
+import { createFocusTrap, getInputModality, focusRespectingModality } from './focus-trap.js';
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)));
+
+function dialog() {
+    document.body.innerHTML = '<button id="opener">open</button><div id="dlg"><button id="first">A</button><input id="field" type="text"><button id="last">B</button></div>';
+    return /** @type {HTMLElement} */ (document.getElementById('dlg'));
+}
+
+describe('focus trap modality', () => {
+    beforeEach(() => { document.body.innerHTML = ''; });
+
+    it('mouse-opened dialog focuses its first button quietly', async () => {
+        const dlg = dialog();
+        document.getElementById('opener')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        expect(getInputModality()).toBe('pointer');
+        const trap = createFocusTrap(dlg);
+        trap.activate();
+        await nextFrame();
+        const first = document.getElementById('first');
+        expect(document.activeElement).toBe(first);
+        expect(first?.classList.contains('focus-quiet')).toBe(true);
+
+        // A key press brings the ring back.
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+        expect(first?.classList.contains('focus-quiet')).toBe(false);
+        expect(getInputModality()).toBe('keyboard');
+        trap.destroy();
+    });
+
+    it('keyboard-opened dialog keeps the focus ring', async () => {
+        const dlg = dialog();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        const trap = createFocusTrap(dlg);
+        trap.activate();
+        await nextFrame();
+        expect(document.getElementById('first')?.classList.contains('focus-quiet')).toBe(false);
+        trap.destroy();
+    });
+
+    it('text fields are never quieted', () => {
+        dialog();
+        document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        const field = /** @type {HTMLElement} */ (document.getElementById('field'));
+        focusRespectingModality(field);
+        expect(document.activeElement).toBe(field);
+        expect(field.classList.contains('focus-quiet')).toBe(false);
+    });
+});

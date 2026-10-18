@@ -17,6 +17,17 @@ use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt as _;
 
+/// A rule file name is taken by the file itself or by its disabled copy
+/// (`<name>.disabled`), which the library lists under the same name.
+fn name_taken(path: &std::path::Path) -> bool {
+    if path.exists() {
+        return true;
+    }
+    let mut parked = path.as_os_str().to_owned();
+    parked.push(".disabled");
+    std::path::Path::new(&parked).exists()
+}
+
 #[tauri::command]
 pub fn open_prism_folder(state: State<PrismState>) -> Result<String, String> {
     let prism_dir = state.get_prism_workspace()?;
@@ -58,12 +69,17 @@ pub fn rule_list(state: State<PrismState>) -> Result<Vec<RuleFileInfo>, String> 
     let mut files = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".prism.yaml") {
+        // Disabled files are renamed to `<name>.prism.yaml.disabled`; list them
+        // under their base name so the library can show and re-enable them.
+        let enabled = !name.ends_with(".disabled");
+        let base = name.strip_suffix(".disabled").unwrap_or(&name).to_owned();
+        if base.ends_with(".prism.yaml") {
             let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
             files.push(RuleFileInfo {
-                filename: name,
+                filename: base,
                 rule_count: count_rules(&content),
                 source: detect_source(&content).to_owned(),
+                enabled,
             });
         }
     }
@@ -88,7 +104,7 @@ pub fn rule_create(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
-    if path.exists() {
+    if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
     write_file_secure(&path, &content)?;
@@ -148,7 +164,7 @@ pub fn rule_rename(
     if !old_path.exists() {
         return Err(format!("Rule file '{safe_old}' not found"));
     }
-    if new_path.exists() && safe_old != safe_new {
+    if name_taken(&new_path) && safe_old != safe_new {
         return Err(format!("Rule file '{safe_new}' already exists"));
     }
 
@@ -253,7 +269,7 @@ pub fn rule_extract_from_profile(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
-    if path.exists() {
+    if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
     write_file_secure(&path, &content)?;
@@ -270,6 +286,11 @@ pub fn rule_import_text(
     text: String,
     name: String,
 ) -> Result<String, String> {
+    // Same cap as importing a file by path: the text may be a whole picked file.
+    let max = crate::core_manager::core::MAX_RESPONSE_SIZE;
+    if text.len() > max {
+        return Err(format!("File exceeds maximum size of {max} bytes"));
+    }
     let content = normalize_to_prism_yaml(&text);
     if content.is_empty() {
         return Err("No valid rules found in input text".to_owned());
@@ -285,7 +306,7 @@ pub fn rule_import_text(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
-    if path.exists() {
+    if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
     write_file_secure(&path, &safe_content)?;
@@ -351,7 +372,7 @@ pub fn rule_import_file(
 
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
-    if target.exists() {
+    if name_taken(&target) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
     write_file_secure(&target, &safe_content)?;
@@ -393,7 +414,7 @@ pub async fn rule_import_url(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
-    if target.exists() {
+    if name_taken(&target) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
     write_file_secure(&target, &safe_content)?;
