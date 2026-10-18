@@ -32,6 +32,8 @@
  * @property {(item: HTMLElement) => void} [onActivate] Called when Enter/Space is pressed on an item.
  * @property {boolean} [vertical=true]  If true, use ArrowUp/ArrowDown; else ArrowLeft/ArrowRight.
  * @property {Function} [getTextContent] Custom function to extract searchable text from an item.
+ * @property {() => number} [getColumns] Grid mode: number of columns per row. ArrowLeft/Right move
+ *   one item, ArrowUp/Down move one row.
  */
 
 const TYPEAHEAD_TIMEOUT = 500;
@@ -61,6 +63,7 @@ export function createRovingTabindex(container, options = {}) {
         onActivate,
         vertical = true,
         getTextContent,
+        getColumns,
     } = options;
 
     let currentIndex = -1;
@@ -138,6 +141,16 @@ export function createRovingTabindex(container, options = {}) {
     function onKeyDown(e) {
         const items = getItems();
         if (items.length === 0) return;
+
+        if (getColumns && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+            e.preventDefault();
+            const cols = Math.max(1, getColumns());
+            const rtl = getComputedStyle(container).direction === 'rtl';
+            const step = { ArrowLeft: rtl ? 1 : -1, ArrowRight: rtl ? -1 : 1, ArrowUp: -cols, ArrowDown: cols }[e.key] || 0;
+            const from = Math.max(0, currentIndex);
+            focusItem(Math.max(0, Math.min(items.length - 1, from + step)));
+            return;
+        }
 
         const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
         const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
@@ -255,13 +268,23 @@ export function createRovingTabindex(container, options = {}) {
     if (initialItems.length > 0) currentIndex = 0;
     knownItems = initialItems;
 
+    /** Keep the index in step when focus lands on an item some other way (Tab, script). */
+    function onFocusIn(/** @type {FocusEvent} */ e) {
+        const target = e.target instanceof HTMLElement ? e.target.closest(itemSelector) : null;
+        if (!(target instanceof HTMLElement)) return;
+        const idx = getItems().indexOf(target);
+        if (idx !== -1) currentIndex = idx;
+    }
+
     container.addEventListener('keydown', onKeyDown);
     container.addEventListener('click', onClick);
+    container.addEventListener('focusin', onFocusIn);
     setupObserver();
 
     function destroy() {
         container.removeEventListener('keydown', onKeyDown);
         container.removeEventListener('click', onClick);
+        container.removeEventListener('focusin', onFocusIn);
         observer?.disconnect();
         observer = null;
         if (typeaheadTimer !== null) {

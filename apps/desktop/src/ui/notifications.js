@@ -265,13 +265,20 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
     });
 }
 
+/** Bumped by each confirm dialog that opens (see the close handler). */
+let _confirmGeneration = 0;
+
 /**
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
+ * @param {{ danger?: boolean, confirmText?: string }} [options]
+ *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
+ *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '' } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -292,13 +299,29 @@ export function showConfirmModal(title, message = '') {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = danger
+                ? 'text-sm leading-6 text-[var(--text-secondary)]'
+                : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }
 
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
+
         // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+        // Destructive dialogs start on Cancel so a stray Enter never deletes.
+        const trap = createFocusTrap(bg, {
+            onEscape: () => close(false),
+            ...(danger ? { initialFocus: cancelBtn } : {}),
+        });
+        // The shared modal may be reopened before this one's close animation ends;
+        // only the latest dialog may touch it then.
+        const generation = ++_confirmGeneration;
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
@@ -306,7 +329,14 @@ export function showConfirmModal(title, message = '') {
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
-                bg.classList.add('hidden');
+                if (generation === _confirmGeneration) {
+                    bg.classList.add('hidden');
+                    if (danger) {
+                        confirmBtn.classList.remove('btn-danger');
+                        confirmBtn.classList.add('btn-primary');
+                    }
+                    if (confirmText) confirmBtn.textContent = originalConfirmLabel;
+                }
                 resolve(val);
             }, 300);
         };
