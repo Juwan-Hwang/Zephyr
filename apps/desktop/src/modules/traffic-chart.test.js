@@ -80,6 +80,8 @@ function sample(up, down, upText = '1 KB/s', downText = '2 KB/s') {
 
 const curvePoints = () => ctx.ops.filter(o => o.op === 'quadraticCurveTo');
 const moveTos = () => ctx.ops.filter(o => o.op === 'moveTo');
+/** The straight segment into the newest sample (fill-closing lineTos run along y = HEIGHT). */
+const curveEnds = () => ctx.ops.filter(o => o.op === 'lineTo' && o.args[1] !== HEIGHT);
 
 let hidden;
 
@@ -149,19 +151,22 @@ describe('chart rendering', () => {
         ctx.strokes.length = 0;
     });
 
-    it('draws nothing until at least two samples exist', () => {
-        chart.updateTrafficData(sample(100, 100));
+    it('starts as a flat baseline across the whole width before real data arrives', () => {
+        chart.updateTrafficData(sample(0, 0));
         flushRaf();
-        expect(ctx.clearRect).toHaveBeenCalled();
-        expect(ctx.stroke).not.toHaveBeenCalled();
+        const [downStart, upStart] = moveTos();
+        // The window is pre-filled with zeros, so both series start at the left edge on the baseline.
+        expect(downStart.args).toEqual([0, 110]);
+        expect(upStart.args).toEqual([0, 110]);
+        expect(curvePoints()).toHaveLength(2 * 59);
     });
 
-    it('draws download and upload series once two samples exist', () => {
+    it('draws download and upload series', () => {
         chart.updateTrafficData(sample(100, 100));
         chart.updateTrafficData(sample(200, 200));
         flushRaf();
-        expect(ctx.stroke).toHaveBeenCalledTimes(2);
         expect(moveTos()).toHaveLength(2);
+        expect(ctx.fill).toHaveBeenCalled();
     });
 
     it('coalesces several updates into one frame', () => {
@@ -178,24 +183,21 @@ describe('chart rendering', () => {
 
     it('scales the Y axis with a 10 KB/s floor for small values', () => {
         chart.updateTrafficData(sample(0, 1024));
-        chart.updateTrafficData(sample(0, 0));
         flushRaf();
-        // download series starts at 1024 B/s → 10% of the 10 KB/s floor
-        // y = h - (v / max) * (h - 20) - 10 = 120 - 0.1 * 100 - 10 = 100
-        // Two samples: the newest sits on the right edge, the first one gap to its left.
-        const [downStart, upStart] = moveTos();
-        expect(downStart.args).toEqual([WIDTH - 10, 100]);
+        // newest download sample 1024 B/s → 10% of the 10 KB/s floor
+        // y = h - (v / max) * (h - 20) - 10 = 120 - 0.1 * 100 - 10 = 100, on the right edge
+        const [downEnd, upEnd] = curveEnds();
+        expect(downEnd.args).toEqual([WIDTH, 100]);
         // zero sits on the baseline (10px padding)
-        expect(upStart.args).toEqual([WIDTH - 10, 110]);
+        expect(upEnd.args).toEqual([WIDTH, 110]);
     });
 
     it('scales the Y axis to the peak value when above the floor', () => {
         chart.updateTrafficData(sample(50000, 100000));
-        chart.updateTrafficData(sample(0, 0));
         flushRaf();
-        const [downStart, upStart] = moveTos();
-        expect(downStart.args).toEqual([WIDTH - 10, 10]); // peak touches the top padding
-        expect(upStart.args).toEqual([WIDTH - 10, 60]); // half the peak → middle
+        const [downEnd, upEnd] = curveEnds();
+        expect(downEnd.args).toEqual([WIDTH, 10]); // peak touches the top padding
+        expect(upEnd.args).toEqual([WIDTH, 60]); // half the peak → middle
     });
 
     it('treats NaN samples as zero instead of breaking the chart', () => {
@@ -203,21 +205,20 @@ describe('chart rendering', () => {
         chart.updateTrafficData(sample(2048, 2048));
         chart.updateTrafficData(sample(4096, 4096));
         flushRaf();
-        expect(ctx.stroke).toHaveBeenCalledTimes(2);
+        expect(moveTos()).toHaveLength(2);
         for (const { args } of ctx.ops.filter(o => o.op !== 'clearRect' && o.op !== 'beginPath')) {
             for (const v of args) expect(Number.isFinite(v)).toBe(true);
         }
     });
 
-    it('clearTrafficHistory empties the chart', () => {
-        chart.updateTrafficData(sample(1, 1));
-        chart.updateTrafficData(sample(2, 2));
+    it('clearTrafficHistory resets the chart to a flat baseline', () => {
+        chart.updateTrafficData(sample(50000, 100000));
         flushRaf();
-        ctx.stroke.mockClear();
+        ctx.ops.length = 0;
         chart.clearTrafficHistory();
         flushRaf();
         expect(ctx.clearRect).toHaveBeenCalled();
-        expect(ctx.stroke).not.toHaveBeenCalled();
+        for (const end of curveEnds()) expect(end.args[1]).toBe(110);
     });
 });
 

@@ -260,6 +260,22 @@ describe('node quick-switch wheel', () => {
         expect(api.switchProxy).toHaveBeenCalledWith('Proxy', 'JP 01');
     });
 
+    it('restores the old node name and reports an error when the switch fails or throws', async () => {
+        const api = await import('../api.js');
+        const notes = await import('./notifications.js');
+        for (const fail of [() => Promise.resolve(false), () => Promise.reject(new Error('boom'))]) {
+            /** @type {any} */ (api.switchProxy).mockImplementationOnce(fail);
+            await hoverOpen();
+            const jp = /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === 'JP 01'));
+            jp.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(document.getElementById('current-node-name')?.textContent).toBe('HK 02');
+        }
+        expect(notes.showNotification).toHaveBeenCalledWith('notifSwitchFailed', 'error');
+        expect(notes.showNotification).toHaveBeenCalledTimes(2);
+    });
+
     it('is keyboard operable: Enter opens on the current node, arrows move, Escape returns focus', async () => {
         dom.trigger.focus();
         dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));

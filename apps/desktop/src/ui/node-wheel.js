@@ -14,6 +14,7 @@ import { appStore } from './state.js';
 import { invalidateProxiesCache, getSettingsCached } from './cache.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { resetObservedGroup } from './observed-group.js';
+import { getDelayColorClass } from '../utils/format.js';
 
 /** Hover dwell before the wheel opens (ms). */
 export const WHEEL_HOVER_OPEN_DELAY = 300;
@@ -111,6 +112,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
         return;
     }
     const nameEl = trigger.querySelector('#current-node-name');
+    const previousName = nameEl ? nameEl.textContent : '';
     if (nameEl) {
         nameEl.textContent = t('switching');
     }
@@ -123,7 +125,12 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
 
     // Use uiGroupName from appStore for accurate group targeting
     const targetGroup = appStore.get('uiGroupName') || mainGroup;
-    const success = await switchProxy(targetGroup, name);
+    let success = false;
+    try {
+        success = await switchProxy(targetGroup, name);
+    } catch (error) {
+        nodeWheelLogger.error('Node switch failed:', error);
+    }
     if (success) {
         invalidateProxiesCache();
         // The observed exit node described the old selection; drop it so the pill
@@ -163,10 +170,14 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
         // A GLOBAL selection is routed through the backend and reported as a
         // rejected request instead of a thrown error, so surface it here rather
         // than failing silently on a user-initiated switch.
-        // A newer switch owns the display now; reporting this one as failed
-        // would describe the wrong selection.
         nodeWheelLogger.warn('Node switch was not applied');
+        // A newer switch owns the display now; restoring the pill or reporting
+        // this one as failed would describe the wrong selection.
         if (_switchSessionCounter === currentSession) {
+            // Never leave the pill on "switching…": put the old name back, then resync.
+            if (nameEl && nameEl.textContent === t('switching')) {
+                nameEl.textContent = previousName;
+            }
             showNotification(t('notifSwitchFailed'), 'error');
         }
         syncCoreConfig().catch(() => {});
@@ -276,15 +287,12 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             item.setAttribute('role', 'option');
             item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
             item.tabIndex = -1;
-            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-micro)] w-full h-full
+            item.className = `px-4 py-1.5 rounded-full border flex items-center justify-start gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-micro)] w-full h-full
                 ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-[var(--text-primary)]' : 'bg-[var(--zephyr-bg-input)] border-[var(--zephyr-border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)]'}`;
 
+            // Neutral dot (it used to mean "supports UDP" in green, which read as "healthy").
             const dot = document.createElement('div');
-            let dotColor;
-            if (isSelected) dotColor = 'bg-accent animate-pulse';
-            else if (proxy?.udp) dotColor = 'bg-success';
-            else dotColor = 'bg-[var(--text-tertiary)]';
-            dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
+            dot.className = `w-1.5 h-1.5 shrink-0 rounded-full ${isSelected ? 'bg-accent animate-pulse' : 'bg-[var(--text-tertiary)]'}`;
 
             const nameSpan = document.createElement('span');
             nameSpan.className = "text-xs font-semibold tracking-wide truncate max-w-[180px]";
@@ -292,6 +300,18 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
 
             item.appendChild(dot);
             item.appendChild(nameSpan);
+
+            // Last measured latency, in the same colours as elsewhere on the page.
+            // A group (Auto, Fallback) has no history of its own: show the node it is on.
+            const own = proxy?.history;
+            const history = Array.isArray(own) && own.length > 0 ? own : proxyData.proxies[proxy?.now]?.history;
+            const delay = Array.isArray(history) && history.length > 0 ? history[history.length - 1].delay : null;
+            if (typeof delay === 'number' && delay > 0 && delay < 999999) {
+                const delaySpan = document.createElement('span');
+                delaySpan.className = `wheel-delay ms-auto ps-2 text-[11px] font-medium tabular-nums shrink-0 ${getDelayColorClass(delay)}`;
+                delaySpan.textContent = `${delay} ms`;
+                item.appendChild(delaySpan);
+            }
 
             item.addEventListener('mouseenter', () => {
                 hoveredItem = wrapper;
@@ -409,6 +429,10 @@ export function initNodeWheel() {
     const container = document.getElementById('node-wheel-container');
 
     if (!trigger || !dropdown || !list || !container || !scrollContainer) return;
+
+    // The static placeholder in index.html is English; localise it until the first node arrives.
+    const nameEl = trigger.querySelector('#current-node-name');
+    if (nameEl && nameEl.textContent === 'Loading...') nameEl.textContent = t('loading');
 
     if (!list.id) list.id = 'node-wheel-list';
     list.setAttribute('role', 'listbox');
