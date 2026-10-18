@@ -620,57 +620,9 @@ fn resolve_profile_path(paths: &AppPaths, config_path: &str) -> Result<(String, 
         return Ok((fallback_name, fallback));
     }
 
-    // No config file found - create a default one
-    let default_path = paths.profiles_dir.join("config.yaml");
-    create_default_config(&default_path)?;
-    Ok(("config.yaml".to_owned(), default_path))
-}
-
-/// Create a minimal default configuration file for first-time users
-fn create_default_config(path: &Path) -> Result<(), String> {
-    let default_config = r"# Zephyr Default Configuration
-# This is a minimal config file created for first-time setup.
-# Please add your proxy nodes or import a subscription.
-
-port: 7890
-socks-port: 7891
-mixed-port: 7892
-allow-lan: false
-bind-address: '*'
-mode: rule
-log-level: info
-ipv6: false
-external-controller: 127.0.0.1:9090
-
-dns:
-  enable: true
-  ipv6: false
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.0/16
-  fake-ip-filter:
-    - '*.lan'
-    - localhost.ptlogin2.qq.com
-  nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-  fallback:
-    - tls://8.8.8.8:853
-    - tls://1.1.1.1:853
-
-proxies: []
-
-proxy-groups: []
-
-rules:
-  - GEOIP,CN,DIRECT
-  - MATCH,DIRECT
-";
-
-    write_file_secure(path, default_config)
-        .map_err(|e| format!("Failed to create default config: {e}"))?;
-
-    emit_info!(Config, CONFIG_CREATED_DEFAULT, "Created default config");
-    Ok(())
+    // No profile yet: the start runs the built-in minimal config and the app
+    // shows its no-subscription state, so nothing is written here.
+    Ok((config_file_name, resolved_path))
 }
 
 /// Contents of the profile a start with `config_path` runs: the bare file name
@@ -1004,6 +956,16 @@ pub fn prepare_runtime_config(
     Some((result, config_port, proxy_endpoint))
 }
 
+/// The built-in minimal config, with the user's global preferences (ports, TUN, ...) applied
+/// the same way as for a profile.
+fn build_minimal_runtime_config_with_prefs(
+    secret: &str,
+    prefs: Option<&GlobalPreferences>,
+) -> (String, u16, Option<ProxyEndpoint>) {
+    let base = build_minimal_runtime_config(secret);
+    prepare_runtime_config(&base.0, secret, prefs).unwrap_or(base)
+}
+
 fn build_minimal_runtime_config(secret: &str) -> (String, u16, Option<ProxyEndpoint>) {
     (
         format!(
@@ -1024,24 +986,26 @@ fn select_runtime_config(
     secret: &str,
     prefs: Option<&GlobalPreferences>,
 ) -> Result<(Option<String>, String, u16, Option<ProxyEndpoint>), String> {
-    let preferred_content = super::crypto::read_profile_file(preferred_path)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
-    if let Some((final_config, config_port, proxy_port)) =
-        prepare_runtime_config(&preferred_content, secret, prefs)
-    {
-        return Ok((
-            Some(preferred_name.to_owned()),
-            final_config,
-            config_port,
-            proxy_port,
-        ));
+    if preferred_path.exists() {
+        let preferred_content = super::crypto::read_profile_file(preferred_path)
+            .map_err(|e| format!("Failed to read config: {e}"))?;
+        if let Some((final_config, config_port, proxy_port)) =
+            prepare_runtime_config(&preferred_content, secret, prefs)
+        {
+            return Ok((
+                Some(preferred_name.to_owned()),
+                final_config,
+                config_port,
+                proxy_port,
+            ));
+        }
     }
 
     let mut fallback_profiles = Vec::new();
     let entries = if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
         entries
     } else {
-        let (config, api_port, proxy_port) = build_minimal_runtime_config(secret);
+        let (config, api_port, proxy_port) = build_minimal_runtime_config_with_prefs(secret, prefs);
         return Ok((None, config, api_port, proxy_port));
     };
 
@@ -1086,12 +1050,15 @@ fn select_runtime_config(
         }
     }
 
-    emit_warn!(
-        Config,
-        CONFIG_PARSE_FAILED,
-        "Requested config {preferred_name} is not valid, falling back to minimal config"
-    );
-    let (final_config, api_port, proxy_port) = build_minimal_runtime_config(secret);
+    if preferred_path.exists() {
+        emit_warn!(
+            Config,
+            CONFIG_PARSE_FAILED,
+            "Requested config {preferred_name} is not valid, falling back to minimal config"
+        );
+    }
+    let (final_config, api_port, proxy_port) =
+        build_minimal_runtime_config_with_prefs(secret, prefs);
     Ok((None, final_config, api_port, proxy_port))
 }
 
@@ -1214,11 +1181,14 @@ fn attach_log_file(cmd: &mut Command, log_path: &Path) {
 /// Spawn mihomo, detect immediate exit, and retry on cache lock issues.
 ///
 /// Returns the successfully spawned `Child` process and the log file path, or an error string.
+/// `attempted_log` always holds the log of the latest attempt, so a failed start
+/// can still point the log viewer at the output of the run that failed.
 async fn spawn_with_cache_retry(
     exe_path: &Path,
     safe_custom_args: &[String],
     core_dir: &Path,
     app_data_dir: &Path,
+    attempted_log: &mut Option<PathBuf>,
 ) -> Result<(std::process::Child, PathBuf), String> {
     let spawn_cmd = |log_suffix: &str| -> (Command, PathBuf) {
         let mut cmd = Command::new(exe_path);
@@ -1329,6 +1299,7 @@ async fn spawn_with_cache_retry(
 
     let (mut cmd, log_path) = spawn_cmd("run");
     attach_log_file(&mut cmd, &log_path);
+    *attempted_log = Some(log_path.clone());
 
     let mut child = cmd
         .spawn()
@@ -1357,6 +1328,9 @@ async fn spawn_with_cache_retry(
 
                 match retry_cmd.spawn() {
                     Ok(mut retry_child) => {
+                        // Only a retry that actually started has a log worth showing;
+                        // otherwise the first attempt's log (with the lock error) stays.
+                        *attempted_log = Some(retry_log_path.clone());
                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                         match retry_child.try_wait() {
                             Ok(None) => {
@@ -1531,6 +1505,35 @@ fn store_child_in_core_state(
     Ok(())
 }
 
+/// Write `contents` to `path`, replacing it, readable by the owner only (like the core logs).
+fn write_private_file(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())
+}
+
+/// Point `read_core_log` at the log of a start that failed, so the error card's
+/// log view shows that run instead of an older one (or nothing at all).
+fn remember_failed_log(state: &MihomoState, log_path: Option<&Path>) {
+    let Some(path) = log_path else { return };
+    if let Ok(mut lock) = state.0.lock() {
+        lock.set_last_log_path(Some(path.to_string_lossy().into_owned()));
+    }
+}
+
+/// Whether the running core already runs what a start with `requested` would: the same
+/// profile, or the built-in minimal config while there is still no profile to run.
+fn runs_requested_config(running: Option<&str>, requested: &str, requested_missing: bool) -> bool {
+    running.map_or(requested_missing, |current| current == requested)
+}
+
 #[allow(clippy::cognitive_complexity)]
 pub async fn start_core_inner(
     app: AppHandle,
@@ -1572,6 +1575,13 @@ pub async fn start_core_inner(
         }
     }
     let _guard = ResetGuard;
+
+    // No profile to run at all: the core runs the built-in minimal config (`last_config_path`
+    // stays None), and a repeated start must still reuse it.
+    let requested_missing = resolve_app_paths(&app)
+        .ok()
+        .and_then(|paths| resolve_profile_path(&paths, &config_path).ok())
+        .is_some_and(|(_, path)| !path.exists());
 
     #[cfg(target_os = "macos")]
     struct RunConfigRestoreGuard {
@@ -1656,9 +1666,7 @@ pub async fn start_core_inner(
             let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
             let same_root_core = lock.process().is_none()
                 && lock.started_at().is_some()
-                && lock
-                    .last_config_path()
-                    .is_some_and(|current| current == config_path);
+                && runs_requested_config(lock.last_config_path(), &config_path, requested_missing);
             let info = if same_root_core {
                 lock.last_port().map(|port| {
                     (
@@ -1707,9 +1715,8 @@ pub async fn start_core_inner(
                 // Process is dead — skip drain (no point draining a dead port)
                 None
             } else {
-                let same_config = lock
-                    .last_config_path()
-                    .is_some_and(|current| current == config_path);
+                let same_config =
+                    runs_requested_config(lock.last_config_path(), &config_path, requested_missing);
                 if same_config && !force.unwrap_or(false) {
                     if let Some(port) = lock.last_port() {
                         let active = lock.last_config_path().map(std::borrow::ToOwned::to_owned);
@@ -1861,7 +1868,14 @@ pub async fn start_core_inner(
         })
         .await
         .map_err(|e| format!("Failed to stop core: {e}"))??;
+        // The old core is stopped: forget the previous run's log, so this run's failure shows
+        // its own log (a failed preflight below writes one) instead of an older run's. With TUN
+        // active the root core keeps running, so its log stays the one to show.
+        if let Ok(mut lock) = state.0.lock() {
+            lock.set_last_log_path(None);
+        }
     }
+
     // When tun_active is true, stop_core_inner is skipped to preserve the root
     // TUN daemon across preflight. Any tracked unprivileged child is likewise
     // left running until root authorization succeeds: the privileged script
@@ -1943,6 +1957,16 @@ pub async fn start_core_inner(
             let mut err_msg = redact_error_message(raw_err.trim());
             if err_msg.is_empty() {
                 err_msg = format!("Process exited with status: {}", output.status);
+            }
+            // Keep the check's output where the error card's "View log" reads it.
+            let preflight_log = paths.core_dir.join("preflight.log");
+            let preflight_text = format!(
+                "{}\n{}",
+                redact_error_message(String::from_utf8_lossy(&output.stdout).trim()),
+                redact_error_message(String::from_utf8_lossy(&output.stderr).trim())
+            );
+            if write_private_file(&preflight_log, preflight_text.trim()).is_ok() {
+                remember_failed_log(&state, Some(&preflight_log));
             }
             emit_error!(
                 Config,
@@ -2147,6 +2171,9 @@ pub async fn start_core_inner(
                     // run config via the guard, and surface the error.
                     return Err(tun_start_error(&e));
                 }
+                // The script ran and the root core writes to the TUN log, so that is the
+                // log of this failed start.
+                remember_failed_log(&state, Some(std::path::Path::new(&get_tun_log_path())));
                 // Scope the liveness check to this app's managed core, and only
                 // to the executable-confirmed set: an unverified legacy
                 // candidate may be a foreign root core (another install), and
@@ -2327,13 +2354,22 @@ pub async fn start_core_inner(
     }
 
     // Spawn mihomo (stdout/stderr redirected to log file internally)
-    let (child, log_path) = spawn_with_cache_retry(
+    let mut attempted_log = None;
+    let spawn_result = spawn_with_cache_retry(
         &exe_path,
         &safe_custom_args,
         &paths.core_dir,
         &paths.app_data_dir,
+        &mut attempted_log,
     )
-    .await?;
+    .await;
+    let (child, log_path) = match spawn_result {
+        Ok(spawned) => spawned,
+        Err(e) => {
+            remember_failed_log(&state, attempted_log.as_deref());
+            return Err(e);
+        }
+    };
     let started_at = std::time::Instant::now();
 
     // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
@@ -2362,6 +2398,7 @@ pub async fn start_core_inner(
     // wrong core.
     if let Err(e) = authenticated_health_check(port, &resolved_secret).await {
         let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
+        remember_failed_log(&state, Some(&log_path));
         return Err(e);
     }
 
@@ -2672,12 +2709,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn missing_profile_runs_minimal_config_without_writing_one() {
+        let dir = std::env::temp_dir().join(format!("zephyr-no-profile-{}", std::process::id()));
+        let profiles_dir = dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        let paths = AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.join("core"),
+            profiles_dir,
+        };
+        let (name, path) = resolve_profile_path(&paths, "config.yaml").unwrap();
+        assert_eq!(name, "config.yaml");
+        assert!(!path.exists());
+        let (active, _, _, _) = select_runtime_config(&paths, &name, &path, "s", None).unwrap();
+        assert!(active.is_none());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_core_binary_name() {
         let name = core_binary_name();
         #[cfg(target_os = "windows")]
         assert_eq!(name, "zephyr-mihomo.exe");
         #[cfg(not(target_os = "windows"))]
         assert_eq!(name, "zephyr-mihomo");
+    }
+
+    #[test]
+    fn running_minimal_config_counts_as_requested_while_no_profile_exists() {
+        assert!(runs_requested_config(None, "config.yaml", true));
+        assert!(!runs_requested_config(None, "config.yaml", false));
+        assert!(runs_requested_config(Some("a.yaml"), "a.yaml", false));
+        assert!(!runs_requested_config(Some("a.yaml"), "b.yaml", false));
+    }
+
+    #[test]
+    fn minimal_config_takes_global_preferences() {
+        let prefs = GlobalPreferences {
+            mode: Some("global".to_owned()),
+            mixed_port: Some(7892),
+            ..Default::default()
+        };
+        let (config, _, _) = build_minimal_runtime_config_with_prefs("s", Some(&prefs));
+        assert!(config.contains("MATCH,DIRECT"));
+        assert!(config.contains("mode: global"));
+        assert!(config.contains("mixed-port: 7892"));
     }
 
     #[test]
