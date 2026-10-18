@@ -31,9 +31,9 @@ mod tests {
 
     // Import private items from prism.rs (two levels up)
     use super::super::{
-        check_input_size, count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml,
-        parse_position, read_groups, rule_create_in_dir, sanitize_filename, write_groups,
-        RuleGroup, RuleGroups, MAX_INPUT_SIZE,
+        count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml, parse_position,
+        read_groups, rule_create_in_dir, sanitize_filename, write_groups, RuleGroup, RuleGroups,
+        MAX_INPUT_SIZE,
     };
 
     // ========================================================================
