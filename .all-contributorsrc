@@ -59,6 +59,24 @@
       ]
     },
     {
+      "login": "gemini-code-assist[bot]",
+      "name": "gemini-code-assist[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/176961590?v=4",
+      "profile": "https://github.com/apps/gemini-code-assist",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "traeagent",
+      "name": "traeagent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/272135137?v=4",
+      "profile": "https://github.com/traeagent",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
       "login": "coderabbitai[bot]",
       "name": "coderabbitai[bot]",
       "avatar_url": "https://avatars.githubusercontent.com/u/136622811?v=4",
@@ -81,6 +99,15 @@
       "name": "qodo-code-review[bot]",
       "avatar_url": "https://avatars.githubusercontent.com/u/151058649?v=4",
       "profile": "https://github.com/apps/qodo-code-review",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "qodo-free-for-open-source-projects[bot]",
+      "name": "qodo-free-for-open-source-projects[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/189517486?v=4",
+      "profile": "https://github.com/apps/qodo-free-for-open-source-projects",
       "contributions": [
         "review"
       ]
@@ -131,6 +158,33 @@
       ]
     },
     {
+      "login": "cubic-dev-ai[bot]",
+      "name": "cubic-dev-ai[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/191113872?v=4",
+      "profile": "https://github.com/apps/cubic-dev-ai",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "llamapreview[bot]",
+      "name": "llamapreview[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/184758061?v=4",
+      "profile": "https://github.com/apps/llamapreview",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
+      "login": "graphite-app[bot]",
+      "name": "graphite-app[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/96075541?v=4",
+      "profile": "https://github.com/apps/graphite-app",
+      "contributions": [
+        "review"
+      ]
+    },
+    {
       "login": "sonarqubecloud[bot]",
       "name": "sonarqubecloud[bot]",
       "avatar_url": "https://avatars.githubusercontent.com/u/39514782?v=4",
@@ -153,6 +207,15 @@
       "name": "gitguardian[bot]",
       "avatar_url": "https://avatars.githubusercontent.com/u/57676739?v=4",
       "profile": "https://github.com/apps/gitguardian",
+      "contributions": [
+        "security"
+      ]
+    },
+    {
+      "login": "github-advanced-security[bot]",
+      "name": "github-advanced-security[bot]",
+      "avatar_url": "https://avatars.githubusercontent.com/u/62310815?v=4",
+      "profile": "https://github.com/apps/github-advanced-security",
       "contributions": [
         "security"
       ]
