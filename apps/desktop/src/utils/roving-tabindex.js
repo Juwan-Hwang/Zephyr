@@ -32,6 +32,10 @@
  * @property {(item: HTMLElement) => void} [onActivate] Called when Enter/Space is pressed on an item.
  * @property {boolean} [vertical=true]  If true, use ArrowUp/ArrowDown; else ArrowLeft/ArrowRight.
  * @property {Function} [getTextContent] Custom function to extract searchable text from an item.
+ * @property {() => number} [getColumns] Grid mode: number of columns per row. ArrowLeft/Right move
+ *   one item, ArrowUp/Down move one row.
+ * @property {boolean} [visualOrder] Navigate in on-screen order: items (or the container children
+ *   holding them) are sorted by their CSS `order`, falling back to DOM order.
  */
 
 const TYPEAHEAD_TIMEOUT = 500;
@@ -49,6 +53,27 @@ function isDisabled(el) {
 }
 
 /**
+ * True when a key event comes from an interactive control nested inside an
+ * option rather than from the option itself.
+ * @param {EventTarget|null} target
+ */
+function isNestedControl(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.getAttribute('role') === 'option') return false;
+    return !!target.closest('button, a[href], input, select, textarea') && !!target.closest('[role="option"]');
+}
+
+/**
+ * Only the current item's own controls stay in the Tab order, so the list is one Tab stop.
+ * @param {HTMLElement} item
+ * @param {boolean} active
+ */
+export function setItemTabStop(item, active) {
+    item.setAttribute('tabindex', active ? '0' : '-1');
+    item.querySelectorAll('button, a[href]').forEach((c) => c.setAttribute('tabindex', active ? '0' : '-1'));
+}
+
+/**
  * Create a roving tabindex controller.
  *
  * @param {HTMLElement} container
@@ -61,6 +86,8 @@ export function createRovingTabindex(container, options = {}) {
         onActivate,
         vertical = true,
         getTextContent,
+        getColumns,
+        visualOrder = false,
     } = options;
 
     let currentIndex = -1;
@@ -80,7 +107,20 @@ export function createRovingTabindex(container, options = {}) {
      * @returns {HTMLElement[]}
      */
     function getItems() {
-        return Array.from(container.querySelectorAll(itemSelector));
+        /** @type {HTMLElement[]} */
+        const items = Array.from(container.querySelectorAll(itemSelector));
+        if (!visualOrder) return items;
+        /** @param {HTMLElement} el */
+        const orderOf = (el) => {
+            let node = el;
+            while (node.parentElement && node.parentElement !== container) node = node.parentElement;
+            const own = Number.parseInt(el.style.order || node.style.order || '', 10);
+            return Number.isFinite(own) ? own : 0;
+        };
+        return items
+            .map((el, i) => ({ el, i, o: orderOf(el) }))
+            .sort((a, b) => a.o - b.o || a.i - b.i)
+            .map((v) => v.el);
     }
 
     /**
@@ -103,7 +143,7 @@ export function createRovingTabindex(container, options = {}) {
         currentIndex = clampedIndex;
 
         for (let i = 0; i < items.length; i++) {
-            items[i].setAttribute('tabindex', i === currentIndex ? '0' : '-1');
+            setItemTabStop(items[i], i === currentIndex);
         }
 
         items[currentIndex].focus();
@@ -138,6 +178,20 @@ export function createRovingTabindex(container, options = {}) {
     function onKeyDown(e) {
         const items = getItems();
         if (items.length === 0) return;
+        // CSS order can re-sort items without moving focus; start from the item that has focus.
+        const focused = e.target instanceof HTMLElement ? e.target.closest(itemSelector) : null;
+        const focusedIdx = focused instanceof HTMLElement ? items.indexOf(focused) : -1;
+        if (focusedIdx !== -1) currentIndex = focusedIdx;
+
+        if (getColumns && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+            e.preventDefault();
+            const cols = Math.max(1, getColumns());
+            const rtl = getComputedStyle(container).direction === 'rtl';
+            const step = { ArrowLeft: rtl ? 1 : -1, ArrowRight: rtl ? -1 : 1, ArrowUp: -cols, ArrowDown: cols }[e.key] || 0;
+            const from = Math.max(0, currentIndex);
+            focusItem(Math.max(0, Math.min(items.length - 1, from + step)));
+            return;
+        }
 
         const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
         const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
@@ -165,6 +219,8 @@ export function createRovingTabindex(container, options = {}) {
 
             case 'Enter':
             case ' ':
+                // A button inside an option (e.g. a card's re-test) handles its own keys.
+                if (isNestedControl(e.target)) break;
                 if (currentIndex >= 0 && currentIndex < items.length) {
                     const item = items[currentIndex];
                     e.preventDefault();
@@ -175,6 +231,7 @@ export function createRovingTabindex(container, options = {}) {
                 break;
 
             default:
+                if (isNestedControl(e.target)) break;
                 if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                     handleTypeahead(e.key);
                 }
@@ -195,7 +252,7 @@ export function createRovingTabindex(container, options = {}) {
         if (idx !== -1) {
             currentIndex = idx;
             for (let i = 0; i < items.length; i++) {
-                items[i].setAttribute('tabindex', i === idx ? '0' : '-1');
+                setItemTabStop(items[i], i === idx);
             }
         }
     }
@@ -238,7 +295,7 @@ export function createRovingTabindex(container, options = {}) {
             }
             if (currentIndex >= 0) {
                 for (let i = 0; i < items.length; i++) {
-                    items[i].setAttribute('tabindex', i === currentIndex ? '0' : '-1');
+                    setItemTabStop(items[i], i === currentIndex);
                 }
             }
         });
@@ -250,18 +307,28 @@ export function createRovingTabindex(container, options = {}) {
     // Initialize
     const initialItems = getItems();
     for (let i = 0; i < initialItems.length; i++) {
-        initialItems[i].setAttribute('tabindex', i === 0 ? '0' : '-1');
+        setItemTabStop(initialItems[i], i === 0);
     }
     if (initialItems.length > 0) currentIndex = 0;
     knownItems = initialItems;
 
+    /** Keep the index in step when focus lands on an item some other way (Tab, script). */
+    function onFocusIn(/** @type {FocusEvent} */ e) {
+        const target = e.target instanceof HTMLElement ? e.target.closest(itemSelector) : null;
+        if (!(target instanceof HTMLElement)) return;
+        const idx = getItems().indexOf(target);
+        if (idx !== -1) currentIndex = idx;
+    }
+
     container.addEventListener('keydown', onKeyDown);
     container.addEventListener('click', onClick);
+    container.addEventListener('focusin', onFocusIn);
     setupObserver();
 
     function destroy() {
         container.removeEventListener('keydown', onKeyDown);
         container.removeEventListener('click', onClick);
+        container.removeEventListener('focusin', onFocusIn);
         observer?.disconnect();
         observer = null;
         if (typeaheadTimer !== null) {
