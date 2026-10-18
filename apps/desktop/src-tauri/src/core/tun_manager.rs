@@ -1195,9 +1195,9 @@ fn run_privileged_shell_script(script: &str) -> Result<(), String> {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn shell_escape_single(value: &str) -> String {
     value
-        .replace('\'', "'\\''")
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+        .replace('\'', "'\\''")
 }
 
 /// Build the shell snippets that re-verify each managed PID inside the
