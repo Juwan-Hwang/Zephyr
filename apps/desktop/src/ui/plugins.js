@@ -1639,19 +1639,19 @@ function clearFullscreenOutput() {
  */
 function formatScriptError(error) {
     if (!error) return error;
-    
+
     // Wrapper script preamble lines:
     // - build_wrapper_script: ~22 lines
     // - write-back logic: ~16 lines (before user script starts)
     // Total offset: ~23 lines (1-indexed)
     const WRAPPER_OFFSET = 23;
-    
+
     // Replace eval_script:LINE:COL with user-friendly line numbers
     return error.replace(/eval_script:(\d+):(\d+)/g, (match, line, col) => {
         const lineNum = parseInt(line, 10);
         const colNum = parseInt(col, 10);
         const userLine = lineNum - WRAPPER_OFFSET;
-        
+
         if (userLine > 0) {
             return ((t('overrideScriptLine') ?? 'Script line @@line@@, column @@col@@')
                 .replace('@@line@@', String(userLine))
@@ -1802,4 +1802,3 @@ function initResizer() {
 // ═══════════════════════════════════════════════════════════════════════
 //  Utilities
 // ═══════════════════════════════════════════════════════════════════════
-

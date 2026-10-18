@@ -7,7 +7,7 @@ describe('i18n tests', () => {
     expect(translations.en).toBeDefined();
     expect(translations.zh).toBeDefined();
   });
-  
+
   it('should have settings translation in both languages', () => {
     expect(translations.en.settings).toBeDefined();
     expect(translations.zh.settings).toBeDefined();

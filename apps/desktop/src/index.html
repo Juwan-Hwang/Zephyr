@@ -101,7 +101,7 @@
                                 <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
                                 <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span>
                             </button>
-                        
+
                             <!-- Wheel Dropdown -->
                             <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
                                 <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
@@ -1354,7 +1354,7 @@
         <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
             <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
-            
+
             <div class="space-y-4">
                 <div>
                     <label for="dns-nameservers-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
@@ -1366,7 +1366,7 @@
                     </div>
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
                 </div>
-                
+
                 <div>
                     <label for="dns-fallbacks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
                     <div class="textarea-paste-wrapper">
@@ -1378,7 +1378,7 @@
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
                 </div>
             </div>
-            
+
             <div class="flex gap-3 justify-end mt-6">
                 <button id="dns-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
                 <button id="dns-config-save" class="btn-primary" data-i18n="confirm">Confirm</button>

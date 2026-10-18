@@ -154,7 +154,7 @@ async function showEditPanel(configInfo) {
     const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
 
     // Build dropdown menu items (escape labels for XSS safety)
-    const dropdownMenuItems = autoUpdateOptions.map(opt => 
+    const dropdownMenuItems = autoUpdateOptions.map(opt =>
         `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
     ).join('');
 
@@ -1465,18 +1465,18 @@ export function initSubscriptionSettings({
             const hasTime = lastUpdatedText !== (t3.lastUpdatedNever || 'Never');
             const expireTs = parseSubExpire(configInfo.sub_info);
             const hasExpiry = expireTs > 0;
-            
+
             if (hasUrl || hasTime || hasExpiry) {
                 const infoRow = document.createElement('div');
                 infoRow.className = 'flex items-center justify-between mt-1 gap-2';
-                
+
                 if (hasUrl) {
                     const urlLabel = document.createElement('div');
                     urlLabel.className = 'text-2xs text-[var(--text-tertiary)] truncate flex-1';
                     urlLabel.textContent = configInfo.url_display;
                     infoRow.appendChild(urlLabel);
                 }
-                
+
                 if (hasTime || hasExpiry) {
                     const metaEl = document.createElement('div');
                     metaEl.className = 'flex items-center gap-1.5 text-2xs text-[var(--text-tertiary)] shrink-0 ms-auto';
@@ -1511,7 +1511,7 @@ export function initSubscriptionSettings({
                     }
                     infoRow.appendChild(metaEl);
                 }
-                
+
                 item.appendChild(infoRow);
             }
 

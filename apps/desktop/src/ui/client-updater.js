@@ -83,5 +83,3 @@ async function showUpdateDialog(version, releaseNotes, t) {
     const title = `${t.clientUpdateAvailable || 'Update Available'}: v${version}`;
     return showUpdateNotesModal(title, releaseNotes);
 }
-
-

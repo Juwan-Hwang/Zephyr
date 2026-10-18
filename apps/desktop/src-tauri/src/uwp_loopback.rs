@@ -101,10 +101,10 @@ pub async fn exempt_uwp_apps(app: AppHandle) -> Result<String, String> {
 
         // Apply loopback exemption to all non-framework Appx packages.
         let inner_script = r#"
-Get-AppxPackage | Where-Object { 
-    $_.IsFramework -eq $false 
-} | ForEach-Object { 
-    CheckNetIsolation.exe LoopbackExempt -a -n="$($_.PackageFamilyName)" 
+Get-AppxPackage | Where-Object {
+    $_.IsFramework -eq $false
+} | ForEach-Object {
+    CheckNetIsolation.exe LoopbackExempt -a -n="$($_.PackageFamilyName)"
 }
 "#;
         let utf16: Vec<u8> = inner_script

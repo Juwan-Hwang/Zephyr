@@ -416,4 +416,3 @@ describe('applyTranslations', () => {
         expect(btnEl?.getAttribute('aria-label')).toBe('Paste');
     });
 });
-

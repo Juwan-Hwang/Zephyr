@@ -287,7 +287,7 @@ export function showConfirmModal(title, message = '') {
 
         titleEl.textContent = title;
 
-         
+
         contentArea.replaceChildren();
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {

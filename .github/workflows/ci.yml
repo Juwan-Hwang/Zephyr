@@ -32,6 +32,9 @@ jobs:
     name: Frontend (lint, typecheck, test)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the Codecov upload
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +62,16 @@ jobs:
       - name: Run frontend tests
         run: pnpm test
 
+      - name: Run frontend tests with coverage
+        run: pnpm --filter @zephyr/desktop run test:coverage
+
+      - name: Upload frontend coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: apps/desktop/coverage/lcov.info
+          flags: frontend
+          use_oidc: true
+
   # ============================================================
   # Rust (Linux)：fmt + clippy + debug 测试
   # ============================================================
@@ -66,6 +79,9 @@ jobs:
     name: Rust (ubuntu, fmt, clippy, test)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the Codecov upload
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,7 +90,7 @@ jobs:
         with:
           # Keep in sync with rust-toolchain.toml.
           toolchain: "1.96.0"
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # Commands run from the repo root, so cache the workspace-root target dir.
@@ -103,10 +119,23 @@ jobs:
         # Lint rules live in [workspace.lints] in the root Cargo.toml.
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Run Rust tests (debug)
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Run Rust tests (debug, with coverage)
+        # cargo-llvm-cov runs the same test suite under coverage
+        # instrumentation and writes an lcov report for Codecov.
         # insta defaults to INSTA_UPDATE=no on CI, so missing or outdated
         # snapshots fail the run.
-        run: cargo test --workspace --locked
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      - name: Upload Rust coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: lcov.info
+          flags: rust
+          use_oidc: true
 
   # ============================================================
   # Rust (Windows / macOS)：debug 测试

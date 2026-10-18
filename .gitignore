@@ -83,8 +83,11 @@ android/app/build/
 android/.gradle/
 ios/Sources/UniFFI/
 ios/ZephyrCore.xcframework/
+# Coverage reports (Codecov uploads these from CI; local runs stay untracked)
+coverage/
+lcov.info
+
 android/app/src/main/res/values/app_colors.xml
 android/app/src/main/res/values/app_dimens.xml
 android/app/src/main/java/com/zephyr/ui/theme/AppTokens.kt
 ios/Sources/DesignSystem/AppTokens.swift
-

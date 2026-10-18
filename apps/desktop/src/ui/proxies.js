@@ -1187,7 +1187,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     // Info icon
     const icon = document.createElement('span');
     icon.className = 'text-amber-400 text-sm flex-shrink-0';
-     
+
     icon.textContent = '\u26A0';
 
     // Explanation text — use t() for fallback chain support
@@ -1238,7 +1238,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
     // Dismiss button
     const dismiss = document.createElement('button');
     dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ms-2 flex-shrink-0';
-     
+
     dismiss.textContent = '\u00D7';
     dismiss.title = t('dismiss');
     dismiss.onclick = () => {
@@ -2131,7 +2131,7 @@ export async function renderProxies() {
     // Re-read after await: user may have switched language during fetch.
     t = /** @type {any} */ (translations)[currentLang] || {};
     if (!proxyGroupsResult) {
- 
+
     container.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
@@ -2156,7 +2156,7 @@ export async function renderProxies() {
     // If no writable group was found, show a clean empty state instead of
     // rendering actionable buttons that would fail on PUT /proxies/{group}
     if (!proxyGroupsResult.uiGroupName) {
- 
+
     container.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
@@ -2278,7 +2278,7 @@ export async function renderProxies() {
 
     // --- Full render path ---
     const fragment = buildProxyWrappers(container, proxies, data, current, uiGroupName || '');
-     
+
     container.replaceChildren();
     container.appendChild(fragment);
 
@@ -2410,7 +2410,7 @@ const isNodeInGroup = (node, group, proxyMap, visited = new Set()) => {
 const updateCapsuleDisplay = () => {
     const currentNodeEl = document.getElementById('current-node-name');
     if (!currentNodeEl) return;
-    
+
     const currentGroupName = currentNodeEl.dataset.group;
     if (!currentGroupName) return;
 
@@ -2422,7 +2422,7 @@ const updateCapsuleDisplay = () => {
         // Read latest values inside the callback to prevent stale closures
         const observedNodeName = appStore.get('observedNodeName');
         const observedGroupName = appStore.get('observedGroupName');
-        
+
         // If no observed node or group, revert to default leaf node display
         if (!observedNodeName || !observedGroupName) {
             const leafNode = resolveLeafNode(currentGroupName, proxyMap);

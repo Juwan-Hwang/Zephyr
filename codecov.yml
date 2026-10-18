@@ -1,0 +1,13 @@
+# Codecov configuration.
+# Coverage is uploaded from CI (see .github/workflows/ci.yml):
+# Rust via cargo-llvm-cov (flag: rust), frontend via Vitest (flag: frontend).
+# Statuses start as informational so coverage is visible on PRs without
+# blocking merges; they can be tightened once the numbers are trusted.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true

@@ -43,7 +43,7 @@ jobs:
             arch: "arm64"
 
     runs-on: ${{ matrix.platform }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,16 +98,16 @@ jobs:
               exit 1
               ;;
           esac
-          
+
           # Download mihomo with SHA256 verification
           echo "Downloading mihomo: $MIHOMO_ASSET"
           mkdir -p apps/desktop/src-tauri/bundled
           curl -fsSL --proto =https -o "mihomo.${MIHOMO_EXT}" "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/${MIHOMO_ASSET}"
-          
+
           ASSET_DIGEST=$(curl -fsSL --proto =https --config "$CURL_CFG" \
             "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
             | jq -r ".assets[] | select(.name == \"${MIHOMO_ASSET}\") | .digest // empty")
-          
+
           if [ -n "$ASSET_DIGEST" ]; then
             EXPECTED_HASH=$(echo "$ASSET_DIGEST" | sed 's/sha256://')
             ACTUAL_HASH=$(sha256sum "mihomo.${MIHOMO_EXT}" | awk '{print $1}')
@@ -122,7 +122,7 @@ jobs:
             echo "ERROR: SHA256 digest not available from GitHub API"
             exit 1
           fi
-          
+
           # Extract mihomo
           case "$MIHOMO_EXT" in
             zip)
@@ -136,14 +136,14 @@ jobs:
               mv mihomo apps/desktop/src-tauri/bundled/zephyr-mihomo
               ;;
           esac
-          
+
           # Download geo data with SHA256 verification
           echo "Downloading geo data..."
           for file in geoip.dat geosite.dat Country.mmdb; do
             curl -fsSL --proto =https -o "apps/desktop/src-tauri/bundled/${file}" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}"
             curl -fsSL --proto =https -o "apps/desktop/src-tauri/bundled/${file}.sha256sum" "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/${file}.sha256sum"
           done
-          
+
           for file in geoip.dat geosite.dat Country.mmdb; do
             EXPECTED=$(cat "apps/desktop/src-tauri/bundled/${file}.sha256sum" | cut -d' ' -f1)
             ACTUAL=$(sha256sum "apps/desktop/src-tauri/bundled/${file}" | cut -d' ' -f1)
@@ -154,7 +154,7 @@ jobs:
             echo "✓ SHA256 verified for $file"
             rm "apps/desktop/src-tauri/bundled/${file}.sha256sum"
           done
-          
+
           echo "Bundled resources ready."
           SCRIPT_EOF
           chmod +x /tmp/download-bundled.sh

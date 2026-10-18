@@ -1,10 +1,10 @@
 // @ts-check
 /**
  * Connections Module
- * 
+ *
  * Manages the active/closed connections view with real-time polling,
  * delta-based cumulative tracking, tab switching, search, and bulk actions.
- * 
+ *
  * Dependencies (imported):
  *   - getConnections, closeConnection, closeAllConnections from ./api.js
  *   - showNotification from ../ui/notifications.js
@@ -12,7 +12,7 @@
  *   - escapeHtml from ../utils/sanitize.js
  *   - formatBytes, formatSpeed from ../utils/format.js
  *   - connectionsLogger from ../utils/logger.js
- * 
+ *
  * Exports:
  *   - initConnectionsPage()
  *   - destroyConnectionsPage()
@@ -1456,5 +1456,3 @@ function resolveConnStats(conn, mode) {
         ulTotal: formatBytes(acc.ul),
     };
 }
-
-
