@@ -58,12 +58,17 @@ pub fn rule_list(state: State<PrismState>) -> Result<Vec<RuleFileInfo>, String> 
     let mut files = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".prism.yaml") {
+        // Disabled files are renamed to `<name>.prism.yaml.disabled`; list them
+        // under their base name so the library can show and re-enable them.
+        let enabled = !name.ends_with(".disabled");
+        let base = name.strip_suffix(".disabled").unwrap_or(&name).to_owned();
+        if base.ends_with(".prism.yaml") {
             let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
             files.push(RuleFileInfo {
-                filename: name,
+                filename: base,
                 rule_count: count_rules(&content),
                 source: detect_source(&content).to_owned(),
+                enabled,
             });
         }
     }
@@ -270,6 +275,11 @@ pub fn rule_import_text(
     text: String,
     name: String,
 ) -> Result<String, String> {
+    // Same cap as importing a file by path: the text may be a whole picked file.
+    let max = crate::core_manager::core::MAX_RESPONSE_SIZE;
+    if text.len() > max {
+        return Err(format!("File exceeds maximum size of {max} bytes"));
+    }
     let content = normalize_to_prism_yaml(&text);
     if content.is_empty() {
         return Err("No valid rules found in input text".to_owned());
