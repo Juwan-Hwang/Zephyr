@@ -366,6 +366,70 @@ This project uses [MIT License](LICENSE).
 - [Style Dictionary](https://styledictionary.com/) — Design Token system
 - [clash-prism-*](https://github.com/Juwan-Hwang/Clash-Prism-Engine) — the rules
 
+## Contributors
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<!-- Avatar-only layout, maintained by hand from .all-contributorsrc -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Juwan-Hwang" title="Juwan"><img src="https://avatars.githubusercontent.com/u/180104975?v=4&s=100" width="80" height="80" alt="Juwan-Hwang"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MatrixNeoKozak" title="KozakLordOfMatrix"><img src="https://avatars.githubusercontent.com/u/261791209?v=4&s=100" width="80" height="80" alt="MatrixNeoKozak"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/meta-muse-ai" title="meta-muse-ai[bot]"><img src="https://avatars.githubusercontent.com/in/5063603?v=4&s=100" width="80" height="80" alt="meta-muse-ai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/google-ai-studio" title="google-ai-studio[bot]"><img src="https://avatars.githubusercontent.com/in/1690828?v=4&s=100" width="80" height="80" alt="google-ai-studio[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/codebuddy-connector" title="codebuddy-connector[bot]"><img src="https://avatars.githubusercontent.com/in/2695408?v=4&s=100" width="80" height="80" alt="codebuddy-connector[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/gemini-code-assist" title="gemini-code-assist[bot]"><img src="https://avatars.githubusercontent.com/in/956858?v=4&s=100" width="80" height="80" alt="gemini-code-assist[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/traeagent" title="traeagent"><img src="https://avatars.githubusercontent.com/u/272135137?v=4&s=100" width="80" height="80" alt="traeagent"/></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/coderabbitai" title="coderabbitai[bot]"><img src="https://avatars.githubusercontent.com/in/347564?v=4&s=100" width="80" height="80" alt="coderabbitai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/sourcery-ai" title="sourcery-ai[bot]"><img src="https://avatars.githubusercontent.com/in/48477?v=4&s=100" width="80" height="80" alt="sourcery-ai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/qodo-code-review" title="qodo-code-review[bot]"><img src="https://avatars.githubusercontent.com/in/484649?v=4&s=100" width="80" height="80" alt="qodo-code-review[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/qodo-free-for-open-source-projects" title="qodo-free-for-open-source-projects[bot]"><img src="https://avatars.githubusercontent.com/in/1068000?v=4&s=100" width="80" height="80" alt="qodo-free-for-open-source-projects[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/chatgpt-codex-connector" title="chatgpt-codex-connector[bot]"><img src="https://avatars.githubusercontent.com/in/1144995?v=4&s=100" width="80" height="80" alt="chatgpt-codex-connector[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/copilot-pull-request-reviewer" title="Copilot"><img src="https://avatars.githubusercontent.com/in/946600?v=4&s=100" width="80" height="80" alt="Copilot"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/greptile-apps" title="greptile-apps[bot]"><img src="https://avatars.githubusercontent.com/in/867647?v=4&s=100" width="80" height="80" alt="greptile-apps[bot]"/></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/gitar-bot" title="gitar-bot[bot]"><img src="https://avatars.githubusercontent.com/in/827041?v=4&s=100" width="80" height="80" alt="gitar-bot[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/mergestorm-vortex" title="mergestorm-vortex[bot]"><img src="https://avatars.githubusercontent.com/in/3924858?v=4&s=100" width="80" height="80" alt="mergestorm-vortex[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/cubic-dev-ai" title="cubic-dev-ai[bot]"><img src="https://avatars.githubusercontent.com/in/1082092?v=4&s=100" width="80" height="80" alt="cubic-dev-ai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/llamapreview" title="llamapreview[bot]"><img src="https://avatars.githubusercontent.com/in/1023541?v=4&s=100" width="80" height="80" alt="llamapreview[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/graphite-app" title="graphite-app[bot]"><img src="https://avatars.githubusercontent.com/in/158384?v=4&s=100" width="80" height="80" alt="graphite-app[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/sonarqubecloud" title="sonarqubecloud[bot]"><img src="https://avatars.githubusercontent.com/in/12526?v=4&s=100" width="80" height="80" alt="sonarqubecloud[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/snyk" title="snyk[bot]"><img src="https://avatars.githubusercontent.com/in/23347?v=4&s=100" width="80" height="80" alt="snyk[bot]"/></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/gitguardian" title="gitguardian[bot]"><img src="https://avatars.githubusercontent.com/in/46505?v=4&s=100" width="80" height="80" alt="gitguardian[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/github-advanced-security" title="github-advanced-security[bot]"><img src="https://avatars.githubusercontent.com/in/57789?v=4&s=100" width="80" height="80" alt="github-advanced-security[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/pre-commit-ci" title="pre-commit-ci[bot]"><img src="https://avatars.githubusercontent.com/in/68672?v=4&s=100" width="80" height="80" alt="pre-commit-ci[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/codecov" title="codecov[bot]"><img src="https://avatars.githubusercontent.com/in/254?v=4&s=100" width="80" height="80" alt="codecov[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/dependabot" title="dependabot[bot]"><img src="https://avatars.githubusercontent.com/in/29110?v=4&s=100" width="80" height="80" alt="dependabot[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/imgbot" title="imgbot[bot]"><img src="https://avatars.githubusercontent.com/in/4706?v=4&s=100" width="80" height="80" alt="imgbot[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/allcontributors" title="all-contributors[bot]"><img src="https://avatars.githubusercontent.com/u/649578?v=4&s=100" width="80" height="80" alt="all-contributors[bot]"/></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/google-integrations" title="google-integrations[bot]"><img src="https://avatars.githubusercontent.com/in/1153133?v=4&s=100" width="80" height="80" alt="google-integrations[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/fossa-integration" title="fossa-integration[bot]"><img src="https://avatars.githubusercontent.com/in/1014311?v=4&s=100" width="80" height="80" alt="fossa-integration[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/qoderai" title="qoderai[bot]"><img src="https://avatars.githubusercontent.com/in/1396158?v=4&s=100" width="80" height="80" alt="qoderai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/tencent-buddy-agent" title="tencent-buddy-agent[bot]"><img src="https://avatars.githubusercontent.com/in/3780970?v=4&s=100" width="80" height="80" alt="tencent-buddy-agent[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/opencode-console" title="opencode-console[bot]"><img src="https://avatars.githubusercontent.com/in/1734192?v=4&s=100" width="80" height="80" alt="opencode-console[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/trae-ai" title="trae-ai[bot]"><img src="https://avatars.githubusercontent.com/in/1095633?v=4&s=100" width="80" height="80" alt="trae-ai[bot]"/></a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/google-labs-jules" title="google-labs-jules[bot]"><img src="https://avatars.githubusercontent.com/in/842251?v=4&s=100" width="80" height="80" alt="google-labs-jules[bot]"/></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apps/copilot-swe-agent" title="copilot-swe-agent[bot]"><img src="https://avatars.githubusercontent.com/in/1143301?v=4&s=100" width="80" height="80" alt="copilot-swe-agent[bot]"/></a></td>
+    </tr>
+  </tbody>
+</table>
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
+
 ---
 
 **Conjured by Juwan**
