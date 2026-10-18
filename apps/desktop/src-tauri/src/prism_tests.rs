@@ -33,7 +33,7 @@ mod tests {
     use super::super::{
         check_input_size, count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml,
         parse_position, read_groups, rule_create_in_dir, sanitize_filename, write_groups,
-        MAX_INPUT_SIZE, RuleGroup, RuleGroups,
+        RuleGroup, RuleGroups, MAX_INPUT_SIZE,
     };
 
     // ========================================================================
@@ -1206,10 +1206,7 @@ rules:
     // ========================================================================
 
     mod rule_create_tests {
-        use super::{
-            check_input_size, ensure_prism_ext, fs, rule_create_in_dir, sanitize_filename,
-            MAX_INPUT_SIZE,
-        };
+        use super::{fs, rule_create_in_dir, MAX_INPUT_SIZE};
         use std::path::PathBuf;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1290,7 +1287,10 @@ rules:
             let content = "rules:\n  - DOMAIN,test.com,DIRECT\n";
 
             let res = rule_create_in_dir(&dir, traversal_name, content);
-            assert!(res.is_ok(), "path traversal input should be sanitized to safe filename");
+            assert!(
+                res.is_ok(),
+                "path traversal input should be sanitized to safe filename"
+            );
             let filename = res.expect("expected sanitized filename");
             assert_eq!(filename, "....etcpasswd_rule.prism.yaml");
             assert!(dir.join(&filename).exists());
