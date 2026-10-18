@@ -269,9 +269,14 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
+ * @param {{ danger?: boolean, confirmText?: string, points?: { tone: 'danger' | 'success', label: string, text: string }[] }} [options]
+ *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
+ *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
+ *   points: dotted lines under the message, a bold label then its text (what changes / what stays).
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '', points = [] } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -292,13 +297,37 @@ export function showConfirmModal(title, message = '') {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = danger
+                ? 'text-sm leading-6 text-[var(--text-secondary)]'
+                : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }
+        if (points.length) {
+            const list = document.createElement('ul');
+            list.className = 'confirm-points';
+            for (const point of points) {
+                const li = document.createElement('li');
+                li.className = `confirm-point is-${point.tone}`;
+                const label = document.createElement('strong');
+                label.textContent = point.label;
+                li.append(label, document.createTextNode(point.text));
+                list.appendChild(li);
+            }
+            contentArea.appendChild(list);
+        }
+
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger');
+            container.classList.add('is-danger');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
 
         // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+        // Destructive dialogs start on Cancel so a stray Enter never deletes.
+        const trap = createFocusTrap(bg, { onEscape: () => close(false), ...(danger ? { initialFocus: cancelBtn } : {}) });
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
@@ -307,6 +336,12 @@ export function showConfirmModal(title, message = '') {
             trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
+                if (danger) {
+                    confirmBtn.classList.remove('btn-danger');
+                    confirmBtn.classList.add('btn-primary');
+                    container.classList.remove('is-danger');
+                }
+                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
