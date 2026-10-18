@@ -3452,15 +3452,18 @@ mod tests {
                     if req.contains("Authorization: Bearer test_secret-x") {
                         let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
                         let _ =
-                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes())
+                                .await;
                     } else if req.contains("Authorization: Bearer test_secret") {
                         let resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
                         let _ =
-                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes())
+                                .await;
                     } else {
                         let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
                         let _ =
-                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes()).await;
+                            tokio::io::AsyncWriteExt::write_all(&mut stream, resp.as_bytes())
+                                .await;
                     }
                 }
             }

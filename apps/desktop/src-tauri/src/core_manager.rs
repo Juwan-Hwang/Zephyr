@@ -92,13 +92,12 @@ mod tests {
     #[test]
     fn test_core_manager_mihomo_state_initialization() {
         let state = MihomoState(std::sync::Mutex::new(CoreData::new()));
-        {
-            let lock = state.0.lock().unwrap();
-            assert!(lock.process().is_none());
-            assert!(lock.last_secret().is_empty());
-            assert!(lock.last_config_path().is_none());
-            assert!(lock.last_port().is_none());
-            assert!(lock.started_at().is_none());
-        }
+        let lock = state.0.lock().unwrap();
+        assert!(lock.process().is_none());
+        assert!(lock.last_secret().is_empty());
+        assert!(lock.last_config_path().is_none());
+        assert!(lock.last_port().is_none());
+        assert!(lock.started_at().is_none());
+        drop(lock);
     }
 }
