@@ -385,9 +385,10 @@ function resetConfirmButton(btn) {
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} [message]
- * @param {{ danger?: boolean, confirmText?: string }} [options]
+ * @param {{ danger?: boolean, confirmText?: string, points?: { tone: 'danger' | 'success', label: string, text: string }[] }} [options]
  *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
  *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
+ *   points: dotted lines under the message, a bold label then its text (what changes / what stays).
  * @returns {Promise<boolean>}
  */
 export function showConfirmModal(title, message = '', options = {}) {
@@ -407,11 +408,11 @@ export function showConfirmModal(title, message = '', options = {}) {
 /**
  * @param {string} title
  * @param {string} [message]
- * @param {{ danger?: boolean, confirmText?: string }} [options]
+ * @param {{ danger?: boolean, confirmText?: string, points?: { tone: 'danger' | 'success', label: string, text: string }[] }} [options]
  * @returns {Promise<boolean>}
  */
 function openConfirmModal(title, message = '', options = {}) {
-    const { danger = false, confirmText = '' } = options || {};
+    const { danger = false, confirmText = '', points = [] } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -438,13 +439,28 @@ function openConfirmModal(title, message = '', options = {}) {
             msgDiv.textContent = messageStr;
             contentArea.appendChild(msgDiv);
         }
+        if (points.length) {
+            const list = document.createElement('ul');
+            list.className = 'confirm-points';
+            for (const point of points) {
+                const li = document.createElement('li');
+                li.className = `confirm-point is-${point.tone}`;
+                const label = document.createElement('strong');
+                label.textContent = point.label;
+                li.append(label, document.createTextNode(point.text));
+                list.appendChild(li);
+            }
+            contentArea.appendChild(list);
+        }
 
         // A previous dialog may still be closing and not have restored the shared
         // button yet: start from its default look and label every time.
         resetConfirmButton(confirmBtn);
+        container.classList.remove('is-danger');
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
             confirmBtn.classList.add('btn-danger', 'is-solid');
+            container.classList.add('is-danger');
         }
         if (confirmText) confirmBtn.textContent = confirmText;
 
@@ -470,6 +486,7 @@ function openConfirmModal(title, message = '', options = {}) {
                 if (generation === _confirmGeneration) {
                     bg.classList.add('hidden');
                     resetConfirmButton(confirmBtn);
+                    container.classList.remove('is-danger');
                 }
                 resolve(val);
             }, 300);
