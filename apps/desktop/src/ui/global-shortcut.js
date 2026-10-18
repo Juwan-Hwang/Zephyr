@@ -134,9 +134,7 @@ function _removeShortcut(/** @type {string} */ action) {
     const shortcuts = loadShortcuts();
     shortcuts[action] = '';
     localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
-    try {
-        invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action }).catch(() => {});
-    } catch { /* ignore */ }
+    invoke(COMMANDS.SHORTCUTS.UNREGISTER_SHORTCUT, { action }).catch(() => {});
 }
 
 function getTranslations(/** @type {string} */ lang) {

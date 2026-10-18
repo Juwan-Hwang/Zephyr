@@ -19,7 +19,7 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-            getCurrentWindow().close();
+            void getCurrentWindow().close();
         });
     }
 
@@ -56,7 +56,7 @@ export function initWindowControls() {
     const scheduleSync = () => {
         if (disposed) return;
         if (syncTimer !== null) clearTimeout(syncTimer);
-        syncTimer = setTimeout(() => { syncTimer = null; syncMaximized(); }, 120);
+        syncTimer = setTimeout(() => { syncTimer = null; void syncMaximized(); }, 120);
     };
     // Register cleanup immediately so teardown during async listen still works.
     registerCleanup(() => {
@@ -68,10 +68,10 @@ export function initWindowControls() {
     // and listen() resolving.
     listen('tauri://resize', scheduleSync).then((unlisten) => {
         if (disposed) { Promise.resolve(unlisten()).catch(() => {}); return; }
-        syncMaximized();
+        void syncMaximized();
         registerCleanup(() => { Promise.resolve(unlisten()).catch(() => {}); });
     }).catch(() => {
         // Non-Tauri environment or listener failed — still try initial sync.
-        syncMaximized();
+        void syncMaximized();
     });
 }

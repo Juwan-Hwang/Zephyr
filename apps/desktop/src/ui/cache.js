@@ -138,7 +138,7 @@ function getCached(key, fetcher) {
 
     // Cache miss or fully expired — fetch fresh data
     const pending = inFlight.get(key);
-    if (pending) return pending;
+    if (pending !== undefined) return pending;
 
     // Identity Guard: snapshot current entry reference so we can detect
     // if invalidateXxxCache() replaced it while the fetch was in-flight.

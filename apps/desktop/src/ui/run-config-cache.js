@@ -56,7 +56,7 @@ export async function getRunConfigCached({ force = false } = {}) {
     }
 
     // Coalesce: if a request is already in-flight, reuse it
-    if (_pending) return _pending;
+    if (_pending !== null) return _pending;
 
     // Capture current generation to detect stale responses
     const gen = _generation;

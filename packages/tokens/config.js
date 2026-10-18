@@ -679,7 +679,7 @@ StyleDictionary.registerFormat({
       const objName = `App${compName.charAt(0).toUpperCase() + compName.slice(1)}`;
       const propLines = props.map(p => {
         if (p.raw) return `    // ${p.name}: ${p.raw}`;
-        return `    public static let ${p.name} = ${typeof p.value === 'number' ? p.value : p.value}`;
+        return `    public static let ${p.name} = ${p.value}`;
       }).join('\n');
       return `public enum ${objName} {\n${propLines}\n}`;
     }).join('\n\n');

@@ -499,7 +499,7 @@ async function initApp() {
   const tUI = performance.now();
 
   initNavigation({
-    onProxies: () => { renderProxies(); },
+    onProxies: () => { void renderProxies(); },
     onAdvanced: () => { import('./ui/advanced.js').then(m => m.renderAdvancedSettings?.()).catch(() => {}); },
     onHome: () => { refreshSysProxyStatus().catch(() => {}); },
     onConsole: () => { activateConsole(); refreshSysProxyStatus().catch(() => {}); },
@@ -515,9 +515,9 @@ async function initApp() {
   });
   registerCleanup(initNavTooltips());
   initChart();
-  initTrayEventListeners();
+  void initTrayEventListeners();
   await initProxyToggle();
-  initDnsRewriteToggle();
+  void initDnsRewriteToggle();
   initModeSelector();
   initTunToggle();
   initProxyControls();
@@ -536,13 +536,13 @@ async function initApp() {
 
   // 7b. Initialize deep link and global shortcut listeners
   initDeepLink().then((unlisten) => {
-    registerCleanup(() => { unlisten(); });
+    registerCleanup(unlisten);
   }).catch((err) => {
     apiLogger.warn('Failed to init deep link listener', err);
   });
 
   initGlobalShortcut().then((unlisten) => {
-    registerCleanup(() => { unlisten(); });
+    registerCleanup(unlisten);
   }).catch((err) => {
     apiLogger.warn('Failed to init global shortcut listener', err);
   });
@@ -708,7 +708,7 @@ async function initApp() {
   // needed, which Tauri does not emit natively for hide/show).
   const HEARTBEAT_INTERVAL_MS = 15_000;
   const sendHeartbeat = () => invoke(COMMANDS.HEARTBEAT).catch(() => {});
-  sendHeartbeat();
+  void sendHeartbeat();
   const _heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
   // Send an immediate heartbeat when the window gains focus. This ensures
   // that after showing a previously hidden window, the backend receives a
