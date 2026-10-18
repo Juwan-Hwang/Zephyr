@@ -322,7 +322,7 @@ async function showEditPanel(configInfo) {
         e.preventDefault();
         const editUrlInput = /** @type {HTMLInputElement | null} */ (modal.querySelector('#edit-url'));
         if (editUrlInput) {
-            pasteWithFeedback(editUrlInput, showNotification, translations, appStore.get('currentLang') || 'en');
+            void pasteWithFeedback(editUrlInput, showNotification, translations, appStore.get('currentLang') || 'en');
         }
     });
 
@@ -491,7 +491,7 @@ export function initSubscriptionSettings({
                 /** @type {any} */
                 const t3 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(t3.notifSubSuccess, 'success');
-                renderConfigs();
+                void renderConfigs();
             } catch (err) {
                 const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                 /** @type {any} */
@@ -558,7 +558,7 @@ export function initSubscriptionSettings({
                     await postRestartRecovery(currentConfig);
                 }
 
-                renderConfigs();
+                void renderConfigs();
 
                 if (failCount === 0) {
                     showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
@@ -782,7 +782,7 @@ export function initSubscriptionSettings({
         editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             removeContextMenu();
-            showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval, user_agent: configInfo.user_agent });
+            void showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval, user_agent: configInfo.user_agent });
         });
         menuScroll.appendChild(editItem);
 
@@ -1315,7 +1315,7 @@ export function initSubscriptionSettings({
                     await invoke(COMMANDS.DELETE_CONFIG, { name });
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
-                    renderConfigs();
+                    void renderConfigs();
                 } catch (err) {
                     const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                     showNotification(`${t.notifDeleteFailed}: ${error}`, 'error');
@@ -1351,7 +1351,7 @@ export function initSubscriptionSettings({
                             await postRestartRecovery(configInfo.name);
                         }
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
-                        renderConfigs();
+                        void renderConfigs();
                     } catch (err) {
                         const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                         showNotification(`${t.notifSubFailed}: ${error}`, 'error');
@@ -1390,7 +1390,7 @@ export function initSubscriptionSettings({
 
             // Right-click context menu for rule library integration
             item.addEventListener('contextmenu', (e) => {
-                showSubscriptionContextMenu(e, configInfo);
+                void showSubscriptionContextMenu(e, configInfo);
             });
 
             row.appendChild(left);
@@ -1512,7 +1512,7 @@ export function initSubscriptionSettings({
     }
 
     // Initial render
-    renderConfigs();
+    void renderConfigs();
 
     // Auto-refresh when config changes (e.g. subscription switch from console).
     // Skip the expensive re-render when the settings list is not visible,

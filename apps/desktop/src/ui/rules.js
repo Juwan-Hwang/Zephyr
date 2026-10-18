@@ -98,7 +98,7 @@ export async function initRulesPage() {
 
             const newRule = type === 'MATCH' ? `${type},${policy}` : `${type},${value},${policy}`;
             currentConfigRules.unshift(newRule);
-            renderRulesList();
+            void renderRulesList();
             updateSaveRulesBtnVisibility();
 
             form.classList.add('hidden');
@@ -113,7 +113,7 @@ export async function initRulesPage() {
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
                 const target = /** @type {HTMLInputElement} */ (e.target);
-                renderRulesList(target.value);
+                void renderRulesList(target.value);
             });
         }
     }
@@ -129,7 +129,7 @@ async function loadRules() {
         if (!activeConfig) {
             currentConfigRules = [];
             originalConfigRules = [];
-            renderRulesList();
+            void renderRulesList();
             return;
         }
         const { content } = activeConfig;
@@ -142,7 +142,7 @@ async function loadRules() {
         const _loadedConfig = jsyaml.load(content);
         currentConfigRules = (/** @type {any} */ (_loadedConfig)).rules || [];
         originalConfigRules = [...currentConfigRules];
-        renderRulesList();
+        void renderRulesList();
         updateSaveRulesBtnVisibility();
     } catch (err) {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesLoadFailed, 'error');
@@ -231,7 +231,7 @@ async function renderRulesList(searchQuery = '') {
             if (index > 0) {
                 const movedRule = currentConfigRules.splice(index, 1)[0];
                 currentConfigRules.unshift(movedRule);
-                renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
+                void renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
                 updateSaveRulesBtnVisibility();
             }
         });
@@ -241,7 +241,7 @@ async function renderRulesList(searchQuery = '') {
             if (index < currentConfigRules.length - 1) {
                 const movedRule = currentConfigRules.splice(index, 1)[0];
                 currentConfigRules.push(movedRule);
-                renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
+                void renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
                 updateSaveRulesBtnVisibility();
             }
         });
@@ -249,7 +249,7 @@ async function renderRulesList(searchQuery = '') {
         (/** @type {HTMLElement} */ (item.querySelector('.btn-delete-rule')))?.addEventListener('click', (e) => {
             e.stopPropagation();
             currentConfigRules.splice(index, 1);
-            renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
+            void renderRulesList((/** @type {HTMLInputElement} */ (document.getElementById('rules-search-input')))?.value || '');
             updateSaveRulesBtnVisibility();
         });
 
@@ -271,7 +271,7 @@ async function importSRRules() {
     try {
         const newRules = await fetchAndConvertSRRules(url);
         currentConfigRules = [...newRules, ...currentConfigRules];
-        renderRulesList();
+        void renderRulesList();
         updateSaveRulesBtnVisibility();
         showNotification(/** @type {any} */ (translations)[currentLang].notifSRImportSuccess, 'success');
         input.value = '';
