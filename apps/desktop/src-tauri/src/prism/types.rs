@@ -16,6 +16,9 @@ pub struct RuleFileInfo {
     pub filename: String,
     pub rule_count: usize,
     pub source: String,
+    /// `false` when the file is parked as `<name>.prism.yaml.disabled`
+    /// (see `prism_toggle_group`); `filename` is still the base name.
+    pub enabled: bool,
 }
 
 #[derive(Serialize, Deserialize)]

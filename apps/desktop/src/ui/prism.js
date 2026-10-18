@@ -320,7 +320,8 @@ export async function insertRule(rule, position, groupId) {
  *  @param {string} [groupId] - Required when position is "after_group"
  */
 export async function insertRuleStr(ruleStr, position, groupId) {
-    return invoke(COMMANDS.PRISM.INSERT_RULE_STR, { ruleStr, position, groupId: groupId ?? null });
+    // The command's parameter is `rule_text` (camelCase `ruleText` on the wire).
+    return invoke(COMMANDS.PRISM.INSERT_RULE_STR, { ruleText: ruleStr, position, groupId: groupId ?? null });
 }
 
 /** Toggle a rule group enabled/disabled. */
