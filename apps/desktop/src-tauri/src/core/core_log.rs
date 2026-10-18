@@ -36,14 +36,21 @@ fn read_log_file(
 
     const MAX_LINE_LENGTH: usize = 64 * 1024; // 64 KB per line
 
+    // Read raw bytes: an offset can land inside a multi-byte character, and the
+    // core may log non-UTF-8 text, neither of which should fail the whole read.
+    let mut buf = Vec::new();
     for _ in 0..capped_max_lines {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 bytes_read += n as u64;
-                if line.len() > MAX_LINE_LENGTH {
-                    line.truncate(MAX_LINE_LENGTH);
+                let truncated = buf.len() > MAX_LINE_LENGTH;
+                if truncated {
+                    buf.truncate(MAX_LINE_LENGTH);
+                }
+                let mut line = String::from_utf8_lossy(&buf).into_owned();
+                if truncated {
                     line.push_str("... [truncated]");
                 }
                 lines.push(line);
@@ -66,6 +73,15 @@ fn read_log_file(
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn test_offset_inside_multibyte_char() {
+        let file = create_temp_log_file("节点一\nsecond\n");
+        // Byte 1 is inside the first three-byte character.
+        let result = read_log_file(file.path(), 1, 10).unwrap();
+        assert_eq!(result.lines.len(), 2);
+        assert_eq!(result.lines[1], "second\n");
+    }
 
     fn create_temp_log_file(content: &str) -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();

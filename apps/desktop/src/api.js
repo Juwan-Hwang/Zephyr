@@ -43,13 +43,15 @@ export class ApiError extends Error {
    * @param {number}  [opts.status]    - HTTP 状态码（若有）
    * @param {string}  [opts.endpoint]  - 请求的 API 路径
    * @param {Error}   [opts.cause]     - 原始异常
+   * @param {string}  [opts.body]      - 非 2xx 响应的正文（截断，若可读）
    */
-  constructor(message, { status, endpoint, cause } = {}) {
+  constructor(message, { status, endpoint, cause, body } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status ?? null;
     this.endpoint = endpoint ?? null;
     this.cause = cause ?? null;
+    this.body = body ?? null;
   }
 }
 
@@ -96,9 +98,13 @@ async function apiFetch(endpoint, init = {}) {
     });
 
     if (!res.ok) {
+      /** @type {string|undefined} */
+      let body;
+      try { body = (await res.text()).slice(0, 2000); } catch { /* unreadable body */ }
       throw new ApiError(`HTTP ${res.status}: ${res.statusText}`, {
         status: res.status,
         endpoint,
+        body,
       });
     }
 
@@ -560,13 +566,15 @@ export async function getProxiesMerged(existingData) {
 }
 
 /**
- * 切换代理组中的选中节点
+ * 切换代理组中的选中节点，并带回这一次被拒绝的原因
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
- * @returns {Promise<boolean>} 是否成功
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError }>} reason is
+ *   the backend's rejection for this request (null when it succeeded or gave none);
+ *   error is the HTTP refusal itself when the core answered non-2xx
  * @throws {ApiError}
  */
-export async function switchProxy(group, name) {
+export async function switchProxyResult(group, name) {
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
@@ -575,22 +583,44 @@ export async function switchProxy(group, name) {
     // "Global" keep the direct HTTP PUT.
     if (group === 'GLOBAL') {
       await invoke(COMMANDS.SWITCH_GLOBAL_NODE, { name });
-      return true;
+      return { ok: true, reason: null };
     }
-    const res = await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
+    await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
       method: 'PUT',
       body: JSON.stringify({ name }),
     });
-    return res.ok;
+    return { ok: true, reason: null };
   } catch (err) {
-    if (err instanceof ApiError) throw err;
+    if (err instanceof ApiError) {
+      // A refused switch is a non-2xx answer with the cause in the body
+      // ({"message": "..."}); network failures (no status) still throw.
+      if (err.status == null) throw err;
+      const text = String(err.body || '').trim();
+      /** @type {string|null} */
+      let reason = null;
+      try { reason = String(JSON.parse(text)?.message || '').trim() || null; } catch { reason = text || null; }
+      return { ok: false, reason: (reason || err.message).slice(0, 300), error: err };
+    }
     // The backend rejects with a plain Error carrying the real reason (e.g.
     // "Subscription update in progress, please try again", "GLOBAL proxy group
-    // no longer contains node '<name>'"). Callers only see the boolean, so keep
-    // the reason in the log instead of dropping it.
+    // no longer contains node '<name>'").
     apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
-    return false;
+    return { ok: false, reason: err };
   }
+}
+
+/**
+ * 切换代理组中的选中节点
+ * @param {string} group - 代理组名称
+ * @param {string} name  - 目标节点名称
+ * @returns {Promise<boolean>} 是否成功
+ * @throws {ApiError}
+ */
+export async function switchProxy(group, name) {
+  const result = await switchProxyResult(group, name);
+  // Callers of this form expect an HTTP refusal to reject, as before.
+  if (result.error) throw result.error;
+  return result.ok;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -842,7 +872,7 @@ export async function restartCore(configPath, customArgs = []) {
   setWsSecret(coreResult.secret);
   setCoreReachable(true);
   clearProviderCache();
-  Bus.emit(Events.CORE_RESTARTED);
+  Bus.emit(Events.CORE_RESTARTED, { activeConfig: coreResult.active_config });
   return coreResult;
 }
 

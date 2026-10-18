@@ -21,7 +21,7 @@
  * view-switch in the header — mirrors the original homepage layout.
  */
 
-import { getConnections, testProxy, switchProxy, getConfig, invoke, closeAllConnections } from '../api.js';
+import { getConnections, testProxy, switchProxyResult, getConfig, invoke, closeAllConnections } from '../api.js';
 import { appStore } from './state.js';
 
 import { Bus, Events } from './events.js';
@@ -35,7 +35,7 @@ import { createCssVarCache } from '../utils/css-var-cache.js';
 import { showNotification } from './notifications.js';
 import { t, applyTranslations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
-import { syncCoreConfig, resolveLeafNode } from './proxies.js';
+import { syncCoreConfig, resolveLeafNode, notifySwitchFailed } from './proxies.js';
 import { switchToConfig } from './lifecycle.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { saveProxySelection } from './proxy-memory.js';
@@ -43,6 +43,7 @@ import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache
 import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache.js';
 import { getSubscriptionUserAgent } from './settings.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
+import { syncNoSubscriptionState } from './no-subscription.js';
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
 const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM', my: 'my-MM', ar: 'ar-SA', ur: 'ur-PK', sw: 'sw-KE', tr: 'tr-TR', vi: 'vi-VN' };
@@ -537,12 +538,32 @@ function renderConns(/** @type {ReturnType<typeof processConnections>} */ data) 
 
 /** @type {boolean} In-flight guard for pollConnections. */
 let _pollInFlight = false;
+/** Set once /connections has reported the core's lifetime byte counters. */
+let hasCoreTotals = false;
+/** Bumped on CORE_RESTARTED so a reply from the previous core is not shown as the new one's totals. */
+let coreGeneration = 0;
+
+/** @param {unknown} value @returns {number} NaN when the core did not report it */
+const coreCounter = (value) => (value == null ? Number.NaN : Number(value));
 
 async function pollConnections() {
     if (!isActive || _pollInFlight) return;
     _pollInFlight = true;
+    const generation = coreGeneration;
     try {
         const data = await getConnections();
+        if (generation !== coreGeneration) return;
+        // Total traffic comes from the core's own counters (the same source as the
+        // minimal home), not from integrating the speed while this page is open.
+        const coreDown = coreCounter(/** @type {any} */ (data)?.downloadTotal);
+        const coreUp = coreCounter(/** @type {any} */ (data)?.uploadTotal);
+        // Tracks the latest response, so a core without counters falls back to the speed.
+        hasCoreTotals = Number.isFinite(coreDown) && Number.isFinite(coreUp);
+        if (hasCoreTotals) {
+            state.totalDown = coreDown;
+            state.totalUp = coreUp;
+            renderTotals();
+        }
         const conns = processConnections(data.connections || []);
         renderConns(conns);
     } catch (e) {
@@ -907,9 +928,9 @@ async function selectPickerNode(i) {
             showNotification(t('notifSwitchFailed'), 'error');
             return;
         }
-        const success = await switchProxy(targetGroup, n.name);
+        const { ok: success, reason } = await switchProxyResult(targetGroup, n.name);
         if (!success) {
-            showNotification(t('notifSwitchFailed'), 'error');
+            notifySwitchFailed(reason);
             return;
         }
         // Switch succeeded — post-switch steps are non-critical.
@@ -935,7 +956,7 @@ async function selectPickerNode(i) {
         }
     } catch (e) {
         consoleLogger.warn('Failed to switch node', e);
-        showNotification(t('notifSwitchFailed'), 'error');
+        notifySwitchFailed(e);
     }
     renderPicker();
     setPicker(false);
@@ -1023,8 +1044,13 @@ function renderQuota(used, total) {
     const progressEl = $('dz-sub-progress');
     if (total > 0) {
         const pct = Math.min(100, Math.max(0, (used / total) * 100));
-        if (usedValEl) usedValEl.textContent = (used / 1073741824).toFixed(1);
-        if (usedLabelEl) usedLabelEl.textContent = '/ ' + (total / 1073741824).toFixed(0) + ' GB ' + t('consoleSubUsed');
+        // "102 GB / 200 GB used": both figures carry the unit, decimals only below 10 GB.
+        const gb = (/** @type {number} */ bytes) => {
+            const v = bytes / 1073741824;
+            return `${v < 10 ? v.toFixed(1) : Math.round(v)} GB`;
+        };
+        if (usedValEl) usedValEl.textContent = gb(used);
+        if (usedLabelEl) usedLabelEl.textContent = `/ ${gb(total)} ${t('consoleSubUsed')}`;
         if (progressEl) progressEl.style.width = pct + '%';
     } else {
         if (usedValEl) usedValEl.textContent = '—';
@@ -1307,7 +1333,7 @@ const TEMPLATE = `
 
     <!-- Main grid: chart + sidebar -->
     <div class="dz-grid-main">
-        <div class="glass-card dz-card-pad" style="display:flex;flex-direction:column;">
+        <div class="glass-card dz-card-pad dz-traffic-card" id="dz-traffic-card" style="display:flex;flex-direction:column;">
             <div class="dz-card-head">
                 <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleRealtimeTraffic">Real-time Traffic</span></div>
                 <div class="dz-legend">
@@ -1320,7 +1346,6 @@ const TEMPLATE = `
                 <div><span data-i18n="consoleAvgMin">1 min avg</span><b id="dz-avg-down">0 KB/s ↓</b></div>
                 <div><span data-i18n="consoleSessionDown">Session DL</span><b id="dz-sess-down">0 B</b></div>
                 <div><span data-i18n="consoleSessionUp">Session UL</span><b id="dz-sess-up">0 B</b></div>
-                <div><span data-i18n="consoleSampleInterval">Sample interval</span><b data-i18n="consoleSampleValue">1s · 60pt window</b></div>
             </div>
         </div>
 
@@ -1480,6 +1505,9 @@ function _buildConsoleHome(container) {
 
     // Translate all data-i18n elements in the injected template
     applyTranslations();
+
+    // No subscription: the traffic card carries the Add entry (same as the minimal hero).
+    syncNoSubscriptionState();
 
     // Set aria-labels and titles (not handled by applyTranslations)
     const pickerListInit = $('dz-picker-list');
@@ -1669,7 +1697,7 @@ function _buildConsoleHome(container) {
         // sessDown/sessUp are session-scoped — only when console is active.
         const now = Date.now();
         // Lifetime totals — always accumulate, never reset
-        if (lastTrafficTsMsTotal) {
+        if (lastTrafficTsMsTotal && !hasCoreTotals) {
             const dtSec = Math.max(0, Math.min(5, (now - lastTrafficTsMsTotal) / 1000));
             state.totalDown += (prevDown + state.down) * 0.5 * dtSec;
             state.totalUp += (prevUp + state.up) * 0.5 * dtSec;
@@ -1731,6 +1759,7 @@ function _buildConsoleHome(container) {
     // (not on CONFIG_UPDATED) because CONFIG_UPDATED also fires on non-restart
     // settings changes (restore defaults, node-scroll toggle, etc.).
     const _coreRestartedUnsub = Bus.on(Events.CORE_RESTARTED, () => {
+        coreGeneration++;
         state.totalDown = 0;
         state.totalUp = 0;
         state.downPeak = 0;
@@ -1738,6 +1767,8 @@ function _buildConsoleHome(container) {
         state.sessDown = 0;
         state.sessUp = 0;
         trafficHistory.length = 0;
+        // The new core may not report counters yet: fall back to integrating the speed.
+        hasCoreTotals = false;
         lastTrafficTsMsTotal = null;
         lastTrafficTsMsSession = null;
     });

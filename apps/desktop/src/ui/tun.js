@@ -7,7 +7,7 @@
 import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
-import { showNotification } from './notifications.js';
+import { showNotification, showConfirmModal } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -213,7 +213,7 @@ export function initTunToggle() {
             appStore.set('isTunEnabled', enable);
 
             if (!committedWithLaterFailure) {
-                showNotification(t.configSuccess, 'success');
+                showNotification(enable ? t.tunEnabled : t.tunDisabled, 'success');
             }
 
             renderTunStatus(statusText, enable);
@@ -224,10 +224,14 @@ export function initTunToggle() {
 
             const isLinux = navigator.userAgent.toLowerCase().includes('linux');
             if (isLinux && enable) {
-                const grantPermission = confirm(
+                const grantPermission = await showConfirmModal(
+                    'TUN',
                     t.tunLinuxPermissionPrompt ||
                     'TUN mode requires network capabilities and polkit rules.\nGrant permission now?'
                 );
+                if (!grantPermission) {
+                    showNotification(t.tunAuthCanceled || 'Authorization canceled', 'info');
+                }
                 if (grantPermission) {
                     let permissionGranted = false;
                     try {
@@ -294,7 +298,7 @@ export function initTunToggle() {
                             appStore.set('isTunEnabled', true);
                             toggle.checked = true;
                             renderTunStatus(statusText, true);
-                            showNotification(t.configSuccess, 'success');
+                            showNotification(t.tunEnabled, 'success');
                             return;
                         } catch (retryErr) {
                             tunLogger.error('TUN retry failed after permission grant', retryErr);

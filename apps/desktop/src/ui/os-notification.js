@@ -15,13 +15,15 @@ import { apiLogger } from '../utils/logger.js';
  *
  * @param {string} title - Notification title
  * @param {string} body - Notification body text
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} whether the notification was handed to the OS
  */
 export async function sendOSNotification(title, body) {
     try {
         await invoke(COMMANDS.SEND_NOTIFICATION, { title, body });
+        return true;
     } catch (err) {
         // Silently fall back — OS notifications are non-critical
         apiLogger.warn('[OSNotification] Failed to send notification:', err);
+        return false;
     }
 }
