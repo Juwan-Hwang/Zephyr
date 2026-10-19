@@ -107,4 +107,15 @@ describe('sanitizeHtml', () => {
         const sanitized = sanitizeHtml('<a href="https://example.com">link</a>');
         expect(sanitized).not.toContain('rel=');
     });
+    it('strips javascript: URIs from xlink:href attributes in SVG <use> tags', () => {
+        const payload = '<svg><use xlink:href="javascript:alert(1)"></use></svg>';
+        const sanitized = sanitizeHtml(payload);
+        expect(sanitized).not.toContain('javascript:');
+        expect(sanitized).not.toContain('xlink:href');
+    });
+    it('preserves safe fragment identifiers in svg <use xlink:href="...">', () => {
+        const safeSvg = '<svg><use xlink:href="#icon-check"></use></svg>';
+        const sanitized = sanitizeHtml(safeSvg);
+        expect(sanitized).toContain('xlink:href="#icon-check"');
+    });
 });

@@ -297,8 +297,8 @@ export function sanitizeHtml(input, options = {}) {
                 continue;
             }
 
-            // Validate URL attributes
-            if (name === 'href' || name === 'src') {
+            // Validate URL attributes (including xlink:href for SVG elements)
+            if (name === 'href' || name === 'src' || name === 'xlink:href' || name.endsWith(':href')) {
                 const val = (attr.value || '').trim();
                 const allowData = (name === 'src' && tag === 'img' && allowDataImg);
                 if (!isSafeUrl(val, allowData)) {
