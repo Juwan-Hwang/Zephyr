@@ -17,7 +17,7 @@ import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
-import { showNotification, showModal, showConfirmModal } from '../notifications.js';
+import { showNotification, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
 import { getSettingsCached, getConfigsCached, invalidateSettingsCache, invalidateConfigsCache } from '../cache.js';
 import { Bus, Events } from '../events.js';
@@ -28,9 +28,21 @@ import { generateDomId } from '../../utils/dom-id.js';
 import { SVG_ICONS } from '../icons.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { initCustomDropdown } from '../dropdown.js';
+import { createFocusTrap } from '../../utils/focus-trap.js';
+import { showLinkDialog } from '../link-dialog.js';
+import { validateHttpUrl } from '../../utils/url-validate.js';
 import * as prism from '../prism.js';
 
 const normalizeConfigName = (/** @type {string | null | undefined} */ configName) => typeof configName === 'string' ? configName.toLowerCase().replace(/\.(ya?ml)$/i, '') : '';
+
+/**
+ * A config file name without its .yaml / .yml extension.
+ * @param {string} name
+ * @returns {string}
+ */
+function configStem(name) {
+    return String(name || '').trim().replace(/\.ya?ml$/i, '');
+}
 
 /**
  * Extract a human-readable name from a subscription URL.
@@ -75,6 +87,28 @@ function formatLastUpdated(timestamp, t) {
     if (diff < 3600) return (t.lastUpdatedMinutesAgo || '{m} min ago').replace('{m}', String(Math.floor(diff / 60)));
     if (diff < 86400) return (t.lastUpdatedHoursAgo || '{h}h ago').replace('{h}', String(Math.floor(diff / 3600)));
     return (t.lastUpdatedDaysAgo || '{d}d ago').replace('{d}', String(Math.floor(diff / 86400)));
+}
+
+/**
+ * "Today 21:40" / "Tomorrow 09:00" / a short date, for the edit panel's next-update line.
+ * @param {number} lastUpdated unix seconds @param {number} interval seconds
+ * @returns {string} empty when auto-update is off; "soon" when it never ran or is due
+ */
+export function formatNextUpdate(lastUpdated, interval) {
+    if (!interval || interval <= 0) return '';
+    const nowSec = Math.floor(Date.now() / 1000);
+    const nextSec = (lastUpdated || 0) + interval;
+    if (!lastUpdated || nextSec <= nowSec) return tr('nextUpdateSoon');
+    const next = new Date(nextSec * 1000);
+    const lang = appStore.get('currentLang') || 'en';
+    const time = next.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit', hour12: false });
+    const today = new Date();
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const sameDay = (/** @type {Date} */ a, /** @type {Date} */ b) => a.toDateString() === b.toDateString();
+    const day = sameDay(next, today) ? tr('nextUpdateToday')
+        : sameDay(next, tomorrow) ? tr('nextUpdateTomorrow')
+        : next.toLocaleDateString(lang, { month: 'short', day: 'numeric' });
+    return tr('nextUpdateAt', { time: `${day} ${time}` });
 }
 
 /**
@@ -129,6 +163,43 @@ function uaLabel(opt, t) {
 /** @type {any} */
 let activeEditUADropdown = null;
 
+/** Last update error per config name, shown on its card until an update succeeds. */
+const _subUpdateErrors = new Map();
+
+/** Pencil: edit a subscription. */
+/** Six-dot drag handle. */
+const GRIP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+const EDIT_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+
+/**
+ * Download (overwrite) one subscription and, when it is the config in use, restart the
+ * core on it. Shared by the card's update button and the edit panel after a link change.
+ * @param {string} name - config file name
+ * @param {string} [userAgent] - per-subscription UA; falls back to the global one
+ */
+async function downloadSubscription(name, userAgent = '') {
+    const ua = userAgent || getSubscriptionUserAgent();
+    /** @type {any} */
+    const invokeArgs = { name, overwrite: true };
+    if (ua) invokeArgs.userAgent = ua;
+    await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
+    invalidateConfigsCache();
+    const settings = await getSettingsCached();
+    // No last_config means the core runs the default config.yaml.
+    if (normalizeConfigName(settings?.last_config || 'config.yaml') === normalizeConfigName(name)) {
+        abortLatencyTests();
+        // The file is updated at this point: a failed restart is its own warning,
+        // not a failed download (the card would otherwise keep "Update failed").
+        try {
+            await restartCore(name, settings.custom_args || []);
+            await postRestartRecovery(name);
+        } catch (restartErr) {
+            rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
+            showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+        }
+    }
+}
+
 /**
  * Show the edit panel for a subscription.
  * @param {{name: string, url_display?: string | null, last_updated?: number | null, auto_update_interval?: number | null, user_agent?: string | null}} configInfo
@@ -151,11 +222,16 @@ async function showEditPanel(configInfo) {
         { value: '86400', label: t.autoUpdate1d || 'Every day' },
         { value: '259200', label: t.autoUpdate3d || 'Every 3 days' },
     ];
-    const currentIntervalLabel = autoUpdateOptions.find(o => o.value === String(currentInterval))?.label || (t.autoUpdateDisabled || 'Disabled');
-
-    // Build dropdown menu items (escape labels for XSS safety)
-    const dropdownMenuItems = autoUpdateOptions.map(opt =>
-        `<button type="button" data-value="${opt.value}" data-label="${escapeAttr(opt.label)}" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">${escapeHtml(opt.label)}</button>`
+    // An interval outside the four presets (older versions, imports) is shown as its own
+    // option and kept unless the user picks another one; it used to read as "Off" and be
+    // switched off on Save.
+    if (currentInterval > 0 && !autoUpdateOptions.some(o => o.value === String(currentInterval))) {
+        // Not rounded: 30 minutes must not read as "every 1 h".
+        const hours = new Intl.NumberFormat(appStore.get('currentLang') || 'en', { maximumFractionDigits: 2 }).format(currentInterval / 3600);
+        autoUpdateOptions.push({ value: String(currentInterval), label: tr('autoUpdateEveryHours', { hours }) });
+    }
+    const intervalTabs = autoUpdateOptions.map(opt =>
+        `<button type="button" role="radio" class="seg-tab flex-1 justify-center${opt.value === String(currentInterval) ? ' active' : ''}" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}">${escapeHtml(opt.label)}</button>`
     ).join('');
 
     // Determine which UA option is currently selected (prefix match for versioned values)
@@ -204,20 +280,24 @@ async function showEditPanel(configInfo) {
             </div>
             <div class="space-y-4">
                 <div class="flex flex-col gap-1.5">
-                    <label for="edit-name" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.rename || 'Name')}</label>
+                    <label for="edit-name" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.subscriptionName || 'Name')}</label>
                     <input id="edit-name" type="text" value="" class="form-control form-control-md">
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label for="edit-url" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.subscriptionUrl || 'Subscription URL')}</label>
-                    <div class="input-paste-wrapper">
+                    <div id="edit-url-current" class="edit-url-current${configInfo.url_display ? '' : ' hidden'}">
+                        <span id="edit-url-display" class="edit-url-display"></span>
+                        <button id="edit-url-change" type="button" class="btn-ghost">${escapeHtml(t.changeSubscriptionUrl || 'Change')}</button>
+                    </div>
+                    <div id="edit-url-input-wrap" class="input-paste-wrapper${configInfo.url_display ? ' hidden' : ''}">
                         <input id="edit-url" type="text" value="" placeholder="${escapeAttr(t.subscriptionUrlPlaceholder || 'Enter new URL to replace')}" class="form-control form-control-md">
                         ${renderPasteButtonHtml('edit-url-paste-btn', t.paste || 'Paste')}
                     </div>
                 </div>
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.editUA || 'Update User-Agent')}</label>
+                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.editUALabel || t.editUA || 'User-Agent')}</label>
                     <div id="edit-ua-wrap" class="relative">
-                        <button id="edit-ua-trigger" type="button" class="select-common w-full flex items-center justify-between text-xs py-1.5">
+                        <button id="edit-ua-trigger" type="button" class="select-common edit-select-tall w-full flex items-center justify-between text-xs">
                             <span id="edit-ua-label">${escapeHtml(currentUALabel)}</span>
                             <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                         </button>
@@ -230,31 +310,19 @@ async function showEditPanel(configInfo) {
                             ${UA_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value === currentUAValue ? 'selected' : ''}>${escapeHtml(uaLabel(opt, t))}</option>`).join('')}
                         </select>
                     </div>
+                    <p class="edit-field-hint">${escapeHtml(tr('editUAHint'))}</p>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                    <span id="edit-auto-update-label" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</span>
+                    <div id="edit-auto-update" class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
+                        ${intervalTabs}
+                    </div>
+                    <p id="edit-next-update" class="edit-field-hint"></p>
                 </div>
             </div>
-            <!-- Auto-update dropdown in bottom right -->
-            <div class="flex items-center justify-between pt-2">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</label>
-                    <div id="edit-auto-update-wrap" class="relative">
-                        <button id="edit-auto-update-trigger" type="button" class="select-common w-32 flex items-center justify-between text-xs py-1.5">
-                            <span id="edit-auto-update-label">${escapeHtml(currentIntervalLabel)}</span>
-                            <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
-                        </button>
-                        <div id="edit-auto-update-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30 w-40">
-                            <div class="menu-scroll">
-                                ${dropdownMenuItems}
-                            </div>
-                        </div>
-                        <select id="edit-auto-update" class="hidden">
-                            ${autoUpdateOptions.map(opt => `<option value="${opt.value}" ${opt.value === String(currentInterval) ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-                <div class="flex justify-end gap-2">
-                    <button id="edit-modal-cancel" class="btn-ghost text-xs px-4 py-2">${escapeHtml(t.cancel || 'Cancel')}</button>
-                    <button id="edit-modal-save" class="btn-accent text-xs px-4 py-2">${escapeHtml(t.save || 'Save')}</button>
-                </div>
+            <div class="flex justify-end gap-2 pt-1">
+                <button id="edit-modal-cancel" type="button" class="btn-ghost">${escapeHtml(t.cancel || 'Cancel')}</button>
+                <button id="edit-modal-save" type="button" class="btn-primary">${escapeHtml(t.save || 'Save')}</button>
             </div>
         </div>
     `;
@@ -280,15 +348,40 @@ async function showEditPanel(configInfo) {
     const editNameInput = /** @type {HTMLInputElement} */ (modal.querySelector('#edit-name'));
     if (editNameInput) editNameInput.value = currentStem;
 
-    // Initialize custom dropdowns
-    const autoUpdateDropdown = initCustomDropdown({
-        wrapId: 'edit-auto-update-wrap',
-        triggerId: 'edit-auto-update-trigger',
-        menuId: 'edit-auto-update-menu',
-        labelId: 'edit-auto-update-label',
-        selectId: 'edit-auto-update',
+    // Current link, read-only until "Change" (it used to be an empty box, as if the link were lost).
+    const urlDisplayEl = modal.querySelector('#edit-url-display');
+    if (urlDisplayEl) {
+        urlDisplayEl.textContent = configInfo.url_display || '';
+        /** @type {HTMLElement} */ (urlDisplayEl).title = configInfo.url_display || '';
+    }
+    modal.querySelector('#edit-url-change')?.addEventListener('click', () => {
+        modal.querySelector('#edit-url-current')?.classList.add('hidden');
+        modal.querySelector('#edit-url-input-wrap')?.classList.remove('hidden');
+        /** @type {HTMLInputElement|null} */ (modal.querySelector('#edit-url'))?.focus();
     });
-    activeEditDropdown = autoUpdateDropdown;
+
+    // Auto-update as a segmented control (the old dropdown was cut off by the window edge).
+    const intervalGroup = /** @type {HTMLElement|null} */ (modal.querySelector('#edit-auto-update'));
+    intervalGroup?.querySelectorAll('.seg-tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            intervalGroup.querySelectorAll('.seg-tab').forEach((b) => {
+                b.classList.toggle('active', b === tab);
+                b.setAttribute('aria-checked', b === tab ? 'true' : 'false');
+            });
+            intervalGroup.dataset.value = /** @type {HTMLElement} */ (tab).dataset.value || '0';
+            renderNextUpdate();
+        });
+    });
+    // "Next update: today 21:40" under the interval, following the selected tab.
+    function renderNextUpdate() {
+        const el = modal.querySelector('#edit-next-update');
+        if (!el) return;
+        const text = formatNextUpdate(configInfo.last_updated || 0, Number.parseInt(intervalGroup?.dataset.value || '0', 10));
+        el.textContent = text;
+        el.classList.toggle('hidden', !text);
+    }
+    renderNextUpdate();
+    activeEditDropdown = null;
 
     const uaDropdown = initCustomDropdown({
         wrapId: 'edit-ua-wrap',
@@ -302,7 +395,6 @@ async function showEditPanel(configInfo) {
     const closeModal = () => {
         if (isClosing || isSaving) return;
         isClosing = true;
-        autoUpdateDropdown?.dispose();
         uaDropdown?.dispose();
         activeEditDropdown = null;
         activeEditUADropdown = null;
@@ -311,8 +403,27 @@ async function showEditPanel(configInfo) {
             panel.style.transform = 'scale(0.95)';
         }
         modal.classList.add('opacity-0', 'pointer-events-none');
+        trap.deactivate();
         setTimeout(() => modal.remove(), ANIMATION_DURATION);
     };
+    // Esc closes, Tab stays inside, Enter in a text field saves.
+    const trap = createFocusTrap(modal, {
+        onEscape: () => closeModal(),
+        // An open User-Agent menu takes Escape itself and closes just the menu.
+        passEscape: () => {
+            const menu = document.getElementById('edit-ua-menu');
+            return !!menu && !menu.classList.contains('hidden');
+        },
+    });
+    // Closed before the first frame: never arm the trap for a removed modal.
+    requestAnimationFrame(() => { if (!isClosing) trap.activate(); });
+    modal.addEventListener('keydown', (e) => {
+        const target = /** @type {HTMLElement} */ (e.target);
+        if (e.key === 'Enter' && target instanceof HTMLInputElement && !e.isComposing) {
+            e.preventDefault();
+            document.getElementById('edit-modal-save')?.click();
+        }
+    });
     // Close handlers
     document.getElementById('edit-modal-close')?.addEventListener('click', closeModal);
     document.getElementById('edit-modal-cancel')?.addEventListener('click', closeModal);
@@ -334,10 +445,18 @@ async function showEditPanel(configInfo) {
         const editUrlEl = document.getElementById('edit-url');
         const newUrl = (editUrlEl instanceof HTMLInputElement ? editUrlEl.value : '').trim() || '';
         const editIntervalEl = document.getElementById('edit-auto-update');
-        const newInterval = parseInt((editIntervalEl instanceof HTMLSelectElement ? editIntervalEl.value : '0'), 10);
+        const newInterval = Number.parseInt(editIntervalEl?.dataset.value || String(currentInterval), 10);
 
         if (!newName) {
             showNotification(t.subscriptionNameRequired || 'Subscription name is required', 'error');
+            return;
+        }
+
+        const linkCode = newUrl ? validateHttpUrl(newUrl) : '';
+        if (linkCode) {
+            showNotification(linkCode === 'scheme'
+                ? (t.linkErrorScheme || 'Only http:// and https:// links are supported')
+                : (t.linkErrorInvalid || 'Not a valid link'), 'error');
             return;
         }
 
@@ -360,24 +479,45 @@ async function showEditPanel(configInfo) {
             // Save per-subscription UA only if the selection actually changed
             const editUAEl = document.getElementById('edit-ua-select');
             const newUAPrefix = (editUAEl instanceof HTMLSelectElement ? editUAEl.value : '');
+            // The UA the download below must use: the one saved now, when it changed.
+            let effectiveUA = configInfo.user_agent || '';
             if (newUAPrefix !== currentUAValue) {
                 const resolvedUA = await resolvePerSubUA(newUAPrefix);
                 await invoke(COMMANDS.UPDATE_SUBSCRIPTION_UA, { name: configInfo.name, userAgent: resolvedUA });
+                effectiveUA = resolvedUA || '';
             }
 
             // Rename last — if this fails, updates are still applied under the old name
-            if (newName !== currentStem) {
-                await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
+            let finalName = configInfo.name;
+            if (configStem(newName) !== currentStem) {
+                // The backend returns the file name it actually used (extension, sanitising).
+                const renamed = await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
+                finalName = typeof renamed === 'string' && renamed ? renamed : finalName;
                 invalidateSettingsCache();
+                // An "update failed" mark follows the subscription to its new name.
+                const failure = _subUpdateErrors.get(configInfo.name);
+                _subUpdateErrors.delete(configInfo.name);
+                if (failure !== undefined && finalName !== configInfo.name) _subUpdateErrors.set(finalName, failure);
             }
 
             invalidateConfigsCache();
 
             isSaving = false;
             closeModal();
-            // Show notification based on what was changed
-            if (newUrl) {
+            if (newUrl && !configInfo.url_display) {
+                // A local profile just got a link: keep its contents until the user
+                // presses Update, rather than overwriting the hand-written file now.
                 showNotification(t.notifUrlUpdated || 'Subscription URL updated', 'success');
+            } else if (newUrl) {
+                // A new link only matters once its nodes are downloaded: do that now.
+                try {
+                    await downloadSubscription(finalName, effectiveUA);
+                    _subUpdateErrors.delete(finalName);
+                    showNotification(t.notifUrlUpdatedAndDownloaded || t.notifUrlUpdated || 'Subscription URL updated', 'success');
+                } catch (dlErr) {
+                    _subUpdateErrors.set(finalName, String(dlErr instanceof Error ? dlErr.message : dlErr));
+                    showNotification(`${t.notifUrlSavedDownloadFailed || 'Link saved, but the download failed'}: ${dlErr}`, 'error');
+                }
             } else {
                 showNotification(t.notifSettingsSaved || 'Settings saved', 'success');
             }
@@ -459,14 +599,33 @@ export function initSubscriptionSettings({
         subAddBtn.onclick = async () => {
             /** @type {any} */
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            const url = /** @type {string} */ (await showModal(t.addSubscription, t.urlPlaceholder || "Subscription URL"));
-            if (!url) return;
+            const picked = await showLinkDialog({
+                title: t.addSubscription || 'Add Subscription',
+                confirmText: t.add || 'Add',
+                urlLabel: t.subscriptionUrl || 'Subscription URL',
+                withName: true,
+                nameLabel: t.subscriptionName || 'Name',
+                suggestName: extractNameFromUrl,
+            });
+            if (!picked) return;
+            const url = picked.url;
             /** @type {any} */
             const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-            showNotification(t2.notifDownloadingSub || "Downloading subscription...");
+            // A placeholder card shows the download is under way (it used to be a lone toast).
+            const pending = document.createElement('div');
+            pending.className = 'glass-card sub-card-pending p-4 flex items-center gap-3';
+            const spin = document.createElement('span');
+            spin.className = 'w-3.5 h-3.5 border-2 border-[var(--zephyr-border-default)] border-t-accent rounded-full animate-spin';
+            const pendingText = document.createElement('span');
+            pendingText.className = 'text-xs text-[var(--text-secondary)]';
+            pendingText.textContent = t2.notifDownloadingSub || 'Downloading subscription...';
+            pending.append(spin, pendingText);
+            configsList?.appendChild(pending);
+            pending.scrollIntoView({ block: 'nearest' });
+            let downloaded = false;
             try {
                 const userAgent = getSubscriptionUserAgent();
-                const name = extractNameFromUrl(url) || 'subscription';
+                const name = picked.name || extractNameFromUrl(url) || 'subscription';
                 /** @type {any} */
                 const invokeArgs = { url, name, overwrite: false };
                 if (userAgent) {
@@ -474,9 +633,24 @@ export function initSubscriptionSettings({
                 }
                 /** @type {{name: string, message?: string}} */
                 const savedConfig = await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
-                const savedConfigName = savedConfig.name;
+                downloaded = true;
+                let savedConfigName = savedConfig.name;
+                // A new download may be named from the provider's filename or rules;
+                // a name the user typed wins.
+                const wanted = (picked.name || '').trim();
+                if (wanted && configStem(savedConfigName) !== configStem(wanted)) {
+                    try {
+                        const renamed = await invoke(COMMANDS.RENAME_CONFIG, { oldName: savedConfigName, newName: wanted });
+                        if (typeof renamed === 'string' && renamed) savedConfigName = renamed;
+                    } catch (e) {
+                        rulesLogger.warn('Could not apply the chosen subscription name', e);
+                        if (!/same as the current name/i.test(String(e instanceof Error ? e.message : e))) showNotification(`${t.rename || 'Rename'}: ${String(e instanceof Error ? e.message : e)}`, 'warning');
+                    }
+                }
 
                 invalidateConfigsCache();
+                // A fresh download: no failure from an older subscription of the same name.
+                _subUpdateErrors.delete(savedConfigName);
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
@@ -491,12 +665,23 @@ export function initSubscriptionSettings({
                 /** @type {any} */
                 const t3 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(t3.notifSubSuccess, 'success');
-                void renderConfigs();
+                pending.remove();
+                await renderConfigs();
+                const fresh = configsList?.querySelector(`[data-config-name="${CSS.escape(savedConfigName)}"]`);
+                fresh?.classList.add('sub-card-flash');
+                setTimeout(() => fresh?.classList.remove('sub-card-flash'), 1200);
             } catch (err) {
+                pending.remove();
                 const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                 /** @type {any} */
                 const t4 = /** @type {any} */ (translations)[appStore.get('currentLang')];
                 showNotification(`${t4.notifSubFailed}: ${error}`, 'error');
+                // The file is already saved (a later restart failed): show it, so a retry
+                // with the same name does not collide with a card the list hides.
+                if (downloaded) {
+                    invalidateConfigsCache();
+                    await renderConfigs().catch((e) => rulesLogger.warn('Refresh after failed add', e));
+                }
             }
         };
     }
@@ -535,11 +720,16 @@ export function initSubscriptionSettings({
                     userAgent: userAgent || null,
                 });
 
+                /** @type {string[]} */
+                const failedNames = [];
                 for (const r of results) {
                     if (r.success) {
                         successCount++;
+                        _subUpdateErrors.delete(r.name);
                     } else {
                         failCount++;
+                        failedNames.push(r.name.replace(/\.(yaml|yml)$/i, ''));
+                        _subUpdateErrors.set(r.name, r.error || 'unknown');
                         rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
                     }
                 }
@@ -562,8 +752,12 @@ export function initSubscriptionSettings({
 
                 if (failCount === 0) {
                     showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
+                } else if (failedNames.length === 1) {
+                    // Say which one failed and why (the reason used to go only to the log).
+                    const only = results.find(r => !r.success);
+                    showNotification(tr('subUpdateFailedOne', { name: failedNames[0], error: String(only?.error || '') }), 'error');
                 } else {
-                    showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'info');
+                    showNotification(tr('subUpdateFailedMany', { count: String(failedNames.length), names: new Intl.ListFormat(appStore.get('currentLang') || 'en').format(failedNames) }), 'error');
                 }
             } catch (err) {
                 const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
@@ -836,6 +1030,12 @@ export function initSubscriptionSettings({
                 emptyItem.textContent = t.ruleLibraryNoRules || 'No rule files';
                 menuScroll.appendChild(emptyItem);
             } else {
+                // Section label: these checkboxes enable rule files on this subscription.
+                const header = document.createElement('div');
+                header.className = 'px-3 pt-2 pb-1 text-2xs font-medium text-[var(--text-tertiary)]';
+                header.textContent = t.ctxEnabledRulesHeader || 'Rule files on this subscription';
+                menuScroll.appendChild(header);
+
                 // Build a map: filename -> group name (if any)
                 const fileGroupMap = /** @type {Map<string, string>} */ (new Map());
                 for (const g of groupsList) {
@@ -1043,6 +1243,75 @@ export function initSubscriptionSettings({
     /** @type {number} Render revision — incremented to invalidate stale in-flight renders */
     let _renderRev = 0;
 
+    /** @type {Promise<void>} Order saves run one after another (Alt+arrow repeats). */
+    let _orderSaveQueue = Promise.resolve();
+    /** Revision of the newest queued order: only its failure resets the list. */
+    let _orderSaveRev = 0;
+
+    /**
+     * Queue a save of the card order. The order is taken when the user moves a
+     * card, so a list refresh while the save waits cannot replace it; saves run
+     * one after another, so a burst of moves ends with the latest order.
+     */
+    function saveOrderFromDom() {
+        if (!configsList) return Promise.resolve();
+        const cards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
+        const order = cards.map(c => c.dataset.configName).filter((/** @type {string|undefined} */ n) => n !== undefined);
+        const revision = ++_orderSaveRev;
+        const run = _orderSaveQueue.then(() => persistOrder(/** @type {string[]} */ (order), revision));
+        _orderSaveQueue = run.catch(() => {});
+        return run;
+    }
+
+    /**
+     * Persist a card order. If saving fails and no newer move is queued, re-render
+     * from settings; a newer move keeps the list as the user left it and saves it next.
+     * @param {string[]} newOrder
+     * @param {number} revision
+     */
+    async function persistOrder(newOrder, revision) {
+        try {
+            const s = await invoke(COMMANDS.GET_SETTINGS);
+            s.config_order = newOrder;
+            await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+            invalidateSettingsCache();
+        } catch (err) {
+            showNotification(String(err), 'error');
+            if (revision === _orderSaveRev) await renderConfigs(true);
+        }
+    }
+
+    /**
+     * Keyboard reorder: move a card one place up or down, keep focus on it, save.
+     * @param {HTMLElement} card
+     * @param {-1 | 1} delta
+     */
+    async function moveCardBy(card, delta) {
+        if (!configsList) return;
+        const cards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
+        const from = cards.indexOf(card);
+        const to = from + delta;
+        if (from < 0 || to < 0 || to >= cards.length) return;
+        if (delta < 0) configsList.insertBefore(card, cards[to]);
+        else configsList.insertBefore(card, cards[to].nextSibling);
+        card.focus();
+        announceMove(to + 1);
+        await saveOrderFromDom();
+    }
+
+    /** @param {number} pos 1-based */
+    function announceMove(pos) {
+        let live = document.getElementById('sub-order-live');
+        if (!live) {
+            live = document.createElement('div');
+            live.id = 'sub-order-live';
+            live.className = 'sr-only';
+            live.setAttribute('aria-live', 'polite');
+            document.body.appendChild(live);
+        }
+        live.textContent = tr('subMoved', { pos: String(pos) });
+    }
+
     /**
      * Render the subscription list. Callers fire this and forget it, so it
      * never rejects: any load or render failure is logged here.
@@ -1091,6 +1360,7 @@ export function initSubscriptionSettings({
         configsList.replaceChildren();
 
         // Mouse-based drag reorder (HTML5 DnD unreliable in Tauri WebView)
+        // Keyboard: focus a card, Alt+↑/↓ moves it (see the card's keydown handler).
         // Bind document-level listeners only once
         if (!(/** @type {HTMLElement & {_dragBound?: boolean}} */ (configsList))._dragBound) {
             /** @type {HTMLElement & {_dragBound?: boolean}} */ (configsList)._dragBound = true;
@@ -1099,8 +1369,11 @@ export function initSubscriptionSettings({
 
             configsList.addEventListener('mousedown', (e) => {
                 if (!(e.target instanceof Element)) return;
+                // Drag starts from the handle only, so a click on the card still just switches to it.
+                if (!e.target.closest('.sub-drag-handle')) return;
                 const card = /** @type {HTMLElement} */ (e.target.closest('[data-config-name]'));
                 if (!card || e.button !== 0) return;
+                e.preventDefault();
                 dragState = { el: card, name: card.dataset.configName, startY: e.clientY, moved: false };
             });
 
@@ -1238,17 +1511,7 @@ export function initSubscriptionSettings({
                             clone.remove();
 
                             // 5. Save order (with error handling)
-                            try {
-                                const saveCards = /** @type {HTMLElement[]} */ ([...configsList.querySelectorAll('[data-config-name]')]);
-                                const newOrder = saveCards.map(c => c.dataset.configName).filter((/** @type {string|undefined} */ name) => name !== undefined);
-                                const s = await invoke(COMMANDS.GET_SETTINGS);
-                                s.config_order = newOrder;
-                                await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
-                                invalidateSettingsCache();
-                            } catch (err) {
-                                showNotification(String(err), 'error');
-                                await renderConfigs(true);
-                            }
+                            await saveOrderFromDom();
                         };
                     } else {
                         // No valid target - snap back
@@ -1283,6 +1546,7 @@ export function initSubscriptionSettings({
             const item = document.createElement('div');
             item.className = `glass-card flex flex-col p-4 transition-all group cursor-pointer relative ${isCurrent ? 'ring-1 ring-accent/50 shadow-[0_0_20px_rgba(var(--accent-rgb),0.2)]' : 'hover:shadow-lg'}`;
             item.dataset.configName = name;
+            item.tabIndex = 0;
 
             const row = document.createElement('div');
             row.className = "flex items-center justify-between";
@@ -1294,39 +1558,72 @@ export function initSubscriptionSettings({
             dot.className = `w-2 h-2 rounded-full ${isCurrent ? 'bg-accent shadow-[0_0_8px_var(--accent-glow)]' : 'bg-[var(--text-tertiary)]'}`;
 
             const label = document.createElement('span');
-            label.className = `text-xs transition-colors ${isCurrent ? 'font-bold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`;
-            label.textContent = name.replace(/\.(yaml|yml)$/i, '');
+            label.className = `sub-card-name transition-colors ${isCurrent ? 'font-bold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`;
+            const displayName = name.replace(/\.(yaml|yml)$/i, '');
+            label.textContent = displayName;
 
+            const handle = document.createElement('span');
+            handle.className = 'sub-drag-handle';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+            handle.innerHTML = GRIP_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+            handle.title = t.subDragHandle || 'Drag to reorder (Alt+↑/↓)';
+            handle.setAttribute('aria-hidden', 'true');
+            handle.addEventListener('click', (e) => e.stopPropagation());
+
+            left.appendChild(handle);
             left.appendChild(dot);
             left.appendChild(label);
+            if (isCurrent) {
+                const inUse = document.createElement('span');
+                inUse.className = 'sub-in-use';
+                inUse.textContent = t.subInUse || 'In use';
+                left.appendChild(inUse);
+            }
 
             const actions = document.createElement('div');
-            // Always visible (dimmed) so the actions are discoverable and reachable by keyboard
-            actions.className = 'sub-actions flex items-center gap-2 transition-opacity opacity-40 group-hover:opacity-100 group-focus-within:opacity-100';
+            // Edit / update / delete always visible at full strength (they used to sit at 40%
+            // and read as disabled; edit was only reachable through the context menu).
+            actions.className = 'sub-actions flex items-center gap-1';
 
-            // Delete button
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'sub-action-btn';
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+            editBtn.innerHTML = EDIT_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+            editBtn.title = t.editSubscription || 'Edit';
+            editBtn.setAttribute('aria-label', `${t.editSubscription || 'Edit'}: ${displayName}`);
+            editBtn.onclick = (e) => {
+                e.stopPropagation();
+                void showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval, user_agent: configInfo.user_agent });
+            };
+            // Local files get the pencil too (rename, or attach a link); the context menu already offered it.
+            actions.appendChild(editBtn);
+
+            // Delete button (disabled on the subscription in use)
             const delBtn = document.createElement('button');
-            delBtn.className = 'btn-delete-icon';
+            delBtn.type = 'button';
+            delBtn.className = 'sub-action-btn is-danger';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-            delBtn.title = t.delete;
+            delBtn.title = isCurrent ? (t.cannotDeleteActive || 'Cannot delete the active configuration') : t.delete;
+            delBtn.setAttribute('aria-label', `${t.delete || 'Delete'}: ${displayName}`);
+            if (isCurrent) delBtn.disabled = true;
             delBtn.onclick = async (e) => {
                 e.stopPropagation();
                 e.preventDefault();
 
-                if (isCurrent) {
-                    showNotification(t.cannotDeleteActive || 'Cannot delete the active configuration', 'warning');
-                    return;
-                }
+                if (isCurrent) return;
 
                 const confirmed = await showConfirmModal(
-                    t.delete || 'Delete',
-                    t.confirmDelete || `Are you sure you want to delete "${name}"?`
+                    tr('deleteSubscriptionTitle', { name: displayName }),
+                    t.deleteSubscriptionDesc || 'The subscription file and its settings are removed.',
+                    { danger: true, confirmText: t.delete || 'Delete' }
                 );
                 if (!confirmed) return;
 
                 try {
                     await invoke(COMMANDS.DELETE_CONFIG, { name });
+                    _subUpdateErrors.delete(name);
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
                     void renderConfigs();
@@ -1340,7 +1637,7 @@ export function initSubscriptionSettings({
             if (configInfo.url_display) {
                 const updateBtn = document.createElement('button');
                 updateBtn.type = 'button';
-                updateBtn.className = 'p-1.5 rounded-md hover:bg-accent/20 text-[var(--text-muted)] hover:text-accent transition-colors';
+                updateBtn.className = 'sub-action-btn';
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 updateBtn.title = t.update;
@@ -1350,25 +1647,16 @@ export function initSubscriptionSettings({
                     updateBtn.classList.add('animate-spin');
                     try {
                         // Prefer per-subscription UA, fall back to global fake-client UA
-                        const userAgent = configInfo.user_agent || getSubscriptionUserAgent();
-                        /** @type {any} */
-                        const invokeArgs = { name: configInfo.name, overwrite: true };
-                        if (userAgent) {
-                            invokeArgs.userAgent = userAgent;
-                        }
-                        await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
-                        invalidateConfigsCache();
-                        if (isCurrent) {
-                            abortLatencyTests();
-                            const cfgCustomArgs = cfgSettings.custom_args || [];
-                            await restartCore(configInfo.name, cfgCustomArgs);
-                            await postRestartRecovery(configInfo.name);
-                        }
+                        await downloadSubscription(configInfo.name, configInfo.user_agent || '');
+                        _subUpdateErrors.delete(configInfo.name);
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
                         void renderConfigs();
                     } catch (err) {
                         const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
+                        // Same card status as a failed "Update all".
+                        _subUpdateErrors.set(configInfo.name, error.message || String(err));
                         showNotification(`${t.notifSubFailed}: ${error}`, 'error');
+                        void renderConfigs();
                     } finally {
                         updateBtn.classList.remove('animate-spin');
                     }
@@ -1401,6 +1689,19 @@ export function initSubscriptionSettings({
             };
 
             item.onclick = switchConfig;
+            item.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+            item.addEventListener('keydown', (e) => {
+                if (e.target !== item) return;
+                if ((e.key === 'Enter' || e.key === ' ') && !e.altKey) {
+                    e.preventDefault();
+                    void switchConfig();
+                    return;
+                }
+                if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    e.preventDefault();
+                    void moveCardBy(item, e.key === 'ArrowUp' ? -1 : 1);
+                }
+            });
 
             // Right-click context menu for rule library integration
             item.addEventListener('contextmenu', (e) => {
@@ -1466,7 +1767,10 @@ export function initSubscriptionSettings({
             const expireTs = parseSubExpire(configInfo.sub_info);
             const hasExpiry = expireTs > 0;
 
-            if (hasUrl || hasTime || hasExpiry) {
+            // A failed update shows even when the subscription has never updated.
+            const failure = _subUpdateErrors.get(name);
+            const showTime = hasTime || !!failure;
+            if (hasUrl || showTime || hasExpiry) {
                 const infoRow = document.createElement('div');
                 infoRow.className = 'flex items-center justify-between mt-1 gap-2';
 
@@ -1477,20 +1781,27 @@ export function initSubscriptionSettings({
                     infoRow.appendChild(urlLabel);
                 }
 
-                if (hasTime || hasExpiry) {
+                if (showTime || hasExpiry) {
                     const metaEl = document.createElement('div');
                     metaEl.className = 'flex items-center gap-1.5 text-2xs text-[var(--text-tertiary)] shrink-0 ms-auto';
-                    if (hasTime) {
+                    if (showTime) {
                         const timeEl = document.createElement('span');
-                        timeEl.textContent = lastUpdatedText;
-                        if (t3.consoleSubLastUpdate) timeEl.title = `${t3.consoleSubLastUpdate}: ${lastUpdatedText}`;
+                        if (failure) {
+                            // Hover gives the reason, not the last-update time.
+                            timeEl.textContent = t3.subUpdateFailedShort || 'Update failed';
+                            timeEl.className = 'text-[var(--zephyr-color-danger)]';
+                            timeEl.title = failure;
+                        } else {
+                            timeEl.textContent = tr('subUpdatedAgo', { time: lastUpdatedText });
+                            if (t3.consoleSubLastUpdate) timeEl.title = `${t3.consoleSubLastUpdate}: ${lastUpdatedText}`;
+                        }
                         metaEl.appendChild(timeEl);
                     }
                     if (hasExpiry) {
                         const secsLeft = expireTs - Date.now() / 1000;
                         // Round up: a subscription with 5 hours left still has "1 day", not "Expired".
                         const daysLeft = Math.ceil(secsLeft / 86400);
-                        if (hasTime) {
+                        if (showTime) {
                             const sep = document.createElement('span');
                             sep.setAttribute('aria-hidden', 'true');
                             sep.textContent = '·';
@@ -1513,6 +1824,12 @@ export function initSubscriptionSettings({
                 }
 
                 item.appendChild(infoRow);
+            } else if (!hasUrl) {
+                // Local file: say what it is instead of leaving the card blank.
+                const localRow = document.createElement('div');
+                localRow.className = 'mt-1 text-2xs text-[var(--text-tertiary)]';
+                localRow.textContent = t3.subLocalFile || 'Local file · not auto-updated';
+                item.appendChild(localRow);
             }
 
             configsList.appendChild(item);

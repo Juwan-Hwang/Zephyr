@@ -756,7 +756,8 @@ fn rename_config_blocking(
         };
     }
 
-    Ok(format!("Config renamed to {clean_new}"))
+    // The callers use the result as the new file name (sanitised, with extension).
+    Ok(clean_new)
 }
 
 #[cfg(test)]
