@@ -12,7 +12,7 @@
 
 import { getConnections, isCoreReachable } from '../api.js';
 import { getProxiesCached } from './cache.js';
-import { isWritableGroupType } from './proxy-groups.js';
+import { isWritableGroupType, isNonProxyExit } from './proxy-groups.js';
 import { appStore } from './state.js';
 import { observedGroupLogger } from '../utils/logger.js';
 import { Bus, Events } from './events.js';
@@ -46,6 +46,39 @@ Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
 Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
 
 /**
+ * The first visible writable group on a connection's chain (exit first), skipping DIRECT-style
+ * groups; only that group counts for the connection.
+ * @param {string[]} chains
+ * @param {Record<string, any>} proxiesData
+ * @returns {string|null}
+ */
+function firstObservableGroup(chains, proxiesData) {
+    return chains.find((chainName) => isObservableGroup(chainName, proxiesData)) ?? null;
+}
+
+/**
+ * A visible writable group that is not a DIRECT-style group by name.
+ * @param {string} chainName
+ * @param {Record<string, any>} proxiesData
+ * @returns {boolean}
+ */
+function isObservableGroup(chainName, proxiesData) {
+    const group = proxiesData[chainName];
+    if (!group || !isWritableGroupType(group.type) || group.hidden) return false;
+    const upper = chainName.toUpperCase();
+    return !SPECIAL_GROUPS.has(upper) && !upper.includes('DIRECT');
+}
+
+/**
+ * Whether a group offers anything besides DIRECT/REJECT-style exits (a proxy node or another group).
+ * @param {any} group
+ * @param {Record<string, any>} proxiesData
+ */
+function offersProxy(group, proxiesData) {
+    return Array.isArray(group?.all) && group.all.some((/** @type {unknown} */ m) => !isNonProxyExit(String(m), proxiesData[String(m)]));
+}
+
+/**
  * Compute the observed group and node from active connections.
  * Pure function — no side effects.
  *
@@ -67,43 +100,50 @@ export function computeObservedGroup(connections, proxiesData) {
     const sampled = connections.slice(-MAX_SAMPLE);
     const freq = Object.create(null);
     const groupNodeFreq = Object.create(null);
+    /** The share's denominator: proxied connections, plus direct ones a proxy-offering selector chose. */
+    let proxied = 0;
 
     for (const conn of sampled) {
         const chains = conn.chains || [];
+        const exit = String(chains[0] || '');
+        if (!exit) continue;
+        const chainName = firstObservableGroup(chains, proxiesData);
+        // Traffic that leaves DIRECT or is rejected never uses a proxy node, so it says
+        // nothing about which group picks the user's node (Apple → 🎯 Direct → DIRECT).
+        // A config can name its own direct/reject outbound anything ("Local" of type direct).
+        if (isNonProxyExit(exit, proxiesData[exit])) {
+            // Still part of the share when a selector that also offers proxies picked it
+            // (DIRECT chosen in the user's own group), so a small group carrying the few
+            // proxied connections does not look like it routes everything.
+            // Any such selector on the chain counts, not only the innermost: an outer group
+            // may have picked a direct-only group over its proxy options.
+            if (chains.some((name) => isObservableGroup(name, proxiesData)
+                && offersProxy(proxiesData[name], proxiesData))) proxied++;
+            continue;
+        }
+        proxied++;
 
-        for (let i = 0; i < chains.length; i++) {
-            const chainName = chains[i];
-            const group = proxiesData[chainName];
-            if (!group) continue;
-            if (!isWritableGroupType(group.type)) continue;
-            if (group.hidden) continue;
-            if (SPECIAL_GROUPS.has(chainName.toUpperCase()) || chainName.toUpperCase().includes('DIRECT')) continue;
-
-            // Found the first writable group
+        if (chainName) {
             freq[chainName] = (freq[chainName] || 0) + 1;
 
             // Track node frequency per group
             // chains order: [actual_node, group_name] or [node1, node2, group]
             // The actual exit node is the first element
             const finalNode = chains[0];
-            if (finalNode) {
-                if (!groupNodeFreq[chainName]) {
-                    groupNodeFreq[chainName] = Object.create(null);
-                }
-                groupNodeFreq[chainName][finalNode] = (groupNodeFreq[chainName][finalNode] || 0) + 1;
+            if (!groupNodeFreq[chainName]) {
+                groupNodeFreq[chainName] = Object.create(null);
             }
-
-            break; // Only count the first writable group per chain
+            groupNodeFreq[chainName][finalNode] = (groupNodeFreq[chainName][finalNode] || 0) + 1;
         }
     }
 
     const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) {
-        return { name: null, node: null, freq: 0, total: sampled.length, ratio: 0 };
+        return { name: null, node: null, freq: 0, total: proxied, ratio: 0 };
     }
 
     const [topName, topFreq] = entries[0];
-    const total = sampled.length;
+    const total = proxied;
     const ratio = total > 0 ? topFreq / total : 0;
 
     // Get the most frequent node within the top group
