@@ -17,7 +17,10 @@
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "github-actions-minor-patch",
-      "automerge": false,
+      "automerge": false
+    },
+    {
+      "matchManagers": ["github-actions"],
       "pinDigests": true
     },
     {

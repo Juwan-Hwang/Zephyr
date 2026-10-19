@@ -19,3 +19,7 @@ repos:
 
 ci:
   autofix_prs: true
+  # pre-commit.ci autoupdate cannot be switched off here (weekly is the
+  # default when this line is omitted), so use its slowest schedule and
+  # let Renovate handle the routine hook updates.
+  autoupdate_schedule: quarterly
