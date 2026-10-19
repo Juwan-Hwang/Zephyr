@@ -1362,11 +1362,11 @@ const TEMPLATE = `
                 <div class="dz-card-head" style="margin-bottom:0;">
                     <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleQuickControl">Quick Controls</span></div>
                 </div>
-                <div class="dz-mode-seg" id="dz-mode-seg">
+                <div class="dz-mode-seg" id="dz-mode-seg" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode">
                     <div class="dz-mode-slider" id="dz-mode-slider"></div>
-                    <button type="button" data-mode="rule" data-i18n="rule">Rule</button>
-                    <button type="button" data-mode="global" data-i18n="global">Global</button>
-                    <button type="button" data-mode="direct" data-i18n="direct">Direct</button>
+                    <button type="button" data-mode="rule" aria-pressed="true" data-i18n="rule">Rule</button>
+                    <button type="button" data-mode="global" aria-pressed="false" data-i18n="global">Global</button>
+                    <button type="button" data-mode="direct" aria-pressed="false" data-i18n="direct">Direct</button>
                 </div>
                 <div class="dz-quick-rows">
                     <div class="dz-quick-row">

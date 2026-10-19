@@ -150,20 +150,26 @@ export function updateModeUI(mode) {
     const buttons = document.querySelectorAll('[data-mode]');
     const slider = document.getElementById('mode-slider');
     const modes = ['rule', 'global', 'direct'];
-    const idx = modes.indexOf(mode.toLowerCase());
+    const targetMode = mode.toLowerCase();
+    const idx = modes.indexOf(targetMode);
 
     if (idx !== -1 && slider) {
         slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-        buttons.forEach((b, i) => {
-            if (i === idx) {
-                b.classList.add('text-[var(--text-primary)]');
-                b.classList.remove('text-[var(--text-secondary)]');
-            } else {
-                b.classList.remove('text-[var(--text-primary)]');
-                b.classList.add('text-[var(--text-secondary)]');
-            }
-        });
     }
+
+    buttons.forEach((b) => {
+        const btnMode = b.getAttribute('data-mode')?.toLowerCase();
+        const isActive = btnMode === targetMode;
+        if (isActive) {
+            b.classList.add('text-[var(--text-primary)]');
+            b.classList.remove('text-[var(--text-secondary)]');
+            b.setAttribute('aria-pressed', 'true');
+        } else {
+            b.classList.remove('text-[var(--text-primary)]');
+            b.classList.add('text-[var(--text-secondary)]');
+            b.setAttribute('aria-pressed', 'false');
+        }
+    });
 }
 
 /**

@@ -11,6 +11,7 @@ vi.mock('../api.js', () => ({
 import { translations, setLanguage } from '../i18n.js';
 import { renderTunStatus } from './tun-status.js';
 import { initNavTooltips, getNavLabel, NAV_TOOLTIP_HOVER_DELAY } from './nav-tooltip.js';
+import { updateModeUI } from './modes.js';
 import { Bus, Events } from './events.js';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -462,5 +463,46 @@ describe('sidebar nav tooltips', () => {
         const css = read('styles.css');
         expect(css).toMatch(/\.nav-tooltip\s*\{/);
         expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.nav-tooltip\s*\{\s*transition:\s*none/);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  5. Proxy mode selector accessibility
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Proxy mode selector accessibility', () => {
+    it('index.html mode selector container carries group role and mode aria label', () => {
+        const doc = parseIndex();
+        const container = doc.getElementById('mode-selector-container');
+        expect(container).toBeTruthy();
+        expect(container?.getAttribute('role')).toBe('group');
+        expect(container?.getAttribute('aria-label')).toBe('Proxy Mode');
+        expect(container?.getAttribute('data-i18n-aria-label')).toBe('mode');
+    });
+
+    it('updateModeUI sets aria-pressed="true" on the active button and aria-pressed="false" on inactive ones', () => {
+        document.body.innerHTML = `
+            <div id="mode-selector-container" role="group" aria-label="Proxy Mode">
+                <div id="mode-slider"></div>
+                <button data-mode="rule" aria-pressed="true">Rule</button>
+                <button data-mode="global" aria-pressed="false">Global</button>
+                <button data-mode="direct" aria-pressed="false">Direct</button>
+            </div>`;
+
+        updateModeUI('global');
+        const ruleBtn = document.querySelector('[data-mode="rule"]');
+        const globalBtn = document.querySelector('[data-mode="global"]');
+        const directBtn = document.querySelector('[data-mode="direct"]');
+
+        expect(globalBtn?.getAttribute('aria-pressed')).toBe('true');
+        expect(ruleBtn?.getAttribute('aria-pressed')).toBe('false');
+        expect(directBtn?.getAttribute('aria-pressed')).toBe('false');
+
+        updateModeUI('direct');
+        expect(directBtn?.getAttribute('aria-pressed')).toBe('true');
+        expect(globalBtn?.getAttribute('aria-pressed')).toBe('false');
+        expect(ruleBtn?.getAttribute('aria-pressed')).toBe('false');
+
+        document.body.innerHTML = '';
     });
 });
