@@ -1259,7 +1259,11 @@ function syncModeSegs(/** @type {string} */ mode) {
     if (idx === -1) return;
     for (const { seg, slider } of MODE_SEGS) {
         if (!seg) continue;
-        seg.querySelectorAll('button').forEach((/** @type {HTMLButtonElement} */ b, /** @type {number} */ j) => b.classList.toggle('active', j === idx));
+        seg.querySelectorAll('button[data-mode]').forEach((b) => {
+            const active = b.getAttribute('data-mode') === modes[idx];
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-pressed', String(active));
+        });
         if (slider) slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
     }
 }
@@ -1392,11 +1396,11 @@ const TEMPLATE = `
                 <div class="dz-card-head" style="margin-bottom:0;">
                     <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleQuickControl">Quick Controls</span></div>
                 </div>
-                <div class="dz-mode-seg" id="dz-mode-seg">
+                <div class="dz-mode-seg" id="dz-mode-seg" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode">
                     <div class="dz-mode-slider" id="dz-mode-slider"></div>
-                    <button type="button" data-mode="rule" data-i18n="rule">Rule</button>
-                    <button type="button" data-mode="global" data-i18n="global">Global</button>
-                    <button type="button" data-mode="direct" data-i18n="direct">Direct</button>
+                    <button type="button" data-mode="rule" aria-pressed="true" data-i18n="rule">Rule</button>
+                    <button type="button" data-mode="global" aria-pressed="false" data-i18n="global">Global</button>
+                    <button type="button" data-mode="direct" aria-pressed="false" data-i18n="direct">Direct</button>
                 </div>
                 <div class="dz-quick-rows">
                     <div class="dz-quick-row">

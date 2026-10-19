@@ -658,6 +658,42 @@ mod tests {
         assert!(port < 59190);
     }
 
+    #[test]
+    fn test_extract_mixed_port_from_yaml() {
+        assert_eq!(
+            extract_mixed_port_from_yaml("mixed-port: 7890".to_owned()),
+            7890
+        );
+        assert_eq!(
+            extract_mixed_port_from_yaml("mixed-port: 1080".to_owned()),
+            1080
+        );
+        assert_eq!(
+            extract_mixed_port_from_yaml("port: 1234".to_owned()),
+            DEFAULT_MIXED_PORT
+        );
+        assert!(serde_yaml::from_str::<serde_yaml::Value>("mixed-port: [").is_err());
+        assert_eq!(
+            extract_mixed_port_from_yaml("mixed-port: [".to_owned()),
+            DEFAULT_MIXED_PORT
+        );
+    }
+
+    #[test]
+    fn test_core_binary_name() {
+        let name = core_binary_name();
+        #[cfg(target_os = "windows")]
+        assert_eq!(name, "zephyr-mihomo.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(name, "zephyr-mihomo");
+    }
+
+    #[test]
+    fn test_default_ports() {
+        assert_eq!(default_api_port(), DEFAULT_API_PORT);
+        assert_eq!(default_mixed_port(), DEFAULT_MIXED_PORT);
+    }
+
     // -- Snapshot tests for version parsing --------------------------------
 
     #[test]

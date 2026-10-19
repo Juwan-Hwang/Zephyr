@@ -32,6 +32,22 @@ describe('formatBytes (decimal)', () => {
     it('1.02 KB for 1024', () => expect(formatBytes(1024)).toBe('1.02 KB'));
 });
 
+describe('formatBytes (invalid input)', () => {
+    it.each([[-100], [null], [undefined], [NaN], [Infinity], [-Infinity], ['invalid']])('%s → 0 B', (v) => {
+        expect(formatBytes(/** @type {any} */ (v))).toBe('0 B');
+    });
+    it('values Number() cannot convert → 0 B', () => {
+        const throwing = { valueOf() { throw new Error('nope'); } };
+        expect(formatBytes(/** @type {any} */ (Symbol('x')))).toBe('0 B');
+        expect(formatBytes(/** @type {any} */ (throwing))).toBe('0 B');
+        expect(formatSpeed(/** @type {any} */ (Symbol('x')))).toBe('0 B/s');
+    });
+    it('sub-byte values stay in B', () => expect(formatBytes(0.5)).toBe('0.50 B'));
+    it('numeric strings are parsed', () => expect(formatBytes(/** @type {any} */ ('1000'))).toBe('1.00 KB'));
+    it('clamps to TB', () => expect(formatBytes(1e15)).toBe('1000.00 TB'));
+    it('formatSpeed of NaN is 0 B/s', () => expect(formatSpeed(NaN)).toBe('0 B/s'));
+});
+
 describe('formatSpeed', () => {
     it('0 B/s', () => expect(formatSpeed(0)).toBe('0 B/s'));
     it('1.00 KB/s', () => expect(formatSpeed(1000)).toBe('1.00 KB/s'));

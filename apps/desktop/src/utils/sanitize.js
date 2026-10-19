@@ -132,11 +132,40 @@ const DEFAULT_ALLOWED_ATTRS = {
 /** Regex matching any on* event handler attribute */
 const EVENT_HANDLER_RE = /^on/i;
 
-/** Regex matching javascript: URIs (case-insensitive, whitespace tolerant) */
-const JS_URI_RE = /^\s*javascript\s*:/i;
+/** Script-running schemes, matched against a normalized URL (see normalizeUrlScheme). */
+const SCRIPT_SCHEME_RE = /^(?:javascript|vbscript):/;
 
-/** Regex matching data: URIs */
-const DATA_URI_RE = /^\s*data\s*:/i;
+/** data: scheme, matched against a normalized URL. */
+const DATA_SCHEME_RE = /^data:/;
+
+/** ASCII tab, LF and CR, which URL parsers drop from anywhere in a URL. */
+const URL_TAB_NEWLINE_RE = /[\t\n\r]/g;
+
+/**
+ * Trim leading/trailing C0 controls and spaces (U+0000–U+0020), which URL
+ * parsers drop. Index loops rather than a `[...]+$` regex, which rescans
+ * long interior runs of spaces and goes quadratic on untrusted input.
+ * @param {string} url
+ * @returns {string}
+ */
+function trimUrlEdgeControls(url) {
+    let start = 0;
+    let end = url.length;
+    while (start < end && url.charCodeAt(start) <= 0x20) start++;
+    while (end > start && url.charCodeAt(end - 1) <= 0x20) end--;
+    return url.slice(start, end);
+}
+
+/**
+ * Reduce a URL to the form a browser parses its scheme from: edge C0
+ * controls/spaces trimmed, tabs and newlines removed, lowercased. Without
+ * this, `java&#9;script:` (decoded to a tab) would slip past a plain regex.
+ * @param {string} url
+ * @returns {string}
+ */
+function normalizeUrlScheme(url) {
+    return trimUrlEdgeControls(url).replace(URL_TAB_NEWLINE_RE, '').toLowerCase();
+}
 
 /** NBSP entity pattern (includes \u00A0 for browser-decoded entities) */
 const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
@@ -149,15 +178,16 @@ const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
 const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
- * Check whether a URL is safe (not javascript: or disallowed data:).
+ * Check whether a URL is safe (no javascript:/vbscript:, data: only when allowed).
  *
  * @param {string} url
  * @param {boolean} allowDataImages
  * @returns {boolean}
  */
 function isSafeUrl(url, allowDataImages) {
-    if (JS_URI_RE.test(url)) return false;
-    if (DATA_URI_RE.test(url)) return allowDataImages;
+    const norm = normalizeUrlScheme(url);
+    if (SCRIPT_SCHEME_RE.test(norm)) return false;
+    if (DATA_SCHEME_RE.test(norm)) return allowDataImages;
     return true;
 }
 
@@ -297,8 +327,8 @@ export function sanitizeHtml(input, options = {}) {
                 continue;
             }
 
-            // Validate URL attributes
-            if (name === 'href' || name === 'src') {
+            // Validate URL attributes (SVG <use> also takes the legacy xlink:href)
+            if (name === 'href' || name === 'src' || name === 'xlink:href') {
                 const val = (attr.value || '').trim();
                 const allowData = (name === 'src' && tag === 'img' && allowDataImg);
                 if (!isSafeUrl(val, allowData)) {
