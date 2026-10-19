@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":enablePreCommit"],
+  "timezone": "Asia/Shanghai",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "patch-and-minor",
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "github-actions-minor-patch",
+      "automerge": false
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["cargo"],
+      "addLabels": ["rust"]
+    },
+    {
+      "matchPackageNames": ["webview2-com"],
+      "enabled": false
+    },
+    {
+      "matchManagers": ["npm"],
+      "addLabels": ["javascript"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "addLabels": ["github-actions"]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # pre-commit hooks: fast file-hygiene checks only.
 # The same hooks run in the cloud via pre-commit.ci, which pushes
-# autofix commits to PRs and opens a weekly autoupdate PR.
+# autofix commits to PRs. Hook version updates come from Renovate.
 # Rust/JS formatting and lint stay in CI (cargo fmt/clippy, ESLint),
 # so they are deliberately not duplicated here.
 # Docs: https://pre-commit.com and https://pre-commit.ci
@@ -19,4 +19,7 @@ repos:
 
 ci:
   autofix_prs: true
-  autoupdate_schedule: weekly
+  # pre-commit.ci autoupdate cannot be switched off here (weekly is the
+  # default when this line is omitted), so use its slowest schedule and
+  # let Renovate handle the routine hook updates.
+  autoupdate_schedule: quarterly
