@@ -9,6 +9,39 @@
 import { getCurrentWindow, invoke, listen } from '../api.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { uiLogger } from '../utils/logger.js';
+import { getSettingsCached } from './cache.js';
+import { sendOSNotification } from './os-notification.js';
+import { t } from '../i18n.js';
+
+const TRAY_HINT_KEY = 'zephyr.trayHintShown';
+
+/** Longest the close button waits for the tray hint before closing anyway. */
+const TRAY_HINT_WAIT_MS = 800;
+
+/** In-flight hint attempt, shared so repeated close clicks send it at most once. */
+/** @type {Promise<void> | null} */
+let _trayHintPending = null;
+
+/**
+ * The first time the close button only hides the window (close-to-tray), say once,
+ * via a system notification, that Zephyr keeps running in the tray.
+ * @returns {Promise<void>}
+ */
+function maybeShowTrayHint() {
+    if (_trayHintPending) return _trayHintPending;
+    _trayHintPending = (async () => {
+        try {
+            if (localStorage.getItem(TRAY_HINT_KEY)) return;
+            const settings = await getSettingsCached();
+            if (!settings?.close_to_tray) return;
+            // Only remember the hint once the OS took it, so a failed send retries next close.
+            if (await sendOSNotification('Zephyr', t('trayStillRunning'))) localStorage.setItem(TRAY_HINT_KEY, '1');
+        } catch { /* non-critical */ }
+    })().finally(() => {
+        _trayHintPending = null;
+    });
+    return _trayHintPending;
+}
 
 /**
  * Initialize window control event listeners.
@@ -20,9 +53,12 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
+            // Lightweight mode destroys the WebView on close: give the hint a
+            // moment to be sent and remembered, but never hold the close up for long.
+            const hint = Promise.race([maybeShowTrayHint(), new Promise((r) => setTimeout(r, TRAY_HINT_WAIT_MS))]);
             // close() can throw synchronously when IPC is missing; the
-            // Promise.resolve().then wrapper turns that into a rejection too.
-            Promise.resolve()
+            // .then wrapper turns that into a rejection too.
+            hint
                 .then(() => getCurrentWindow().close())
                 .catch((err) => uiLogger.warn('Failed to close window', err));
         });

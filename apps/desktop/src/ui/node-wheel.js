@@ -4,16 +4,17 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getProxies, switchProxy, abortLatencyTests, closeAllConnections } from '../api.js';
+import { getProxies, switchProxyResult, abortLatencyTests, closeAllConnections } from '../api.js';
 import { nodeWheelLogger } from '../utils/logger.js';
 import { t } from '../i18n.js';
-import { showNotification } from './notifications.js';
 import { fetchProxyGroups } from './proxy-groups.js';
-import { sortProxiesByLatency, syncCoreConfig, renderProxies } from './proxies.js';
+import { sortProxiesByLatency, syncCoreConfig, renderProxies, notifySwitchFailed, resolveLeafNode } from './proxies.js';
 import { appStore } from './state.js';
 import { invalidateProxiesCache, getSettingsCached } from './cache.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { resetObservedGroup } from './observed-group.js';
+import { getDelayColorClass } from '../utils/format.js';
+import { showNotification } from './notifications.js';
 
 /** Hover dwell before the wheel opens (ms). */
 export const WHEEL_HOVER_OPEN_DELAY = 300;
@@ -97,6 +98,8 @@ const waitForCurrentNode = async (groupName, expectedName, maxRetries = 10, inte
 
 /** @type {number} Session counter to prevent race conditions on rapid switches */
 let _switchSessionCounter = 0;
+/** Last node name the pill showed outside a pending switch (rollback target). */
+let _lastSettledName = '';
 
 /**
  * Handle proxy switch within the wheel, including UI updates and recovery.
@@ -110,7 +113,19 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
         closeWheel();
         return;
     }
+    // A mode switch, TUN toggle or profile change may still carry the previous node over
+    // when it finishes; a switch now would race it and could be undone.
+    if (appStore.get('isNetworkUpdating')) {
+        closeWheel();
+        showNotification(t('consoleSubUpdateBusy'), 'info');
+        return;
+    }
     const nameEl = trigger.querySelector('#current-node-name');
+    const shownName = nameEl ? nameEl.textContent : '';
+    // While an earlier switch is in flight the pill reads "switching…"; roll back to the
+    // last real name instead of that transient label.
+    const previousName = shownName === t('switching') ? _lastSettledName : shownName;
+    _lastSettledName = previousName;
     if (nameEl) {
         nameEl.textContent = t('switching');
     }
@@ -123,54 +138,76 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
 
     // Use uiGroupName from appStore for accurate group targeting
     const targetGroup = appStore.get('uiGroupName') || mainGroup;
-    const success = await switchProxy(targetGroup, name);
-    if (success) {
-        invalidateProxiesCache();
-        // The observed exit node described the old selection; drop it so the pill
-        // and home figures follow the new node (the watcher re-confirms it if active).
-        resetObservedGroup();
-        await closeAllConnections();
-
-        // Save proxy selection for restore after core restart
-        try {
-            const settings = await getSettingsCached();
-            const profileName = settings?.last_config;
-            if (profileName) {
-                await saveProxySelection(profileName, { node: name, group: targetGroup });
-            }
-        } catch (e) {
-            nodeWheelLogger.warn('Failed to save proxy selection', e);
-        }
-
-        // Wait for node switch to complete, then let syncCoreConfig() handle display
-        // Run as non-blocking IIFE to prevent UI lag
-        void (async () => {
-            try {
-                await waitForCurrentNode(targetGroup, name);
-                if (_switchSessionCounter !== currentSession) return;
-                // Let syncCoreConfig() handle the display update with leaf node resolution
-                await syncCoreConfig();
-                if (_switchSessionCounter !== currentSession) return;
-                const proxiesPage = document.querySelector('[data-page="proxies"]');
-                if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
-                    await renderProxies();
-                }
-            } catch (error) {
-                nodeWheelLogger.error('Failed to update UI after node switch:', error);
-            }
-        })();
-    } else {
-        // A GLOBAL selection is routed through the backend and reported as a
-        // rejected request instead of a thrown error, so surface it here rather
-        // than failing silently on a user-initiated switch.
-        // A newer switch owns the display now; reporting this one as failed
-        // would describe the wrong selection.
-        nodeWheelLogger.warn('Node switch was not applied');
-        if (_switchSessionCounter === currentSession) {
-            showNotification(t('notifSwitchFailed'), 'error');
-        }
-        syncCoreConfig().catch(() => {});
+    let success = false;
+    /** @type {unknown} */
+    let failure = null;
+    try {
+        ({ ok: success, reason: failure } = await switchProxyResult(targetGroup, name));
+    } catch (error) {
+        failure = error;
+        nodeWheelLogger.error('Node switch failed:', error);
     }
+    if (success) {
+        if (_switchSessionCounter === currentSession) _lastSettledName = name;
+        await afterWheelSwitch(targetGroup, name, currentSession);
+        return;
+    }
+    // A GLOBAL selection is routed through the backend and reported as a
+    // rejected request instead of a thrown error, so surface it here rather
+    // than failing silently on a user-initiated switch.
+    nodeWheelLogger.warn('Node switch was not applied');
+    // A newer switch owns the display now; restoring the pill, reporting this
+    // one as failed or resyncing from it would describe the wrong selection.
+    if (_switchSessionCounter !== currentSession) return;
+    // Never leave the pill on "switching…": put the old name back, then resync.
+    if (nameEl?.textContent === t('switching')) nameEl.textContent = previousName;
+    notifySwitchFailed(failure);
+    syncCoreConfig().catch(() => {});
+}
+
+/**
+ * Bookkeeping after an accepted wheel switch: drop stale caches, save the
+ * selection, then let syncCoreConfig() redraw once the core reports the node.
+ * @param {string} targetGroup
+ * @param {string} name
+ * @param {number} currentSession
+ */
+async function afterWheelSwitch(targetGroup, name, currentSession) {
+    invalidateProxiesCache();
+    // The observed exit node described the old selection; drop it so the pill
+    // and home figures follow the new node (the watcher re-confirms it if active).
+    resetObservedGroup();
+    // The core already took the switch: a failed cleanup must not stop the rest.
+    try { await closeAllConnections(); } catch (e) { nodeWheelLogger.warn('Failed to close connections after switch', e); }
+
+    // Save proxy selection for restore after core restart
+    try {
+        const settings = await getSettingsCached();
+        const profileName = settings?.last_config;
+        if (profileName) {
+            await saveProxySelection(profileName, { node: name, group: targetGroup });
+        }
+    } catch (e) {
+        nodeWheelLogger.warn('Failed to save proxy selection', e);
+    }
+
+    // Wait for node switch to complete, then let syncCoreConfig() handle display
+    // Run as non-blocking IIFE to prevent UI lag
+    void (async () => {
+        try {
+            await waitForCurrentNode(targetGroup, name);
+            if (_switchSessionCounter !== currentSession) return;
+            // Let syncCoreConfig() handle the display update with leaf node resolution
+            await syncCoreConfig();
+            if (_switchSessionCounter !== currentSession) return;
+            const proxiesPage = document.querySelector('[data-page="proxies"]');
+            if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
+                await renderProxies();
+            }
+        } catch (error) {
+            nodeWheelLogger.error('Failed to update UI after node switch:', error);
+        }
+    })();
 }
 
 /**
@@ -276,15 +313,12 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
             item.setAttribute('role', 'option');
             item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
             item.tabIndex = -1;
-            item.className = `px-3 py-1.5 rounded-full border flex items-center justify-center gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-micro)] w-full h-full
+            item.className = `px-4 py-1.5 rounded-full border flex items-center justify-start gap-2 cursor-pointer transition-[color,border-color,box-shadow] duration-[var(--zephyr-time-micro)] w-full h-full
                 ${isSelected ? 'bg-white/20 border-accent shadow-[0_0_15px_rgba(255,255,255,0.15)] text-[var(--text-primary)]' : 'bg-[var(--zephyr-bg-input)] border-[var(--zephyr-border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)]'}`;
 
+            // Neutral dot (it used to mean "supports UDP" in green, which read as "healthy").
             const dot = document.createElement('div');
-            let dotColor;
-            if (isSelected) dotColor = 'bg-accent animate-pulse';
-            else if (proxy?.udp) dotColor = 'bg-success';
-            else dotColor = 'bg-[var(--text-tertiary)]';
-            dot.className = `w-1.5 h-1.5 rounded-full ${dotColor}`;
+            dot.className = `w-1.5 h-1.5 shrink-0 rounded-full ${isSelected ? 'bg-accent animate-pulse' : 'bg-[var(--text-tertiary)]'}`;
 
             const nameSpan = document.createElement('span');
             nameSpan.className = "text-xs font-semibold tracking-wide truncate max-w-[180px]";
@@ -292,6 +326,21 @@ async function populateAndShowWheel(trigger, dropdown, scrollContainer, list, up
 
             item.appendChild(dot);
             item.appendChild(nameSpan);
+
+            // Last measured latency, in the same colours as elsewhere on the page.
+            // A group (Auto, Fallback) has no history of its own: show the node it
+            // ends up on, following nested groups the way the proxy cards do.
+            const own = proxy?.history;
+            const leaf = proxy?.now ? resolveLeafNode(name, proxyData.proxies) : null;
+            let history = Array.isArray(own) && own.length > 0 ? own : null;
+            if (!history && leaf) history = proxyData.proxies[leaf]?.history;
+            const delay = Array.isArray(history) && history.length > 0 ? history.at(-1)?.delay : null;
+            if (typeof delay === 'number' && delay > 0 && delay < 999999) {
+                const delaySpan = document.createElement('span');
+                delaySpan.className = `wheel-delay ms-auto ps-2 text-[11px] font-medium tabular-nums shrink-0 ${getDelayColorClass(delay)}`;
+                delaySpan.textContent = `${delay} ms`;
+                item.appendChild(delaySpan);
+            }
 
             item.addEventListener('mouseenter', () => {
                 hoveredItem = wrapper;
@@ -409,6 +458,10 @@ export function initNodeWheel() {
     const container = document.getElementById('node-wheel-container');
 
     if (!trigger || !dropdown || !list || !container || !scrollContainer) return;
+
+    // The static placeholder in index.html is English; localise it until the first node arrives.
+    const nameEl = trigger.querySelector('#current-node-name');
+    if (nameEl?.textContent === 'Loading...') nameEl.textContent = t('loading');
 
     if (!list.id) list.id = 'node-wheel-list';
     list.setAttribute('role', 'listbox');
