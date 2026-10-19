@@ -84,6 +84,7 @@ export async function switchToConfig(configName, customArgs = []) {
   const actualConfig = coreResult.active_config;
   const fallbackOccurred = actualConfig && actualConfig !== configName;
   const noConfigLoaded = actualConfig === null;
+  appStore.set('noSubscription', noConfigLoaded);
 
   if (fallbackOccurred || noConfigLoaded) {
     if (noConfigLoaded) {

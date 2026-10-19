@@ -24,6 +24,9 @@ function refreshSysProxyStatusSafe() {
 
 /** Restore sys-proxy through the serialization queue (prevents TOCTOU race). */
 function restoreSysProxySafe() {
+    // Without a subscription the core runs the direct-only minimal config: a leftover
+    // ownership marker must not turn the system proxy back on.
+    if (appStore.get('noSubscription')) return;
     import('./sysproxy.js').then(m => m.restoreSysProxy()).catch(err => {
         trayLogger.warn('Failed to restore system proxy', err);
     });
@@ -195,8 +198,24 @@ export async function initTrayEventListeners() {
     const unlisten1 = await listen('tray-sysproxy-changed', async (event) => {
         /** @type {any} */
         const ev = event;
-        const enabled = ev.payload;
+        let enabled = ev.payload;
         const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
+        // Without a subscription the system proxy would only reach DIRECT: undo a tray enable,
+        // as the switches and the shortcut refuse it.
+        if (enabled && appStore.get('noSubscription')) {
+            try {
+                const { setSysProxyEnabled } = await import('./sysproxy.js');
+                await setSysProxyEnabled(false);
+                enabled = false;
+            } catch (err) {
+                trayLogger.warn('Failed to undo tray system proxy without a subscription', err);
+            }
+            showNotification(tFunc('sysProxyNeedsSubscription') || 'Available once a subscription is added', 'warning');
+            // The backend already drew the tray as enabled, and the store may not change
+            // (it was false before), so its subscribers would not redraw it.
+            updateTrayStatus().catch(() => {});
+            updateTrayMenu(true).catch(() => {});
+        }
 
         // Rust backend has already toggled the system proxy; just sync the UI.
         appStore.set('isSysProxyEnabled', enabled);
