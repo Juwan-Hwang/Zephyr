@@ -265,6 +265,12 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
     });
 }
 
+/** Bumped by each confirm dialog that opens (see the close handler). */
+let _confirmGeneration = 0;
+/** Restores the shared confirm button after a closing dialog; run early when another opens. */
+/** @type {(() => void) | null} */
+let _pendingConfirmReset = null;
+
 /**
  * Show a confirmation modal dialog.
  * @param {string} title
@@ -312,6 +318,9 @@ export function showConfirmModal(title, message = '', options = {}) {
             contentArea.appendChild(msgDiv);
         }
 
+        // A previous dialog still fading out has not put the shared button back yet: do it now,
+        // so this one starts from the default style and label.
+        _pendingConfirmReset?.();
         const originalConfirmLabel = confirmBtn.textContent;
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
@@ -327,20 +336,29 @@ export function showConfirmModal(title, message = '', options = {}) {
             onEscape: () => close(false),
             ...(danger ? { initialFocus: cancelBtn } : {}),
         });
+        // The shared modal may be reopened before this one's close animation ends;
+        // only the latest dialog may touch it then.
+        const generation = ++_confirmGeneration;
+
+        const resetControls = () => {
+            if (_pendingConfirmReset === resetControls) _pendingConfirmReset = null;
+            if (danger) {
+                confirmBtn.classList.remove('btn-danger');
+                confirmBtn.classList.add('btn-primary');
+                container.classList.remove('is-danger');
+            }
+            if (confirmText) confirmBtn.textContent = originalConfirmLabel;
+        };
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');
             unlockScroll();
             trap.deactivate();
+            _pendingConfirmReset = resetControls;
             setTimeout(() => {
-                bg.classList.add('hidden');
-                if (danger) {
-                    confirmBtn.classList.remove('btn-danger');
-                    confirmBtn.classList.add('btn-primary');
-                    container.classList.remove('is-danger');
-                }
-                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
+                if (_pendingConfirmReset === resetControls) resetControls();
+                if (generation === _confirmGeneration) bg.classList.add('hidden');
                 resolve(val);
             }, 300);
         };
