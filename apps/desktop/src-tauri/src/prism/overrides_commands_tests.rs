@@ -18,7 +18,7 @@
     clippy::panic
 )]
 mod tests {
-    use super::super::{default_template_content, OverrideExt};
+    use super::super::{check_write_mode, default_template_content, OverrideExt};
 
     #[test]
     fn js_template() {
@@ -28,5 +28,18 @@ mod tests {
     #[test]
     fn prism_yaml_template() {
         insta::assert_snapshot!(default_template_content(OverrideExt::PrismYaml));
+    }
+
+    #[test]
+    fn dry_run_with_save_only_is_refused() {
+        assert!(check_write_mode(Some(true), Some(true)).is_err());
+    }
+
+    #[test]
+    fn single_write_modes_are_allowed() {
+        assert!(check_write_mode(None, None).is_ok());
+        assert!(check_write_mode(Some(true), None).is_ok());
+        assert!(check_write_mode(Some(false), Some(true)).is_ok());
+        assert!(check_write_mode(Some(true), Some(false)).is_ok());
     }
 }
