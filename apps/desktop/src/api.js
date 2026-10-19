@@ -710,6 +710,14 @@ export async function closeConnection(id) {
 let latencyTestController = new AbortController();
 
 /**
+ * Controllers that still have tests in flight, with how many. A test keeps the
+ * controller it started under, so a reset for a new run must not detach Stop
+ * from a single-node retest that began just before it.
+ * @type {Map<AbortController, number>}
+ */
+const liveLatencyControllers = new Map();
+
+/**
  * 获取当前延迟测试的 AbortSignal（供 worker 循环检查是否被中止）。
  */
 export function getLatencyTestSignal() {
@@ -733,6 +741,7 @@ export function resetLatencyTestController() {
  */
 export function abortLatencyTests() {
   latencyTestController.abort();
+  for (const controller of liveLatencyControllers.keys()) controller.abort();
 }
 
 /**
@@ -750,7 +759,11 @@ export async function testProxy(name, customTimeout = 5000) {
   const timeout = setTimeout(() => localController.abort(), customTimeout + 1000);
 
   const onGlobalAbort = () => localController.abort();
-  latencyTestController.signal.addEventListener('abort', onGlobalAbort, { once: true });
+  // Keep the controller this test started under: a reset during the request
+  // swaps the module-level one, and cleanup must detach from the original.
+  const globalController = latencyTestController;
+  liveLatencyControllers.set(globalController, (liveLatencyControllers.get(globalController) ?? 0) + 1);
+  globalController.signal.addEventListener('abort', onGlobalAbort, { once: true });
 
   try {
     const testUrl = 'https://www.gstatic.com/generate_204';
@@ -782,7 +795,10 @@ export async function testProxy(name, customTimeout = 5000) {
     return -1;
   } finally {
     clearTimeout(timeout);
-    latencyTestController.signal.removeEventListener('abort', onGlobalAbort);
+    globalController.signal.removeEventListener('abort', onGlobalAbort);
+    const left = (liveLatencyControllers.get(globalController) ?? 1) - 1;
+    if (left > 0) liveLatencyControllers.set(globalController, left);
+    else liveLatencyControllers.delete(globalController);
   }
 }
 
