@@ -265,6 +265,9 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
     });
 }
 
+/** Bumped by each confirm dialog that opens (see the close handler). */
+let _confirmGeneration = 0;
+
 /**
  * Show a confirmation modal dialog.
  * @param {string} title
@@ -299,6 +302,9 @@ export function showConfirmModal(title, message = '') {
 
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+        // The shared modal may be reopened before this one's close animation ends;
+        // only the latest dialog may touch it then.
+        const generation = ++_confirmGeneration;
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
@@ -306,7 +312,7 @@ export function showConfirmModal(title, message = '') {
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
-                bg.classList.add('hidden');
+                if (generation === _confirmGeneration) bg.classList.add('hidden');
                 resolve(val);
             }, 300);
         };
