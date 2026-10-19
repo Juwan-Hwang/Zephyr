@@ -2453,6 +2453,9 @@ appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 //  Smart Auto-Test Scheduler
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Shortest gap between automatic latency passes (each one measures every node). */
+const AUTO_TEST_MIN_INTERVAL_SECS = 60;
+
 const _autoTest = {
     /** @type {number|null} */
     _timer: null,
@@ -2516,8 +2519,11 @@ const _autoTest = {
 
             // Schedule next cycle using adaptive interval
             const config = /** @type {any} */ (await smartConfig().catch(() => null));
-            const minInterval = config?.min_interval_secs ?? 60;
-            const maxInterval = config?.max_interval_secs ?? 600;
+            // smart.toml keeps the intervals under [scheduler]. A pass measures every node,
+            // so never start one more often than once a minute (the old plugin page saved
+            // a 10 s minimum that was never read before).
+            const minInterval = Math.max(AUTO_TEST_MIN_INTERVAL_SECS, Number(config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60) || 60);
+            const maxInterval = Math.max(minInterval, Number(config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600) || 600);
             // Use average score of all tested nodes as network quality
             const rankings = await smartRank().catch(() => []);
             const avgScore = rankings.length > 0
