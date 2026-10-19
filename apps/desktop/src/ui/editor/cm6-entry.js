@@ -9,4 +9,4 @@ export { yaml } from '@codemirror/lang-yaml';
 export { javascript } from '@codemirror/lang-javascript';
 export { autocompletion } from '@codemirror/autocomplete';
 export { indentWithTab } from '@codemirror/commands';
-export { syntaxHighlighting, defaultHighlightStyle, foldGutter, indentOnInput, bracketMatching } from '@codemirror/language';
+export { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, foldGutter, indentOnInput, bracketMatching } from '@codemirror/language';

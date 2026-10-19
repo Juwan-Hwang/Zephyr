@@ -63,6 +63,9 @@ pub struct OverrideItem {
     /// Populated by `override_list`; not persisted in meta.json.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_success: Option<bool>,
+    /// Error message of the last execution when it failed. Populated by `override_list`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 impl OverrideItem {
@@ -82,6 +85,7 @@ impl OverrideItem {
             updated_at: None,
             created_at: now,
             last_success: None,
+            last_error: None,
         }
     }
 
