@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // The wheel only needs the node list; everything else is a no-op.
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
-    switchProxy: vi.fn().mockResolvedValue(true),
+    switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
     abortLatencyTests: vi.fn(),
     closeAllConnections: vi.fn().mockResolvedValue(undefined),
 }));
@@ -16,6 +16,12 @@ vi.mock('./proxies.js', () => ({
     sortProxiesByLatency: vi.fn(),
     syncCoreConfig: vi.fn().mockResolvedValue(undefined),
     renderProxies: vi.fn(),
+    notifySwitchFailed: vi.fn(),
+    resolveLeafNode: vi.fn((/** @type {string} */ n, /** @type {any} */ map) => {
+        let cur = n; const seen = new Set();
+        while (map?.[cur]?.now && map[map[cur].now] && !seen.has(cur)) { seen.add(cur); cur = map[cur].now; }
+        return cur;
+    }),
 }));
 vi.mock('./state.js', () => ({ appStore: { get: vi.fn(() => null) } }));
 vi.mock('./cache.js', () => ({
@@ -257,7 +263,62 @@ describe('node quick-switch wheel', () => {
         jp.click();
         expect(isShown(dom.dropdown)).toBe(false);
         await vi.advanceTimersByTimeAsync(0);
-        expect(api.switchProxy).toHaveBeenCalledWith('Proxy', 'JP 01');
+        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01');
+    });
+
+    it('restores the old node name and reports an error when the switch fails or throws', async () => {
+        const api = await import('../api.js');
+        const proxies = await import('./proxies.js');
+        const rejected = new Error('busy');
+        for (const fail of [() => Promise.resolve({ ok: false, reason: rejected }), () => Promise.reject(new Error('boom'))]) {
+            /** @type {any} */ (api.switchProxyResult).mockImplementationOnce(fail);
+            await hoverOpen();
+            const jp = /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === 'JP 01'));
+            jp.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(document.getElementById('current-node-name')?.textContent).toBe('HK 02');
+        }
+        // Same titled toast as the proxies page; a thrown error carries its reason.
+        expect(proxies.notifySwitchFailed).toHaveBeenCalledTimes(2);
+        expect(proxies.notifySwitchFailed).toHaveBeenNthCalledWith(1, rejected);
+        expect(/** @type {any} */ (proxies.notifySwitchFailed).mock.calls[1][0]).toBeInstanceOf(Error);
+    });
+
+    it('saves an older accepted switch when the newer click fails, and reports only the newer one', async () => {
+        const api = await import('../api.js');
+        const proxies = await import('./proxies.js');
+        const cache = await import('./cache.js');
+        const memory = await import('./proxy-memory.js');
+        /** @type {any} */ (cache.getSettingsCached).mockResolvedValue({ last_config: 'sub' });
+        /** @type {(v: any) => void} */
+        let resolveA = () => {};
+        /** @type {(e: any) => void} */
+        let rejectB = () => {};
+        /** @type {any} */ (api.switchProxyResult)
+            .mockImplementationOnce(() => new Promise((r) => { resolveA = r; }))
+            .mockImplementationOnce(() => new Promise((_, j) => { rejectB = j; }));
+        /** @param {string} name */
+        const pick = async (name) => {
+            await hoverOpen();
+            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === name)).click();
+            await vi.advanceTimersByTimeAsync(0);
+        };
+        await pick('JP 01');
+        await pick('HK 01');
+        const boom = new Error('boom');
+        rejectB(boom);
+        await vi.advanceTimersByTimeAsync(0);
+        const syncsBeforeA = /** @type {any} */ (proxies.syncCoreConfig).mock.calls.length;
+        resolveA({ ok: true, reason: null });
+        await vi.advanceTimersByTimeAsync(3000);
+        // The failed newer click's resync may have read the core before A landed: A redraws.
+        expect(/** @type {any} */ (proxies.syncCoreConfig).mock.calls.length).toBeGreaterThan(syncsBeforeA);
+        expect(memory.saveProxySelection).toHaveBeenCalledTimes(1);
+        expect(memory.saveProxySelection).toHaveBeenCalledWith('sub', { node: 'JP 01', group: 'Proxy' });
+        expect(proxies.notifySwitchFailed).toHaveBeenCalledTimes(1);
+        expect(proxies.notifySwitchFailed).toHaveBeenCalledWith(boom);
     });
 
     it('is keyboard operable: Enter opens on the current node, arrows move, Escape returns focus', async () => {

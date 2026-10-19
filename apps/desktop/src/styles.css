@@ -21,10 +21,10 @@
    Windows 的 Segoe UI Emoji 不含国旗字形，区域指示符会显示成两个字母
    （如 "🇯🇵" → "JP"）。用 unicode-range 限定只接管区域指示符与
    subdivision 旗帜标签，其余字符继续走系统字体。
-   字形来自 Twemoji（CC-BY-4.0），见 NOTICE。 */
+   字形来自 Catrinity Flags（SIL OFL 1.1，按 OFL 要求子集改名），见 NOTICE。 */
 @font-face {
-  font-family: "Twemoji Country Flags";
-  src: url("./fonts/TwemojiCountryFlags.woff2") format("woff2");
+  font-family: "Zephyr Country Flags";
+  src: url("./fonts/ZephyrCountryFlags.woff2") format("woff2");
   unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
   font-display: swap;
 }
@@ -35,10 +35,10 @@
   --scroll-fade-dir: right;
   --ui-scale: 1;
   --scale-origin-x: left;
-  --font-sans: "Twemoji Country Flags", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+  --font-sans: "Zephyr Country Flags", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
     "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
     "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
-  --font-mono: "Twemoji Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+  --font-mono: "Zephyr Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
     "Courier New", monospace;
   --color-accent: var(--accent-primary, #007AFF);
@@ -134,6 +134,10 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   transition-duration: var(--zephyr-time-standard);
   transition-timing-function: var(--zephyr-easing-ease-out);
   cursor: pointer;
+}
+/* The display above must not beat the .hidden utility (uno loads first). */
+:is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary).hidden {
+  display: none;
 }
 
 .btn-ghost {
@@ -288,8 +292,9 @@ input[type="range"],
 /* Keyboard focus on a wheel node (options are tabindex=-1, so the global ring skips them) */
 #node-wheel-list [role="option"]:focus { outline: none; }
 #node-wheel-list [role="option"]:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
+    /* box-shadow follows the rounded corners of the scaled option (outline left corner slivers) */
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 5px var(--zephyr-focus-ring);
 }
 
 
@@ -447,6 +452,16 @@ input[type=number] {
 }
 input:checked + .switch-slider {
     background-color: var(--color-accent);
+}
+/* The real checkbox is 0x0, so draw the keyboard focus ring on the visible track. */
+.ios-switch input:focus-visible + .switch-slider {
+    outline: 2px solid var(--color-accent, #0A84FF);
+    outline-offset: 2px;
+}
+/* Busy (system proxy being applied): not clickable, slightly faded. */
+.ios-switch input:disabled + .switch-slider {
+    cursor: progress;
+    opacity: 0.6;
 }
 
 /* Default size: 40x24 */
@@ -1762,7 +1777,7 @@ html.dark #fullscreen-editor-output {
 .dz-kpi-icon svg { width: 12px; height: 12px; }
 .dz-kpi-value { display: flex; align-items: baseline; gap: 4px; }
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
-.dz-kpi-value span { font-size: 11px; font-weight: 600; color: var(--zephyr-text-muted); }
+.dz-kpi-value span { font-size: 13px; font-weight: 500; color: var(--zephyr-text-muted); }
 .dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Keep footer text clear of the sparkline drawn in the bottom corner */
 .dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
@@ -1863,6 +1878,8 @@ html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
 .dz-mode-slider { position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc((100% - 8px)/3); border-radius: var(--radius-lg); box-shadow: var(--zephyr-shadow-sm); border: 1px solid var(--zephyr-border-default); transition: transform var(--motion-base) var(--motion-ease-out); }
 html.dark .dz-mode-slider { background: rgba(255,255,255,.09); }
 html:not(.dark) .dz-mode-slider { background: #fff; }
+/* Minimal home: same white selected segment in light theme (grey-on-grey was invisible). */
+html:not(.dark) #mode-slider { background: #fff; }
 .dz-mode-seg button { position: relative; z-index: 1; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out); white-space: nowrap; overflow: hidden; }
 .dz-mode-seg button.active { color: var(--color-accent); }
 
@@ -2373,7 +2390,18 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 }
 
 /* Toasts: neutral text on glass, a status dot carries the type colour */
-#notif-container { inset-inline-end: 32px; bottom: 24px; }
+/* Toasts sit top-right under the page header: away from the switches at the
+   bottom of the home page. Fixed width so a stack reads as one column. */
+#notif-container { inset-inline-end: 32px; top: 76px; width: 280px; }
+#notif-container > .toast { width: 100%; }
+.toast-sticky { pointer-events: auto; }
+.toast-close {
+  flex-shrink: 0; margin: -4px -6px 0 auto; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 15px; line-height: 1; color: var(--text-tertiary);
+  cursor: pointer; transition: background-color var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.toast-close:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 .toast {
   display: flex;
   align-items: flex-start;
@@ -2383,14 +2411,14 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
   box-shadow: var(--zephyr-shadow-dialog, 0 8px 32px rgba(0, 0, 0, .25));
 }
 html.dark .toast { background: rgba(28, 28, 32, 0.82); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
-html:not(.dark) .toast { background: rgba(255, 255, 255, 0.86); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+html:not(.dark) .toast { background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
 .toast-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--color-accent); }
 .toast[data-type="success"] .toast-dot { background: var(--zephyr-color-success); }
 .toast[data-type="error"] .toast-dot { background: var(--zephyr-color-danger); }
 .toast[data-type="warning"] .toast-dot { background: var(--zephyr-color-warning); }
-.toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .toast-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
-.toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); }
+.toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); white-space: pre-line; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2585,3 +2613,91 @@ button[data-home-mode] {
 /* Custom-content modals hide the default Cancel/Confirm; drop the empty action row so it leaves no gap */
 #modal-content-area + div:has(> .hidden + .hidden:last-child) { display: none; }
 #modal-content-area:has(+ div > .hidden + .hidden:last-child) { margin-block-end: 0; }
+
+/* Core failed to start: the card replaces the hero's speed area; the rest of
+   the home page stays in place, dimmed and inert (ui/core-error.js). */
+.home-hero.is-core-error .home-hero-body { visibility: hidden; }
+.core-error-card {
+  position: absolute; inset: 0 0 auto 0; bottom: var(--home-stats-h, 96px); z-index: 3;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 16px 24px; text-align: center;
+}
+.core-error-card.is-floating {
+  position: fixed; z-index: 60; inset: 50% auto auto 50%; bottom: auto; transform: translate(-50%, -50%);
+  width: min(440px, calc(100% - 48px)); padding: 24px; border-radius: var(--radius-lg, 12px);
+}
+.core-error-icon {
+  width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent);
+  margin-bottom: 4px;
+}
+.core-error-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.core-error-sub { font-size: 12px; color: var(--text-secondary); }
+.core-error-detail {
+  max-width: min(560px, 100%); margin-top: 2px; padding: 3px 10px; border-radius: 10px;
+  font-size: 11px; line-height: 18px; color: var(--text-tertiary);
+  background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  /* The whole reason stays readable: wrap, and scroll past five lines. */
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 90px; overflow-y: auto;
+}
+.core-error-retry {
+  margin-top: 8px; height: 28px; padding: 0 18px; border-radius: 999px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary, #007AFF);
+  background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #007AFF) 30%, transparent);
+  outline: none;
+}
+.core-error-actions { display: flex; gap: 8px; margin-top: 8px; }
+.core-error-actions .core-error-retry { margin-top: 0; }
+.core-error-retry.is-secondary {
+  color: var(--text-secondary); background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-strong, transparent);
+}
+.core-error-card.has-log { justify-content: flex-start; padding-top: 20px; }
+.core-error-log {
+  width: min(640px, 100%); flex: 1 1 auto; min-height: 60px; margin-top: 8px; padding: 8px 10px;
+  overflow: auto; text-align: start; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 11px/16px var(--font-mono, ui-monospace, monospace); color: var(--text-secondary);
+  background: var(--zephyr-bg-muted); border-radius: var(--radius-md, 8px); user-select: text;
+}
+.core-error-retry:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
+.core-error-retry:disabled { opacity: .6; cursor: default; }
+#app-main-container.core-down .home-hero.is-core-error .home-stats,
+#app-main-container.core-down [data-page="home"] > :not(#home-hero),
+#app-main-container.core-down [data-page="console"] {
+  opacity: .45; pointer-events: none; filter: saturate(.6);
+}
+
+/* No subscription yet: the hero shows one title and the Add button (ui/no-subscription.js). */
+.home-hero.is-empty .home-hero-body { visibility: hidden; }
+.dz-traffic-card { position: relative; }
+.dz-traffic-card.is-empty > :not(.home-empty-state) { visibility: hidden; }
+.home-empty-state {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; text-align: center; padding: 0 24px;
+}
+.home-hero > .home-empty-state { bottom: var(--home-stats-h, 96px); }
+.home-empty-icon {
+  width: 36px; height: 36px; border-radius: 10px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent-primary, #007AFF); background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+}
+.home-empty-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.home-empty-sub { font-size: 12px; color: var(--text-secondary); }
+.home-empty-btn {
+  margin-top: 10px; height: 28px; padding: 0 18px; border-radius: 999px; cursor: pointer; outline: none;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary, #007AFF);
+  background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #007AFF) 30%, transparent);
+}
+.home-empty-btn:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
+.home-hero.is-empty .home-stats { opacity: .5; }
+.home-hero.is-empty .home-stat-value,
+.home-hero.is-empty .home-stat-foot { visibility: hidden; position: relative; }
+.home-hero.is-empty .home-stat-value::before,
+.home-hero.is-empty .home-stat-foot::before {
+  content: "—"; visibility: visible; position: absolute; inset: 0; text-align: center;
+}
+.home-hero.is-empty .home-stat-value::before { font-size: 22px; font-weight: 300; }

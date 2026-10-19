@@ -383,6 +383,8 @@ export const appStore = createStore('zephyr.app', {
     // Network state
     isNetworkUpdating: false,
     isTestingLatency: false,
+    /** The core is running on the built-in minimal config: no subscription added yet. */
+    noSubscription: false,
 
     // UI state
     currentTheme: normalizeTheme(lsGet('appTheme')),
@@ -436,7 +438,7 @@ export const appStore = createStore('zephyr.app', {
         // and restored as true on the next init, permanently locking out
         // every operation that checks it (switchConfig, TUN toggle, mode
         // selector, etc.).
-        'isNetworkUpdating', 'isTestingLatency',
+        'isNetworkUpdating', 'isTestingLatency', 'noSubscription',
     ],
 });
 
