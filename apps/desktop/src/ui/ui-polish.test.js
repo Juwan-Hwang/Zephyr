@@ -458,6 +458,20 @@ describe('sidebar nav tooltips', () => {
         }
     });
 
+    it('index.html overlay close and back buttons carry accessible aria-labels', () => {
+        const doc = parseIndex();
+        for (const id of ['close-plugins-btn', 'fullscreen-editor-close-btn']) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('aria-label'), `${id} aria-label`).toBe('Dismiss');
+            expect(btn?.getAttribute('data-i18n-aria-label'), `${id} data-i18n-aria-label`).toBe('dismiss');
+        }
+        const backBtn = doc.getElementById('btn-back-settings');
+        expect(backBtn).toBeTruthy();
+        expect(backBtn?.getAttribute('aria-label')).toBe('Back');
+        expect(backBtn?.getAttribute('data-i18n-aria-label')).toBe('overrideBack');
+    });
+
     it('tooltip styles respect reduced motion', () => {
         const css = read('styles.css');
         expect(css).toMatch(/\.nav-tooltip\s*\{/);

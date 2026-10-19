@@ -241,7 +241,7 @@ function initCopyEnvSettings() {
             <div class="glass-card w-[360px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
                     <h3 class="dialog-title">${escapeHtml(t.copyEnvFormat || 'Shell Format')}</h3>
-                    <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                    <button id="copy-env-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.dismiss || 'Dismiss')}" data-i18n-aria-label="dismiss">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
@@ -392,7 +392,7 @@ function initLogSettingsModal() {
             <div class="glass-card w-[400px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
                     <h3 class="dialog-title">${escapeHtml(t.logSettings || 'Log Settings')}</h3>
-                    <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                    <button id="log-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.dismiss || 'Dismiss')}" data-i18n-aria-label="dismiss">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
@@ -588,7 +588,7 @@ function initLogSettingsModal() {
             <div class="glass-card w-[480px] p-6 space-y-4">
                 <div class="flex items-center justify-between">
                     <h3 class="dialog-title">${escapeHtml(t.logExportTitle || 'Export Logs')}</h3>
-                    <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                    <button id="log-export-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.dismiss || 'Dismiss')}" data-i18n-aria-label="dismiss">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
@@ -2409,7 +2409,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 <div class="glass-card w-[440px] p-6 space-y-5">
                     <div class="flex items-center justify-between">
                         <h3 class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Smart Proxy Settings')}</h3>
-                        <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                        <button id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.dismiss || 'Dismiss')}" data-i18n-aria-label="dismiss">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
                     </div>

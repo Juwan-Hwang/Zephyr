@@ -198,7 +198,7 @@ async function showEditPanel(configInfo) {
         <div class="glass-card w-[440px] p-6 space-y-5" style="opacity:0;transform:scale(0.95);transition:opacity ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1),transform ${ANIMATION_DURATION}ms cubic-bezier(0.16,1,0.3,1)">
             <div class="flex items-center justify-between">
                 <h3 class="dialog-title">${escapeHtml(t.editSubscription || 'Edit Subscription')}</h3>
-                <button id="edit-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <button id="edit-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.dismiss || 'Dismiss')}" data-i18n-aria-label="dismiss">
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>

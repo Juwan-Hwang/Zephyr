@@ -251,7 +251,7 @@
                         <!-- Panel header: title + close -->
                         <div class="flex items-center justify-between shrink-0">
                             <h3 class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
-                            <button id="close-plugins-btn" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                            <button id="close-plugins-btn" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" aria-label="Dismiss" data-i18n-aria-label="dismiss">
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
@@ -1293,7 +1293,7 @@
 
                 <header class="flex items-center justify-between relative z-10">
                     <div class="flex items-center gap-4">
-                        <button id="btn-back-settings" class="btn-ghost">
+                        <button id="btn-back-settings" class="btn-ghost" aria-label="Back" data-i18n-aria-label="overrideBack">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
                         </button>
                         <div>
@@ -1444,7 +1444,7 @@
                         <span data-i18n="overrideSaveAndRun">保存并执行</span>
                     </button>
                     <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
-                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm">
+                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm" aria-label="Dismiss" data-i18n-aria-label="dismiss">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 </div>
