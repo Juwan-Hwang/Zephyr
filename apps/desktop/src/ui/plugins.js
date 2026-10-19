@@ -28,11 +28,147 @@ import {
     overrideExport,
     overrideImport,
 } from './prism.js';
+import { rulesLogger } from '../utils/logger.js';
 import { SVG_ICONS } from './icons.js';
 import { stopSmartAutoTest, startSmartAutoTest, refreshProxies } from './proxies.js';
-import { t } from '../i18n.js';
-import { showNotification, showModal } from './notifications.js';
+import { t, currentLang } from '../i18n.js';
+import { showNotification, showModal, showConfirmModal } from './notifications.js';
+import { createFocusTrap } from '../utils/focus-trap.js';
+import { showLinkDialog } from './link-dialog.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
+
+/**
+ * Status text for the inline editor: "Ln 9, Col 31 · 248 chars".
+ * @param {{ line: number, col: number, length: number }} pos
+ */
+function showInlineCursor(pos) {
+    const el = document.getElementById('plugin-script-cursor');
+    if (!el) return;
+    const lc = (t('overrideLineCol') ?? 'Line @@line@@, Col @@col@@')
+        .replace('@@line@@', String(pos.line)).replace('@@col@@', String(pos.col));
+    const chars = (t('overrideCharCount') ?? '@@count@@ chars').replace('@@count@@', String(pos.length));
+    el.textContent = `${lc} · ${chars}`;
+    updateDirtyMarker();
+}
+
+/** Show "● Unsaved" in the breadcrumb while the editor differs from what was saved. */
+function updateDirtyMarker() {
+    document.getElementById('plugin-script-dirty')?.classList.toggle('hidden', !isScriptDirty());
+}
+
+/**
+ * Swap the panel header between the list title and the editor breadcrumb.
+ * @param {boolean} editing
+ */
+function setEditorChrome(editing) {
+    document.getElementById('plugin-panel-title')?.classList.toggle('hidden', editing);
+    document.getElementById('plugin-script-crumb')?.classList.toggle('hidden', !editing);
+    document.getElementById('plugin-toolbar')?.classList.toggle('hidden', editing);
+    document.getElementById('plugin-list')?.classList.toggle('hidden', editing);
+    document.getElementById('plugin-script-area')?.classList.toggle('hidden', !editing);
+}
+
+/**
+ * @typedef {Object} ScriptResult
+ * @property {'ok'|'fail'|'warn'} kind
+ * @property {string} label - bold lead ("Last apply succeeded")
+ * @property {string[]} detail - quiet parts joined with " · "
+ * @property {number|null} at - when it happened (ms), shown as relative time
+ * @property {string} log - full output behind "View log" ('' hides the link)
+ */
+
+/** @type {ScriptResult|null} */
+let _scriptResult = null;
+/** @type {ReturnType<typeof setInterval>|null} */
+let _resultTimer = null;
+
+const RESULT_ICON = { ok: '✓', fail: '✕', warn: '!' };
+const RESULT_COLOR = { ok: '--zephyr-color-success', fail: '--zephyr-color-danger', warn: '--zephyr-color-warning' };
+
+/** @param {number} at */
+function formatAgo(at) {
+    const sec = Math.round((Date.now() - at) / 1000);
+    if (sec < 45) return t('overrideJustNow') ?? 'just now';
+    const rtf = new Intl.RelativeTimeFormat(currentLang, { numeric: 'auto' });
+    const min = Math.round(sec / 60);
+    return min < 60 ? rtf.format(-min, 'minute') : rtf.format(-Math.round(min / 60), 'hour');
+}
+
+/**
+ * The result line for a real (saved and applied) run.
+ * @param {any} result
+ * @returns {ScriptResult}
+ */
+function runScriptResult(result) {
+    const took = (t('overrideDuration') ?? 'Took @@ms@@ ms')
+        .replace('@@ms@@', String(Math.round((result.durationUs ?? 0) / 1000)));
+    if (result.success) {
+        return {
+            kind: 'ok',
+            label: result.configModified ? (t('overrideLastApplyOk') ?? 'Last apply succeeded') : (t('overrideSavedNoChange') ?? 'Saved, config unchanged'),
+            detail: [took], at: Date.now(), log: logText(result),
+        };
+    }
+    return {
+        kind: 'fail',
+        label: t('overrideLastApplyFailed') ?? 'Last apply failed',
+        detail: [formatScriptError(result.error) || String(result.error ?? ''), took].filter(Boolean),
+        at: Date.now(), log: logText(result),
+    };
+}
+
+/** Paint the one-line result under the editor from `_scriptResult`. */
+function renderScriptResult() {
+    const box = document.getElementById('plugin-script-result');
+    const icon = document.getElementById('plugin-script-result-icon');
+    const label = document.getElementById('plugin-script-status');
+    const detail = document.getElementById('plugin-script-result-detail');
+    const logBtn = document.getElementById('plugin-script-log-btn');
+    const out = document.getElementById('plugin-script-output');
+    if (!box) return;
+    const r = _scriptResult;
+    box.classList.toggle('hidden', !r);
+    if (!r) {
+        out?.classList.add('hidden');
+        return;
+    }
+    const color = `var(${RESULT_COLOR[r.kind]})`;
+    if (icon) {
+        icon.textContent = RESULT_ICON[r.kind];
+        icon.style.color = color;
+        icon.style.backgroundColor = `color-mix(in srgb, ${color} 15%, transparent)`;
+    }
+    if (label) {
+        label.textContent = r.label;
+        label.style.color = r.kind === 'ok' ? '' : color;
+    }
+    if (detail) detail.textContent = [...r.detail, ...(r.at ? [formatAgo(r.at)] : [])].join(' · ');
+    if (logBtn) logBtn.classList.toggle('hidden', !r.log);
+    if (out) out.textContent = r.log;
+}
+
+/** @param {ScriptResult|null} r */
+function setScriptResult(r) {
+    _scriptResult = r;
+    document.getElementById('plugin-script-output')?.classList.add('hidden');
+    const logBtn = document.getElementById('plugin-script-log-btn');
+    if (logBtn) logBtn.textContent = t('overrideViewLog') ?? 'View log';
+    renderScriptResult();
+    if (_resultTimer) { clearInterval(_resultTimer); _resultTimer = null; }
+    if (r?.at) _resultTimer = setInterval(renderScriptResult, 30_000);
+}
+
+/** Proxy group count from the running core, or null when it cannot be read. */
+async function countProxyGroups() {
+    try {
+        const { getProxies } = await import('../api.js');
+        const data = /** @type {{ proxies?: Record<string, { name?: string, all?: unknown }> }} */ (await getProxies());
+        return Object.values(data?.proxies ?? {})
+            .filter(p => Array.isArray(p?.all) && p?.name !== 'GLOBAL').length;
+    } catch {
+        return null;
+    }
+}
 import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
 import { EditorView, StateEffect } from '../cm6.bundle.js';
 
@@ -55,6 +191,15 @@ function getOverrideCards(container) {
 //  Internal state
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Six-dot drag handle (same as the subscription cards). */
+const GRIP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+
+/** Dialogs opened on top of the override panel, each with its own Esc handling. */
+function isNestedDialogOpen() {
+    if (document.getElementById('modal-bg')?.classList.contains('hidden') === false) return true;
+    return !!document.getElementById('link-dialog') || !!document.getElementById('scope-editor-overlay');
+}
+
 /** Currently active override ID being edited. */
 let activeOverrideId = '';
 
@@ -73,6 +218,52 @@ let _dragState = null;
 /** CodeMirror EditorView for the override script editor (null when not active). @type {EditorView|null} */
 let scriptEditorView = null;
 
+/** Bumped on every editor open and on panel close; a load that finishes after a newer one is dropped. */
+let _editorOpenGen = 0;
+
+/** Script content as last loaded or saved — anything else in the editor is unsaved. */
+let _savedScript = '';
+/** Order of save/run writes: only the newest one that returns may update _savedScript. */
+let _scriptWriteSeq = 0;
+/** Script writes run one at a time, in the order they were started. */
+let _scriptWriteChain = Promise.resolve();
+/**
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+function queueScriptWrite(fn) {
+    const run = _scriptWriteChain.then(fn, fn);
+    _scriptWriteChain = run.then(() => undefined, () => undefined);
+    return run;
+}
+/** @param {number} seq @param {string} source */
+function markSaved(seq, source) {
+    if (seq === _scriptWriteSeq) _savedScript = source;
+}
+
+/** @returns {boolean} */
+function isScriptDirty() {
+    const scriptArea = document.getElementById('plugin-script-area');
+    if (!scriptArea || scriptArea.classList.contains('hidden')) return false;
+    const view = (isFullscreenEditorOpen && fullscreenEditorView) ? fullscreenEditorView : scriptEditorView;
+    if (!view) return false;
+    return getEditorContent(view) !== _savedScript;
+}
+
+/**
+ * Ask before leaving the editor with unsaved changes.
+ * @returns {Promise<boolean>} true when it is fine to leave
+ */
+async function confirmLeaveEditor() {
+    if (!isScriptDirty()) return true;
+    return showConfirmModal(
+        t('overrideUnsavedTitle') ?? 'Discard unsaved changes?',
+        t('overrideUnsavedDesc') ?? 'Your edits to this script have not been saved.',
+        { danger: true, confirmText: t('overrideDiscard') ?? 'Discard' }
+    );
+}
+
 /** CodeMirror EditorView for the fullscreen editor (null when not active). @type {EditorView|null} */
 let fullscreenEditorView = null;
 
@@ -82,6 +273,8 @@ let searchFilter = '';
 /** Current active override extension for fullscreen editor. @type {string} */
 let activeOverrideExt = '';
 
+/** Keeps Tab inside the fullscreen editor, which sits outside the override panel. @type {import('../utils/focus-trap.js').FocusTrapHandle|null} */
+let fullscreenTrap = null;
 /** Whether fullscreen editor is currently open. */
 let isFullscreenEditorOpen = false;
 
@@ -101,34 +294,37 @@ export function initPlugins() {
     // eslint-disable-next-line no-unused-vars -- placeholder for CodeMirror editor
     const scriptCm6 = document.getElementById('plugin-script-cm6');
     const scriptOutput = document.getElementById('plugin-script-output');
-    const scriptOutputToggle = document.getElementById('plugin-script-output-toggle');
-    const scriptOutputLabel = document.getElementById('plugin-script-output-label');
-    const scriptOutputChevron = document.getElementById('plugin-script-output-chevron');
-    // ── Script output collapsible ────────────────────────────
-    scriptOutputToggle?.addEventListener('click', () => {
+    // "View log" opens the full output under the result line.
+    const logBtn = document.getElementById('plugin-script-log-btn');
+    logBtn?.addEventListener('click', () => {
         if (!scriptOutput) return;
-        const isHidden = scriptOutput.style.display === 'none';
-        scriptOutput.style.display = isHidden ? '' : 'none';
-        if (scriptOutputChevron) {
-            scriptOutputChevron.style.transform = isHidden ? 'rotate(180deg)' : '';
-        }
-        if (isHidden && scriptOutputLabel) {
-            const lineCount = (scriptOutput.textContent?.match(/\n/g) || []).length + 1;
-            scriptOutputLabel.textContent = (t('overrideOutputLineCount') || 'Output (@@count@@ lines)').replace('@@count@@', String(lineCount));
-        }
+        const open = scriptOutput.classList.toggle('hidden') === false;
+        logBtn.textContent = open ? (t('overrideHideLog') ?? 'Hide log') : (t('overrideViewLog') ?? 'View log');
     });
     // eslint-disable-next-line no-unused-vars -- placeholder for editor title
     const scriptTitle = document.getElementById('plugin-script-title');
     const scriptRunBtn = document.getElementById('plugin-script-run-btn');
     const scriptValidateBtn = document.getElementById('plugin-script-validate-btn');
-    const scriptStatus = document.getElementById('plugin-script-status');
+    const scriptSaveBtn = document.getElementById('plugin-script-save-btn');
     const scriptBackBtn = document.getElementById('plugin-script-back-btn');
 
     if (!panel) return;
 
     // ── Panel open / close ──────────────────────────────────────────
+    // Esc closes the panel (after the unsaved check); Tab stays inside it.
+    const panelTrap = createFocusTrap(panel, {
+        onEscape: () => {
+            // The trap swallows Esc for the whole document, so it closes the
+            // fullscreen editor itself and leaves nested dialogs to their own handlers.
+            if (isFullscreenEditorOpen) { closeFullscreenEditor(); return; }
+            void closePanel();
+        },
+        // Nested dialogs and the editor's autocomplete close themselves on Esc.
+        passEscape: () => isNestedDialogOpen() || !!document.querySelector('.cm-tooltip-autocomplete'),
+    });
     openBtn?.addEventListener('click', () => {
         panel.classList.remove('hidden');
+        requestAnimationFrame(() => panelTrap.activate());
         // Animate in
         requestAnimationFrame(() => {
             const inner = panel.querySelector('.plugin-panel');
@@ -145,7 +341,19 @@ export function initPlugins() {
         void loadOverrides();
     });
 
-    const closePanel = () => {
+    const closePanel = async () => {
+        if (!(await confirmLeaveEditor())) return;
+        // Leaving discards the edits: drop the editor so reopening starts clean.
+        if (isFullscreenEditorOpen) closeFullscreenEditor();
+        // An editor still loading its script has already switched the chrome: drop that load.
+        _editorOpenGen++;
+        setEditorChrome(false);
+        if (scriptEditorView) {
+            setScriptResult(null);
+            scriptEditorView.destroy();
+            scriptEditorView = null;
+        }
+        panelTrap.deactivate();
         const inner = panel.querySelector('.plugin-panel');
         if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';
@@ -159,6 +367,20 @@ export function initPlugins() {
 
     closeBtn?.addEventListener('click', closePanel);
     backdrop?.addEventListener('click', closePanel);
+
+    // Ctrl/Cmd+S saves, Ctrl/Cmd+Enter saves and applies. Capture phase so the
+    // editor's own Mod-Enter binding never inserts a line first.
+    panel.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey || scriptArea?.classList.contains('hidden')) return;
+        const key = e.key.toLowerCase();
+        if (key !== 's' && key !== 'enter') return;
+        e.preventDefault();
+        e.stopPropagation();
+        (key === 's' ? scriptSaveBtn : scriptRunBtn)?.click();
+    }, true);
+    if (/mac/i.test(navigator.platform)) {
+        panel.querySelectorAll('.script-kbd').forEach(k => { k.textContent = (k.textContent ?? '').replace('Ctrl', '⌘'); });
+    }
 
     // ── Header: search ──────────────────────────────────────────────
     const searchInput = document.getElementById('plugin-search-input');
@@ -177,118 +399,134 @@ export function initPlugins() {
     // ── Header: bulk actions ───────────────────────────────────────
     const enableAllBtn = document.getElementById('plugin-enable-all-btn');
     const disableAllBtn = document.getElementById('plugin-disable-all-btn');
-    enableAllBtn?.addEventListener('click', () => bulkToggle(true));
-    disableAllBtn?.addEventListener('click', () => bulkToggle(false));
+    const moreBtn = document.getElementById('plugin-more-btn');
+    const moreMenu = document.getElementById('plugin-more-dropdown');
+    const closeMore = () => { moreMenu?.classList.add('hidden'); moreBtn?.setAttribute('aria-expanded', 'false'); };
+    moreBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = moreMenu?.classList.toggle('hidden') === false;
+        moreBtn.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', closeMore);
+    enableAllBtn?.addEventListener('click', () => { closeMore(); void bulkToggle(true); });
+    disableAllBtn?.addEventListener('click', () => { closeMore(); void bulkToggle(false); });
 
     // ── Script area back button ─────────────────────────────────────
-    scriptBackBtn?.addEventListener('click', () => {
-        pluginList?.classList.remove('hidden');
-        scriptArea?.classList.add('hidden');
+    scriptBackBtn?.addEventListener('click', async () => {
+        if (!(await confirmLeaveEditor())) return;
+        // A content load still in flight must not open an editor after Back.
+        _editorOpenGen++;
+        setEditorChrome(false);
+        setScriptResult(null);
         if (scriptEditorView) { scriptEditorView.destroy(); scriptEditorView = null; }
         // Refresh list to reflect any changes
         void loadOverrides();
     });
 
+    /** Current editor text (raw; trimmed only to check for empty). */
+    const editorText = () => {
+        if (scriptEditorView) return getEditorContent(scriptEditorView);
+        return (scriptEditor instanceof HTMLInputElement || scriptEditor instanceof HTMLTextAreaElement) ? scriptEditor.value : '';
+    };
+    /** @param {string} s */
+    const plain = (s) => s.replace(/^[✓✗⚠]\s*/u, '');
+
     // ── Script validate ─────────────────────────────────────────────
     scriptValidateBtn?.addEventListener('click', async () => {
-        if (!scriptStatus) return;
-        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : ((scriptEditor instanceof HTMLInputElement || scriptEditor instanceof HTMLTextAreaElement) ? scriptEditor.value : '')).trim();
-        if (!source) return;
-
-        scriptStatus.textContent = t('overrideValidating') ?? 'Validating...';
-        scriptStatus.className = 'text-xs text-[var(--text-secondary)]';
-
+        const source = editorText();
+        if (!source.trim() || !activeOverrideId) return;
+        // A check runs nothing, so it is a toast and the last-run line stays.
         try {
-            // Use overrideSetContent with dry_run for validation
             const result = await overrideSetContent(activeOverrideId, source, true);
-            if (result.success) {
-                scriptStatus.textContent = t('overrideScriptSafe') ?? '✓ Script safe';
-                scriptStatus.className = 'text-xs text-emerald-400';
-            } else {
-                scriptStatus.textContent = '✗ ' + (formatScriptError(result.error) ?? (t('overrideScriptUnsafe') ?? 'Script may be unsafe'));
-                scriptStatus.className = 'text-xs text-rose-400';
-            }
+            if (result.success) showNotification(plain(t('overrideScriptSafe') ?? 'Syntax check passed'), 'success');
+            else showNotification(formatScriptError(result.error) ?? (t('overrideScriptUnsafe') ?? 'Script may be unsafe'), 'error');
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             // If core is not running, show a friendlier message instead of a hard error
             if (msg.includes('Failed to read running config') || msg.includes('No such file')) {
-                scriptStatus.textContent = t('overrideCoreNotRunning') ?? '⚠ Core not running, cannot validate';
-                scriptStatus.className = 'text-xs text-amber-400';
+                showNotification(plain(t('overrideCoreNotRunning') ?? 'Core not running, cannot validate'), 'warning');
             } else {
-                scriptStatus.textContent = '✗ ' + msg;
-                scriptStatus.className = 'text-xs text-rose-400';
+                showNotification(formatScriptError(msg) || msg, 'error');
             }
         }
     });
 
-    // ── Script run (save + execute) ──────────────────────────────
-    scriptRunBtn?.addEventListener('click', async () => {
-        if (!scriptOutput || !activeOverrideId) return;
-        const source = (scriptEditorView ? getEditorContent(scriptEditorView) : ((scriptEditor instanceof HTMLInputElement || scriptEditor instanceof HTMLTextAreaElement) ? scriptEditor.value : '')).trim();
-        if (!source) return;
+    // ── Script save (no apply) ──────────────────────────────────────
+    scriptSaveBtn?.addEventListener('click', async () => {
+        const source = editorText();
+        if (!source.trim() || !activeOverrideId) return;
+        try {
+            const seq = ++_scriptWriteSeq;
+            const id = activeOverrideId;
+            await queueScriptWrite(() => overrideSetContent(id, source, false, true));
+            markSaved(seq, source);
+            updateDirtyMarker();
+            showNotification(t('overrideSavedOnly') ?? 'Saved', 'success');
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            showNotification(formatScriptError(msg) || msg, 'error');
+        }
+    });
 
-        scriptOutput.textContent = '';
-        scriptOutput.className = 'text-xs text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-all';
+    // ── Script run (save + apply) ────────────────────────────────
+    scriptRunBtn?.addEventListener('click', async () => {
+        if (!activeOverrideId) return;
+        const source = editorText();
+        if (!source.trim()) return;
 
         stopSmartAutoTest();
+        const id = activeOverrideId;
+        const openGen = _editorOpenGen;
+        const seq = ++_scriptWriteSeq;
+        // Queued before the group count, so a later save cannot be written ahead of this one.
+        /** @type {number|null} */
+        let groupsBefore = null;
 
         try {
-            const result = await overrideSetContent(activeOverrideId, source, false);
+            const result = await queueScriptWrite(async () => {
+                groupsBefore = await countProxyGroups();
+                return overrideSetContent(id, source, false);
+            });
 
             // Invalidate caches so renderProxies fetches fresh data
             const { invalidateProxiesCache, invalidateConfigCache } = await import('./cache.js');
             invalidateProxiesCache();
             invalidateConfigCache();
 
-            // Wait for Mihomo to finish reloading, then refresh proxies page
-            setTimeout(() => {
+            // Another override opened during the run, or this one was closed and
+            // reopened: that editor and result line are not this run's to update.
+            const stillOpen = activeOverrideId === id && openGen === _editorOpenGen;
+            // A returned log means the backend wrote the content before running it,
+            // so it is saved even when the run itself failed.
+            if (stillOpen) {
+                markSaved(seq, source);
+                updateDirtyMarker();
+            }
+            const shown = runScriptResult(result);
+            if (stillOpen) setScriptResult(shown);
+
+            // Wait for Mihomo to finish reloading, then refresh proxies page and say how the groups moved
+            setTimeout(async () => {
                 startSmartAutoTest();
                 void refreshProxies();
+                if (!result.success || !result.configModified || groupsBefore === null) return;
+                const groupsAfter = await countProxyGroups();
+                if (groupsAfter === null || groupsAfter === groupsBefore || _scriptResult !== shown) return;
+                shown.detail.unshift((t('overrideGroupsDelta') ?? 'Proxy groups @@from@@ → @@to@@')
+                    .replace('@@from@@', String(groupsBefore)).replace('@@to@@', String(groupsAfter)));
+                renderScriptResult();
             }, 1000);
-
-            const lines = [];
-            if (result.logs?.length) {
-                lines.push('── logs ──────────────────────');
-                for (const log of result.logs) {
-                    lines.push(`[${log.level ?? 'Info'}] ${log.message}`);
-                }
-                lines.push('');
-            }
-
-            lines.push('── result ───────────────────');
-            lines.push(`success        : ${result.success}`);
-            lines.push(`configModified : ${result.configModified}`);
-            lines.push(`duration       : ${result.durationUs ?? 0} µs`);
-            if (result.error) {
-                lines.push(`error          : ${formatScriptError(result.error)}`);
-            }
-
-            const outputText = lines.join('\n');
-            scriptOutput.textContent = outputText;
-            scriptOutput.className = result.success
-                ? 'script-output px-4 pb-3 text-emerald-400 whitespace-pre-wrap break-all custom-scrollbar'
-                : 'script-output px-4 pb-3 text-rose-400 whitespace-pre-wrap break-all custom-scrollbar';
-            // Auto-expand collapsible output
-            scriptOutput.style.display = '';
-            scriptOutput.style.maxHeight = '120px';
-            scriptOutput.style.overflowY = 'auto';
-            if (scriptOutputChevron) scriptOutputChevron.style.transform = 'rotate(180deg)';
-            if (scriptOutputLabel) {
-                const lc = (outputText.match(/\n/g) || []).length + 1;
-                scriptOutputLabel.textContent = (t('overrideOutputLineCount') || 'Output (@@count@@ lines)').replace('@@count@@', String(lc));
-            }
 
             if (result.success && result.configModified) {
                 showNotification(t('overrideApplied') ?? 'Override applied and config reloaded', 'success');
             }
         } catch (err) {
-            scriptOutput.textContent = err instanceof Error ? err.message : String(err);
-            scriptOutput.className = 'script-output px-4 pb-3 text-rose-400 whitespace-pre-wrap break-all custom-scrollbar';
-            scriptOutput.style.display = '';
-            scriptOutput.style.maxHeight = '120px';
-            scriptOutput.style.overflowY = 'auto';
-            if (scriptOutputChevron) scriptOutputChevron.style.transform = 'rotate(180deg)';
-            if (scriptOutputLabel) scriptOutputLabel.textContent = t('overrideOutput') || 'Output';
+            const msg = err instanceof Error ? err.message : String(err);
+            if (activeOverrideId === id && openGen === _editorOpenGen) {
+                setScriptResult({ kind: 'fail', label: t('overrideLastApplyFailed') ?? 'Last apply failed', detail: [formatScriptError(msg) || msg], at: Date.now(), log: msg });
+            } else {
+                showNotification(formatScriptError(msg) || msg, 'error');
+            }
             // Resume auto test on error too
             setTimeout(() => {
                 startSmartAutoTest();
@@ -356,9 +594,11 @@ async function createNewOverride(ext) {
     if (!name?.trim()) return;
 
     try {
-        await overrideCreate(name.trim(), ext, 'local', null);
-        showNotification(t('overrideCreated') ?? 'Override created', 'success');
-        void loadOverrides();
+        const created = await overrideCreate(name.trim(), ext, 'local', null);
+        await loadOverrides();
+        // Go straight into the new script instead of leaving one more row to click.
+        if (created?.id) void openEditor(created.id, created.name ?? name.trim(), created.ext ?? ext);
+        else showNotification(t('overrideCreated') ?? 'Override created', 'success');
     } catch (err) {
         showNotification(String(err), 'error');
     }
@@ -369,18 +609,14 @@ async function createNewOverride(ext) {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function importFromUrl() {
-    const url = await showModal(
-        t('overrideImportUrlPrompt') ?? 'Enter remote URL:',
-        '',
-        'https://'
-    );
-    if (!url?.trim()) return;
-
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl.toLowerCase().startsWith('http://') && !trimmedUrl.toLowerCase().startsWith('https://')) {
-        showNotification(t('overrideInvalidUrl') ?? 'Invalid URL', 'error');
-        return;
-    }
+    // Link is checked as it is typed (same dialog as "Add subscription").
+    const picked = await showLinkDialog({
+        title: t('overrideImportUrlTitle') ?? 'Import override from URL',
+        urlLabel: t('overrideLink') ?? 'Link',
+        confirmText: t('overrideImportAction') ?? 'Import',
+    });
+    if (!picked) return;
+    const trimmedUrl = picked.url;
 
     // Extract filename once (strip query params / fragments) — reuse for name & ext detection
     const name = trimmedUrl.split('/').filter(Boolean).pop()?.split(/[?#]/)[0] || 'Remote Override';
@@ -470,14 +706,21 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
     overlay.id = 'scope-editor-overlay';
     overlay.style.background = '';
+    // Esc closes and Tab stays inside (this dialog used to ignore Esc).
+    const scopeTrap = createFocusTrap(overlay, { onEscape: () => closeScope() });
+    const closeScope = () => { scopeTrap.deactivate(); overlay.remove(); };
 
     const card = document.createElement('div');
-    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-0 max-w-[480px] max-h-[70vh] shadow-2xl';
+    card.className = 'glass-card p-6 flex flex-col gap-4 w-[400px] max-w-[calc(100vw-48px)] max-h-[70vh] shadow-2xl';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
 
     // Title
-    const title = document.createElement('div');
-    title.className = 'text-sm font-semibold text-[var(--text-primary)]';
+    const title = document.createElement('h3');
+    title.className = 'dialog-title';
+    title.id = 'scope-editor-title';
     title.textContent = t('overrideScopeTitle') ?? 'Override Scope';
+    card.setAttribute('aria-labelledby', title.id);
 
     // Global toggle
     const globalRow = document.createElement('label');
@@ -499,7 +742,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
     // Fetch and render profiles
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
-    saveBtn.className = 'bg-accent hover:bg-accent/80 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
+    saveBtn.className = 'btn-primary';
     saveBtn.textContent = t('confirm') ?? 'OK';
     saveBtn.disabled = true; // Disabled until profiles are loaded
 
@@ -531,7 +774,7 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
             cb.dataset.profileName = cb.value;
             const label = document.createElement('span');
             label.className = 'text-xs text-[var(--text-secondary)] truncate';
-            label.textContent = cfg.name || cfg;
+            label.textContent = String(cfg.name || cfg).replace(/\.(yaml|yml)$/i, '');
             row.appendChild(cb);
             row.appendChild(label);
             profileContainer.appendChild(row);
@@ -569,9 +812,9 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
+    cancelBtn.className = 'btn-ghost';
     cancelBtn.textContent = t('cancel') ?? 'Cancel';
-    cancelBtn.addEventListener('click', () => overlay.remove());
+    cancelBtn.addEventListener('click', () => closeScope());
 
     saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
@@ -589,9 +832,10 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
             });
             overlay.remove();
             void loadOverrides();
+            scopeTrap.deactivate();
         } catch (err) {
             showNotification(String(err), 'error');
-            overlay.remove();
+            closeScope();
         }
     });
 
@@ -605,10 +849,11 @@ function openScopeEditor(overrideId, currentGlobal, currentProfileIds) {
 
     // Click backdrop to close
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
+        if (e.target === overlay) closeScope();
     });
 
     document.body.appendChild(overlay);
+    scopeTrap.activate();
     saveBtn.focus();
 }
 
@@ -656,9 +901,10 @@ async function loadOverrides() {
             const target = e.target;
             if (!(target instanceof Element)) return;
             const card = target.closest('[data-id]');
-            if (!(card instanceof HTMLElement) || e.button !== 0) return;
-            // Don't start drag from buttons
-            if (target.closest('button')) return;
+            // A filtered list holds only some overrides, so its order can't be saved.
+            if (!(card instanceof HTMLElement) || e.button !== 0 || searchFilter) return;
+            // Don't start drag from buttons; the grip handle has its own drag (bindOverrideDrag)
+            if (target.closest('button, .override-drag-handle')) return;
             _dragState = { el: card, id: card.dataset.id ?? '', startY: e.clientY, moved: false };
         });
 
@@ -839,14 +1085,18 @@ async function loadOverrides() {
                         }
                         overrideItems = newItems;
 
-                        try {
-                            await overrideReorder(newIds);
-                            // No need to reload — DOM already matches
-                        } catch (err) {
-                            showNotification(String(err), 'error');
-                            // Revert: reload from backend
-                            await loadOverrides();
-                        }
+                        // Same queue as the grip and keyboard moves, so saves land in action order.
+                        _reorderChain = _reorderChain.then(async () => {
+                            try {
+                                await overrideReorder(newIds);
+                                // No need to reload — DOM already matches
+                            } catch (err) {
+                                showNotification(String(err), 'error');
+                                // Revert: reload from backend
+                                await loadOverrides();
+                            }
+                        }).catch((e) => { rulesLogger.warn('Override move failed', e); });
+                        await _reorderChain;
                     };
                 } else {
                     // No actual position change — snap back
@@ -883,6 +1133,8 @@ async function loadOverrides() {
  * @param {string} filter
  */
 function renderOverrideCards(container, items, filter) {
+    bindOverrideDrag(container);
+    container.classList.toggle('is-filtered', !!filter);
     const filtered = items.filter(item =>
         !filter || item.name?.toLowerCase().includes(filter)
     );
@@ -943,66 +1195,29 @@ function renderOverrideCards(container, items, filter) {
  * @param {any} item
  */
 function updateOverrideCardContent(card, item) {
-    // Update status indicator
-    const statusDot = card.querySelector('.rounded-full[title]');
-    if (statusDot instanceof HTMLElement) {
-        const statusColor = !item.enabled
-            ? 'bg-[var(--text-tertiary)]'
-            : item.lastSuccess === false
-                ? 'bg-red-400'
-                : 'bg-emerald-400';
-        let summaryText;
-        if (!item.enabled) {
-            summaryText = t('overrideDisabled');
-        } else if (item.lastSuccess === false) {
-            summaryText = t('overrideFailed');
-        } else {
-            summaryText = t('overrideEnabled');
-        }
-        statusDot.className = `w-2 h-2 rounded-full shrink-0 ${statusColor}`;
-        statusDot.title = summaryText;
-    }
-
-    // Update scope badge
-    const scopeBadge = card.querySelector('[data-action="edit-scope"]');
-    if (scopeBadge) {
-        const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
-        const scopeLabel = item.global
-            ? t('overrideScopeGlobal')
-            : (item.profileIds?.length
-                ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
-                : t('overrideScopeNone'));
-        scopeBadge.className = `text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity`;
-        scopeBadge.textContent = scopeLabel;
-    }
-
-    // Update status text
-    const statusText = card.querySelector('[data-override-status]');
-    if (statusText) {
-        if (!item.enabled) {
-            statusText.textContent = t('overrideDisabled');
-            statusText.className = 'text-xs text-[var(--text-muted)]';
-        } else if (item.lastSuccess === false) {
-            statusText.textContent = t('overrideFailed');
-            statusText.className = 'text-xs text-red-400';
-        } else {
-            statusText.textContent = t('overrideEnabled');
-            statusText.className = 'text-xs text-[var(--text-muted)]';
+    const scopeBtn = card.querySelector('[data-action="edit-scope"]');
+    if (scopeBtn) {
+        const scope = overrideScopeInfo(item);
+        const value = scopeBtn.querySelector('[data-scope-value]');
+        if (value) {
+            value.textContent = scope.label;
+            value.className = scope.className;
         }
     }
 
-    // Update toggle button
-    const toggleBtn = card.querySelector('.override-toggle-btn');
-    if (toggleBtn instanceof HTMLElement) {
-        toggleBtn.dataset.enabled = String(item.enabled);
-        toggleBtn.title = item.enabled
-            ? t('overrideDisable')
-            : t('overrideEnable');
-        // eslint-disable-next-line no-unsanitized/property -- static SVG icon
-        toggleBtn.innerHTML = item.enabled
-            ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
-            : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`;
+    const status = card.querySelector('[data-override-status]');
+    if (status instanceof HTMLElement) {
+        const text = overrideFailureText(item);
+        status.textContent = text;
+        status.classList.toggle('hidden', !text);
     }
+
+    // Update enable switch
+    const toggleInput = card.querySelector('.override-toggle-input');
+    if (toggleInput instanceof HTMLInputElement) toggleInput.checked = !!item.enabled;
+    const switchLabel = card.querySelector('.override-switch');
+    if (switchLabel instanceof HTMLElement) switchLabel.title = item.enabled ? t('overrideDisable') : t('overrideEnable');
+    card.classList.toggle('is-disabled', !item.enabled);
 
     // Update up/down button visibility
     const upBtn = card.querySelector('.override-up-btn');
@@ -1013,6 +1228,31 @@ function updateOverrideCardContent(card, item) {
     if (downBtn) {
         downBtn.classList.toggle('invisible', isLast(item.id));
     }
+}
+
+/**
+ * "Applies to" value for an override row.
+ * @param {any} item
+ * @returns {{label: string, className: string}}
+ */
+export function overrideScopeInfo(item) {
+    if (item.global) return { label: t('overrideScopeAll') || 'All subscriptions', className: 'font-semibold text-[var(--text-secondary)]' };
+    const ids = item.profileIds || [];
+    if (!ids.length) return { label: t('overrideScopeUnset') || 'No subscription', className: 'font-semibold text-[var(--zephyr-color-warning)]' };
+    const label = ids.slice(0, 2).join(', ') + (ids.length > 2 ? ` +${ids.length - 2}` : '');
+    return { label, className: 'font-semibold text-[var(--text-secondary)]' };
+}
+
+/**
+ * One-line failure text for an enabled override whose last run failed; empty otherwise.
+ * @param {any} item
+ * @returns {string}
+ */
+export function overrideFailureText(item) {
+    if (!item.enabled || item.lastSuccess !== false) return '';
+    const head = t('overrideLastFailed') || 'Last run failed';
+    const detail = (formatScriptError(item.lastError ?? null) || '').split('\n')[0].trim();
+    return detail ? (t('overrideLastFailedDetail') || 'Last run failed: @@msg@@').replace('@@msg@@', detail) : head;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1027,73 +1267,49 @@ function buildOverrideCard(item) {
     const card = document.createElement('div');
     card.className = 'glass-card p-4 flex items-center justify-between group rtl-slide hover:z-10 transition-transform duration-[var(--zephyr-time-standard)] cursor-pointer';
     card.dataset.id = item.id;
+    card.tabIndex = 0;
+    card.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
 
-    // ── Type badge color ───────────────────────────────────────
     const isJs = item.ext === 'js';
-    const typeColor = isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-teal-500/20 text-teal-400';
     const typeLabel = isJs ? 'JS' : 'Prism';
-
-    // ── Scope badge ───────────────────────────────────────────
-    const scopeClass = item.global ? 'bg-emerald-500/20 text-emerald-400' : 'bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]';
-    const scopeLabel = item.global
-        ? t('overrideScopeGlobal')
-        : (item.profileIds?.length
-            ? item.profileIds.slice(0, 2).join(', ') + (item.profileIds.length > 2 ? '…' : '')
-            : t('overrideScopeNone'));
-
-    // ── Status indicator ───────────────────────────────────────
-    const statusColor = !item.enabled
-        ? 'bg-[var(--text-tertiary)]'
-        : item.lastSuccess === false
-            ? 'bg-red-400'
-            : 'bg-emerald-400';
-
-    // ── Status summary line ────────────────────────────────────
-    let summaryText;
-    let summaryClass;
-    if (!item.enabled) {
-        summaryText = t('overrideDisabled');
-        summaryClass = 'text-[var(--text-muted)]';
-    } else if (item.lastSuccess === false) {
-        summaryText = t('overrideFailed');
-        summaryClass = 'text-red-400';
-    } else {
-        summaryText = t('overrideEnabled');
-        summaryClass = 'text-[var(--text-muted)]';
-    }
+    const badge = 'text-2xs font-semibold px-1.5 py-0.5 rounded-sm bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)] shrink-0';
+    const scope = overrideScopeInfo(item);
+    const failure = overrideFailureText(item);
 
     // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() and escapeAttr() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
     card.innerHTML = `
-        <div class="flex items-center gap-4 flex-1 min-w-0">
-            <div class="w-2 h-2 rounded-full shrink-0 ${statusColor}" title="${escapeAttr(summaryText)}"></div>
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+            <span class="override-drag-handle" aria-hidden="true" title="${escapeAttr(t('subDragHandle') || 'Drag to reorder (Alt+↑/↓)')}">${GRIP_ICON}</span>
             <div class="flex flex-col gap-1 min-w-0">
-                <div class="flex items-center gap-2">
-                    <span class="text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(item.name ?? '')}</span>
-                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${typeColor} shrink-0">${typeLabel}</span>
-                    ${item.type === 'remote' ? '<span class="text-2xs px-1.5 py-0.5 rounded-sm bg-info/20 text-info shrink-0">🌐</span>' : ''}
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="override-name text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(item.name ?? '')}</span>
+                    <span class="${badge}">${typeLabel}</span>
+                    ${item.type === 'remote' ? `<span class="${badge} !font-normal">${escapeHtml(t('overrideRemote') || 'Remote')}</span>` : ''}
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-2xs px-1.5 py-0.5 rounded-sm ${scopeClass} cursor-pointer hover:opacity-80 transition-opacity" data-action="edit-scope">${escapeHtml(scopeLabel)}</span>
-                    <span class="text-xs ${summaryClass}" data-override-status>${escapeHtml(summaryText)}</span>
+                <div class="flex items-center gap-3 min-w-0 text-xs">
+                    <button type="button" class="override-scope-btn shrink-0" data-action="edit-scope" title="${escapeAttr(t('overrideScopeTitle'))}">
+                        <span class="text-[var(--text-tertiary)]">${escapeHtml(t('overrideScopeLabel') || 'Applies to')}</span>
+                        <span data-scope-value class="${scope.className}">${escapeHtml(scope.label)}</span>
+                        <svg class="w-3 h-3 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    <span class="override-status truncate ${failure ? '' : 'hidden'}" data-override-status>${escapeHtml(failure)}</span>
                 </div>
             </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-            <button type="button" class="override-toggle-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm hover:bg-accent/10 transition-[opacity,color]" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" aria-label="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}" data-id="${escapeAttr(String(item.id ?? ''))}" data-enabled="${item.enabled}">
-                ${item.enabled
-                    ? `<svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`
-                    : `<svg class="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>`
-                }
-            </button>
+        <div class="flex items-center gap-1 shrink-0">
             <button type="button" class="override-up-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isFirst(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveUp') || '上移')}" aria-label="${escapeAttr(t('overrideMoveUp') || '上移')}" data-id="${escapeAttr(String(item.id ?? ''))}">
                 ${SVG_ICONS.arrowUp}
             </button>
             <button type="button" class="override-down-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-sm text-[var(--text-muted)] hover:text-accent hover:bg-accent/10 transition-[opacity,color] ${isLast(item.id) ? 'invisible' : ''}" title="${escapeAttr(t('overrideMoveDown') || '下移')}" aria-label="${escapeAttr(t('overrideMoveDown') || '下移')}" data-id="${escapeAttr(String(item.id ?? ''))}">
                 ${SVG_ICONS.arrowDown}
             </button>
-            <button type="button" class="btn-delete-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-sm" title="${escapeAttr(t('pluginUnload') || '删除')}" aria-label="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
+            <button type="button" class="btn-delete-icon rounded-sm me-2" title="${escapeAttr(t('pluginUnload') || '删除')}" aria-label="${escapeAttr(t('pluginUnload') || '删除')}" data-action="delete">
                 ${SVG_ICONS.trash}
             </button>
+            <label class="ios-switch override-switch" title="${item.enabled ? (escapeAttr(t('overrideDisable') || '禁用')) : (escapeAttr(t('overrideEnable') || '启用'))}">
+                <input type="checkbox" class="override-toggle-input" aria-label="${escapeAttr(item.name ?? '')}" ${item.enabled ? 'checked' : ''}>
+                <span class="switch-slider"></span>
+            </label>
         </div>
     `;
 
@@ -1105,8 +1321,21 @@ function buildOverrideCard(item) {
     // ── Click: delete ──────────────────────────────────────────
     card.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showDeleteConfirm(item.id, item.name ?? '');
+        void showDeleteConfirm(item.id, item.name ?? '');
     });
+
+    // ── Keyboard: Enter opens, Alt+↑/↓ moves (same as the arrow buttons) ──
+    card.addEventListener('keydown', (e) => {
+        if (e.target !== card) return;
+        if (e.key === 'Enter' && !e.altKey) {
+            e.preventDefault();
+            void openEditor(item.id, item.name ?? '', item.ext ?? 'js');
+        } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            void reorderItem(item.id, e.key === 'ArrowUp' ? -1 : 1);
+        }
+    });
+    card.querySelector('.override-drag-handle')?.addEventListener('click', (e) => e.stopPropagation());
 
     // ── Reorder buttons ────────────────────────────────────────
     card.querySelector('.override-up-btn')?.addEventListener('click', (e) => {
@@ -1118,17 +1347,15 @@ function buildOverrideCard(item) {
         void reorderItem(item.id, 1);
     });
 
-    // ── Inline toggle button ─────────────────────────────────
-    card.querySelector('.override-toggle-btn')?.addEventListener('click', (e) => {
+    // ── Enable switch (always visible) ───────────────────────
+    const switchLabel = card.querySelector('.override-switch');
+    switchLabel?.addEventListener('click', (e) => e.stopPropagation());
+    card.querySelector('.override-toggle-input')?.addEventListener('change', (e) => {
         e.stopPropagation();
-        void toggleOverride(item.id, !item.enabled);
+        const current = overrideItems.find(i => i.id === item.id) || item;
+        void toggleOverride(item.id, !current.enabled);
     });
-
-    // ── Inline toggle: click status dot ───────────────────────
-    card.querySelector('.rounded-full')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        void toggleOverride(item.id, !item.enabled);
-    });
+    card.classList.toggle('is-disabled', !item.enabled);
 
     // ── Click: scope badge → edit scope ───────────────────────
     card.querySelector('[data-action="edit-scope"]')?.addEventListener('click', (e) => {
@@ -1153,10 +1380,6 @@ async function openEditor(id, name, ext) {
     const scriptArea = document.getElementById('plugin-script-area');
     const scriptCm6 = document.getElementById('plugin-script-cm6');
     const scriptTitle = document.getElementById('plugin-script-title');
-    const scriptOutput = document.getElementById('plugin-script-output');
-    const scriptStatus = document.getElementById('plugin-script-status');
-    const scriptOutputChevron = document.getElementById('plugin-script-output-chevron');
-    const scriptOutputLabel = document.getElementById('plugin-script-output-label');
 
     if (!pluginList || !scriptArea) return;
 
@@ -1164,30 +1387,39 @@ async function openEditor(id, name, ext) {
     activeOverrideName = name;
     activeOverrideExt = ext;
 
-    // Show editor
-    pluginList.classList.add('hidden');
-    scriptArea.classList.remove('hidden');
+    // Show editor; the list toolbar (search, new, bulk) means nothing while editing one script.
+    setEditorChrome(true);
 
     if (scriptTitle) scriptTitle.textContent = name;
-    if (scriptOutput) {
-        scriptOutput.textContent = '';
-        scriptOutput.style.display = 'none';
-        scriptOutput.className = 'script-output px-4 pb-3 text-[var(--text-secondary)] whitespace-pre-wrap break-all custom-scrollbar';
+    const typeBadge = document.getElementById('plugin-script-type');
+    if (typeBadge) {
+        const isJs = ext === 'js';
+        typeBadge.textContent = isJs ? 'JS' : 'Prism';
+        typeBadge.className = `text-2xs font-semibold px-1.5 py-0.5 rounded-sm shrink-0 ${isJs ? 'bg-blue-500/20 text-blue-400' : 'bg-teal-500/20 text-teal-400'}`;
     }
-    if (scriptStatus) {
-        scriptStatus.textContent = '';
-        scriptStatus.className = 'text-xs text-[var(--text-secondary)]';
-    }
-    if (scriptOutputChevron) scriptOutputChevron.style.transform = '';
-    if (scriptOutputLabel) scriptOutputLabel.textContent = t('overrideOutput') || 'Output';
+    // Last run outcome, as the backend remembers it.
+    const item = overrideItems.find(o => o.id === id);
+    setScriptResult(item?.lastSuccess === true
+        ? { kind: 'ok', label: t('overrideLastApplyOk') ?? 'Last apply succeeded', detail: [], at: null, log: '' }
+        : item?.lastSuccess === false
+            ? { kind: 'fail', label: t('overrideLastApplyFailed') ?? 'Last apply failed', detail: [], at: null, log: '' }
+            : null);
 
     // Load content
+    const openGen = ++_editorOpenGen;
     let content = '';
     try {
+        // A save still being written would otherwise be read back as the old text and marked clean.
+        await _scriptWriteChain;
         content = await overrideGetContent(id);
     } catch {
         content = '';
     }
+    // The panel was closed (or another script opened) while this one loaded.
+    if (openGen !== _editorOpenGen) return;
+
+    _scriptWriteSeq++;
+    _savedScript = content || '';
 
     // Build CM6 editor
     if (scriptEditorView) { scriptEditorView.destroy(); scriptEditorView = null; }
@@ -1197,6 +1429,7 @@ async function openEditor(id, name, ext) {
             parent: scriptCm6,
             content: content || '',
             language: ext === 'js' ? 'javascript' : 'yaml',
+            onCursor: showInlineCursor,
             prismDsl: ext !== 'js',
         });
     }
@@ -1240,31 +1473,116 @@ async function toggleOverride(id, enabled) {
  * @param {string} id
  * @param {number} direction
  */
-async function reorderItem(id, direction) {
+function reorderItem(id, direction) {
+    // A filtered list shows only some overrides: a step there would jump hidden ones
+    // (same rule as dragging), so moves wait until the search is cleared.
+    if (searchFilter) return _reorderChain;
+    // Run moves one after another (key repeat), so an older save cannot land last.
+    _reorderChain = _reorderChain.then(async () => {
+        const idx = overrideItems.findIndex(i => i.id === id);
+        if (idx < 0) return;
+        await moveOverrideTo(id, idx + direction);
+    }).catch((e) => { rulesLogger.warn('Override move failed', e); });
+    return _reorderChain;
+}
+
+/** @type {Promise<void>} */
+let _reorderChain = Promise.resolve();
+
+/**
+ * Move one override to a new index (arrow buttons, Alt+↑/↓, drag handle), keep focus, persist.
+ * @param {string} id
+ * @param {number} toIdx
+ */
+async function moveOverrideTo(id, toIdx) {
     const idx = overrideItems.findIndex(i => i.id === id);
-    if (idx < 0) return;
+    if (idx < 0 || toIdx < 0 || toIdx >= overrideItems.length || toIdx === idx) return;
 
-    const newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= overrideItems.length) return;
-
-    // Swap in memory first for instant UI feedback (no flash)
+    const before = overrideItems;
     const newItems = [...overrideItems];
-    [newItems[idx], newItems[newIdx]] = [newItems[newIdx], newItems[idx]];
+    const [moved] = newItems.splice(idx, 1);
+    newItems.splice(toIdx, 0, moved);
     overrideItems = newItems;
 
     // Update UI immediately without full reload
     const pluginList = document.getElementById('plugin-list');
+    const hadFocus = document.activeElement instanceof HTMLElement && document.activeElement.dataset?.id === id;
     if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
+    if (hadFocus && pluginList) {
+        getOverrideCards(pluginList).find(c => c.dataset.id === id)?.focus();
+    }
 
     // Persist the NEW order to backend
     try {
         await overrideReorder(overrideItems.map(i => i.id));
     } catch (err) {
-        // Revert on error
-        [overrideItems[idx], overrideItems[newIdx]] = [overrideItems[newIdx], overrideItems[idx]];
+        overrideItems = before;
         if (pluginList) renderOverrideCards(pluginList, overrideItems, searchFilter);
         showNotification(String(err), 'error');
     }
+}
+
+/**
+ * Drag handle reorder for the override list (mouse events; HTML5 DnD is unreliable in the WebView).
+ * Bound once per container. Disabled while a search filter hides part of the list.
+ * @param {HTMLElement} container
+ */
+function bindOverrideDrag(container) {
+    const el = /** @type {HTMLElement & {_overrideDragBound?: boolean}} */ (container);
+    if (el._overrideDragBound) return;
+    el._overrideDragBound = true;
+
+    /** @type {{ card: HTMLElement, id: string, startY: number, moved: boolean, target: number } | null} */
+    let drag = null;
+
+    const clearMarks = () => getOverrideCards(container).forEach(c => c.classList.remove('is-dragging', 'drop-above', 'drop-below'));
+
+    container.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || !(e.target instanceof Element) || searchFilter) return;
+        if (!e.target.closest('.override-drag-handle')) return;
+        const card = /** @type {HTMLElement|null} */ (e.target.closest('[data-id]'));
+        if (!card?.dataset.id || card.parentElement !== container) return;
+        e.preventDefault();
+        drag = { card, id: card.dataset.id, startY: e.clientY, moved: false, target: -1 };
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        if (!drag.moved && Math.abs(e.clientY - drag.startY) < 5) return;
+        drag.moved = true;
+        const cards = getOverrideCards(container);
+        const from = cards.indexOf(drag.card);
+        // Index the dragged card would take if dropped here.
+        let to = 0;
+        cards.forEach((c, i) => {
+            const r = c.getBoundingClientRect();
+            if (e.clientY > r.top + r.height / 2) to = i + 1;
+        });
+        if (to > from) to -= 1;
+        drag.target = to;
+        clearMarks();
+        drag.card.classList.add('is-dragging');
+        // Mark the card the dragged one will land next to.
+        if (to !== from) cards[to]?.classList.add(to > from ? 'drop-below' : 'drop-above');
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (!drag) return;
+        const { id, moved, target } = drag;
+        drag = null;
+        clearMarks();
+        if (!moved) return;
+        e.stopPropagation();
+        // Swallow the click that follows the drag so the card doesn't open the editor.
+        /** @param {Event} ev */
+        const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        container.addEventListener('click', swallow, { capture: true, once: true });
+        setTimeout(() => {
+            container.removeEventListener('click', swallow, { capture: true });
+            _reorderChain = _reorderChain.then(() => moveOverrideTo(id, target))
+                .catch((err) => { rulesLogger.warn('Override move failed', err); });
+        }, 0);
+    }, true);
 }
 
 /**
@@ -1289,60 +1607,19 @@ function isLast(id) {
  * @param {string} overrideId
  * @param {string} overrideName
  */
-function showDeleteConfirm(overrideId, overrideName) {
-    const existing = document.getElementById('plugin-unload-confirm');
-    existing?.remove();
-
-    const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md';
-    overlay.id = 'plugin-unload-confirm';
-    overlay.style.background = '';
-
-    const card = document.createElement('div');
-    card.className = 'glass-card p-6 flex flex-col gap-4 min-w-0 max-w-[420px] shadow-2xl';
-
-    const title = document.createElement('div');
-    title.className = 'text-sm font-semibold text-[var(--text-primary)]';
-    title.textContent = (t('overrideDeleteConfirmTitle') ?? 'Delete override "@@name@@"?').replace('@@name@@', overrideName);
-
-    const msg = document.createElement('div');
-    msg.className = 'text-xs text-[var(--text-secondary)]';
-    msg.textContent = t('overrideDeleteConfirmMsg') ?? 'This action cannot be undone. The override script and execution logs will be deleted.';
-
-    const btnRow = document.createElement('div');
-    btnRow.className = 'flex items-center justify-end gap-2';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn-ghost text-xs px-4 py-1.5 rounded-sm';
-    cancelBtn.textContent = t('cancel') ?? '取消';
-    cancelBtn.addEventListener('click', () => overlay.remove());
-
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'bg-rose-600 hover:bg-rose-500 text-white text-xs px-4 py-1.5 rounded-sm font-medium';
-    confirmBtn.textContent = t('confirm') ?? '确认';
-    confirmBtn.addEventListener('click', async () => {
-        confirmBtn.disabled = true;
-        cancelBtn.disabled = true;
-        try {
-            await overrideDelete(overrideId);
-            overlay.remove();
-            void loadOverrides();
-        } catch (err) {
-            showNotification(String(err), 'error');
-            overlay.remove();
-        }
-    });
-
-    btnRow.appendChild(cancelBtn);
-    btnRow.appendChild(confirmBtn);
-    card.appendChild(title);
-    card.appendChild(msg);
-    card.appendChild(btnRow);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-    confirmBtn.focus();
+async function showDeleteConfirm(overrideId, overrideName) {
+    const confirmed = await showConfirmModal(
+        (t('overrideDeleteConfirmTitle') ?? 'Delete override "@@name@@"?').replace('@@name@@', overrideName),
+        t('overrideDeleteConfirmMsg') ?? 'This action cannot be undone. The override script and execution logs will be deleted.',
+        { danger: true, confirmText: t('delete') ?? 'Delete' }
+    );
+    if (!confirmed) return;
+    try {
+        await overrideDelete(overrideId);
+        void loadOverrides();
+    } catch (err) {
+        showNotification(String(err), 'error');
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1376,13 +1653,17 @@ function initFullscreenEditor() {
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         if (!isFullscreenEditorOpen) return;
-        // ESC to close
-        if (e.key === 'Escape') {
+        // ESC to close, unless the editor (autocomplete) or a nested dialog took it
+        if (e.key === 'Escape' && !e.defaultPrevented && !isNestedDialogOpen()) {
             closeFullscreenEditor();
         }
-        // Ctrl/Cmd + Enter to run
+        // Ctrl/Cmd + Enter saves and runs; Ctrl/Cmd + S only saves, as in the inline editor
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
             void runFullscreenEditor();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            void saveFullscreenEditor();
         }
     });
 
@@ -1444,6 +1725,13 @@ function openFullscreenEditor() {
 
     // Focus editor
     (/** @type {{focus: () => void}} */ (/** @type {unknown} */ (fullscreenEditorView))).focus();
+    // Esc is handled by the panel's trap (it closes this editor first).
+    fullscreenTrap?.deactivate();
+    fullscreenTrap = createFocusTrap(overlay, {
+        passEscape: () => true,
+        initialFocus: /** @type {HTMLElement} */ (/** @type {any} */ (fullscreenEditorView).contentDOM),
+    });
+    fullscreenTrap.activate();
 
     // Clear output
     clearFullscreenOutput();
@@ -1454,6 +1742,8 @@ function openFullscreenEditor() {
  */
 function closeFullscreenEditor() {
     if (!isFullscreenEditorOpen) return;
+    fullscreenTrap?.deactivate();
+    fullscreenTrap = null;
 
     const overlay = document.getElementById('fullscreen-editor-overlay');
     const container = document.getElementById('fullscreen-editor-container');
@@ -1476,8 +1766,10 @@ function closeFullscreenEditor() {
                     parent: scriptCm6,
                     content: content,
                     language: activeOverrideExt === 'js' ? 'javascript' : 'yaml',
+                    onCursor: showInlineCursor,
                     prismDsl: activeOverrideExt !== 'js',
                 });
+                updateDirtyMarker();
             }
         }
 
@@ -1514,18 +1806,43 @@ async function validateFullscreenEditor() {
         if (result.success) {
             if (status) {
                 status.textContent = t('overrideScriptSafe') ?? '✓ Script safe';
-                status.className = 'text-emerald-400';
+                status.className = 'text-[var(--zephyr-color-success)]';
             }
         } else {
             if (status) {
                 status.textContent = '✗ ' + (formatScriptError(result.error) ?? (t('overrideScriptUnsafe') ?? 'Script may be unsafe'));
-                status.className = 'text-rose-400';
+                status.className = 'text-[var(--zephyr-color-danger)]';
             }
         }
     } catch (err) {
         if (status) {
             status.textContent = '✗ ' + (err instanceof Error ? err.message : String(err));
-            status.className = 'text-rose-400';
+            status.className = 'text-[var(--zephyr-color-danger)]';
+        }
+    }
+}
+
+/**
+ * Save the fullscreen editor's script without running it (Ctrl/Cmd + S).
+ */
+async function saveFullscreenEditor() {
+    if (!fullscreenEditorView || !activeOverrideId) return;
+    const source = getEditorContent(fullscreenEditorView);
+    if (!source.trim()) return;
+    const status = document.getElementById('fullscreen-editor-status');
+    try {
+        const seq = ++_scriptWriteSeq;
+        const id = activeOverrideId;
+        await queueScriptWrite(() => overrideSetContent(id, source, false, true));
+        markSaved(seq, source);
+        if (status) {
+            status.textContent = t('overrideSavedOnly') ?? 'Saved';
+            status.className = 'text-[var(--zephyr-color-success)]';
+        }
+    } catch (err) {
+        if (status) {
+            status.textContent = formatScriptError(err instanceof Error ? err.message : String(err)) || String(err);
+            status.className = 'text-[var(--zephyr-color-danger)]';
         }
     }
 }
@@ -1538,9 +1855,10 @@ async function runFullscreenEditor() {
 
     const output = document.getElementById('fullscreen-editor-output');
     const status = document.getElementById('fullscreen-editor-status');
-    const source = getEditorContent(fullscreenEditorView).trim();
+    // Saved as typed (like the inline editor), so the unsaved check compares like with like.
+    const source = getEditorContent(fullscreenEditorView);
 
-    if (!source) return;
+    if (!source.trim()) return;
 
     if (output) {
         output.replaceChildren();
@@ -1552,8 +1870,19 @@ async function runFullscreenEditor() {
 
     stopSmartAutoTest();
 
+    const id = activeOverrideId;
+    const openGen = _editorOpenGen;
+    // Another override opened during the run, or this one was closed and
+    // reopened: that editor and result line are not this run's to update.
+    const stillOpen = () => activeOverrideId === id && openGen === _editorOpenGen;
     try {
-        const result = await overrideSetContent(activeOverrideId, source, false);
+        const seq = ++_scriptWriteSeq;
+        const result = await queueScriptWrite(() => overrideSetContent(id, source, false));
+        if (stillOpen()) {
+            // Written before it ran, so saved even when the run failed.
+            markSaved(seq, source);
+            setScriptResult(runScriptResult(result));
+        }
 
         // Invalidate caches so renderProxies fetches fresh data
         const { invalidateProxiesCache, invalidateConfigCache } = await import('./cache.js');
@@ -1585,16 +1914,16 @@ async function runFullscreenEditor() {
 
         const outputText = lines.join('\n');
 
-        if (output) {
+        if (output && stillOpen()) {
             output.textContent = outputText;
-            output.className = `flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar ${result.success ? 'text-emerald-400' : 'text-rose-400'}`;
+            output.className = `flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar ${result.success ? 'text-[var(--zephyr-color-success)]' : 'text-[var(--zephyr-color-danger)]'}`;
         }
 
-        if (status) {
+        if (status && stillOpen()) {
             status.textContent = result.success
                 ? (t('overrideExecSuccess') ?? '✓ Execution successful')
                 : (t('overrideExecFailed') ?? '✗ Execution failed');
-            status.className = result.success ? 'text-emerald-400' : 'text-rose-400';
+            status.className = result.success ? 'text-[var(--zephyr-color-success)]' : 'text-[var(--zephyr-color-danger)]';
         }
 
         if (result.success && result.configModified) {
@@ -1602,13 +1931,14 @@ async function runFullscreenEditor() {
         }
     } catch (err) {
         const errorText = err instanceof Error ? err.message : String(err);
-        if (output) {
+        if (!stillOpen()) showNotification(formatScriptError(errorText) || errorText, 'error');
+        if (output && stillOpen()) {
             output.textContent = errorText;
-            output.className = 'flex-1 p-4 text-sm font-mono text-rose-400 whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
+            output.className = 'flex-1 p-4 text-sm font-mono text-[var(--zephyr-color-danger)] whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
         }
-        if (status) {
+        if (status && stillOpen()) {
             status.textContent = `✗ ${errorText}`;
-            status.className = 'text-rose-400';
+            status.className = 'text-[var(--zephyr-color-danger)]';
         }
         setTimeout(() => {
             startSmartAutoTest();
@@ -1624,11 +1954,22 @@ function clearFullscreenOutput() {
     if (output) {
         output.replaceChildren();
         const div = document.createElement('div');
-        div.className = 'text-[var(--text-tertiary)] italic';
-        div.textContent = t('overrideOutputPlaceholder') ?? 'Click "Save & Run" to see output...';
+        div.className = 'text-[var(--text-tertiary)]';
+        div.textContent = t('overrideOutputEmpty') ?? 'No output';
         output.appendChild(div);
         output.className = 'flex-1 p-4 text-sm font-mono text-[var(--text-secondary)] whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar';
     }
+}
+
+/**
+ * Full output for "View log": the error, then each log line.
+ * @param {{ error?: string|null, logs?: {level?: string, message: string}[] }} result
+ */
+function logText(result) {
+    const lines = [];
+    if (result.error) lines.push(formatScriptError(result.error) || String(result.error));
+    for (const log of result.logs ?? []) lines.push(`[${log.level ?? 'Info'}] ${log.message}`);
+    return lines.join('\n');
 }
 
 /**
@@ -1745,6 +2086,19 @@ function setupFullscreenEditorStatus() {
     fullscreenEditorView.dispatch({
         effects: StateEffect.appendConfig.of([listener]),
     });
+
+    // Fill the status bar for the opened document right away (it used to read "0 chars").
+    const state = fullscreenEditorView.state;
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    if (cursorPos) {
+        cursorPos.textContent = (t('overrideLineCol') ?? 'Line @@line@@, Col @@col@@')
+            .replace('@@line@@', String(line.number))
+            .replace('@@col@@', String(head - line.from + 1));
+    }
+    if (charCount) {
+        charCount.textContent = (t('overrideCharCount') ?? '@@count@@ chars').replace('@@count@@', String(state.doc.length));
+    }
 }
 
 /**
