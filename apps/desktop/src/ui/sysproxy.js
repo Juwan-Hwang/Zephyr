@@ -7,7 +7,7 @@
 import { getConfig, invoke } from '../api.js';
 import { sysproxyLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
-import { translations, currentLang } from '../i18n.js';
+import { translations, currentLang, t } from '../i18n.js';
 import { updateTrayStatus } from './tray.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -32,7 +32,7 @@ export async function updateSysProxyUI() {
             statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
-            statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusReady || 'Ready to protect your traffic';
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
             statusText.classList.remove('text-accent');
             statusText.classList.add('text-[var(--text-muted)]');
         }
@@ -178,6 +178,10 @@ export async function initProxyToggle() {
     toggle.addEventListener('change', async (e) => {
         const target = /** @type {HTMLInputElement} */ (e.target);
         const enabled = target.checked;
+        // Hold the switch while the OS applies it (Windows can take a second) so a
+        // second click can't queue a contradicting change.
+        target.disabled = true;
+        target.setAttribute('aria-busy', 'true');
 
         try {
             await setSysProxyEnabled(enabled);
@@ -191,6 +195,9 @@ export async function initProxyToggle() {
             // Ensure checkbox reflects the store even if GET_SYS_PROXY also
             // failed (updateSysProxyUI swallows read errors internally).
             target.checked = !!appStore.get('isSysProxyEnabled');
+        } finally {
+            target.disabled = false;
+            target.removeAttribute('aria-busy');
         }
     });
 }
