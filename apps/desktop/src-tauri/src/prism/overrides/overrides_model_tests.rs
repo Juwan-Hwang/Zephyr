@@ -35,6 +35,7 @@ mod tests {
             updated_at: None,
             created_at: 0,
             last_success: None,
+            last_error: None,
         }
     }
 
