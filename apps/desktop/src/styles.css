@@ -793,21 +793,24 @@ html .proxy-card.proxy-card--selected.glass-card:hover {
 }
 .proxy-check {
   position: absolute;
-  top: 10px;
-  inset-inline-end: 10px;
-  width: 16px;
-  height: 16px;
+  /* Sits on the card's top-end corner, over the border. */
+  /* Centred on the rounded corner's arc, so it reads as part of the border. */
+  top: -4px;
+  inset-inline-end: -4px;
+  width: 18px;
+  height: 18px;
+  z-index: 1;
   border-radius: 9999px;
   display: grid;
   place-items: center;
   color: #fff;
   background: var(--accent-primary);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 1px 3px color-mix(in srgb, var(--accent-primary) 35%, transparent);
   pointer-events: none;
 }
 .proxy-check svg {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
 .delay-dot {
   width: 6px;
@@ -831,30 +834,49 @@ html .proxy-card.proxy-card--selected.glass-card:hover {
 
 /* --- Score Badge (Smart Proxy) --- */
 .score-badge {
-  font-size: var(--zephyr-badge-font-size);
-  line-height: 1.4;
-  font-weight: 700;
-  padding: var(--zephyr-badge-padding);
-  border-radius: var(--radius-badge);
-  flex-shrink: 0;
+  /* Quiet by design: the latency already carries colour, so the score stays neutral
+     and only a small tier dot says good / fair / poor. */
   display: none;
-  background-color: color-mix(in srgb, var(--zephyr-color-success) 15%, transparent);
-  color: var(--zephyr-color-success);
-  border-color: color-mix(in srgb, var(--zephyr-color-success) 20%, transparent);
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 18px;
+  /* 1px top padding drops the digits onto the pill's optical centre (digit glyphs sit high
+     in their line box); the dot is nudged up to the digits' centre line. */
+  padding: 1px 6px 0;
+  box-sizing: border-box;
+  margin-inline-start: 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, var(--text-muted));
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+.score-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--zephyr-color-success);
+  transform: translateY(-1px);
 }
 html:root[style*="--smart-enabled: 1"] .score-badge,
 html:root[style*="--smart-enabled:1"] .score-badge {
   display: inline-flex;
 }
-.score-badge.score-medium {
-  background-color: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent);
-  color: var(--zephyr-color-warning);
-  border-color: color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
-}
-.score-badge.score-low {
-  background-color: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent);
-  color: var(--zephyr-color-danger);
-  border-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+.score-badge.score-medium::before { background: var(--zephyr-color-warning); }
+.score-badge.score-low::before { background: var(--zephyr-color-danger); }
+/* Same specificity as the smart-enabled rule above, so an empty badge stays hidden. */
+.score-badge:empty,
+html:root[style*="--smart-enabled: 1"] .score-badge:empty,
+html:root[style*="--smart-enabled:1"] .score-badge:empty { display: none; }
+.proxy-card--selected .score-badge {
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-primary) 18%, transparent);
 }
 
 /* --- Plugin Panel --- */
@@ -1331,7 +1353,13 @@ html:not(.dark) .form-control:focus {
 /* Proxy card wrapper: content-visibility for virtual scroll perf */
 .proxy-wrapper {
   content-visibility: auto;
-  contain-intrinsic-size: auto 96px;
+  contain-intrinsic-size: auto 104px;
+  /* Room for the selected check on the card's corner: content-visibility clips paint
+     to this box, so it extends 8px past the card into the grid gap. */
+  padding-top: 8px;
+  padding-inline-end: 8px;
+  margin-top: -8px;
+  margin-inline-end: -8px;
 }
 .proxy-wrapper:hover {
   content-visibility: visible;
@@ -2449,6 +2477,13 @@ header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
 /* Proxy group pill: one line, long group names end in an ellipsis */
 #proxy-group-trigger { white-space: nowrap; max-width: 16rem; }
 #proxy-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Last step of the header fit: the group pill gives up width (label ellipsized)
+   so a long group name cannot push the search and buttons past the page edge. */
+[data-page="proxies"] > header.is-compact-2 > div:first-child,
+[data-page="proxies"] > header.is-compact-2 #proxy-group-selector { min-width: 0; }
+[data-page="proxies"] > header.is-compact-2 #proxy-group-trigger { max-width: 100%; }
+[data-page="proxies"] > header.is-compact-2 > div:first-child > h2,
+[data-page="proxies"] > header.is-compact-2 > div:last-child { flex-shrink: 0; white-space: nowrap; }
 
 /* Connections table head: a long column name truncates inside its own column
    instead of running into the next one */
@@ -2701,3 +2736,155 @@ button[data-home-mode] {
   content: "—"; visibility: visible; position: absolute; inset: 0; text-align: center;
 }
 .home-hero.is-empty .home-stat-value::before { font-size: 22px; font-weight: 300; }
+/* Proxies: "traffic goes through another group" hint (ui/group-mismatch.js decides). */
+.group-mismatch-bar {
+  align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+.group-mismatch-icon { flex-shrink: 0; display: inline-flex; color: var(--color-accent); }
+.group-mismatch-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.group-mismatch-title { font-size: 12px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
+.group-mismatch-hint { font-size: 11.5px; line-height: 16px; color: var(--text-secondary); }
+.group-mismatch-action {
+  flex-shrink: 0; height: 26px; padding: 0 10px; border-radius: var(--radius-button, 8px);
+  font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  transition: background-color var(--zephyr-time-standard);
+}
+.group-mismatch-action:hover:not(.is-disabled) { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.group-mismatch-action.is-disabled { color: var(--text-tertiary); background: transparent; cursor: not-allowed; }
+.group-mismatch-close {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; font-size: 15px; line-height: 1;
+  color: var(--text-tertiary); display: inline-flex; align-items: center; justify-content: center;
+}
+.group-mismatch-close:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+
+/* Proxies: empty states (direct mode, no nodes) fill the list height and sit centred. */
+#proxies-list:has(> .proxies-empty-state) { flex: 1 1 auto; grid-template-rows: 1fr; }
+.proxies-empty-state {
+  grid-column: 1 / -1; min-height: 100%; align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 48px 24px 15vh; text-align: center;
+}
+.proxies-empty-icon {
+  width: 56px; height: 56px; border-radius: 16px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.proxies-empty-icon svg { width: 24px; height: 24px; }
+.proxies-empty-state.is-danger .proxies-empty-icon {
+  color: var(--zephyr-color-danger);
+  background: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--zephyr-color-danger) 18%, transparent);
+}
+.proxies-empty-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.proxies-empty-detail { max-width: 360px; font-size: 13px; line-height: 20px; color: var(--text-secondary); }
+.proxies-empty-action { margin-top: 10px; min-width: 140px; }
+
+/* Latency test running: the button fills left to right as nodes finish. */
+#test-all-btn.is-testing {
+  background-image: linear-gradient(to right,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) var(--test-progress, 0%),
+    transparent var(--test-progress, 0%));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Proxies header: node search, node count, hidden-timeout chip. */
+.proxy-search {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; width: clamp(120px, 16vw, 168px); padding: 0 10px;
+  border-radius: var(--radius-button, 8px); color: var(--text-tertiary);
+  background: var(--zephyr-bg-input); border: 1px solid var(--zephyr-border-subtle);
+  transition: border-color var(--zephyr-time-standard), box-shadow var(--zephyr-time-standard);
+}
+.proxy-search:focus-within { border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); box-shadow: 0 0 0 3px var(--zephyr-focus-ring); }
+.proxy-search input { flex: 1; min-width: 0; height: 100%; font-size: 12px; color: var(--text-primary); background: transparent; outline: none; }
+.proxy-search input::-webkit-search-cancel-button { display: none; }
+.proxy-search input::placeholder { color: var(--text-tertiary); }
+.proxy-search-count { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+.proxy-hidden-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+  font-size: 11px; white-space: nowrap; color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+.proxy-hidden-chip.hidden { display: none; }
+/* .btn-ghost / .btn-accent set display after the utility class, so hide them explicitly. */
+#sort-btn.hidden, #test-all-btn.hidden { display: none; }
+.proxy-hidden-chip button { color: var(--color-accent); font-weight: 600; }
+
+/* Proxy card: per-node re-test button, shown on hover / keyboard focus. */
+.node-retest-btn {
+  pointer-events: auto; width: 20px; height: 20px; margin-inline-end: 6px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary);
+  opacity: 0; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.glass-card:hover .node-retest-btn, .glass-card:focus-within .node-retest-btn, .node-retest-btn:focus-visible, .node-retest-btn.is-spinning { opacity: 1; }
+/* No hover on touch / pen: keep the button visible. */
+@media (hover: none) { .node-retest-btn { opacity: 1; } }
+.node-retest-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.node-retest-btn.is-spinning svg { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .node-retest-btn.is-spinning svg { animation: none; } }
+
+/* Proxies: group menu — opaque (dark 0.97 let the 3D cards show through), current group ticked, route on the right. */
+html.dark .proxy-group-menu { background: rgb(30, 30, 34); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+html:not(.dark) .proxy-group-menu { background: rgb(252, 252, 253); }
+.proxy-group-menu { min-width: 320px; }
+.proxy-group-option { display: flex; align-items: center; gap: 8px; }
+.proxy-group-check { width: 12px; height: 12px; flex-shrink: 0; display: grid; place-items: center; color: var(--color-accent); }
+.proxy-group-check svg { width: 12px; height: 12px; }
+.proxy-group-name { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-group-route { margin-inline-start: auto; padding-inline-start: 12px; flex-shrink: 1; max-width: 62%; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-tertiary); }
+
+/* Proxies: sort menu (same surface as the group menu) and a steady-width sort button. */
+header:not(.is-compact) #sort-btn { min-width: 112px; }
+.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; }
+.proxy-sort-menu.is-end { inset-inline-start: auto; inset-inline-end: 0; }
+.proxy-sort-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border-radius: var(--radius-dropdown-option); text-align: start; }
+.proxy-sort-option .proxy-sort-body { flex: 1; min-width: 0; }
+.proxy-sort-option:hover, .proxy-sort-option:focus-visible { background: var(--zephyr-bg-muted); outline: none; }
+.proxy-sort-option[aria-checked="true"] { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.proxy-sort-option .proxy-group-check { flex-shrink: 0; width: 14px; height: 14px; display: grid; place-items: center; color: var(--accent-primary); }
+.proxy-sort-option .proxy-group-check svg { width: 14px; height: 14px; }
+.proxy-sort-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.proxy-sort-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.proxy-sort-desc { font-size: 11px; color: var(--text-tertiary); }
+[data-page="proxies"] > header { z-index: 20; }
+
+/* Keyboard focus on a proxy card follows the card's rounded corners. */
+#proxies-list > [role="option"] { border-radius: 16px; }
+
+/* Latency test result: one line at the bottom of the proxies page. */
+.latency-result {
+  position: absolute; left: 50%; bottom: 20px; z-index: 20;
+  display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - 64px);
+  height: 32px; padding: 0 6px 0 14px; border-radius: 999px;
+  font-size: 12px; color: var(--text-secondary, var(--text-muted)); white-space: nowrap;
+  background: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-default);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+  opacity: 0; transform: translate(-50%, 8px);
+  transition: opacity var(--zephyr-time-standard, 200ms) ease, transform var(--zephyr-time-standard, 200ms) ease;
+}
+.latency-result.is-shown { opacity: 1; transform: translate(-50%, 0); }
+.latency-result-dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: var(--zephyr-color-success); }
+.latency-result[data-tone="warn"] .latency-result-dot { background: var(--zephyr-color-warning); }
+.latency-result-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.latency-result:not(:has(.latency-result-action)) { padding-inline-end: 14px; }
+.latency-result-action {
+  flex-shrink: 0; height: 22px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary);
+}
+.latency-result-action:hover, .latency-result-action:focus-visible { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); outline: none; }
+
+/* Direct mode: one panel filling the list area, content centred, so the page isn't half empty. */
+.proxies-empty-state.is-card {
+  min-height: 100%; align-self: stretch; padding: 36px 32px 40px; gap: 8px;
+  border-radius: var(--radius-card, 20px);
+  background: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-subtle, var(--zephyr-border-default));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03), 0 8px 24px rgb(0 0 0 / 0.04);
+}
+.proxies-empty-state.is-card .proxies-empty-detail { max-width: 340px; line-height: 1.6; }
+.proxies-empty-state.is-card .proxies-empty-action { min-width: 0; margin-top: 8px; }

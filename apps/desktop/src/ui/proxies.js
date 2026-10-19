@@ -6,21 +6,21 @@
  * @module ui/proxies
  */
 
+import { decideGroupMismatch } from './group-mismatch.js';
 import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
-import { escapeHtml } from '../utils/sanitize.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
 import { debounce } from '../utils/debounce.js';
-import { translations, currentLang, t, getDirection } from '../i18n.js';
+import { translations, currentLang, t, t as tFmt, getDirection } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
-import { createRovingTabindex } from '../utils/roving-tabindex.js';
+import { createRovingTabindex, setItemTabStop } from '../utils/roving-tabindex.js';
 import { COMMANDS } from '@zephyr/shared';
 import { getConfigCached, getProxiesCached, getSettingsCached, invalidateProxiesCache } from './cache.js';
 import { appStore } from './state.js';
-import { smartScore, smartNextInterval, smartSelectBest, smartRank, smartConfig, failoverReport } from './prism.js';
+import { smartScore, smartNextInterval, smartRank, smartConfig, failoverReport } from './prism.js';
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
@@ -61,6 +61,26 @@ export function notifySwitchFailed(err) {
 }
 
 export { switchPage } from './navigation.js';
+
+/** Close open connections after a node switch; false when that failed. */
+async function closeConnsAfterSwitch() {
+    try {
+        await closeAllConnections();
+        return true;
+    } catch (err) {
+        proxyLogger.warn('Failed to close connections after proxy switch', err);
+        return false;
+    }
+}
+
+/**
+ * Confirm a node switch, mentioning the closed connections only when they were.
+ * @param {string} node
+ * @param {boolean} closedConns
+ */
+function notifySwitched(node, closedConns) {
+    showNotification(tFmt(closedConns ? 'switchedNodeClosedConns' : 'switchedNode', { node }), 'success');
+}
 
 // --- Constants ---
 
@@ -174,7 +194,13 @@ function isProxyGroup(p) {
 function proxyMetaLabel(proxy, groupNow) {
     const upperType = String(proxy?.type || '').toUpperCase();
     const abbr = PROTOCOL_ABBR[upperType] || proxy?.type || '';
-    if (isProxyGroup(proxy)) return groupNow?.node ? `→ ${groupNow.node}` : abbr;
+    if (isProxyGroup(proxy)) {
+        // Say what kind of group it is ("Auto → HK 02"): names like "♻️ 优选" don't.
+        const kindKey = /** @type {Record<string, string>} */ ({ URLTEST: 'groupKindAuto', FALLBACK: 'groupKindFallback', LOADBALANCE: 'groupKindLoadBalance' })[upperType.replace(/[-_ ]/g, '')];
+        const kind = kindKey ? t(kindKey) : '';
+        if (groupNow?.node) return kind ? `${kind} → ${groupNow.node}` : `→ ${groupNow.node}`;
+        return kind || abbr;
+    }
     const transport = TRANSPORT_MAP[upperType] || '-';
     return transport === '-' ? abbr : `${abbr} · ${transport}`;
 }
@@ -531,7 +557,7 @@ function showLatencyLoadingForAllCards() {
 
         const latVal = card.querySelector('[id^="latency-"]');
         if (latVal) {
-            latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
+            latVal.className = 'text-xs tabular-nums font-semibold text-accent';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             latVal.innerHTML = latencyLoadingIcon; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         }
@@ -548,7 +574,7 @@ function createActiveCheck() {
     const badge = document.createElement('span');
     badge.className = 'active-dot proxy-check';
     badge.setAttribute('aria-hidden', 'true');
-    badge.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>'; // nosemgrep: js-innerhtml-assignment — static markup
+    badge.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 8.4l2.8 2.8 5.6-6.2"/></svg>'; // nosemgrep: js-innerhtml-assignment — static markup
     return badge;
 }
 
@@ -768,8 +794,30 @@ export function initProxyControls() {
             }
         }
 
+        const searchInput = /** @type {HTMLInputElement|null} */ (document.getElementById('proxy-search'));
+        if (searchInput && !searchInput.dataset.wired) {
+            searchInput.dataset.wired = '1';
+            /** @type {ReturnType<typeof setTimeout> | undefined} */
+            let searchTimer;
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => { renderProxies().catch(() => {}); }, 120);
+            });
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && searchInput.value) {
+                    e.stopPropagation();
+                    searchInput.value = '';
+                    renderProxies().catch(() => {});
+                }
+            });
+        }
+
         testBtn.onclick = async () => {
-            if (appStore.get('isTestingLatency')) return;
+            // While a test runs the button reads "Stop · 8/19": a second click stops it.
+            if (appStore.get('isTestingLatency')) {
+                abortLatencyTests();
+                return;
+            }
             resetLatencyTestController();  // Reset controller before starting
             appStore.set('isTestingLatency', true);
             appStore.set('latencyTestStartTime', Date.now());
@@ -777,8 +825,25 @@ export function initProxyControls() {
             const icon = document.getElementById('test-icon');
             const _t = /** @type {any} */ (translations)[currentLang];
 
-            icon?.classList.add('animate-spin', 'text-accent');
-            testBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            // While testing, the button is a Stop button: show a stop square instead of the pulse.
+            const iconMarkup = icon?.innerHTML ?? '';
+            if (icon) icon.innerHTML = '<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>'; // nosemgrep: js-innerhtml-assignment — static markup
+            const testLabel = testBtn.querySelector('span');
+            // The label shows live progress while testing: keep a language change from
+            // putting the static "Test Latency" back over it (restored in finally).
+            const testLabelKey = testLabel?.dataset.i18n;
+            if (testLabel && testLabelKey) delete testLabel.dataset.i18n;
+            let testedCount = 0;
+            _testRunResults.clear();
+            let totalCount = 0;
+            const showProgress = () => {
+                const tr = /** @type {any} */ (translations)[currentLang] || {};
+                if (testLabel) testLabel.textContent = totalCount > 0 ? `${tr.latencyStop || 'Stop'} · ${testedCount}/${totalCount}` : (tr.latencyStop || 'Stop');
+                testBtn.style.setProperty('--test-progress', totalCount > 0 ? `${Math.round((testedCount / totalCount) * 100)}%` : '0%');
+            };
+            testBtn.classList.add('is-testing');
+            testBtn.setAttribute('aria-busy', 'true');
+            showProgress();
 
             let hideTimeoutEnabled = false;
 
@@ -797,9 +862,11 @@ export function initProxyControls() {
                 if (!proxyGroupsResult) {
                     throw new Error('No valid proxy group found for testing');
                 }
-                const { data, proxies } = proxyGroupsResult;
+                const { data, proxies, uiGroupName: testedGroup } = proxyGroupsResult;
                 const settings = await getSettingsCached();
                 hideTimeoutEnabled = !!settings?.hide_timeout_nodes;
+                // The "switch to fastest" action belongs to this profile only.
+                const testedProfile = settings?.last_config || 'config.yaml';
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -816,71 +883,47 @@ export function initProxyControls() {
                 // Test a single proxy and update UI immediately
                 const testProxyAndUpdate = async (/** @type {string} */ name) => {
                     // testProxy already handles abort internally and returns -1 on cancellation
+                    const gen = beginNodeTest(name);
                     const delay = await testProxy(name);
-
-                    // Update wrapper dataset
-                    const container = document.getElementById('proxies-list');
-                    if (container) {
-                        const wrapper = container.querySelector(`[data-name="${CSS.escape(name)}"]`);
-                        if (wrapper) {
-                            (/** @type {HTMLElement} */ (wrapper)).dataset.latency = String(delay > 0 ? delay : DELAY_INFINITE);
-                            setProxyPendingState(/** @type {HTMLElement} */ (wrapper.firstElementChild), false);
-                        }
+                    // Cut short by Stop: no result, so neither a timeout on the card nor a
+                    // failure for the smart score (the cleanup redraws pending cards).
+                    if (getLatencyTestSignal().aborted && !(delay > 0)) return;
+                    // A single-node re-test started after this one owns the card, and
+                    // its newer figure is the one that counts.
+                    const isLatest = isLatestNodeTest(name, gen);
+                    if (!getLatencyTestSignal().aborted) {
+                        testedCount += 1;
+                        showProgress();
                     }
 
-                    // Update latency display
-                    const updatedLatVal = document.getElementById(`latency-${CSS.escape(name)}`);
-                    if (updatedLatVal) {
-                        const card = updatedLatVal.closest('.glass-card');
-                        if (delay > 0) {
-                            updatedLatVal.textContent = `${delay}ms`;
-                            updatedLatVal.className = `text-xs tabular-nums font-semibold ${getDelayColorClass(delay)}`;
-                            setCardDelayTier(card, delay);
-                            if (card) {
-                                (/** @type {HTMLElement} */ (card)).dataset.latency = String(delay);
-                                setProxyPendingState(/** @type {HTMLElement} */ (card), false);
-                            }
-                        } else {
-                            updatedLatVal.textContent = /** @type {any} */ (translations)[currentLang].timeout || 'Timeout';
-                            updatedLatVal.className = 'text-xs tabular-nums font-semibold text-[var(--text-tertiary)]';
-                            setCardDelayTier(card, DELAY_INFINITE);
-                            if (card) {
-                                (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
-                                setProxyPendingState(/** @type {HTMLElement} */ (card), false);
-                            }
-                        }
+                    if (isLatest) {
+                        applyNodeLatency(name, delay);
+                        _testRunResults.set(name, delay);
+                        recordShownResult(name, delay);
                     }
 
-                    // Hide timeout nodes immediately if setting is enabled
-                    if (hideTimeoutEnabled && isInvalidDelay(delay)) {
-                        // Don't hide if this is the currently active node
-                        // Use _activeCard to get real-time active node (prevents mis-hiding during node switch)
-                        const activeWrapper = _activeCard?.closest('[data-name]');
-                        const activeName = activeWrapper instanceof HTMLElement ? activeWrapper.dataset.name : undefined;
-                        if (name !== activeName) {
-                            const container = document.getElementById('proxies-list');
-                            const wrapper = container?.querySelector(`[data-name="${CSS.escape(name)}"]`);
-                            if (wrapper) {
-                                wrapper.remove();
-                            }
-                        }
-                    }
+                    // Timed-out nodes are hidden once the whole test finishes (the final
+                    // re-render applies the filter), so cards don't vanish mid-test.
                     queueLatencySort();
 
                     // Update smart score via concurrency-limited batcher (max 2 IPC calls)
-                    if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+                    if (isLatest && document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
                         const success = delay > 0 && delay < 999999;
                         _smartBatcher.push(name, success ? delay : 999999, success);
                     }
 
                     // Report to failover engine if enabled
-                    if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
+                    if (isLatest && appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
                         const failoverSuccess = delay > 0 && delay < 999999;
                         void reportFailover(name, failoverSuccess);
                     }
                 };
 
                 const priorityQueue = buildLatencyPriorityQueue(data, validProxiesToTest);
+                /** The nodes this run covers; the summary only counts their figures. */
+                const runNodes = new Set(priorityQueue);
+                totalCount = priorityQueue.length;
+                showProgress();
                 let queueIndex = 0;
                 const concurrency = Math.min(12, priorityQueue.length);
                 const workers = Array.from({ length: concurrency }, async () => {
@@ -892,6 +935,45 @@ export function initProxyControls() {
                     }
                 });
                 await Promise.all(workers);
+                // A single-node re-test started during the run owns its node's figure:
+                // wait for it, so the summary and the fastest pick read what the card shows.
+                // One started while waiting counts too, so wait until none is left.
+                while (_retestsInFlight.size > 0) {
+                    await Promise.allSettled(_retestsInFlight);
+                }
+
+                // One summary instead of making the user scan every card.
+                const tr = /** @type {any} */ (translations)[currentLang] || {};
+                const stopped = getLatencyTestSignal().aborted;
+                // The summary and the fastest pick read the run's figures (_testRunResults),
+                // the same ones the cards show: a re-test during the run replaces its node's
+                // figure, and one that lands after Stop for a node the run never reached
+                // counts too. A node whose run result was superseded by a re-test that Stop
+                // then cut short has no figure: it is neither available nor timed out.
+                /** @type {Array<[string, number]>} */
+                const runFigures = [..._testRunResults].filter(([name]) => runNodes.has(name));
+                let available = 0;
+                let timedOut = 0;
+                for (const [, delay] of runFigures) {
+                    if (delay > 0 && delay < 999999) available += 1;
+                    else timedOut += 1;
+                }
+                const parts = [
+                    stopped ? (tr.latencyTestStopped || 'Test stopped') : (tr.latencyTestDone || 'Test complete'),
+                    `${available} ${tr.latencyAvailable || 'available'}`,
+                ];
+                if (timedOut > 0) parts.push(`${timedOut} ${tr.latencyTimedOut || 'timed out'}`);
+                // Read the latest figure per node: a re-test during the run (even a timeout) replaces it.
+                /** @type {{ name: string, delay: number } | null} */
+                let best = null;
+                for (const [name, delay] of runFigures) {
+                    // "Fastest" means a real outbound node: direct/reject and groups
+                    // (whose delay is just one of their members') never win it.
+                    if (!isRealOutboundNode(name, /** @type {any} */ (data).proxies?.[name])) continue;
+                    if (delay > 0 && delay < 999999 && (!best || delay < best.delay)) best = { name, delay };
+                }
+                if (best) parts.push(`${tr.latencyFastest || 'fastest:'}${currentLang === 'zh' ? '' : ' '}${best.name} ${best.delay}ms`);
+                showLatencyResult(parts.join(' · '), available > 0 ? 'ok' : 'warn', best, testedGroup || null, testedProfile);
             } catch (err) {
                 proxyLogger.error('Latency test error', err);
                 const _err = err instanceof Error ? err : new Error(String(err));
@@ -904,8 +986,13 @@ export function initProxyControls() {
                 appStore.set('latencyTestStartTime', null);
                 if (latencySortTimer) clearTimeout(latencySortTimer);
                 // Restore UI controls first — must never be skipped by render failures
-                icon?.classList.remove('animate-spin', 'text-accent');
-                testBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                // eslint-disable-next-line no-unsanitized/property -- restores the original static markup
+                if (icon) icon.innerHTML = iconMarkup; // nosemgrep: js-innerhtml-assignment — static markup
+                testBtn.classList.remove('is-testing');
+                testBtn.removeAttribute('aria-busy');
+                testBtn.style.removeProperty('--test-progress');
+                if (testLabel) testLabel.textContent = /** @type {any} */ (translations)[currentLang]?.testLatency || 'Test Latency';
+                if (testLabel && testLabelKey) testLabel.dataset.i18n = testLabelKey;
                 // Safety net: clear stuck pending state and re-render BEFORE
                 // sorting — the sort must not gate or block this cleanup.
                 let hadStuckPending = false;
@@ -919,6 +1006,7 @@ export function initProxyControls() {
                         });
                     }
                     invalidateProxiesCache();
+                    if (hideTimeoutEnabled) flashHiddenChip();
                     if (hideTimeoutEnabled || hadStuckPending) {
                         await renderProxies();
                     }
@@ -941,69 +1029,17 @@ export function initProxyControls() {
     }
 
     if (sortBtn) {
-        sortBtn.onclick = async () => {
-            const smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
-            const modes = smartEnabled
-                ? ['default', 'name', 'latency', 'smart']
-                : ['default', 'name', 'latency'];
-            const currentMode = appStore.get('currentSortMode');
-            // If current mode is 'smart' but smart is now disabled, reset to default
-            if (!smartEnabled && currentMode === 'smart') {
-                appStore.set('currentSortMode', 'default');
-            }
-            const idx = (modes.indexOf(appStore.get('currentSortMode')) + 1) % modes.length;
-            appStore.set('currentSortMode', modes[idx]);
-
-            const t = /** @type {any} */ (translations)[currentLang];
-            const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
-            if (sortLabel) sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')];
-            void refreshProxies();
-            if (appStore.get('currentSortMode') === 'smart') {
-                await applySmartSortToDom();
-            }
+        // A menu instead of "click to cycle": every option is visible, the current one ticked.
+        sortBtn.setAttribute('aria-haspopup', 'menu');
+        sortBtn.setAttribute('aria-expanded', 'false');
+        sortBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleSortMenu(sortBtn, sortLabel);
         };
     }
 
-    // Smart Select Best: one-click switch to the best-scoring node
-    const selectBestBtn = document.getElementById('select-best-btn');
-    if (selectBestBtn) {
-        void syncSmartUiVisibility();
-        selectBestBtn.onclick = async () => {
-            try {
-                const best = await smartSelectBest();
-                if (!best?.name) {
-                    showNotification(
-                        /** @type {any} */ (translations)[currentLang].noProxiesToTest || 'No proxy history available',
-                        'info'
-                    );
-                    return;
-                }
-
-                // Use smartRank to get the canonical score (same source as badge display)
-                let displayScore = Math.round(best.score);
-                try {
-                    const rankings = await smartRank();
-                    const match = rankings?.find((r) => r.name === best.name);
-                    if (match) displayScore = Math.round(match.score);
-                } catch { /* fallback to selectBest score */ }
-
-                const proxyGroupsResult = await fetchProxyGroupsShared({
-                    preferredGroupName: appStore.get('uiGroupName') || undefined,
-                });
-                if (!proxyGroupsResult) return;
-                const { uiGroupName: targetGroup } = proxyGroupsResult;
-                if (!targetGroup) return;
-                const success = await switchProxy(targetGroup, best.name);
-                if (success) {
-                    showNotification(t('notifSwitchedBest', { name: best.name, score: displayScore }), 'success');
-                    await syncCoreConfig();
-                    await renderProxies();
-                }
-            } catch (err) {
-                proxyLogger.error('Smart select best failed', err);
-            }
-        };
-    }
+    // Keeps --smart-enabled (score badges, smart sort) in step with the backend.
+    void syncSmartUiVisibility();
 
     // Keyboard navigation for proxy list
     const proxyList = document.getElementById('proxies-list');
@@ -1015,6 +1051,10 @@ export function initProxyControls() {
                 const card = item.querySelector('.glass-card');
                 if (card instanceof HTMLElement) card.click();
             },
+            // The cards are a grid: ←/→ move one card, ↑/↓ one row.
+            getColumns: () => getComputedStyle(proxyList).gridTemplateColumns.split(' ').filter(Boolean).length || 1,
+            // Sorting reorders the cards with CSS order only.
+            visualOrder: true,
         });
     }
 }
@@ -1038,6 +1078,26 @@ export function initProxyControls() {
 // Resets automatically when the group pair changes.
 /** @type {string|null} */
 let _dismissedMismatchKey = null;
+
+const MISMATCH_DISMISSED_KEY = 'zephyr.groupMismatchDismissed';
+
+/** @param {string} key */
+function isMismatchDismissed(key) {
+    try {
+        const list = JSON.parse(localStorage.getItem(MISMATCH_DISMISSED_KEY) || '[]');
+        return Array.isArray(list) && list.includes(key);
+    } catch { return false; }
+}
+
+/** @param {string} key */
+function rememberMismatchDismissed(key) {
+    try {
+        const raw = JSON.parse(localStorage.getItem(MISMATCH_DISMISSED_KEY) || '[]');
+        const list = Array.isArray(raw) ? raw.filter((k) => k !== key) : [];
+        list.push(key);
+        localStorage.setItem(MISMATCH_DISMISSED_KEY, JSON.stringify(list.slice(-50)));
+    } catch { /* storage unavailable: the in-memory key still hides it this session */ }
+}
 
 /**
  * Report a proxy test result to the failover engine if the tested node
@@ -1177,70 +1237,614 @@ export function resolveLeafNode(name, proxyMap, visited = new Set()) {
     return name;
 }
 
-/** @param {string} uiGroupName @param {string|null} effectiveGroupName @param {string|null} observedGroupName @param {string|null} observedNodeName @param {Record<string, any>} proxyMap */
-function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, proxyMap) {
+/** Straight arrow: traffic goes out directly. */
+const DIRECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"/><polyline points="14 6 20 12 14 18"/></svg>';
+
+/** Circular arrow: re-test one node. */
+const RETEST_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
+
+/** Results of the running full test, so a re-render mid-test (search, sort) keeps them instead of re-pending. */
+const _testRunResults = new Map();
+
+/**
+ * Latest measurement shown per node, numbered in the order they landed. A render fetches the
+ * core's history first and writes cards later: results that landed in between are newer than
+ * that history, so the render puts them back (see replayResultsSince).
+ * @type {Map<string, { delay: number, seq: number }>}
+ */
+const _shownResults = new Map();
+let _shownResultSeq = 0;
+/** @param {string} name @param {number} delay */
+function recordShownResult(name, delay) {
+    _shownResults.set(name, { delay, seq: ++_shownResultSeq });
+}
+/**
+ * Re-apply results that landed after `mark` (taken when a render started).
+ * @param {number} mark
+ * @returns {boolean} whether any card changed
+ */
+function replayResultsSince(mark) {
+    let changed = false;
+    for (const [name, r] of _shownResults) {
+        if (r.seq > mark) { applyNodeLatency(name, r.delay); changed = true; }
+    }
+    return changed;
+}
+
+/** Single-node re-test requests still in flight; a full test's summary waits for them. */
+const _retestsInFlight = new Set();
+
+/** Latest latency request per node: an older request finishing late must not win. */
+const _nodeTestGen = new Map();
+/** @param {string} name @returns {number} */
+function beginNodeTest(name) {
+    const gen = (_nodeTestGen.get(name) || 0) + 1;
+    _nodeTestGen.set(name, gen);
+    return gen;
+}
+/** @param {string} name @param {number} gen */
+function isLatestNodeTest(name, gen) {
+    return _nodeTestGen.get(name) === gen;
+}
+
+/**
+ * Write a measured delay (or a timeout) to a node's wrapper and card, so the shown
+ * figure and the latency sort agree.
+ * @param {string} name
+ * @param {number} delay - ms, or <= 0 for a timeout / failure
+ */
+function applyNodeLatency(name, delay) {
+    const ok = delay > 0 && delay < 999999;
+    const value = ok ? delay : DELAY_INFINITE;
+    const wrapper = document.getElementById('proxies-list')?.querySelector(`[data-name="${CSS.escape(name)}"]`);
+    if (wrapper instanceof HTMLElement) {
+        wrapper.dataset.latency = String(value);
+        setProxyPendingState(/** @type {HTMLElement} */ (wrapper.firstElementChild), false);
+    }
+    const latVal = document.getElementById(`latency-${CSS.escape(name)}`);
+    if (!latVal) return;
+    const card = latVal.closest('.glass-card');
+    if (ok) {
+        latVal.textContent = `${delay}ms`;
+        latVal.className = `text-xs tabular-nums font-semibold ${getDelayColorClass(delay)}`;
+    } else {
+        latVal.textContent = /** @type {any} */ (translations)[currentLang]?.timeout || 'Timeout';
+        latVal.className = 'text-xs tabular-nums font-semibold text-[var(--text-tertiary)]';
+    }
+    setCardDelayTier(card, value);
+    if (card instanceof HTMLElement) {
+        card.dataset.latency = String(value);
+        setProxyPendingState(card, false);
+    }
+}
+
+/**
+ * A node that can win "fastest": not DIRECT/REJECT (by name or type) and not a group.
+ * @param {string} name
+ * @param {any} node - the node's entry in the core's /proxies map
+ */
+function isRealOutboundNode(name, node) {
+    const kind = String(node?.type || '').toLowerCase();
+    return !SPECIAL_PROXY_NAMES.has(name) && kind !== 'direct' && kind !== 'reject'
+        && !(Array.isArray(node?.all) && node.all.length > 0);
+}
+
+/**
+ * Test one node's latency and update its card in place (no node switch).
+ * @param {string} name
+ * @param {HTMLElement} latVal
+ * @param {HTMLButtonElement} btn
+ */
+async function retestSingleNode(name, latVal, btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('is-spinning');
+    try {
+        // A Stop pressed earlier leaves the shared signal aborted, which would cancel
+        // this request at once; with no full test running, start from a fresh one.
+        if (getLatencyTestSignal().aborted && !appStore.get('isTestingLatency')) resetLatencyTestController();
+        const signal = getLatencyTestSignal();
+        // A stopped full test is still winding down: this request would be cancelled
+        // at once and read as a timeout, so leave the card alone.
+        if (signal.aborted) return;
+        const gen = beginNodeTest(name);
+        const pending = testProxy(name);
+        _retestsInFlight.add(pending);
+        /** @type {number} */
+        let delay = -1;
+        try {
+            delay = await pending;
+        } finally {
+            _retestsInFlight.delete(pending);
+        }
+        // Cut short by Stop: no measurement, so leave the card as it was.
+        if (signal.aborted && !(delay > 0)) return;
+        // A newer test of this node (the full list) owns the result.
+        if (!isLatestNodeTest(name, gen)) return;
+        applyNodeLatency(name, delay);
+        recordShownResult(name, delay);
+        // Mid-test re-renders replay the run's results; keep this newer figure there.
+        if (appStore.get('isTestingLatency') || _testRunResults.has(name)) _testRunResults.set(name, delay);
+        // Feed the smart score like a full test does, so the badge and smart order follow.
+        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+            const success = delay > 0 && delay < 999999;
+            _smartBatcher.push(name, success ? delay : 999999, success);
+        }
+        // Keep the latency / smart sort in step with the new figure.
+        if (appStore.get('currentSortMode') === 'latency') applyLatencySortToDom();
+        else if (appStore.get('currentSortMode') === 'smart') {
+            await _smartBatcher.wait();
+            await applySmartSortToDom();
+        }
+        invalidateProxiesCache();
+        // A node that just timed out drops out of the list when timeouts are hidden.
+        if (!(delay > 0 && delay < 999999) && (await getSettingsCached())?.hide_timeout_nodes) {
+            flashHiddenChip();
+            await renderProxies();
+        }
+    } catch (err) {
+        proxyLogger.warn('Single node test failed', err);
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('is-spinning');
+    }
+}
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _latencyResultTimer = null;
+
+/**
+ * One-line test result pinned to the bottom of the proxies page, with a one-tap switch
+ * to the fastest node when it isn't the one in use.
+ * @param {string} text
+ * @param {'ok'|'warn'} tone
+ * @param {{ name: string, delay: number } | null} fastest
+ * @param {string|null} [testedGroup] - the group the test ran on; the switch goes there
+ * @param {string|null} [testedProfile] - the profile the test ran on; the switch only applies there
+ */
+function showLatencyResult(text, tone, fastest, testedGroup = null, testedProfile = null) {
+    const page = document.querySelector('[data-page="proxies"]');
+    if (!page) { showNotification(text, tone === 'ok' ? 'success' : 'warning'); return; }
+    page.querySelector('.latency-result')?.remove();
+    if (_latencyResultTimer) clearTimeout(_latencyResultTimer);
+    const bar = document.createElement('div');
+    bar.className = 'latency-result';
+    bar.dataset.tone = tone;
+    bar.setAttribute('role', 'status');
+    const dot = document.createElement('span');
+    dot.className = 'latency-result-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.className = 'latency-result-text';
+    bar.append(dot, label);
+    // The list shows the tested group's selection only while that group is still open.
+    const showsTestedGroup = !testedGroup || testedGroup === appStore.get('uiGroupName');
+    const current = showsTestedGroup ? document.querySelector('#proxies-list .proxy-card--selected')?.closest('[data-name]') : null;
+    const currentName = current instanceof HTMLElement ? current.dataset.name : null;
+    if (fastest && fastest.name !== currentName) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'latency-result-action';
+        btn.textContent = t('latencySwitchFastest');
+        btn.addEventListener('click', () => {
+            // Busy (profile change, mode switch, TUN toggle): keep the action for later.
+            if (appStore.get('isNetworkUpdating')) {
+                showNotification(t('consoleSubUpdateBusy'), 'info');
+                return;
+            }
+            bar.remove();
+            void switchToFastest(testedGroup, fastest.name, testedProfile);
+        });
+        bar.appendChild(btn);
+    }
+    page.appendChild(bar);
+    // Text goes in after the live region is in the page, so screen readers announce it.
+    requestAnimationFrame(() => {
+        label.textContent = text;
+        bar.classList.add('is-shown');
+    });
+    _latencyResultTimer = setTimeout(() => {
+        bar.classList.remove('is-shown');
+        setTimeout(() => bar.remove(), 300);
+    }, 8000);
+}
+
+/**
+ * Switch the tested group to its fastest node, the same way a card click does:
+ * save the choice for the profile, close open connections, report a failure.
+ * @param {string|null} testedGroup
+ * @param {string} node
+ * @param {string|null} [testedProfile] - the profile the test ran on
+ */
+async function switchToFastest(testedGroup, node, testedProfile = null) {
+    const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
+    // A profile change, mode switch or TUN toggle holds this guard and may still
+    // restore a saved node when it finishes: same rule as a card click.
+    if (appStore.get('isNetworkUpdating')) {
+        showNotification(t('consoleSubUpdateBusy'), 'info');
+        return;
+    }
+    try {
+        // The profile changed since the test: its group and node may exist here too,
+        // but the result says nothing about this profile, so neither switch nor save.
+        // Read it uncached, as a cached name can lag just after a profile change.
+        const activeProfile = (await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml';
+        if (testedProfile && activeProfile !== testedProfile) {
+            showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
+            return;
+        }
+        const group = testedGroup || (await fetchProxyGroupsShared({ preferredGroupName: appStore.get('uiGroupName') || undefined }))?.uiGroupName;
+        // The selected card may be filtered out of view: ask the core (uncached, as a
+        // stale selection would skip a switch still needed), and do not re-select (and
+        // close every connection for) the node already in use.
+        const proxyMap = group
+            ? await getProxies().then(getProxiesMerged).then(d => d?.proxies).catch(() => null)
+            : null;
+        // Saved for the profile verified above, the one the switch applies to.
+        const saveSelection = async (/** @type {string} */ savedGroup) => {
+            try {
+                await saveProxySelection(activeProfile, { node, group: savedGroup });
+            } catch (e) {
+                proxyLogger.warn('Failed to save proxy selection', e);
+            }
+        };
+        // A profile change may have started during the awaits above: check again right
+        // before switching or saving, so neither lands on the wrong profile.
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(t('consoleSubUpdateBusy'), 'info');
+            return;
+        }
+        if (((await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml') !== activeProfile) {
+            showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
+            return;
+        }
+        if (group && proxyMap?.[group]?.now === node) {
+            // Already in use, but the saved choice for the profile may still differ.
+            await saveSelection(group);
+            notifySwitched(node, false);
+            return;
+        }
+        if (!group || !(await switchProxy(group, node))) {
+            showNotification(tr.proxySwitchFailed || 'Failed to switch proxy', 'error');
+            return;
+        }
+        invalidateProxiesCache();
+        await saveSelection(group);
+        notifySwitched(node, await closeConnsAfterSwitch());
+        // The switch already happened: a failed refresh afterwards is not a failed switch.
+        await syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after switch failed', e));
+        await renderProxies().catch((e) => proxyLogger.warn('Re-render after switch failed', e));
+    } catch (err) {
+        proxyLogger.warn('Switch to fastest node failed', err);
+        showNotification(`${tr.proxySwitchFailed || 'Failed to switch proxy'}: ${String(/** @type {any} */ (err)?.message ?? err)}`, 'error');
+    }
+}
+
+/** Bold check marking the active sort option. */
+const CHECK_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+
+/** @type {HTMLElement|null} */
+let _sortMenu = null;
+
+/** Close the sort menu if open. */
+function closeSortMenu() {
+    if (!_sortMenu) return;
+    _sortMenu.remove();
+    _sortMenu = null;
+    document.getElementById('sort-btn')?.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', closeSortMenu);
+    document.removeEventListener('keydown', onSortMenuKey, true);
+    document.removeEventListener('focusin', onSortMenuFocusIn);
+}
+
+/** Focus moved outside the menu and its button (Tab): close it. @param {FocusEvent} e */
+function onSortMenuFocusIn(e) {
+    const target = /** @type {Node|null} */ (e.target);
+    if (!_sortMenu || !target) return;
+    if (_sortMenu.contains(target) || document.getElementById('sort-btn')?.contains(target)) return;
+    closeSortMenu();
+}
+
+/** @param {KeyboardEvent} e */
+function onSortMenuKey(e) {
+    if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeSortMenu();
+        document.getElementById('sort-btn')?.focus();
+        return;
+    }
+    if (!_sortMenu) return;
+    const items = /** @type {HTMLElement[]} */ (Array.from(_sortMenu.querySelectorAll('[role="menuitemradio"]')));
+    if (items.length === 0) return;
+    const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+    /** @type {Record<string, number>} */
+    const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 };
+    if (!(e.key in moves)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    items[(moves[e.key] + items.length) % items.length].focus();
+}
+
+/**
+ * @param {HTMLElement} sortBtn
+ * @param {HTMLElement|null} sortLabel
+ */
+function toggleSortMenu(sortBtn, sortLabel) {
+    if (_sortMenu) { closeSortMenu(); return; }
+    const tr = /** @type {any} */ (translations)[currentLang] || {};
+    const smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+    if (!smartEnabled && appStore.get('currentSortMode') === 'smart') appStore.set('currentSortMode', 'default');
+    const modes = smartEnabled ? ['default', 'name', 'latency', 'smart'] : ['default', 'name', 'latency'];
+    /** @type {Record<string, [string, string]>} */
+    const text = {
+        default: [tr.sortDefault, tr.sortDefaultDesc],
+        name: [tr.sortName, tr.sortNameDesc],
+        latency: [tr.sortLatency, tr.sortLatencyDesc],
+        smart: [tr.sortSmart, tr.sortSmartDesc],
+    };
+    const menu = document.createElement('div');
+    menu.className = 'proxy-group-menu proxy-sort-menu rounded-lg shadow-2xl border border-[var(--zephyr-border-default)]';
+    menu.setAttribute('role', 'menu');
+    const current = appStore.get('currentSortMode') || 'default';
+    for (const mode of modes) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', mode === current ? 'true' : 'false');
+        item.className = 'proxy-sort-option';
+        const check = document.createElement('span');
+        check.className = 'proxy-group-check';
+        check.setAttribute('aria-hidden', 'true');
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+        if (mode === current) check.innerHTML = CHECK_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+        const body = document.createElement('span');
+        body.className = 'proxy-sort-body';
+        const title = document.createElement('span');
+        title.className = 'proxy-sort-title';
+        title.textContent = text[mode][0] || mode;
+        body.appendChild(title);
+        if (text[mode][1]) {
+            const desc = document.createElement('span');
+            desc.className = 'proxy-sort-desc';
+            desc.textContent = text[mode][1];
+            body.appendChild(desc);
+        }
+        item.append(body, check);
+        item.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const hadFocus = item === document.activeElement;
+            closeSortMenu();
+            if (hadFocus) sortBtn.focus();
+            appStore.set('currentSortMode', mode);
+            if (sortLabel) sortLabel.textContent = text[mode][0] || mode;
+            await refreshProxies();
+            if (mode === 'smart') await applySmartSortToDom().catch((err) => proxyLogger.warn('Smart sort failed', err));
+        });
+        menu.appendChild(item);
+    }
+    sortBtn.parentElement?.appendChild(menu);
+    // Open under the button; flip to its end edge when that would leave the window.
+    const box = menu.getBoundingClientRect();
+    if (box.right > window.innerWidth - 8 || box.left < 8) menu.classList.add('is-end');
+    _sortMenu = menu;
+    sortBtn.setAttribute('aria-expanded', 'true');
+    /** @type {HTMLElement|null} */ (menu.querySelector('[aria-checked="true"]'))?.focus();
+    setTimeout(() => {
+        document.addEventListener('click', closeSortMenu);
+        document.addEventListener('keydown', onSortMenuKey, true);
+        document.addEventListener('focusin', onSortMenuFocusIn);
+    }, 0);
+}
+
+/** Magnifier: no search matches. */
+const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+/** Stack of cards: no nodes. */
+const NODES_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg>';
+
+/** The search box and "show hidden" only apply to the group they were used in. */
+let _searchGroup = /** @type {string|null} */ (null);
+/** Temporarily show nodes that "hide timed-out nodes" filtered (setting unchanged). */
+let _showHiddenTimeouts = false;
+/** The hidden-timeout chip only flashes for a few seconds after a latency test, so the header stays calm. */
+const HIDDEN_CHIP_MS = 5000;
+let _hiddenChipUntil = 0;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _hiddenChipTimer = null;
+/** @type {Parameters<typeof setProxyHeaderMeta>[0]} */
+let _lastHeaderMeta = null;
+
+function flashHiddenChip() {
+    _hiddenChipUntil = Date.now() + HIDDEN_CHIP_MS;
+    if (_hiddenChipTimer) clearTimeout(_hiddenChipTimer);
+    _hiddenChipTimer = setTimeout(() => {
+        _hiddenChipTimer = null;
+        setProxyHeaderMeta(_lastHeaderMeta);
+    }, HIDDEN_CHIP_MS + 50);
+}
+
+/** @param {string} title */
+function buildNoNodesState(title) {
+    const tr = /** @type {any} */ (translations)[currentLang] || {};
+    return buildProxiesEmptyState({
+        icon: NODES_ICON,
+        title,
+        actionLabel: tr.addSubscription || 'Add Subscription',
+        onAction: () => {
+            import('./navigation.js').then((m) => {
+                m.navigateTo('subscriptions');
+                requestAnimationFrame(() => document.getElementById('add-sub-btn')?.click());
+            }).catch(() => {});
+        },
+    });
+}
+
+/**
+ * Header read-outs next to the group button: hidden-timeout chip and search count.
+ * (No standing node count: the header was too crowded and the cards show the list anyway.)
+ * @param {{ total: number, matched: number|null, searchedFrom: number, hidden: number, hideEnabled: boolean } | null} meta
+ */
+function setProxyHeaderMeta(meta) {
+    _lastHeaderMeta = meta;
+    const chip = document.getElementById('proxy-hidden-chip');
+    const searchCount = document.getElementById('proxy-search-count');
+    if (searchCount) searchCount.textContent = meta?.matched != null ? `${meta.matched}/${meta.searchedFrom}` : '';
+    if (!chip) return;
+    const flashing = Date.now() < _hiddenChipUntil;
+    const showChip = !!meta && meta.hideEnabled && (_showHiddenTimeouts || (flashing && meta.hidden > 0));
+    chip.classList.toggle('hidden', !showChip);
+    if (!showChip || !meta) return;
+    chip.replaceChildren();
+    const label = document.createElement('span');
+    label.textContent = _showHiddenTimeouts ? '' : tFmt('hiddenTimeoutNodes', { count: String(meta.hidden) });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = _showHiddenTimeouts ? t('hideTimedOutAgain') : t('showHiddenNodes');
+    btn.addEventListener('click', () => {
+        _showHiddenTimeouts = !_showHiddenTimeouts;
+        renderProxies().catch(() => {});
+    });
+    if (label.textContent) chip.append(label, '·', btn); else chip.append(btn);
+}
+
+/** Circle with exclamation mark: the core could not be reached. */
+const ALERT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+/** Sort / test-all mean nothing when no node is used (direct mode). */
+function setProxyToolsHidden(/** @type {boolean} */ hidden) {
+    for (const id of ['sort-btn', 'test-all-btn']) {
+        document.getElementById(id)?.classList.toggle('hidden', hidden);
+    }
+    // Search means nothing without a node list (direct mode / no nodes).
+    const search = /** @type {HTMLElement|null} */ (document.querySelector('label.proxy-search'));
+    if (search) search.style.display = hidden ? 'none' : '';
+}
+
+/**
+ * Empty state for the node list: centred in the list's full height, icon, title,
+ * one muted line and one primary action.
+ * `card` puts it on a panel at the top of the list (a mode, not a missing list) with a soft action.
+ * @param {{ icon: string, title: string, detail?: string, tone?: 'danger', card?: boolean, actionLabel?: string, onAction?: (btn: HTMLButtonElement) => void }} opts
+ * @returns {HTMLElement}
+ */
+function buildProxiesEmptyState({ icon, title, detail, tone, card, actionLabel, onAction }) {
+    const wrap = document.createElement('div');
+    wrap.className = tone === 'danger' ? 'proxies-empty-state is-danger' : 'proxies-empty-state';
+    if (card) wrap.classList.add('is-card');
+    const ic = document.createElement('div');
+    ic.className = 'proxies-empty-icon';
+    ic.setAttribute('aria-hidden', 'true');
+    // eslint-disable-next-line no-unsanitized/property -- static icon markup from SVG_ICONS // nosemgrep: js-innerhtml-assignment
+    ic.innerHTML = icon;
+    const h = document.createElement('h3');
+    h.className = 'proxies-empty-title';
+    h.textContent = title;
+    wrap.append(ic, h);
+    if (detail && detail !== title) {
+        const p = document.createElement('p');
+        p.className = 'proxies-empty-detail';
+        p.textContent = detail;
+        wrap.appendChild(p);
+    }
+    if (actionLabel && onAction) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = card ? 'btn-accent proxies-empty-action' : 'btn-primary proxies-empty-action';
+        btn.textContent = actionLabel;
+        btn.addEventListener('click', () => onAction(btn));
+        wrap.appendChild(btn);
+    }
+    return wrap;
+}
+
+/** Pair the bar shows now; the live region is rebuilt only when it changes. @type {string|null} */
+let _renderedMismatchKey = null;
+/**
+ * The list shows no group (direct mode, loading, an empty or error state), so no
+ * group explanation applies, even when observed traffic changes meanwhile.
+ */
+let _barSuppressed = false;
+
+function hideGroupExplanationBar() {
+    _renderedMismatchKey = null;
+    const bar = document.getElementById('group-explanation-bar');
+    bar?.classList.add('hidden');
+    bar?.classList.remove('flex');
+}
+
+/** Hide the bar for a list state that shows no group, until a group list renders again. */
+function suppressGroupExplanationBar() {
+    _barSuppressed = true;
+    hideGroupExplanationBar();
+}
+
+/** @param {string} uiGroupName @param {string|null} effectiveGroupName @param {string|null} observedGroupName @param {string|null} observedNodeName @param {Record<string, any>} proxyMap @param {string} profile - the active profile; a dismissal belongs to it */
+function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, proxyMap, profile) {
     const bar = document.getElementById('group-explanation-bar');
     if (!bar) return;
+    if (_barSuppressed) { hideGroupExplanationBar(); return; }
 
-    // Get the currently selected node in the UI group, resolving nested groups
-    const uiSelectedNode = resolveLeafNode(uiGroupName, proxyMap);
+    const decision = decideGroupMismatch({
+        uiGroupName,
+        effectiveGroupName,
+        observedGroupName,
+        observedNodeName,
+        uiLeafNode: resolveLeafNode(uiGroupName, proxyMap),
+        proxyMap,
+    });
 
-    // Check if node names match (user's main concern)
-    // If observed node matches UI selected node, don't show mismatch even if group names differ
-    const nodeMatch = observedNodeName && uiSelectedNode && observedNodeName === uiSelectedNode;
-
-    // Determine what to show: observedGroup mismatch takes priority over effectiveGroup mismatch
-    // But skip if node names match (the actual traffic goes to the same node user selected)
-    const showObserved = observedGroupName && observedGroupName !== uiGroupName && !nodeMatch;
-    const showEffective = !showObserved && effectiveGroupName && uiGroupName !== effectiveGroupName && !nodeMatch;
-
-    if (!showObserved && !showEffective) {
-        bar.classList.add('hidden');
-        bar.classList.remove('flex');
+    if (!decision) {
+        hideGroupExplanationBar();
         _dismissedMismatchKey = null;
         return;
     }
 
-    // Build a key for this specific mismatch
-    const mismatchKey = showObserved
-        ? `observed:${uiGroupName}|${observedGroupName}`
-        : `${uiGroupName}|${effectiveGroupName}`;
-
-    if (_dismissedMismatchKey === mismatchKey) {
+    const showObserved = decision.kind === 'observed';
+    // One key per profile and group pair; a dismissed pair stays quiet across sessions,
+    // but only in its own profile (another profile can route the same names differently).
+    const mismatchKey = `${profile}|${uiGroupName}|${decision.target}`;
+    if (_dismissedMismatchKey === mismatchKey || isMismatchDismissed(mismatchKey)) {
+        hideGroupExplanationBar();
         return;
     }
+    // Same message already showing: leave the live region alone so it is not re-announced.
+    // The headline depends on the kind too, so it is part of the rendered key.
+    // The language is part of the key: the bar's spans carry no data-i18n, so a
+    // language change must rebuild them.
+    const renderedKey = `${mismatchKey}|${decision.kind}|${currentLang}`;
+    if (_renderedMismatchKey === renderedKey && !bar.classList.contains('hidden')) return;
+    _renderedMismatchKey = renderedKey;
 
     bar.classList.remove('hidden');
     bar.classList.add('flex');
     bar.replaceChildren();
 
-    // Info icon
     const icon = document.createElement('span');
-    icon.className = 'text-amber-400 text-sm flex-shrink-0';
+    icon.className = 'group-mismatch-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
 
-    icon.textContent = '\u26A0';
-
-    // Explanation text — use t() for fallback chain support
+    // Blue explanation, not a warning: a title saying which group is in charge, then what to do.
     const text = document.createElement('span');
-    text.className = 'text-2xs text-[var(--text-secondary)] flex-1';
-
-    if (showObserved) {
-        text.textContent = t('observedGroupMismatch', { observedGroup: observedGroupName, uiGroup: uiGroupName });
-    } else {
-        text.textContent = t('groupMismatchExplanation', { uiGroup: uiGroupName, effectiveGroup: effectiveGroupName });
-    }
+    text.className = 'group-mismatch-text';
+    const title = document.createElement('span');
+    title.className = 'group-mismatch-title';
+    title.textContent = t(showObserved ? 'groupMismatchTrafficTitle' : 'groupMismatchRulesTitle', { target: decision.target });
+    const hint = document.createElement('span');
+    hint.className = 'group-mismatch-hint';
+    hint.textContent = t('groupMismatchHint');
+    text.append(title, hint);
 
     // Quick-switch button
     const btn = document.createElement('button');
-    const targetGroup = (showObserved ? observedGroupName : effectiveGroupName) || '';
+    btn.type = 'button';
+    const targetGroup = decision.target;
     const targetType = proxyMap?.[targetGroup]?.type || '';
-    const targetIsWritable = isWritableGroupType(targetType);
+    // A hidden selector cannot be opened in the group menu, so it is not switchable here either.
+    const targetIsWritable = isWritableGroupType(targetType) && !proxyMap?.[targetGroup]?.hidden;
 
     if (targetIsWritable) {
-        btn.className = 'text-2xs text-accent hover:text-accent/80 underline whitespace-nowrap flex-shrink-0';
-        btn.textContent = showObserved
-            ? t('switchToObservedGroup')
-            : t('switchToEffectiveGroup');
+        btn.className = 'group-mismatch-action';
+        btn.textContent = t('openMismatchGroup');
         btn.onclick = async () => {
             try {
                 appStore.set('uiGroupName', targetGroup);
@@ -1258,7 +1862,7 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
             }
         };
     } else {
-        btn.className = 'text-2xs text-[var(--text-tertiary)] cursor-not-allowed whitespace-nowrap flex-shrink-0';
+        btn.className = 'group-mismatch-action is-disabled';
         btn.textContent = showObserved
             ? t('observedGroupNotSwitchable')
             : t('effectiveGroupNotSwitchable');
@@ -1267,12 +1871,14 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
 
     // Dismiss button
     const dismiss = document.createElement('button');
-    dismiss.className = 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ms-2 flex-shrink-0';
-
+    dismiss.type = 'button';
+    dismiss.className = 'group-mismatch-close';
     dismiss.textContent = '\u00D7';
     dismiss.title = t('dismiss');
+    dismiss.setAttribute('aria-label', t('dismiss'));
     dismiss.onclick = () => {
         _dismissedMismatchKey = mismatchKey;
+        rememberMismatchDismissed(mismatchKey);
         bar.classList.add('hidden');
         bar.classList.remove('flex');
     };
@@ -1296,7 +1902,7 @@ let _groupMenuElement = null;
  * @param {string[]} groups - List of available group names
  * @param {string} currentGroup - Currently selected group name
  */
-function renderGroupSelector(groups, currentGroup) {
+function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     const selector = document.getElementById('proxy-group-selector');
     const trigger = document.getElementById('proxy-group-trigger');
     const label = document.getElementById('proxy-group-label');
@@ -1319,7 +1925,7 @@ function renderGroupSelector(groups, currentGroup) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
-        _groupMenuElement.className = 'hidden fixed bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
+        _groupMenuElement.className = 'proxy-group-menu hidden fixed border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
         const scrollDiv = document.createElement('div');
         scrollDiv.className = 'menu-scroll max-h-[300px]';
@@ -1336,15 +1942,34 @@ function renderGroupSelector(groups, currentGroup) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'proxy-group-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
-        if (groupName === currentGroup) {
+        btn.dataset.group = groupName;
+        const isCurrent = groupName === currentGroup;
+        if (isCurrent) {
             btn.classList.add('active');
+            btn.setAttribute('aria-current', 'true');
         }
-        btn.textContent = groupName;
-        // Attach hover highlight directly during creation
-        btn.addEventListener('mouseenter', () => {
-            menuScroll.querySelectorAll('.proxy-group-option').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        });
+        // Check mark stays on the current group (hover no longer moves the highlight);
+        // the muted right-hand text says which node each group uses right now.
+        const check = document.createElement('span');
+        check.className = 'proxy-group-check';
+        check.setAttribute('aria-hidden', 'true');
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+        if (isCurrent) check.innerHTML = CHECK_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+        const nameEl = document.createElement('span');
+        nameEl.className = 'proxy-group-name';
+        nameEl.textContent = groupName;
+        const route = document.createElement('span');
+        route.className = 'proxy-group-route';
+        const leaf = resolveLeafNode(groupName, proxyMap);
+        // Show the hop when a group points at another group ("节点选择 → 🇭🇰 香港-01"),
+        // and say 直连 rather than DIRECT.
+        const via = /** @type {any} */ (proxyMap)?.[groupName]?.now;
+        const label = (/** @type {string} */ n) => (n === 'DIRECT' ? t('modeDirect') : n);
+        if (!leaf || leaf === groupName) route.textContent = '';
+        else if (via && via !== leaf) route.textContent = `${label(via)} → ${label(leaf)}`;
+        else route.textContent = label(leaf);
+        route.title = route.textContent;
+        btn.append(check, nameEl, route);
         btn.onclick = async () => {
             // Close menu
             menu.classList.add('hidden');
@@ -1384,7 +2009,7 @@ function renderGroupSelector(groups, currentGroup) {
         menuScroll.addEventListener('mouseleave', () => {
             const current = menuScroll.dataset.currentGroup;
             menuScroll.querySelectorAll('.proxy-group-option').forEach(b => {
-                b.classList.toggle('active', b.textContent === current);
+                b.classList.toggle('active', /** @type {HTMLElement} */ (b).dataset.group === current);
             });
         });
 
@@ -1464,6 +2089,55 @@ let _providerPollInFlight = false;
 const PROVIDER_POLL_MAX = 20;
 
 /** Special proxy names that never have detail records in /proxies. */
+/**
+ * Whether the proxy map holds at least one real outbound node (not DIRECT/REJECT-like, not a group).
+ * @param {Record<string, any>} proxyMap
+ * @returns {boolean}
+ */
+function hasAnyRealNode(proxyMap) {
+    return Object.entries(proxyMap).some(([name, node]) => {
+        // Any group record, even an empty one, is not a node.
+        if (Array.isArray(node?.all)) return false;
+        return !isNonProxyExit(name, node);
+    });
+}
+
+/** Core adapter types that send traffic nowhere through a proxy (mihomo spells them Direct, RejectDrop, ...). */
+const NON_PROXY_EXIT_TYPES = new Set(['DIRECT', 'REJECT', 'REJECTDROP', 'PASS', 'COMPATIBLE', 'DNS']);
+
+/**
+ * A built-in DIRECT/REJECT-style entry, or a local outbound of such a type under its own name.
+ * @param {string} name
+ * @param {any} node - its /proxies record, if any
+ */
+function isNonProxyExit(name, node) {
+    if (SPECIAL_PROXY_NAMES.has(String(name).toUpperCase())) return true;
+    return NON_PROXY_EXIT_TYPES.has(String(node?.type || '').toUpperCase().replace(/[-_]/g, ''));
+}
+
+/**
+ * A provider-fed (`use:` / include-all) group whose own members are still only
+ * DIRECT/REJECT-style entries (or nothing): its provider's nodes have not arrived,
+ * whatever other groups hold. The provider poll is bounded, so this cannot spin forever.
+ * Local outbounds of those types under their own names count the same.
+ * @param {unknown[]} members
+ * @param {Record<string, any> | undefined} proxyMap
+ */
+function providerMembersPending(members, proxyMap) {
+    return members.every((n) => isNonProxyExit(String(n), proxyMap?.[String(n)]));
+}
+
+/**
+ * Only DIRECT / REJECT in the group and no real node anywhere in the config.
+ * @param {string[]} members
+ * @param {Record<string, any> | undefined} proxyMap
+ */
+function hasOnlySpecialMembers(members, proxyMap) {
+    return members.length > 0
+        && members.every((n) => SPECIAL_PROXY_NAMES.has(String(n).toUpperCase()))
+        && !hasAnyRealNode(proxyMap || {});
+}
+
 // SPECIAL_PROXY_NAMES imported from api.js (single source of truth)
 
 /**
@@ -1581,7 +2255,7 @@ function renderProxiesLoading(container, loadingText) {
     span.dataset.i18n = 'loadingNodes';
     span.textContent = loadingText;
     const spinner = document.createElement('div');
-    spinner.className = 'w-6 h-6 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin';
+    spinner.className = 'w-6 h-6 border-2 border-[var(--zephyr-border-default)] border-t-accent rounded-full animate-spin';
     loading.appendChild(span);
     loading.appendChild(spinner);
     container.appendChild(loading);
@@ -1598,9 +2272,16 @@ function renderProxiesLoading(container, loadingText) {
             'restart-core-btn',
             'restartCore'
         );
-        btn.className = 'mt-2 ' + ACCENT_BTN_CLASS;
+        btn.className = 'mt-1 btn-ghost';
+        // The accent inline style would override .btn-ghost.
+        btn.style.cssText = '';
+        // Large subscriptions often need a few seconds: offer the restart only after a real wait.
+        const slow = document.createElement('span');
+        slow.className = 'text-xs text-[var(--text-tertiary)]';
+        slow.textContent = tObj.loadingSlow || 'Taking longer than usual';
+        existing.appendChild(slow);
         existing.appendChild(btn);
-    }, 2500);
+    }, 8000);
 }
 
 /**
@@ -1696,7 +2377,11 @@ function startProviderPoll(preferredGroupName, exhaustionKey, attempt = 0) {
             // appear in /proxies, causing buildProxyWrappers to skip nodes.
             const _hasMissingDetails = result && !result.providerLoading
                 && hasMissingProxyDetails(result.proxies || [], data.proxies);
-            if (result && !result.providerLoading && !_hasMissingDetails) {
+            // The same wait the page applies: a `use:` group still holding only
+            // DIRECT/REJECT has not got its provider's nodes yet.
+            const _stillWaiting = result && result.uiGroupUsesProviders
+                && providerMembersPending(result.proxies || [], data?.proxies);
+            if (result && !result.providerLoading && !_hasMissingDetails && !_stillWaiting) {
                 // Nodes have arrived — invalidate cache + re-render
                 invalidateProxiesCache();
                 void refreshProxies();
@@ -1827,6 +2512,19 @@ async function updateProxiesInPlace(container, proxies, data, current) {
 
     // Sync _activeCard with the actual current node
     const currentWrapper = container.querySelector('[data-selected="1"]');
+    // Tab into the list lands on the selected node, not the first card. While focus
+    // is already on a card (or its re-test button), that card keeps the tab stop.
+    const focusedOption = document.activeElement instanceof HTMLElement && container.contains(document.activeElement)
+        ? document.activeElement.closest('[role="option"]')
+        : null;
+    const tabStop = focusedOption instanceof HTMLElement && container.contains(focusedOption)
+        ? focusedOption
+        : currentWrapper;
+    if (tabStop instanceof HTMLElement && tabStop.matches('[role="option"]')) {
+        container.querySelectorAll('[role="option"]').forEach((el) => {
+            if (el instanceof HTMLElement) setItemTabStop(el, el === tabStop);
+        });
+    }
     if (currentWrapper) {
         _activeCard = /** @type {HTMLElement|null} */ (currentWrapper.firstElementChild);
     } else {
@@ -1896,7 +2594,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
         // --- Top row: the node name owns the whole row ---
         const top = document.createElement('div');
-        top.className = 'flex items-center pointer-events-none w-full min-w-0 pe-5';
+        top.className = 'node-top flex items-center pointer-events-none w-full min-w-0';
 
         const nameContainer = document.createElement('div');
         nameContainer.className = 'node-name flex-1 min-w-0 text-sm font-semibold text-[var(--text-primary)] tracking-tight';
@@ -1906,6 +2604,13 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         nameContainer.title = name;
         nameContainer.appendChild(nameSpan);
         top.appendChild(nameContainer);
+        // Smart score at the end of the name row (the selected check keeps its own corner);
+        // stays hidden until there is a real score.
+        const scoreBadge = document.createElement('span');
+        scoreBadge.className = 'score-badge tabular-nums';
+        scoreBadge.setAttribute('data-score-badge', 'true');
+        scoreBadge.title = t('sortSmartDesc');
+        top.appendChild(scoreBadge);
 
         // --- Bottom row: status dot + protocol (or group target) + latency ---
         const bottom = document.createElement('div');
@@ -1932,7 +2637,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         const latVal = document.createElement('span');
         latVal.id = `latency-${CSS.escape(name)}`;
         if (isPending) {
-            latVal.className = 'text-xs tabular-nums font-semibold text-accent/60';
+            latVal.className = 'text-xs tabular-nums font-semibold text-accent';
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             latVal.innerHTML = latencyLoadingIcon; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             (/** @type {HTMLElement} */ (card)).dataset.latency = String(DELAY_INFINITE);
@@ -1940,6 +2645,20 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             latVal.className = `text-xs tabular-nums font-semibold ${delayColor}`;
             latVal.textContent = !isInvalidDelay(lastDelay) ? `${lastDelay}ms` : (lastDelay === null ? '--' : (/** @type {any} */ (translations)[currentLang].timeout || 'Timeout'));
         }
+        // Re-test just this node (hover/focus reveals it); never switches the node.
+        const retest = document.createElement('button');
+        retest.type = 'button';
+        retest.className = 'node-retest-btn';
+        retest.tabIndex = -1;
+        retest.title = t('retestNode');
+        retest.setAttribute('aria-label', `${t('retestNode')}: ${name}`);
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+        retest.innerHTML = RETEST_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+        retest.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void retestSingleNode(name, latVal, retest);
+        });
+        right.appendChild(retest);
         right.appendChild(latVal);
 
         bottom.appendChild(left);
@@ -1954,13 +2673,6 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
         card.appendChild(top);
 
-        // Smart score badge (between title and UDP rows, only visible when smart mode is enabled)
-        // Use absolute positioning with fixed pixel value for consistent cross-system placement
-        const scoreBadge = document.createElement('div');
-        scoreBadge.className = 'score-badge absolute start-4 top-[40px] text-center text-2xs tabular-nums font-bold';
-        scoreBadge.setAttribute('data-score-badge', 'true');
-        scoreBadge.textContent = '--';
-        card.appendChild(scoreBadge);
 
         card.appendChild(bottom);
 
@@ -1973,7 +2685,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                 showNotification(t('consoleSubUpdateBusy'), 'info');
                 return;
             }
-            abortLatencyTests();
+            // Switching a node and a running latency test are independent: the test keeps going.
 
             card.classList.add('opacity-50', 'pointer-events-none');
             const originalLatContent = latVal ? latVal.innerHTML : '';
@@ -1981,16 +2693,21 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 latVal.innerHTML = SVG_ICONS.loadingSmall; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             }
+            // A latency result can land while the switch is in flight; it replaces the
+            // spinner, and must not then be overwritten by the old content.
+            const switchSpinner = latVal?.firstChild ?? null;
+            const restoreLatency = () => {
+                if (!latVal || latVal.firstChild !== switchSpinner) return;
+                // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
+                latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+            };
 
             try {
                 const { ok: success, reason: switchRejection } = await switchProxyResult(mainGroup, name);
                 invalidateProxiesCache();
 
                 card.classList.remove('opacity-50', 'pointer-events-none');
-                if (latVal) {
-                    // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
-                    latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-                }
+                restoreLatency();
 
                 if (success) {
                     setActiveNode(card, container);
@@ -2008,19 +2725,17 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    void closeAllConnections()
-                        .catch((err) => proxyLogger.warn('Failed to close connections after proxy switch', err))
-                        .then(() => syncCoreConfig())
-                        .catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
+                    // Open connections are closed so the new node applies at once; only
+                    // say so once that actually happened.
+                    const closed = await closeConnsAfterSwitch();
+                    notifySwitched(name, closed);
+                    void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     notifySwitchFailed(switchRejection);
                 }
             } catch (err) {
                 card.classList.remove('opacity-50', 'pointer-events-none');
-                if (latVal) {
-                    // eslint-disable-next-line no-unsanitized/property -- restoring saved innerHTML (same DOM element)
-                    latVal.innerHTML = originalLatContent; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-                }
+                restoreLatency();
                 notifySwitchFailed(err);
             }
         };
@@ -2051,8 +2766,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         (/** @type {HTMLElement} */ (wrapper)).dataset.estimate = (/** @type {HTMLElement} */ (wrapper)).dataset.latency;
 
         wrapper.style.height = 'auto';
-        wrapper.className = 'w-full proxy-wrapper';
-        wrapper.style.minHeight = '96px';
+        wrapper.className = 'proxy-wrapper';
+        wrapper.style.minHeight = '104px'; // 96px card + 8px room for the selected check
 
         const card = createCard(wrapper);
         setProxyPendingState(card, appStore.get('isTestingLatency'));
@@ -2090,6 +2805,8 @@ export async function renderProxies() {
     // so that early-return paths (no data, direct mode, no groups) also
     // invalidate stale renders from older invocations.
     const _renderGen = ++_renderGeneration;
+    // Results landing after this point are newer than the history this render fetches.
+    const resultMark = _shownResultSeq;
 
     // Start observed-group watcher only when proxies page is visible and app is foregrounded
     if (!document.hidden) {
@@ -2107,10 +2824,19 @@ export async function renderProxies() {
     }
 
     // Fetch proxies (merged with provider data) and config in parallel
-    const [data, config] = await Promise.all([
-        getProxiesCached().then(getProxiesMerged),
-        getConfigCached(),
-    ]);
+    // A failing core API must reach the error state below, not leave "Loading nodes…" up forever.
+    /** @type {any} */
+    let data = null;
+    /** @type {any} */
+    let config = null;
+    try {
+        [data, config] = await Promise.all([
+            getProxiesCached().then(getProxiesMerged),
+            getConfigCached(),
+        ]);
+    } catch (err) {
+        proxyLogger.warn('Failed to load proxies', err);
+    }
 
     // Guard: if a newer render started while fetching, abort — the newer render takes precedence.
     if (_renderGen !== _renderGeneration) return;
@@ -2122,35 +2848,34 @@ export async function renderProxies() {
     t = /** @type {any} */ (translations)[currentLang] || {};
 
     if (!data || !data.proxies) {
+        setProxyToolsHidden(true);
+        suppressGroupExplanationBar();
+        setProxyHeaderMeta(null);
         container.replaceChildren();
-        const errWrap = document.createElement('div');
-        errWrap.className = 'col-span-full text-center py-10 text-rose-400 bg-rose-400/5 rounded-lg border border-rose-400/20 flex flex-col items-center gap-4';
-        const errText = document.createElement('span');
-        errText.dataset.i18n = 'failedToConnect';
-        errText.textContent = t.failedToConnect;
-        errWrap.appendChild(errText);
-        // Add restart core button on connection failure
-        const restartBtn = createAccentButton(
-            t.restartCore || 'Restart Core',
-            (b) => handleCoreRestart(b, 'error state'),
-            undefined,
-            'restartCore'
-        );
-        errWrap.appendChild(restartBtn);
-        container.appendChild(errWrap);
+        container.appendChild(buildProxiesEmptyState({
+            icon: ALERT_ICON,
+            tone: 'danger',
+            title: t.failedToConnect,
+            actionLabel: t.restartCore || 'Restart Core',
+            onAction: (b) => handleCoreRestart(b, 'error state'),
+        }));
         return;
     }
 
-    if (config?.mode?.toLowerCase() === 'direct') {
+    const isDirect = config?.mode?.toLowerCase() === 'direct';
+    setProxyToolsHidden(isDirect);
+    if (isDirect) {
+        suppressGroupExplanationBar();
+        setProxyHeaderMeta(null);
         container.replaceChildren();
-        const prompt = document.createElement('div');
-        prompt.className = 'col-span-full text-center py-20 text-[var(--text-muted)] bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] flex flex-col items-center gap-4';
-        // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
-        prompt.innerHTML = `
-            ${SVG_ICONS.externalLink}
-            <span class="text-sm font-light tracking-wider uppercase opacity-60">${escapeHtml(t.directModePrompt)}</span>
-        `;
-        container.appendChild(prompt);
+        container.appendChild(buildProxiesEmptyState({
+            icon: DIRECT_ICON,
+            title: t.directModeTitle || t.directModePrompt,
+            detail: t.directModeDetail || t.directModePrompt,
+            card: true,
+            actionLabel: t.switchToRuleMode || 'Rule',
+            onAction: () => /** @type {HTMLElement|null} */ (document.querySelector('[data-mode="rule"]'))?.click(),
+        }));
         return;
     }
 
@@ -2167,12 +2892,11 @@ export async function renderProxies() {
     // Re-read after await: user may have switched language during fetch.
     t = /** @type {any} */ (translations)[currentLang] || {};
     if (!proxyGroupsResult) {
-
-    container.replaceChildren();
-    const empty = document.createElement('div');
-    empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
-    empty.textContent = t.noGroupsFound;
-        container.appendChild(empty);
+        setProxyToolsHidden(true);
+        suppressGroupExplanationBar();
+        setProxyHeaderMeta(null);
+        container.replaceChildren();
+        container.appendChild(buildNoNodesState(t.noGroupsFound || 'No switchable proxy groups found'));
         return;
     }
 
@@ -2187,21 +2911,40 @@ export async function renderProxies() {
     const effectiveGroupName = proxyGroupsResult.effectiveGroupName;
 
     // Render group selector dropdown
-    renderGroupSelector(proxyGroupsResult.groups || [], uiGroupName || '');
+    renderGroupSelector(proxyGroupsResult.groups || [], uiGroupName || '', /** @type {Record<string, any>} */ (data?.proxies || {}));
 
     // If no writable group was found, show a clean empty state instead of
     // rendering actionable buttons that would fail on PUT /proxies/{group}
     if (!proxyGroupsResult.uiGroupName) {
-
-    container.replaceChildren();
-    const empty = document.createElement('div');
-    empty.className = 'col-span-full text-center py-10 text-[var(--text-muted)]';
-    empty.textContent = t.noGroupsFound || 'No switchable proxy groups found';
-        container.appendChild(empty);
+        setProxyToolsHidden(true);
+        suppressGroupExplanationBar();
+        setProxyHeaderMeta(null);
+        container.replaceChildren();
+        container.appendChild(buildNoNodesState(t.noGroupsFound || 'No switchable proxy groups found'));
         return;
     }
 
     let proxies = [...proxyGroupsResult.proxies]; // Mutable copy
+
+    const onlySpecialMembers = hasOnlySpecialMembers(proxies, data?.proxies);
+    // A group fed by a proxy provider (`use:` or include-all) that has not downloaded yet
+    // looks empty too: wait for the provider instead of offering to add a subscription.
+    if (proxyGroupsResult.uiGroupUsesProviders && providerMembersPending(proxies, data?.proxies)) {
+        proxyGroupsResult.providerLoading = true;
+    }
+
+    // Only DIRECT / REJECT in the group and no real node anywhere: no subscription (or one
+    // without nodes) yet. A DIRECT/REJECT selector (an ad-block group) in a config that has
+    // nodes still renders, so either member can be picked.
+    // (An include-all group waiting for its provider looks the same: the poller below handles it.)
+    if (!proxyGroupsResult.providerLoading && onlySpecialMembers) {
+        setProxyToolsHidden(true);
+        setProxyHeaderMeta(null);
+        suppressGroupExplanationBar();
+        container.replaceChildren();
+        container.appendChild(buildNoNodesState(t.noNodesYet || 'No nodes yet'));
+        return;
+    }
 
     // Provider nodes are now merged by getProxiesMerged() at the top of this
     // function (combines /proxies + /providers/proxies). If nodes are still
@@ -2218,6 +2961,8 @@ export async function renderProxies() {
 // stale cards from a previous group, then start a silent poller to
 // re-render once nodes arrive.
     if (proxyGroupsResult.providerLoading) {
+        // The bar explains the previous group; this one has no nodes to explain yet.
+        suppressGroupExplanationBar();
         // If polling was already exhausted for this group, show a terminal state
         // with a retry button instead of restarting the poll loop.
         // Use the resolved uiGroupName (not preferredGroupName) as the key —
@@ -2259,15 +3004,27 @@ export async function renderProxies() {
     // Render the group explanation bar (observed/effective vs ui group mismatch indicator)
     const observedGroupName = appStore.get('observedGroupName');
     const observedNodeName = appStore.get('observedNodeName');
-    renderGroupExplanationBar(uiGroupName || '', effectiveGroupName, observedGroupName, observedNodeName, /** @type {Record<string, any>} */ (data?.proxies));
-
-    // Filter out unavailable (timeout) proxies if setting is enabled
+    // Settings name the active profile (the explanation bar's dismissals belong to it)
+    // and whether timeouts are hidden.
     const settings = await getSettingsCached();
     // Guard: if a newer render started while fetching, abort.
     if (_renderGen !== _renderGeneration) return;
+    _barSuppressed = false;
+    renderGroupExplanationBar(uiGroupName || '', effectiveGroupName, observedGroupName, observedNodeName, /** @type {Record<string, any>} */ (data?.proxies), settings?.last_config || 'config.yaml');
+
+    // Filter out unavailable (timeout) proxies if setting is enabled
     // Re-read after await: user may have switched language during settings fetch.
     t = /** @type {any} */ (translations)[currentLang] || {};
-    if (settings?.hide_timeout_nodes) {
+    // Group switched: the search and a temporary "show hidden" apply to one group only.
+    if (_searchGroup !== uiGroupName) {
+        _searchGroup = uiGroupName;
+        _showHiddenTimeouts = false;
+        const searchEl = /** @type {HTMLInputElement|null} */ (document.getElementById('proxy-search'));
+        if (searchEl) searchEl.value = '';
+    }
+    const groupTotal = proxies.length;
+    let hiddenTimeoutCount = 0;
+    if (settings?.hide_timeout_nodes && !_showHiddenTimeouts) {
         const preFilterCount = proxies.length;
         proxies = proxies.filter((/** @type {string} */ name) => {
             // Always keep the currently active node, even if it's timed out
@@ -2285,6 +3042,23 @@ export async function renderProxies() {
         if (proxies.length === 0 && preFilterCount > 0) {
             proxies = [...proxyGroupsResult.proxies];
         }
+        hiddenTimeoutCount = preFilterCount - proxies.length;
+    }
+
+    const query = (/** @type {HTMLInputElement|null} */ (document.getElementById('proxy-search'))?.value || '').trim().toLowerCase();
+    const beforeSearch = proxies.length;
+    if (query) proxies = proxies.filter((/** @type {string} */ name) => name.toLowerCase().includes(query));
+    setProxyHeaderMeta({
+        total: groupTotal,
+        matched: query ? proxies.length : null,
+        searchedFrom: beforeSearch,
+        hidden: hiddenTimeoutCount,
+        hideEnabled: !!settings?.hide_timeout_nodes,
+    });
+    if (query && proxies.length === 0) {
+        container.replaceChildren();
+        container.appendChild(buildProxiesEmptyState({ icon: SEARCH_ICON, title: t.noSearchMatches || 'No matching nodes' }));
+        return;
     }
 
     if (appStore.get('currentSortMode') === 'name') {
@@ -2307,6 +3081,16 @@ export async function renderProxies() {
     if (await updateProxiesInPlace(container, proxies, data, current)) {
         // Guard: if a newer render started while updating, abort.
         if (_renderGen !== _renderGeneration) return;
+        // The in-place path rewrites cards from the core's history; mid-test, keep
+        // what this run already measured.
+        if (appStore.get('isTestingLatency')) {
+            for (const [name, delay] of _testRunResults) applyNodeLatency(name, delay);
+            replayResultsSince(resultMark);
+            // The order was computed from older history: sort by these figures again.
+            applyLatencySortToDom(false);
+        } else if (replayResultsSince(resultMark) && appStore.get('currentSortMode') === 'latency') {
+            applyLatencySortToDom(false);
+        }
         // Still backfill scores even on in-place updates (badges may not exist yet on first render)
         void backfillSmartScores(container);
         return;
@@ -2317,6 +3101,14 @@ export async function renderProxies() {
 
     container.replaceChildren();
     container.appendChild(fragment);
+    // Re-rendered mid-test: nodes already measured in this run show their result, not a spinner.
+    if (appStore.get('isTestingLatency')) {
+        for (const [name, delay] of _testRunResults) applyNodeLatency(name, delay);
+        replayResultsSince(resultMark);
+        applyLatencySortToDom(false);
+    } else if (replayResultsSince(resultMark) && appStore.get('currentSortMode') === 'latency') {
+        applyLatencySortToDom(false);
+    }
 
     // Sync _activeCard with the actual current node
     const currentWrapper = container.querySelector('[data-selected="1"]');
@@ -2335,11 +3127,8 @@ export async function renderProxies() {
 
 // --- Smart UI visibility sync ---
 
-/** Sync Best button visibility and --smart-enabled CSS var with backend config. */
+/** Sync the --smart-enabled CSS var with backend config. */
 async function syncSmartUiVisibility() {
-    const selectBestBtn = document.getElementById('select-best-btn');
-    if (!selectBestBtn) return;
-
     let enabled;
     try {
         const config = await smartConfig();
@@ -2352,7 +3141,6 @@ async function syncSmartUiVisibility() {
     }
 
     document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
-    selectBestBtn.style.display = enabled ? '' : 'none';
 
     // Reset sort mode to default if smart is disabled but current mode is smart
     if (!enabled && appStore.get('currentSortMode') === 'smart') {
@@ -2411,12 +3199,12 @@ const _renderExplanationBarFromStore = debounce(async () => {
     const proxiesPage = document.querySelector('[data-page="proxies"]');
     if (proxiesPage && !proxiesPage.classList.contains('hidden')) {
         try {
-            const data = await getProxiesCached().then(getProxiesMerged);
+            const [data, settings] = await Promise.all([getProxiesCached().then(getProxiesMerged), getSettingsCached()]);
             const uiGroupName = appStore.get('uiGroupName');
             const effectiveGroupName = appStore.get('effectiveGroupName');
             const observedGroupName = appStore.get('observedGroupName');
             const observedNodeName = appStore.get('observedNodeName');
-            renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies);
+            renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGroupName, observedNodeName, data?.proxies, settings?.last_config || 'config.yaml');
         } catch { /* ignore */ }
     }
     // Removed syncCoreConfig() from here - it's already called on proxy switch events and config updates
