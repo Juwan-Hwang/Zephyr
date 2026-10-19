@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRovingTabindex } from './roving-tabindex.js';
+import { createRovingTabindex, setItemTabStop } from './roving-tabindex.js';
 
 /** Let MutationObserver callbacks run. */
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -31,6 +31,22 @@ describe('createRovingTabindex', () => {
     /** @type {{ destroy: () => void } | null} */
     let roving = null;
     afterEach(() => { roving?.destroy(); roving = null; });
+
+    it('leaves arrow keys to a text field inside an option', () => {
+        const list = makeList(3);
+        roving = createRovingTabindex(list, { getColumns: () => 1 });
+        const input = document.createElement('input');
+        list.querySelectorAll('[role="option"]')[0].appendChild(input);
+        const ev = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+        input.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(tabindexes(list)).toEqual(['0', '-1', '-1']);
+        // A button inside an option still moves through the grid.
+        const btn = document.createElement('button');
+        list.querySelectorAll('[role="option"]')[0].appendChild(btn);
+        press(btn, 'ArrowDown');
+        expect(tabindexes(list)).toEqual(['-1', '0', '-1']);
+    });
 
     it('initialises the first item as the tab stop and navigates with arrows', () => {
         const list = makeList(3);
@@ -170,5 +186,67 @@ describe('createRovingTabindex', () => {
         await flush();
         expect(/** @type {any} */ (roving).currentIndex).toBe(1);
         expect(/** @type {HTMLElement} */ (group.lastElementChild).getAttribute('tabindex')).toBe('0');
+    });
+
+    it('leaves arrow keys to a range slider inside an option', () => {
+        const list = makeList(3);
+        roving = createRovingTabindex(list, { getColumns: () => 1 });
+        const range = document.createElement('input');
+        range.type = 'range';
+        list.querySelectorAll('[role="option"]')[0].appendChild(range);
+        const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+        range.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(tabindexes(list)).toEqual(['0', '-1', '-1']);
+    });
+
+    it('keeps form controls in inactive options out of the Tab order', () => {
+        const item = document.createElement('div');
+        const input = document.createElement('input');
+        const select = document.createElement('select');
+        const area = document.createElement('textarea');
+        item.append(input, select, area);
+        setItemTabStop(item, false);
+        expect([input, select, area].map((c) => c.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1']);
+        setItemTabStop(item, true);
+        expect([input, select, area].map((c) => c.getAttribute('tabindex'))).toEqual(['0', '0', '0']);
+    });
+
+    it('adopts the tab stop a caller marks after rebuilding the list', async () => {
+        const list = makeList(5);
+        roving = createRovingTabindex(list);
+        press(list, 'End');
+        // Filter down to two items: the old index is clamped.
+        list.replaceChildren(...Array.from(list.children).slice(0, 2));
+        await flush();
+        expect(tabindexes(list)).toEqual(['-1', '0']);
+        // Rebuild all five with the selected one (index 3) marked: it gets the stop, not index 1.
+        const fresh = makeList(5);
+        list.replaceChildren(...Array.from(fresh.children));
+        document.body.replaceChildren(list);
+        setItemTabStop(/** @type {HTMLElement} */ (list.children[3]), true);
+        await flush();
+        expect(tabindexes(list)).toEqual(['-1', '-1', '-1', '0', '-1']);
+        expect(/** @type {any} */ (roving).currentIndex).toBe(3);
+    });
+
+    it('gives a list that was empty a tab stop once items arrive', async () => {
+        const list = makeList(0);
+        roving = createRovingTabindex(list);
+        const fresh = makeList(3);
+        list.replaceChildren(...Array.from(fresh.children));
+        document.body.replaceChildren(list);
+        await flush();
+        expect(tabindexes(list)).toEqual(['0', '-1', '-1']);
+    });
+
+    it('keeps the tab stop on the same item when an earlier item is removed', async () => {
+        const list = makeList(3);
+        roving = createRovingTabindex(list);
+        press(list, 'End');
+        list.children[0].remove();
+        await flush();
+        expect(tabindexes(list)).toEqual(['-1', '0']);
+        expect(/** @type {any} */ (roving).currentIndex).toBe(1);
     });
 });
