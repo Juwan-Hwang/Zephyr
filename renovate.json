@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": ["config:recommended", ":enablePreCommit"],
   "timezone": "Asia/Shanghai",
   "schedule": ["before 6am on monday"],
   "dependencyDashboard": true,
@@ -15,6 +15,9 @@
     },
     {
       "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "github-actions-minor-patch",
+      "automerge": false,
       "pinDigests": true
     },
     {
@@ -22,8 +25,13 @@
       "addLabels": ["rust"]
     },
     {
+      "matchPackageNames": ["webview2-com"],
+      "enabled": false
+    },
+    {
       "matchManagers": ["npm"],
-      "addLabels": ["javascript"]
+      "addLabels": ["javascript"],
+      "minimumReleaseAge": "3 days"
     },
     {
       "matchManagers": ["github-actions"],
