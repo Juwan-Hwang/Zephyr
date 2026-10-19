@@ -1396,7 +1396,7 @@ rules:
 
         #[test]
         fn test_validate_plugin_id_and_hook_name() {
-            use super::super::prism::types::validate_plugin_id;
+            use crate::prism::types::validate_plugin_id;
             assert!(validate_plugin_id("on_config_load").is_ok());
             assert!(validate_plugin_id("on_request_header").is_ok());
             assert!(validate_plugin_id("../invalid_hook").is_err());
