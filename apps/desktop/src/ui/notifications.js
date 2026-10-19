@@ -265,6 +265,9 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
     });
 }
 
+/** Bumped by each confirm dialog that opens (see the close handler). */
+let _confirmGeneration = 0;
+
 /**
  * Show a confirmation modal dialog.
  * @param {string} title
@@ -327,6 +330,9 @@ export function showConfirmModal(title, message = '', options = {}) {
             onEscape: () => close(false),
             ...(danger ? { initialFocus: cancelBtn } : {}),
         });
+        // The shared modal may be reopened before this one's close animation ends;
+        // only the latest dialog may touch it then.
+        const generation = ++_confirmGeneration;
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
@@ -334,13 +340,15 @@ export function showConfirmModal(title, message = '', options = {}) {
             unlockScroll();
             trap.deactivate();
             setTimeout(() => {
-                bg.classList.add('hidden');
-                if (danger) {
-                    confirmBtn.classList.remove('btn-danger');
-                    confirmBtn.classList.add('btn-primary');
-                    container.classList.remove('is-danger');
+                if (generation === _confirmGeneration) {
+                    bg.classList.add('hidden');
+                    if (danger) {
+                        confirmBtn.classList.remove('btn-danger');
+                        confirmBtn.classList.add('btn-primary');
+                        container.classList.remove('is-danger');
+                    }
+                    if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 }
-                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
