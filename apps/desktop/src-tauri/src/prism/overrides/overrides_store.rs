@@ -323,10 +323,10 @@ pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse log: {e}"))
 }
 
-/// Read only the `success` field from the last execution log.
+/// Read only the `success` and `error` fields from the last execution log.
 /// Cheaper than `read_log` as it does not allocate a vector of `LogEntry`.
 /// Uses `BufReader` to stream the file instead of loading it entirely into memory.
-pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
+pub fn read_log_status(state: &PrismState, id: &str) -> Result<(bool, Option<String>), String> {
     let dir = overrides_dir(state)?;
     let path = dir.join(format!("{id}.log.json"));
     let file = match fs::File::open(&path) {
@@ -336,12 +336,14 @@ pub fn read_log_success(state: &PrismState, id: &str) -> Result<bool, String> {
     };
     let reader = std::io::BufReader::new(file);
     #[derive(serde::Deserialize)]
-    struct SuccessOnly {
+    struct StatusOnly {
         success: bool,
+        #[serde(default)]
+        error: Option<String>,
     }
-    let partial: SuccessOnly =
+    let partial: StatusOnly =
         serde_json::from_reader(reader).map_err(|e| format!("Failed to parse log: {e}"))?;
-    Ok(partial.success)
+    Ok((partial.success, partial.error))
 }
 
 // ===========================================================================

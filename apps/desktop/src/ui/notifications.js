@@ -380,7 +380,7 @@ let _confirmQueue = Promise.resolve();
  * @param {string} title
  * @param {string} [message]
  * @param {{ danger?: boolean, confirmText?: string }} [options]
- *   danger: red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
+ *   danger: solid red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
  *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
  * @returns {Promise<boolean>}
  */
@@ -447,7 +447,7 @@ function openConfirmModal(title, message = '', options = {}) {
         const originalConfirmLabel = confirmBtn.textContent;
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
-            confirmBtn.classList.add('btn-danger');
+            confirmBtn.classList.add('btn-danger', 'is-solid');
             container.classList.add('is-danger');
         }
         if (confirmText) confirmBtn.textContent = confirmText;
@@ -471,7 +471,7 @@ function openConfirmModal(title, message = '', options = {}) {
             setTimeout(() => {
                 bg.classList.add('hidden');
                 if (danger) {
-                    confirmBtn.classList.remove('btn-danger');
+                    confirmBtn.classList.remove('btn-danger', 'is-solid');
                     confirmBtn.classList.add('btn-primary');
                     container.classList.remove('is-danger');
                 }
