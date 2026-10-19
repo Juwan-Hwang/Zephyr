@@ -269,9 +269,11 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
+ * @param {{ danger?: boolean, confirmText?: string }} [options] danger: red confirm button, starts on Cancel; confirmText: label for it
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '' } = options;
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -293,12 +295,38 @@ export function showConfirmModal(title, message = '') {
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
             msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
-            msgDiv.textContent = messageStr;
+            // **text** marks the part worth reading first (e.g. how many rules go away).
+            // Only our own destructive prompts use it: other messages may carry outside
+            // text (a deep-link URL) that must be shown exactly as is.
+            (danger ? messageStr.split(/\*\*(.+?)\*\*/) : [messageStr]).forEach((part, i) => {
+                if (!part) return;
+                if (i % 2) {
+                    const strong = document.createElement('strong');
+                    strong.className = 'font-semibold text-[var(--text-primary)]';
+                    strong.textContent = part;
+                    msgDiv.appendChild(strong);
+                } else {
+                    msgDiv.appendChild(document.createTextNode(part));
+                }
+            });
             contentArea.appendChild(msgDiv);
         }
 
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger');
+            container.classList.add('is-danger');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
+
         // Focus trap: Tab cycles inside modal, Escape closes
-        const trap = createFocusTrap(bg, { onEscape: () => close(false) });
+        // Destructive dialogs start on Cancel so a stray Enter never deletes (focused the
+        // trap's way, so opening with the mouse shows no focus ring).
+        const trap = createFocusTrap(bg, {
+            onEscape: () => close(false),
+            ...(danger ? { initialFocus: cancelBtn } : {}),
+        });
 
         const close = (/** @type {boolean} */ val) => {
             bg.classList.add('opacity-0');
@@ -307,6 +335,12 @@ export function showConfirmModal(title, message = '') {
             trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
+                if (danger) {
+                    confirmBtn.classList.remove('btn-danger');
+                    confirmBtn.classList.add('btn-primary');
+                    container.classList.remove('is-danger');
+                }
+                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
