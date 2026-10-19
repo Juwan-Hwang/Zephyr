@@ -70,11 +70,11 @@ describe('motion tokens', () => {
 
 describe('Windows country-flag font', () => {
     it('ships the woff2 and scopes it to regional indicators / flag tags', () => {
-        expect(fs.existsSync(path.join(SRC, 'fonts/TwemojiCountryFlags.woff2'))).toBe(true);
+        expect(fs.existsSync(path.join(SRC, 'fonts/ZephyrCountryFlags.woff2'))).toBe(true);
         const css = read('styles.css');
-        expect(css).toMatch(/font-family: "Twemoji Country Flags";/);
+        expect(css).toMatch(/font-family: "Zephyr Country Flags";/);
         expect(css).toMatch(/unicode-range: U\+1F1E6-1F1FF, U\+1F3F4, U\+E0062-E007F;/);
-        expect(css).toMatch(/--font-sans: "Twemoji Country Flags",/);
+        expect(css).toMatch(/--font-sans: "Zephyr Country Flags",/);
     });
 
     it('CSP lets the app load its own fonts', () => {
@@ -85,10 +85,10 @@ describe('Windows country-flag font', () => {
         expect(src).toMatch(/(?:^|\s)'self'(?:\s|$)/);
     });
 
-    it('NOTICE credits Twemoji under CC-BY-4.0', () => {
+    it('NOTICE credits Catrinity Flags under the OFL', () => {
         const notice = readRoot('NOTICE');
-        expect(notice).toMatch(/Twemoji/);
-        expect(notice).toMatch(/CC-BY[ -]4\.0/);
+        expect(notice).toMatch(/Catrinity Flags/);
+        expect(notice).toMatch(/SIL OPEN FONT LICENSE Version 1\.1/);
     });
 });
 
