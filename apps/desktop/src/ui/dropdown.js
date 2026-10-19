@@ -163,9 +163,11 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     };
 
     const syncUI = () => {
-        const opt = select.querySelector(`option[value="${select.value}"]`);
+        // Compare values directly: a name with a quote would break an attribute selector.
+        const opt = Array.from(select.options).find((o) => o.value === select.value);
         if (label && opt) {
-            const activeBtn = menu.querySelector(`[${optionAttr}="${select.value}"]`);
+            const activeBtn = Array.from(menu.querySelectorAll(`[${optionAttr}]`))
+                .find((item) => item.getAttribute(optionAttr) === select.value);
             label.textContent = activeBtn?.getAttribute('data-label') || opt.textContent || select.value;
         }
         menu.querySelectorAll(`[${optionAttr}]`).forEach(item => {
