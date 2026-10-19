@@ -27,8 +27,18 @@ const COLOR_LERP_DURATION = 400;
 /*  Mutable chart state                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * A full window of zero samples: the chart starts as a flat baseline across the
+ * whole card and new data scrolls in from the right, instead of a sliver on the edge.
+ * @returns {Array<{ up: number, down: number, time: number }>}
+ */
+function zeroHistory() {
+  const now = Date.now();
+  return Array.from({ length: MAX_DATA_POINTS }, (_, i) => ({ up: 0, down: 0, time: now - (MAX_DATA_POINTS - i) * 1000 }));
+}
+
 /** @type {Array<{ up: number, down: number, time: number }>} */
-let trafficHistory = [];
+let trafficHistory = zeroHistory();
 
 /** @type {HTMLCanvasElement | null} */
 let canvas = null;
@@ -341,7 +351,7 @@ export function updateTrafficData(data) {
  * Clear all stored traffic history and redraw the empty chart.
  */
 export function clearTrafficHistory() {
-  trafficHistory = [];
+  trafficHistory = zeroHistory();
   scheduleRender();
 }
 
