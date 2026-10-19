@@ -3393,4 +3393,122 @@ mod tests {
             Some(ProxyEndpoint::http(7891))
         );
     }
+
+    // ── Additional Core Startup & State Management Tests ─────────────────────
+
+    fn setup_test_app_paths() -> (tempfile::TempDir, AppPaths) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let app_paths = AppPaths {
+            app_data_dir: temp_dir.path().to_path_buf(),
+            core_dir: temp_dir.path().join("core"),
+            profiles_dir: temp_dir.path().join("profiles"),
+        };
+        std::fs::create_dir_all(&app_paths.app_data_dir).unwrap();
+        std::fs::create_dir_all(&app_paths.core_dir).unwrap();
+        std::fs::create_dir_all(&app_paths.profiles_dir).unwrap();
+        (temp_dir, app_paths)
+    }
+
+    #[test]
+    fn test_first_available_profile() {
+        let (_temp, paths) = setup_test_app_paths();
+
+        std::fs::write(paths.profiles_dir.join("b_profile.yaml"), "port: 7890").unwrap();
+        std::fs::write(paths.profiles_dir.join("a_profile.yml"), "port: 7890").unwrap();
+        std::fs::write(paths.profiles_dir.join("run_config.yaml"), "port: 7890").unwrap();
+        std::fs::write(paths.profiles_dir.join("readme.txt"), "hello").unwrap();
+
+        let first = first_available_profile(&paths).unwrap();
+        assert_eq!(
+            first.file_name().unwrap().to_str().unwrap(),
+            "a_profile.yml"
+        );
+    }
+
+    #[test]
+    fn test_resolve_profile_path() {
+        let (_temp, paths) = setup_test_app_paths();
+
+        // Rejects run_config.yaml directly
+        let res = resolve_profile_path(&paths, "run_config.yaml");
+        assert_eq!(
+            res.unwrap_err(),
+            "Cannot switch to run_config.yaml directly"
+        );
+
+        // No profile yet: keeps the requested name and writes nothing
+        let (name, path) = resolve_profile_path(&paths, "nonexistent.yaml").unwrap();
+        assert_eq!(name, "nonexistent.yaml");
+        assert!(!path.exists());
+
+        // Resolves an existing profile
+        std::fs::write(paths.profiles_dir.join("profile1.yaml"), "port: 7890").unwrap();
+        let (name1, path1) = resolve_profile_path(&paths, "profile1.yaml").unwrap();
+        assert_eq!(name1, "profile1.yaml");
+        assert_eq!(path1, paths.profiles_dir.join("profile1.yaml"));
+
+        // Falls back to the first available profile when the requested one is missing
+        let (fallback_name, _) = resolve_profile_path(&paths, "missing_target.yaml").unwrap();
+        assert_eq!(fallback_name, "profile1.yaml");
+    }
+
+    #[test]
+    fn test_select_runtime_config() {
+        let (_temp, paths) = setup_test_app_paths();
+
+        let preferred_path = paths.profiles_dir.join("pref.yaml");
+        let valid_yaml = "port: 7890\nmode: rule";
+        std::fs::write(&preferred_path, valid_yaml).unwrap();
+
+        // 1. Preferred profile is valid
+        let (name, yaml, port, proxy) =
+            select_runtime_config(&paths, "pref.yaml", &preferred_path, "sec123", None).unwrap();
+        assert_eq!(name, Some("pref.yaml".to_owned()));
+        assert_eq!(port, 9090);
+        assert_eq!(proxy, Some(ProxyEndpoint::http(7890)));
+        assert!(yaml.contains("secret: sec123"));
+
+        // 2. Preferred profile is invalid, secondary fallback profile is valid
+        let invalid_path = paths.profiles_dir.join("invalid.yaml");
+        std::fs::write(&invalid_path, "{ invalid yaml: [").unwrap();
+        let fallback_path = paths.profiles_dir.join("fallback.yaml");
+        std::fs::write(&fallback_path, "port: 7895\nmode: rule").unwrap();
+
+        let (fb_name, fb_yaml, fb_port, fb_proxy) =
+            select_runtime_config(&paths, "invalid.yaml", &invalid_path, "sec456", None).unwrap();
+        assert_eq!(fb_name, Some("fallback.yaml".to_owned()));
+        assert_eq!(fb_port, 9090);
+        assert_eq!(fb_proxy, Some(ProxyEndpoint::http(7895)));
+        assert!(fb_yaml.contains("secret: sec456"));
+
+        // 3. Preferred profile invalid and no valid fallbacks exist
+        let (_temp2, empty_paths) = setup_test_app_paths();
+        let bad_path = empty_paths.profiles_dir.join("bad.yaml");
+        std::fs::write(&bad_path, "{ invalid yaml: [").unwrap();
+
+        let (no_name, min_yaml, min_port, min_proxy) =
+            select_runtime_config(&empty_paths, "bad.yaml", &bad_path, "sec789", None).unwrap();
+        assert_eq!(no_name, None);
+        assert_eq!(min_port, 9090);
+        assert_eq!(min_proxy, Some(ProxyEndpoint::http(DEFAULT_MIXED_PORT)));
+        assert!(min_yaml.contains("secret: sec789"));
+    }
+
+    #[test]
+    fn test_clear_stopped_core_state() {
+        let mut core_data = CoreData::new();
+        core_data.set_started_at(Some(std::time::Instant::now()));
+        core_data.set_last_port(Some(9090));
+        core_data.set_last_proxy_endpoint(Some(ProxyEndpoint::http(7890)));
+
+        assert!(core_data.started_at().is_some());
+        assert_eq!(core_data.last_port(), Some(9090));
+
+        clear_stopped_core_state(&mut core_data);
+
+        assert!(core_data.started_at().is_none());
+        assert!(core_data.process().is_none());
+        assert!(core_data.last_port().is_none());
+        assert!(core_data.last_proxy_endpoint().is_none());
+    }
 }

@@ -28,6 +28,7 @@ import { invalidateRunConfigCache } from './run-config-cache.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
+import { updateModeUI } from './modes.js';
 
 // Re-export switchPage for external consumers that import from this module
 
@@ -704,29 +705,6 @@ export async function syncCoreConfig() {
         }
     } catch (e) {
         proxyLogger.warn('Failed to sync current node display', e);
-    }
-}
-
-// --- Mode UI ---
-
-/** @param {string} mode */
-function updateModeUI(mode) {
-    const buttons = document.querySelectorAll('[data-mode]');
-    const slider = document.getElementById('mode-slider');
-    const modes = ['rule', 'global', 'direct'];
-    const idx = modes.indexOf(mode.toLowerCase());
-
-    if (idx !== -1 && slider) {
-        slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-        buttons.forEach((b, i) => {
-            if (i === idx) {
-                b.classList.add('text-[var(--text-primary)]');
-                b.classList.remove('text-[var(--text-secondary)]');
-            } else {
-                b.classList.remove('text-[var(--text-primary)]');
-                b.classList.add('text-[var(--text-secondary)]');
-            }
-        });
     }
 }
 

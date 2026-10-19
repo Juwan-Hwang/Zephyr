@@ -50,13 +50,14 @@ export async function pluginListLoaded() {
     return invoke(COMMANDS.PLUGIN.LIST_LOADED);
 }
 
-/** Execute a plugin hook.
+/** Execute a plugin hook across all loaded plugins.
  *  @param {string} hookName
- *  @param {object} [context]
+ *  @param {object} [hookData] - Hook-specific payload
+ *  @param {object} [config] - Config the hook runs against
  *  @returns {Promise<any>}
  */
-export async function pluginExecuteHook(hookName, context) {
-    return invoke(COMMANDS.PLUGIN.EXECUTE_HOOK, { hookName, context: context ?? null });
+export async function pluginExecuteHook(hookName, hookData, config) {
+    return invoke(COMMANDS.PLUGIN.EXECUTE_HOOK, { hookName, config: config ?? {}, hookData: hookData ?? {} });
 }
 
 /** List available hooks for a plugin.

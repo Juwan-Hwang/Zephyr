@@ -107,4 +107,46 @@ describe('sanitizeHtml', () => {
         const sanitized = sanitizeHtml('<a href="https://example.com">link</a>');
         expect(sanitized).not.toContain('rel=');
     });
+
+    /* eslint-disable no-script-url */
+    it('strips javascript: URIs from xlink:href on SVG <use>', () => {
+        const sanitized = sanitizeHtml('<svg><use xlink:href="javascript:alert(1)"></use></svg>');
+        expect(sanitized).not.toContain('javascript:');
+        expect(sanitized).not.toContain('xlink:href');
+    });
+    /* eslint-enable no-script-url */
+    it('keeps fragment references in xlink:href on SVG <use>', () => {
+        const sanitized = sanitizeHtml('<svg><use xlink:href="#icon-check"></use></svg>');
+        expect(sanitized).toContain('xlink:href="#icon-check"');
+    });
+
+    it.each([
+        ['tab entity', 'java&#9;script:alert(1)'],
+        ['newline entity', 'java&#10;script:alert(1)'],
+        ['CR entity', 'java&#13;script:alert(1)'],
+        ['leading control char', '&#1;javascript:alert(1)'],
+        ['vbscript', 'vbscript:msgbox(1)'],
+    ])('strips obfuscated script URIs (%s) from a[href] and use[xlink:href]', (_name, uri) => {
+        const a = sanitizeHtml(`<a href="${uri}">x</a>`);
+        expect(a).not.toContain('href=');
+        const use = sanitizeHtml(`<svg><use xlink:href="${uri}"></use></svg>`);
+        expect(use).not.toContain('xlink:href');
+    });
+
+    it('strips script URIs padded with edge spaces and controls', () => {
+        expect(sanitizeHtml('<a href=" \u0001 javascript:alert(1) \u0001 ">x</a>')).not.toContain('href=');
+    });
+
+    it('checks URLs with long interior space runs in linear time', () => {
+        const uri = `https://example.com/a${' '.repeat(100000)}b`;
+        const started = performance.now();
+        const sanitized = sanitizeHtml(`<a href="${uri}">x</a>`);
+        expect(performance.now() - started).toBeLessThan(1000);
+        expect(sanitized).toContain('href="https://example.com/a');
+    });
+
+    it('still allows ordinary links', () => {
+        expect(sanitizeHtml('<a href="https://example.com/a?b=1">x</a>')).toContain('href="https://example.com/a?b=1"');
+        expect(sanitizeHtml('<a href="#section">x</a>')).toContain('href="#section"');
+    });
 });

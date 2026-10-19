@@ -183,11 +183,11 @@
                             </div>
                             <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="mode">Proxy Mode</h3>
                         </div>
-                        <div id="mode-selector-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
+                        <div id="mode-selector-container" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
                             <div id="mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                            <button data-mode="rule" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="rule">Rule</button>
-                            <button data-mode="global" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="global">Global</button>
-                            <button data-mode="direct" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="direct">Direct</button>
+                            <button data-mode="rule" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="rule">Rule</button>
+                            <button data-mode="global" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="global">Global</button>
+                            <button data-mode="direct" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="direct">Direct</button>
                         </div>
                     </div>
 
@@ -1429,7 +1429,7 @@
                         <span data-i18n="overrideSaveAndRun">保存并执行</span>
                     </button>
                     <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
-                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm">
+                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm" aria-label="Close" data-i18n-aria-label="close">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 </div>

@@ -1,8 +1,5 @@
 // @ts-check
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 vi.mock('../api.js', () => ({
     invoke: vi.fn().mockResolvedValue({}),
@@ -12,22 +9,7 @@ import { translations, setLanguage } from '../i18n.js';
 import { renderTunStatus } from './tun-status.js';
 import { initNavTooltips, getNavLabel, NAV_TOOLTIP_HOVER_DELAY } from './nav-tooltip.js';
 import { Bus, Events } from './events.js';
-
-const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const read = (/** @type {string} */ rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
-
-/**
- * Parse index.html without letting happy-dom fetch its stylesheets/scripts:
- * `<script>` and `<link>` are renamed to inert elements before parsing (plain
- * string substitution on our own trusted file, not sanitization).
- */
-const parseIndex = () => {
-    const html = read('index.html')
-        .split('<script').join('<template data-inert-script')
-        .split('</script>').join('</template>')
-        .split('<link').join('<meta data-inert-link');
-    return new DOMParser().parseFromString(html, 'text/html');
-};
+import { readSrc as read, parseIndex } from '../test/index-dom.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  1. TUN status labels
