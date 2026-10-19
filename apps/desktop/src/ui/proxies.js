@@ -28,6 +28,7 @@ import { invalidateRunConfigCache } from './run-config-cache.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
+import { updateModeUI } from './modes.js';
 
 // Re-export switchPage for external consumers that import from this module
 export { switchPage } from './navigation.js';
@@ -651,34 +652,6 @@ export async function syncCoreConfig() {
     }
 }
 
-// --- Mode UI ---
-
-/** @param {string} mode */
-function updateModeUI(mode) {
-    const buttons = document.querySelectorAll('[data-mode]');
-    const slider = document.getElementById('mode-slider');
-    const modes = ['rule', 'global', 'direct'];
-    const targetMode = mode.toLowerCase();
-    const idx = modes.indexOf(targetMode);
-
-    if (idx !== -1 && slider) {
-        slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-    }
-
-    buttons.forEach((b) => {
-        const btnMode = b.getAttribute('data-mode')?.toLowerCase();
-        const isActive = btnMode === targetMode;
-        if (isActive) {
-            b.classList.add('text-[var(--text-primary)]');
-            b.classList.remove('text-[var(--text-secondary)]');
-            b.setAttribute('aria-pressed', 'true');
-        } else {
-            b.classList.remove('text-[var(--text-primary)]');
-            b.classList.add('text-[var(--text-secondary)]');
-            b.setAttribute('aria-pressed', 'false');
-        }
-    });
-}
 
 // --- System Proxy UI ---
 
