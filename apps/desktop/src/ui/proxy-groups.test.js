@@ -13,7 +13,7 @@ vi.mock('./run-config-cache.js', () => ({
 
 import { getProxies, getConfig } from '../api.js';
 import { getRunConfigCached } from './run-config-cache.js';
-import { buildIncludeAllSet, fetchProxyGroups } from './proxy-groups.js';
+import { buildIncludeAllSet, fetchProxyGroups, isNonProxyExit } from './proxy-groups.js';
 
 // ─── buildIncludeAllSet ─────────────────────────────────────────────────────
 
@@ -305,5 +305,17 @@ expect(result.providerLoading).toBe(false);
         getRunConfigCached.mockResolvedValue({});
         const result = await fetchProxyGroups();
         expect(result).toBeNull();
+    });
+});
+
+describe('isNonProxyExit', () => {
+    it('matches built-in exits by exact name and local outbounds by adapter type', () => {
+        expect(isNonProxyExit('DIRECT')).toBe(true);
+        expect(isNonProxyExit('reject-drop')).toBe(true);
+        expect(isNonProxyExit('REJECT-Paris', { type: 'Vmess' })).toBe(false);
+        expect(isNonProxyExit('Local', { type: 'Direct' })).toBe(true);
+        expect(isNonProxyExit('Block', { type: 'RejectDrop' })).toBe(true);
+        expect(isNonProxyExit('Resolver', { type: 'Dns' })).toBe(true);
+        expect(isNonProxyExit('HK 01', { type: 'Shadowsocks' })).toBe(false);
     });
 });

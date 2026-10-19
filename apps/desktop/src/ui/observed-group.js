@@ -12,7 +12,7 @@
 
 import { getConnections, isCoreReachable } from '../api.js';
 import { getProxiesCached } from './cache.js';
-import { isWritableGroupType } from './proxy-groups.js';
+import { isWritableGroupType, isNonProxyExit } from './proxy-groups.js';
 import { appStore } from './state.js';
 import { observedGroupLogger } from '../utils/logger.js';
 import { Bus, Events } from './events.js';
@@ -45,6 +45,7 @@ let _staticProxiesCache = null;
 Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
 Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
 
+
 /**
  * Compute the observed group and node from active connections.
  * Pure function — no side effects.
@@ -67,9 +68,17 @@ export function computeObservedGroup(connections, proxiesData) {
     const sampled = connections.slice(-MAX_SAMPLE);
     const freq = Object.create(null);
     const groupNodeFreq = Object.create(null);
+    /** Connections that actually went through a proxy node (the share's denominator). */
+    let proxied = 0;
 
     for (const conn of sampled) {
         const chains = conn.chains || [];
+        // Traffic that leaves DIRECT or is rejected never uses a proxy node, so it says
+        // nothing about which group picks the user's node (Apple → 🎯 Direct → DIRECT).
+        // A config can name its own direct/reject outbound anything ("Local" of type direct).
+        const exit = String(chains[0] || '');
+        if (!exit || isNonProxyExit(exit, proxiesData[exit])) continue;
+        proxied++;
 
         for (let i = 0; i < chains.length; i++) {
             const chainName = chains[i];
@@ -99,11 +108,11 @@ export function computeObservedGroup(connections, proxiesData) {
 
     const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) {
-        return { name: null, node: null, freq: 0, total: sampled.length, ratio: 0 };
+        return { name: null, node: null, freq: 0, total: proxied, ratio: 0 };
     }
 
     const [topName, topFreq] = entries[0];
-    const total = sampled.length;
+    const total = proxied;
     const ratio = total > 0 ? topFreq / total : 0;
 
     // Get the most frequent node within the top group

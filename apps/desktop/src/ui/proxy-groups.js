@@ -40,6 +40,21 @@ export function isGroup(p) {
     return Array.isArray(p?.all);
 }
 
+/** Core adapter types that send traffic nowhere through a proxy (mihomo spells them Direct, RejectDrop, ...). */
+export const NON_PROXY_EXIT_TYPES = Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECTDROP', 'PASS', 'COMPATIBLE', 'DNS']));
+
+/**
+ * A built-in DIRECT/REJECT-style entry (matched exactly: a node may be named "REJECT-Paris"),
+ * or a local outbound of such a type under its own name.
+ * @param {string} name
+ * @param {any} [node] - its /proxies record, if any
+ * @returns {boolean}
+ */
+export function isNonProxyExit(name, node) {
+    if (SPECIAL_PROXY_NAMES.has(String(name).toUpperCase())) return true;
+    return NON_PROXY_EXIT_TYPES.has(String(node?.type || '').toUpperCase().replace(/[-_]/g, ''));
+}
+
 /**
  * Returns true if the proxy type supports `PUT /proxies/{name}` to change `now`.
  * Only selector/select groups are writable via the mihomo API.
@@ -335,6 +350,7 @@ function determineUiPrimaryGroup(ctx) {
  * @property {Record<string, string[]>} graph - Group → children adjacency list
  * @property {boolean} providerLoading - True when uiGroup uses include-all or include-all-providers and all[] has no real proxy nodes (empty or special-only)
  * @property {boolean} hasProxyProviders - True when the config defines proxy-providers (regardless of loading state)
+ * @property {boolean} uiGroupUsesProviders - True when the uiGroup itself pulls nodes from a provider (`use:` or include-all)
  */
 
 /**
@@ -467,6 +483,11 @@ export async function fetchProxyGroups(options = {}) {
             && !groupNames.has(name)
         );
     const providerLoading = hasProxyProviders && isIncludeAllGroup && !isGlobalGroup && !hasProviderProxies;
+    const uiGroupDef = Array.isArray(runConfig?.['proxy-groups'])
+        ? runConfig['proxy-groups'].find(/** @param {any} g */ g => g?.name === uiGroupName)
+        : null;
+    const uiGroupUsesProviders = hasProxyProviders && !isGlobalGroup
+        && (isIncludeAllGroup || (Array.isArray(uiGroupDef?.use) && uiGroupDef.use.length > 0));
 
     return {
         // Legacy compat fields
@@ -496,6 +517,10 @@ export async function fetchProxyGroups(options = {}) {
         // state).  Callers can use this to decide if a missing node might
         // still arrive from a provider that hasn't finished downloading.
         hasProxyProviders,
+
+        // The open group itself is fed by a provider, so an empty-looking member list
+        // may still fill once the provider downloads.
+        uiGroupUsesProviders,
     };
 }
 
