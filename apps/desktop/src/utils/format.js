@@ -65,14 +65,15 @@ const _NET_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
  * formatBytes(1048576); // "1.00 MB"
  */
 export function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
+    const num = Number(bytes);
+    if (!Number.isFinite(num) || num <= 0) return '0 B';
 
     const i = Math.min(
-        Math.floor(Math.log(bytes) / Math.log(1000)),
+        Math.max(0, Math.floor(Math.log(num) / Math.log(1000))),
         _NET_UNITS.length - 1,
     );
 
-    return `${(bytes / Math.pow(1000, i)).toFixed(2)} ${_NET_UNITS[i]}`;
+    return `${(num / Math.pow(1000, i)).toFixed(2)} ${_NET_UNITS[i]}`;
 }
 
 /**

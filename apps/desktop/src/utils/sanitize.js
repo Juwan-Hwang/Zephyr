@@ -132,11 +132,28 @@ const DEFAULT_ALLOWED_ATTRS = {
 /** Regex matching any on* event handler attribute */
 const EVENT_HANDLER_RE = /^on/i;
 
-/** Regex matching javascript: URIs (case-insensitive, whitespace tolerant) */
-const JS_URI_RE = /^\s*javascript\s*:/i;
+/** Script-running schemes, matched against a normalized URL (see normalizeUrlScheme). */
+const SCRIPT_SCHEME_RE = /^(?:javascript|vbscript):/;
 
-/** Regex matching data: URIs */
-const DATA_URI_RE = /^\s*data\s*:/i;
+/** data: scheme, matched against a normalized URL. */
+const DATA_SCHEME_RE = /^data:/;
+
+/** ASCII tab, LF and CR, which URL parsers drop from anywhere in a URL. */
+const URL_TAB_NEWLINE_RE = /[\t\n\r]/g;
+
+/** Leading/trailing C0 controls and spaces, which URL parsers trim. */
+const URL_EDGE_CONTROLS_RE = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g;
+
+/**
+ * Reduce a URL to the form a browser parses its scheme from: edge C0
+ * controls/spaces trimmed, tabs and newlines removed, lowercased. Without
+ * this, `java&#9;script:` (decoded to a tab) would slip past a plain regex.
+ * @param {string} url
+ * @returns {string}
+ */
+function normalizeUrlScheme(url) {
+    return url.replace(URL_EDGE_CONTROLS_RE, '').replace(URL_TAB_NEWLINE_RE, '').toLowerCase();
+}
 
 /** NBSP entity pattern (includes \u00A0 for browser-decoded entities) */
 const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
@@ -149,15 +166,16 @@ const NBSP_RE = /&nbsp;|&#160;|&#xA0;|\u00A0/gi;
 const STRIP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'noscript', 'object', 'embed', 'applet', 'template']);
 
 /**
- * Check whether a URL is safe (not javascript: or disallowed data:).
+ * Check whether a URL is safe (no javascript:/vbscript:, data: only when allowed).
  *
  * @param {string} url
  * @param {boolean} allowDataImages
  * @returns {boolean}
  */
 function isSafeUrl(url, allowDataImages) {
-    if (JS_URI_RE.test(url)) return false;
-    if (DATA_URI_RE.test(url)) return allowDataImages;
+    const norm = normalizeUrlScheme(url);
+    if (SCRIPT_SCHEME_RE.test(norm)) return false;
+    if (DATA_SCHEME_RE.test(norm)) return allowDataImages;
     return true;
 }
 
@@ -297,8 +315,8 @@ export function sanitizeHtml(input, options = {}) {
                 continue;
             }
 
-            // Validate URL attributes
-            if (name === 'href' || name === 'src') {
+            // Validate URL attributes (SVG <use> also takes the legacy xlink:href)
+            if (name === 'href' || name === 'src' || name === 'xlink:href') {
                 const val = (attr.value || '').trim();
                 const allowData = (name === 'src' && tag === 'img' && allowDataImg);
                 if (!isSafeUrl(val, allowData)) {

@@ -155,27 +155,29 @@ async function carryNodeOver(nodeToInherit, mode) {
     }
 }
 
+/** Outbound modes in selector order. */
+const MODES = ['rule', 'global', 'direct'];
+
 /**
+ * Reflect `mode` on the home mode selector (slider, highlight, aria-pressed).
  * @param {string} mode
  */
 export function updateModeUI(mode) {
-    const buttons = document.querySelectorAll('[data-mode]');
-    const slider = document.getElementById('mode-slider');
-    const modes = ['rule', 'global', 'direct'];
-    const idx = modes.indexOf(mode.toLowerCase());
+    const target = String(mode ?? '').toLowerCase();
+    const idx = MODES.indexOf(target);
+    if (idx === -1) return;
 
-    if (idx !== -1 && slider) {
-        slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-        buttons.forEach((b, i) => {
-            if (i === idx) {
-                b.classList.add('text-[var(--text-primary)]');
-                b.classList.remove('text-[var(--text-secondary)]');
-            } else {
-                b.classList.remove('text-[var(--text-primary)]');
-                b.classList.add('text-[var(--text-secondary)]');
-            }
-        });
-    }
+    const slider = document.getElementById('mode-slider');
+    if (slider) slider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
+
+    // Only the home mode selector: other [data-mode] elements (connection rows,
+    // the console's own selector) must not pick up these classes.
+    document.querySelectorAll('#mode-selector-container button[data-mode]').forEach((b) => {
+        const active = b.getAttribute('data-mode') === target;
+        b.classList.toggle('text-[var(--text-primary)]', active);
+        b.classList.toggle('text-[var(--text-secondary)]', !active);
+        b.setAttribute('aria-pressed', String(active));
+    });
 }
 
 /**
