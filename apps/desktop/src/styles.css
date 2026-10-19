@@ -168,6 +168,14 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 .btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
 }
+/* Destructive confirm in a dialog: solid red, the one unmistakable button. */
+.btn-danger.is-solid {
+  background-color: var(--zephyr-color-danger); border-color: transparent; color: #fff;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--zephyr-color-danger) 30%, transparent);
+}
+.btn-danger.is-solid:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 88%, #000);
+}
 
 .btn-warning {
   background-color: color-mix(in srgb, var(--zephyr-color-warning) 10%, transparent);
@@ -854,6 +862,19 @@ html:not(.dark) .plugin-panel {
   resize: vertical;
   min-height: 120px;
 }
+/* Shortcut hint inside the override editor buttons ("Save  Ctrl S"). */
+.script-kbd {
+  margin-inline-start: 0.5rem;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+/* The inline override editor grows with the panel; CodeMirror fills it. */
+#plugin-script-cm6 { display: flex; flex-direction: column; }
+#plugin-script-cm6 > .cm-editor { flex: 1; min-height: 0; }
 .script-output {
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 0.6875rem;
@@ -2435,3 +2456,98 @@ button[data-home-mode] {
 @media (min-width: 1100px) {
   [data-page="settings"] > * { width: 100%; max-width: 800px; margin-inline: auto; }
 }
+/* Edit subscription: current link shown read-only until "Change"; tall controls throughout. */
+.edit-url-current {
+  display: flex; align-items: center; gap: 8px; min-height: 42px; padding-block: 0; padding-inline: 14px 6px;
+  border-radius: var(--zephyr-radius-md); background: var(--zephyr-surface-input); border: 1px solid var(--zephyr-border-subtle);
+}
+.edit-url-current.hidden { display: none; }
+.edit-url-display { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; color: var(--text-secondary); }
+.edit-url-current::before { content: ''; flex-shrink: 0; width: 14px; height: 14px; background: var(--text-tertiary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E") center / contain no-repeat; }
+.edit-url-current button#edit-url-change.btn-ghost { border: 0; box-shadow: none; height: 28px; padding: 0 10px; background: transparent; color: var(--color-accent); font-size: 12px; font-weight: 600; }
+.edit-url-current button#edit-url-change.btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.edit-field-hint { font-size: 11px; line-height: 16px; color: var(--text-tertiary); margin: 0; }
+.edit-field-hint.hidden { display: none; }
+.edit-select-tall { min-height: 42px; padding-inline: 1rem; border-radius: var(--zephyr-radius-md); }
+
+/* Subscription cards: name 13px, "in use" pill, full-strength action icons. */
+.sub-card-name { font-size: 13px; }
+.sub-in-use {
+  height: 18px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.sub-action-btn {
+  width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-muted); transition: color var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.sub-action-btn svg { width: 14px; height: 14px; }
+.sub-action-btn:hover:not(:disabled) { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.sub-action-btn.is-danger:hover:not(:disabled) { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent); }
+.sub-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Code editor syntax colours (ui/editor/prism-editor.js maps CodeMirror's tags here). No purple. */
+:root {
+  --cm-keyword: #0060DF; --cm-atom: #B25000; --cm-number: #0E7C86; --cm-string: #248A3D;
+  --cm-regexp: #A15C00; --cm-def: #0A7EA4; --cm-type: #00756A; --cm-prop: #1F5FA8; --cm-comment: #8E8E93;
+}
+html.dark {
+  --cm-keyword: #4DA3FF; --cm-atom: #FFB340; --cm-number: #5DD3C9; --cm-string: #30D158;
+  --cm-regexp: #FFD60A; --cm-def: #64D2FF; --cm-type: #63E6BE; --cm-prop: #9CDCFE; --cm-comment: #8E8E93;
+}
+
+/* Override cards: disabled ones read quieter. */
+#plugin-list .glass-card.is-disabled .text-sm { color: var(--text-tertiary); }
+
+/* New subscription: brief highlight once its card appears. */
+.sub-card-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s; }
+
+/* Context menus: opaque so the card underneath (traffic bars) doesn't show through. */
+html.dark .ctx-menu-root.glass-card { background: rgb(30, 30, 34); }
+html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
+
+/* .hidden loses to these components' own display rule — keep hidden things hidden. */
+.input-paste-wrapper.hidden, .edit-url-current.hidden { display: none; }
+
+/* Link dialog (add subscription / import override): inline link error, "optional" tag. */
+.link-dialog-error { min-height: 16px; margin: 0; padding-inline: 4px; font-size: 11px; line-height: 16px; color: var(--zephyr-color-danger); }
+.link-dialog-error:empty { min-height: 0; }
+#link-dialog input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--zephyr-color-danger) 70%, transparent); }
+.link-dialog-optional { margin-inline-start: 4px; font-weight: 400; color: var(--text-tertiary); }
+#link-dialog .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Subscription cards: drag handle (drag starts only here) and keyboard focus (Alt+↑/↓ moves). */
+.sub-drag-handle {
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 24px; margin-inline: -6px -4px; border-radius: 4px; cursor: grab;
+  color: var(--text-tertiary); opacity: 0.45; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.sub-drag-handle:active { cursor: grabbing; }
+[data-config-name]:hover .sub-drag-handle, [data-config-name]:focus-visible .sub-drag-handle { opacity: 1; }
+.sub-drag-handle:hover { color: var(--text-secondary); }
+#configs-list [data-config-name]:focus-visible { outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: -2px; }
+
+/* Override list: drag handle, drop marker, keyboard focus. Handle hidden while searching. */
+.override-drag-handle {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 16px; height: 24px; margin-inline: -8px -10px; border-radius: 4px; cursor: grab;
+  color: var(--text-tertiary); opacity: 0.45; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.override-drag-handle:active { cursor: grabbing; }
+#plugin-list [data-id]:hover .override-drag-handle, #plugin-list [data-id]:focus-visible .override-drag-handle { opacity: 1; }
+#plugin-list.is-filtered .override-drag-handle { visibility: hidden; }
+#plugin-list [data-id].is-dragging { opacity: 0.5; }
+#plugin-list [data-id].drop-above { box-shadow: 0 -2px 0 0 var(--color-accent); }
+#plugin-list [data-id].drop-below { box-shadow: 0 2px 0 0 var(--color-accent); }
+/* Override rows: handle only on hover; "Applies to" is a quiet text button; failure is the one status. */
+#plugin-list .override-drag-handle { opacity: 0; }
+.plugin-more-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; }
+.override-scope-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
+.override-scope-btn:hover [data-scope-value] { text-decoration: underline; text-underline-offset: 2px; }
+.override-status { display: inline-flex; align-items: center; gap: 6px; color: var(--zephyr-color-danger); }
+.override-status.hidden { display: none; }
+.override-status::before { content: ""; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; flex-shrink: 0; }
+#plugin-list [data-id]:focus-visible { outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: -2px; }

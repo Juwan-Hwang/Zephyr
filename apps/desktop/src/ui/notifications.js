@@ -269,9 +269,11 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
+ * @param {{ danger?: boolean, confirmText?: string }} [options] danger: solid red confirm button; confirmText: label for it
  * @returns {Promise<boolean>}
  */
-export function showConfirmModal(title, message = '') {
+export function showConfirmModal(title, message = '', options = {}) {
+    const { danger = false, confirmText = '' } = options;
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -297,6 +299,13 @@ export function showConfirmModal(title, message = '') {
             contentArea.appendChild(msgDiv);
         }
 
+        const originalConfirmLabel = confirmBtn.textContent;
+        if (danger) {
+            confirmBtn.classList.remove('btn-primary');
+            confirmBtn.classList.add('btn-danger', 'is-solid');
+        }
+        if (confirmText) confirmBtn.textContent = confirmText;
+
         // Focus trap: Tab cycles inside modal, Escape closes
         const trap = createFocusTrap(bg, { onEscape: () => close(false) });
 
@@ -307,6 +316,11 @@ export function showConfirmModal(title, message = '') {
             trap.deactivate();
             setTimeout(() => {
                 bg.classList.add('hidden');
+                if (danger) {
+                    confirmBtn.classList.remove('btn-danger', 'is-solid');
+                    confirmBtn.classList.add('btn-primary');
+                }
+                if (confirmText) confirmBtn.textContent = originalConfirmLabel;
                 resolve(val);
             }, 300);
         };
