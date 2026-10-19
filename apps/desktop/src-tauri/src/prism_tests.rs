@@ -1393,5 +1393,15 @@ rules:
             let with_ext = ensure_prism_ext(&sanitized);
             assert_eq!(with_ext, "广告过滤.prism.yaml");
         }
+
+        #[test]
+        fn test_validate_plugin_id_and_hook_name() {
+            use super::super::prism::types::validate_plugin_id;
+            assert!(validate_plugin_id("on_config_load").is_ok());
+            assert!(validate_plugin_id("on_request_header").is_ok());
+            assert!(validate_plugin_id("../invalid_hook").is_err());
+            assert!(validate_plugin_id("hook\\path").is_err());
+            assert!(validate_plugin_id("hook\0null").is_err());
+        }
     }
 }

@@ -123,6 +123,8 @@ pub fn plugin_execute_hook(
     config: serde_json::Value,
     hook_data: serde_json::Value,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // Validate hook_name to prevent path traversal or unsanitized string injection
+    validate_plugin_id(&hook_name)?;
     let lock = state.lock_inner()?;
     let ids: Vec<&str> = lock
         .plugin_loader
