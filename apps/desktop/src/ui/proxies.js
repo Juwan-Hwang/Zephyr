@@ -2516,8 +2516,9 @@ const _autoTest = {
 
             // Schedule next cycle using adaptive interval
             const config = /** @type {any} */ (await smartConfig().catch(() => null));
-            const minInterval = config?.min_interval_secs ?? 60;
-            const maxInterval = config?.max_interval_secs ?? 600;
+            // smart.toml keeps the intervals under [scheduler].
+            const minInterval = config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60;
+            const maxInterval = config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600;
             // Use average score of all tested nodes as network quality
             const rankings = await smartRank().catch(() => []);
             const avgScore = rankings.length > 0
