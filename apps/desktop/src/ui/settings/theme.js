@@ -13,12 +13,37 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
 import { saveSetting } from '../settings-helpers.js';
+import { t } from '../../i18n.js';
+
+/** i18n keys naming each preset accent. */
+const PRESET_NAME_KEYS = /** @type {Record<string, string>} */ ({
+    blue: 'themeColorBlue',
+    green: 'themeColorGreen',
+    orange: 'themeColorOrange',
+    pink: 'themeColorPink',
+});
+
+/**
+ * Subtitle naming the accent in use, e.g. "Current: Blue (default)".
+ * @param {string} theme
+ * @returns {string}
+ */
+export function themeColorSummary(theme) {
+    const value = String(theme || '').toLowerCase();
+    if (value.startsWith('#')) return t('themeColorCurrent', { name: `${t('themeColorCustom')} ${value.toUpperCase()}` });
+    const key = PRESET_NAME_KEYS[value];
+    if (!key) return t('themeColorDesc');
+    const name = t(key);
+    return t(value === DEFAULT_THEME ? 'themeColorCurrentDefault' : 'themeColorCurrent', { name });
+}
+
+let languageListenerBound = false;
 
 /**
  * Initialize theme-related settings controls.
  *
  * @param {object} opts
- * @param {string} opts.savedTheme - The theme color string from backend settings (e.g. "zinc").
+ * @param {string} opts.savedTheme - The theme color string from backend settings (e.g. "blue" or "#3b82f6").
  * @param {string|null} opts.savedThemeMode - The theme mode from backend settings ("light", "dark", "auto").
  * @param {number|null} opts.savedOpacity - The opacity value from backend settings (0-100).
  * @param {HTMLElement|null} opts.appMainContainer - The main app container element.
@@ -53,6 +78,36 @@ export function initThemeSettings({
      */
     const applyColorTheme = (themeStr) => {
         applyTheme(themeStr);
+        syncThemeSelection(themeStr);
+    };
+
+    /**
+     * Mark the accent colour in use: ring + tick on its swatch; the custom swatch shows
+     * the chosen colour instead of the rainbow once one is picked.
+     * @param {string} theme
+     */
+    const syncThemeSelection = (theme) => {
+        const value = String(theme || '').toLowerCase();
+        themeCircles.forEach((circle) => {
+            const preset = (/** @type {HTMLElement} */ (circle).dataset.theme || '').toLowerCase();
+            const on = preset === value;
+            circle.classList.toggle('is-selected', on);
+            circle.setAttribute('aria-pressed', on ? 'true' : 'false');
+            // Screen readers get the colour's name in the interface language.
+            const nameKey = PRESET_NAME_KEYS[preset];
+            if (nameKey) circle.setAttribute('aria-label', t(nameKey));
+        });
+        const desc = document.getElementById('theme-color-desc');
+        if (desc) {
+            delete desc.dataset.i18n;
+            desc.textContent = themeColorSummary(value);
+        }
+        const swatch = document.getElementById('custom-theme-swatch');
+        if (swatch) {
+            const isCustom = value.startsWith('#');
+            swatch.classList.toggle('is-selected', isCustom);
+            swatch.style.background = isCustom ? value : '';
+        }
     };
 
     // ---- Theme mode handling ----
@@ -202,10 +257,18 @@ export function initThemeSettings({
     }
 
     // ---- Theme circles ----
+    syncThemeSelection(currentTheme);
+    if (!languageListenerBound) {
+        languageListenerBound = true;
+        Bus.on(Events.LANGUAGE_CHANGED, () => syncThemeSelection(appStore.get('currentTheme') || currentTheme));
+        // Restore Defaults (and any other writer) changes the theme without a swatch click.
+        appStore.subscribe('currentTheme', () => syncThemeSelection(appStore.get('currentTheme') || DEFAULT_THEME));
+    }
     themeCircles.forEach(circle => {
         /** @type {HTMLElement} */ (circle).onclick = () => {
             const theme = circle.getAttribute('data-theme') || '';
             applyTheme(theme);
+            syncThemeSelection(theme);
             appStore.set('currentTheme', theme);
             Bus.emit(Events.THEME_CHANGED, theme);
             void save();
