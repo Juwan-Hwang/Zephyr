@@ -26,8 +26,12 @@ const THEME_CLASSES = [
     'theme-orange', 'theme-pink', 'theme-zinc',
 ];
 
+/** A custom accent: #rgb or #rrggbb, the forms applyTheme can expand. */
+const HEX_THEME_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
 /**
- * Normalize a persisted theme value: custom hex colors are kept as-is,
+ * Normalize a persisted theme value: well-formed custom hex colors are kept as-is
+ * (a malformed one falls back to the default),
  * legacy preset names are migrated, unknown values fall back to the default.
  *
  * @param {unknown} theme
@@ -36,7 +40,7 @@ const THEME_CLASSES = [
 export function normalizeTheme(theme) {
     if (typeof theme !== 'string' || !theme.trim()) return DEFAULT_THEME;
     const value = theme.trim();
-    if (value.startsWith('#')) return value;
+    if (value.startsWith('#')) return HEX_THEME_RE.test(value) ? value : DEFAULT_THEME;
     if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_ALIASES, value)) return LEGACY_THEME_ALIASES[value];
     return VALID_THEMES.has(value) ? value : DEFAULT_THEME;
 }
