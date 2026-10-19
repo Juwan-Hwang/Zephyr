@@ -195,8 +195,20 @@ export async function initTrayEventListeners() {
     const unlisten1 = await listen('tray-sysproxy-changed', async (event) => {
         /** @type {any} */
         const ev = event;
-        const enabled = ev.payload;
+        let enabled = ev.payload;
         const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById('sys-proxy-toggle'));
+        // Without a subscription the system proxy would only reach DIRECT: undo a tray enable,
+        // as the switches and the shortcut refuse it.
+        if (enabled && appStore.get('noSubscription')) {
+            try {
+                const { setSysProxyEnabled } = await import('./sysproxy.js');
+                await setSysProxyEnabled(false);
+                enabled = false;
+            } catch (err) {
+                trayLogger.warn('Failed to undo tray system proxy without a subscription', err);
+            }
+            showNotification(tFunc('sysProxyNeedsSubscription') || 'Available once a subscription is added', 'warning');
+        }
 
         // Rust backend has already toggled the system proxy; just sync the UI.
         appStore.set('isSysProxyEnabled', enabled);
