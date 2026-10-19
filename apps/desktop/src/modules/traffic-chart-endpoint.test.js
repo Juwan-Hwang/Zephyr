@@ -142,10 +142,10 @@ describe('traffic chart rendering', () => {
         const strokeIdx = series.findIndex(o => o[0] === 'stroke');
         const beforeStroke = series[strokeIdx - 1];
 
-        const n = 6; // five samples + one more
-        // The newest sample is anchored to the right edge; older ones extend leftwards.
+        // The window is pre-filled with zeros, so the curve spans the full width:
+        // the newest sample on the right edge, the oldest (a zero) on the left.
         const lastX = WIDTH;
-        const firstX = ((60 - n) / 59) * WIDTH;
+        const firstX = 0;
         const maxVal = 60000;
         const lastY = HEIGHT - ((30000 / maxVal) * (HEIGHT - 20)) - 10;
 
