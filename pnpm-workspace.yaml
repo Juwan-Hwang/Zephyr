@@ -19,6 +19,6 @@ overrides:
   # undici: CRLF injection (CVE-2026-15157), cookie injection (CVE-2026-16729),
   # cache poisoning (CVE-2026-13697, CVE-2026-14643), response desync
   # (CVE-2026-16728).  Transitive dep of @cyclonedx/cdxgen & cheerio.
-  undici: 7.29.0
+  undici: 7.29.1
   # CVE-2026-69152: tar uncontrolled recursion DoS via long-path member selection.
   tar: 7.5.21
