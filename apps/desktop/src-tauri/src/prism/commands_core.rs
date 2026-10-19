@@ -228,10 +228,12 @@ pub async fn prism_rebuild(
     let (raw_profile, current_secret, global_prefs) = {
         let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
         let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-        let config_path = lock
-            .last_config_path()
-            .ok_or_else(|| "No active profile".to_owned())?
-            .to_owned();
+        let Some(config_path) = lock.last_config_path().map(ToOwned::to_owned) else {
+            // No subscription yet: the core runs the built-in direct-only config and
+            // there is no profile to patch. Rule files saved now apply once one is added.
+            drop(lock);
+            return Ok(serde_json::json!({ "skipped": "no active profile" }));
+        };
         let secret = lock.last_secret().to_owned();
         drop(lock);
 
