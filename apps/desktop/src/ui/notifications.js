@@ -269,7 +269,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} message
- * @param {{ danger?: boolean, confirmText?: string }} [options] danger: red confirm button, starts on Cancel; confirmText: label for it
+ * @param {{ danger?: boolean, confirmText?: string }} [options] danger: solid red confirm button, starts on Cancel; confirmText: label for it
  * @returns {Promise<boolean>}
  */
 export function showConfirmModal(title, message = '', options = {}) {
@@ -315,7 +315,7 @@ export function showConfirmModal(title, message = '', options = {}) {
         const originalConfirmLabel = confirmBtn.textContent;
         if (danger) {
             confirmBtn.classList.remove('btn-primary');
-            confirmBtn.classList.add('btn-danger');
+            confirmBtn.classList.add('btn-danger', 'is-solid');
             container.classList.add('is-danger');
         }
         if (confirmText) confirmBtn.textContent = confirmText;
@@ -336,7 +336,7 @@ export function showConfirmModal(title, message = '', options = {}) {
             setTimeout(() => {
                 bg.classList.add('hidden');
                 if (danger) {
-                    confirmBtn.classList.remove('btn-danger');
+                    confirmBtn.classList.remove('btn-danger', 'is-solid');
                     confirmBtn.classList.add('btn-primary');
                     container.classList.remove('is-danger');
                 }
