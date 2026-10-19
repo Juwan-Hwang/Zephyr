@@ -23,6 +23,13 @@ const MAX_DATA_POINTS = 60;
 /** Duration (ms) over which colour transitions are interpolated. */
 const COLOR_LERP_DURATION = 400;
 
+/**
+ * Pre-allocated points buffer reused across renders.
+ * Performance optimization: Eliminates array and point object allocations on every frame (60 FPS).
+ * @type {Array<{ x: number, y: number }>}
+ */
+const _pointsBuffer = Array.from({ length: MAX_DATA_POINTS }, () => ({ x: 0, y: 0 }));
+
 /* ------------------------------------------------------------------ */
 /*  Mutable chart state                                                */
 /* ------------------------------------------------------------------ */
@@ -413,21 +420,25 @@ function renderChart() {
 
   if (trafficHistory.length < 2) return;
 
-  // Filter out any non-numeric entries for safety
-  const validData = trafficHistory.filter(
-    (d) => !isNaN(d.up) && !isNaN(d.down),
-  );
-  if (validData.length < 2) return;
-
-  // Dynamic Y-axis scale with a floor of 10 KB/s
-  let maxVal = Math.max(...validData.map((d) => Math.max(d.up, d.down)));
-  maxVal = Math.max(maxVal, 1024 * 10);
+  // Single-pass check for valid samples and peak max value (floor of 10 KB/s).
+  // Performance optimization: Avoids .filter(), .map(), and spread allocations on every frame.
+  let validCount = 0;
+  let maxVal = 1024 * 10;
+  for (let i = 0; i < trafficHistory.length; i++) {
+    const d = trafficHistory[i];
+    if (!isNaN(d.up) && !isNaN(d.down)) {
+      validCount++;
+      if (d.up > maxVal) maxVal = d.up;
+      if (d.down > maxVal) maxVal = d.down;
+    }
+  }
+  if (validCount < 2) return;
 
   const getY = (/** @type {number} */ v) => height - ((v / maxVal) * (height - 20)) - 10;
 
   // Downstream — fixed blue, solid line + gradient fill (primary series)
   drawArea(
-    trafficHistory.map((d) => d.down || 0),
+    'down',
     currentColors.download,
     getY,
     { lineWidth: 2, fillAlpha: 0.3 },
@@ -435,7 +446,7 @@ function renderChart() {
 
   // Upstream — fixed coral, slightly thinner solid line + faint fill
   drawArea(
-    trafficHistory.map((d) => d.up || 0),
+    'up',
     currentColors.upload,
     getY,
     { lineWidth: 1.5, fillAlpha: 0.08 },
@@ -444,25 +455,36 @@ function renderChart() {
 
 /**
  * Draw a single filled area curve with a gradient fade.
+ * Reads directly from `trafficHistory` and populates `_pointsBuffer` in place
+ * to avoid per-frame garbage collection pressure.
  *
- * @param {number[]} data - Y-values for each data point
+ * @param {'down' | 'up'} key - Direction key in trafficHistory entries
  * @param {{ r: number, g: number, b: number }} color - RGB colour for this series
  * @param {(val: number) => number} getY - Maps a data value to a canvas Y coordinate
  * @param {{ lineWidth?: number, fillAlpha?: number }} [style] - Stroke width and top-of-gradient fill opacity
  * @private
  */
-function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
+function drawArea(key, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
   if (!canvas || !ctx) return;
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
+  const count = trafficHistory.length;
+
   // Anchor the newest sample to the right edge so a short history still reads as a
   // live tail instead of a sliver hugging the left edge (the home hero is full width).
-  const offset = Math.max(0, MAX_DATA_POINTS - data.length);
-  const getX = (/** @type {number} */ i) => ((i + offset) / (MAX_DATA_POINTS - 1)) * width;
+  const offset = Math.max(0, MAX_DATA_POINTS - count);
+
+  for (let i = 0; i < count; i++) {
+    if (!_pointsBuffer[i]) _pointsBuffer[i] = { x: 0, y: 0 };
+    const pt = _pointsBuffer[i];
+    pt.x = ((i + offset) / (MAX_DATA_POINTS - 1)) * width;
+    const val = trafficHistory[i][key];
+    pt.y = getY(Number.isFinite(val) ? val : 0);
+  }
 
   ctx.beginPath();
-  traceSmoothCurve(ctx, data.map((v, i) => ({ x: getX(i), y: getY(v) })));
+  traceSmoothCurve(ctx, _pointsBuffer.slice(0, count));
 
   // Stroke
   ctx.strokeStyle = rgba(color, 0.8);
@@ -478,8 +500,10 @@ function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
 
   // Close the fill straight down from the newest point (where the curve now
   // ends) and back along the baseline.
-  ctx.lineTo(getX(data.length - 1), height);
-  ctx.lineTo(getX(0), height);
+  const lastX = _pointsBuffer[count - 1].x;
+  const firstX = _pointsBuffer[0].x;
+  ctx.lineTo(lastX, height);
+  ctx.lineTo(firstX, height);
   ctx.closePath();
   ctx.fillStyle = gradient;
   ctx.fill();
