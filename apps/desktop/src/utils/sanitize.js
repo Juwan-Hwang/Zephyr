@@ -103,7 +103,7 @@ const DEFAULT_ALLOWED_ATTRS = {
     tr:     new Set(['class']),
     td:     new Set(['colspan', 'rowspan', 'class']),
     th:     new Set(['colspan', 'rowspan', 'class']),
-    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step', 'spellcheck', 'title']),
+    input:  new Set(['type', 'id', 'name', 'placeholder', 'value', 'class', 'disabled', 'readonly', 'checked', 'min', 'max', 'step', 'spellcheck', 'autocomplete', 'title']),
     label:  new Set(['for', 'class', 'title']),
     button: new Set(['type', 'id', 'class', 'disabled', 'title']),
     textarea: new Set(['id', 'name', 'placeholder', 'class', 'disabled', 'readonly', 'rows', 'cols', 'spellcheck', 'title']),
