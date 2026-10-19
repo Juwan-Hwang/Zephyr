@@ -15,7 +15,7 @@ const logger = createLogger('backend-events');
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-/** @type {Array<{ type: string, message: string, timestamp: string, source?: string }>} */
+/** @type {Array<{ type: string, message: string, timestamp: string, source?: string, data?: any }>} */
 let _extLogEvents = [];
 
 /** @type {Set<string>} */
@@ -27,7 +27,7 @@ let _prismEventUnlisten = null;
 /** @type {(() => Promise<void>) | null} */
 let _backendEventUnlisten = null;
 
-/** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string }) => void>} */
+/** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void>} */
 const _eventSubscribers = new Set();
 
 // ── Internal Helpers ─────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ function _formatTimestamp(timestampMs) {
 /**
  * Push an event into the accumulated buffer and notify the logs page subscriber.
  * Shared by both the backend-event and prism-event handlers.
- * @param {{ type: string, message: string, timestamp: string, source?: string }} entry
+ * @param {{ type: string, message: string, timestamp: string, source?: string, data?: any }} entry
  */
 function _pushEvent(entry) {
     _extLogEvents.push(entry);
@@ -223,6 +223,8 @@ function _handlePrismEvent(event) {
         type,
         message,
         timestamp: _formatTimestamp(),
+        // Raw payload: the logs page formats it in the UI language.
+        data: (data && typeof data === 'object') ? data : undefined,
     });
 }
 
@@ -231,7 +233,7 @@ function _handlePrismEvent(event) {
 /**
  * Subscribe to new events. Multiple subscribers can coexist.
  * Returns an unsubscribe function for clean teardown.
- * @param {(entry: { type: string, message: string, timestamp: string, source?: string }) => void} callback
+ * @param {(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void} callback
  * @returns {() => void}
  */
 export function subscribeToEvents(callback) {
@@ -241,7 +243,7 @@ export function subscribeToEvents(callback) {
 
 /**
  * Unsubscribe a specific callback from new events.
- * @param {(entry: { type: string, message: string, timestamp: string, source?: string }) => void} callback
+ * @param {(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void} callback
  */
 export function unsubscribeFromEvents(callback) {
     _eventSubscribers.delete(callback);
@@ -249,7 +251,7 @@ export function unsubscribeFromEvents(callback) {
 
 /**
  * Get accumulated events (for logs page to render).
- * @returns {Array<{ type: string, message: string, timestamp: string, source?: string }>}
+ * @returns {Array<{ type: string, message: string, timestamp: string, source?: string, data?: any }>}
  */
 export function getExtLogEvents() {
     return _extLogEvents;
