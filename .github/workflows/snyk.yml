@@ -13,8 +13,18 @@ name: Snyk Scan
 on:
   push:
     branches: [main, dev]
+    paths:
+      - '**/package.json'
+      - '**/pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/snyk.yml'
   pull_request:
     branches: [main]
+    paths:
+      - '**/package.json'
+      - '**/pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/snyk.yml'
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
