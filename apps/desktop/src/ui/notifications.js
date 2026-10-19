@@ -379,9 +379,11 @@ let _confirmQueue = Promise.resolve();
  * Show a confirmation modal dialog.
  * @param {string} title
  * @param {string} [message]
- * @param {{ danger?: boolean, confirmText?: string }} [options]
+ * @param {{ danger?: boolean, confirmText?: string, points?: { tone: 'danger' | 'success', label: string, text: string }[] }} [options]
  *   danger: solid red confirm button, neutral message, initial focus on Cancel so Enter never destroys by accident.
  *   confirmText: label for the confirm button (e.g. "删除"); restored afterwards.
+ *   points: dotted lines under the message, a bold label then its text (what changes / what stays);
+ *   a danger dialog with points shows its message as plain text instead of the amber box.
  * @returns {Promise<boolean>}
  */
 export function showConfirmModal(title, message = '', options = {}) {
@@ -401,11 +403,11 @@ export function showConfirmModal(title, message = '', options = {}) {
 /**
  * @param {string} title
  * @param {string} [message]
- * @param {{ danger?: boolean, confirmText?: string }} [options]
+ * @param {{ danger?: boolean, confirmText?: string, points?: { tone: 'danger' | 'success', label: string, text: string }[] }} [options]
  * @returns {Promise<boolean>}
  */
 function openConfirmModal(title, message = '', options = {}) {
-    const { danger = false, confirmText = '' } = options || {};
+    const { danger = false, confirmText = '', points = [] } = options || {};
     return new Promise((resolve) => {
         const bg = document.getElementById('modal-bg');
         const container = document.getElementById('modal-container');
@@ -426,7 +428,9 @@ function openConfirmModal(title, message = '', options = {}) {
         const messageStr = message != null ? String(message) : '';
         if (messageStr.trim()) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
+            msgDiv.className = danger && points.length
+                ? 'text-sm leading-6 text-[var(--text-secondary)]'
+                : 'rounded-[var(--radius-md)] border border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm leading-6 text-[var(--text-primary)]';
             // **text** marks the part worth reading first (e.g. how many rules go away).
             // Only our own destructive prompts use it: other messages may carry outside
             // text (a deep-link URL) that must be shown exactly as is.
@@ -442,6 +446,19 @@ function openConfirmModal(title, message = '', options = {}) {
                 }
             });
             contentArea.appendChild(msgDiv);
+        }
+        if (points.length) {
+            const list = document.createElement('ul');
+            list.className = 'confirm-points';
+            for (const point of points) {
+                const li = document.createElement('li');
+                li.className = `confirm-point is-${point.tone}`;
+                const label = document.createElement('strong');
+                label.textContent = point.label;
+                li.append(label, document.createTextNode(point.text));
+                list.appendChild(li);
+            }
+            contentArea.appendChild(list);
         }
 
         const originalConfirmLabel = confirmBtn.textContent;
