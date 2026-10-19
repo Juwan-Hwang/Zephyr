@@ -667,11 +667,9 @@ export async function getConnections() {
  * @returns {Promise<void>}
  */
 export async function closeConnection(id) {
+  // Mihomo closes one connection at DELETE /connections/:id; a bare DELETE /connections closes all.
   const ids = typeof id === 'string' ? [id] : id;
-  await apiFetch('/connections', {
-    method: 'DELETE',
-    body: JSON.stringify({ ids }),
-  });
+  await Promise.all(ids.map((one) => apiFetch(`/connections/${encodeURIComponent(one)}`, { method: 'DELETE' })));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
