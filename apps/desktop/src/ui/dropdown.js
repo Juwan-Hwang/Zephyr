@@ -185,6 +185,29 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     });
     menu.addEventListener('mouseleave', syncUI, { signal });
 
+    // Keyboard: the menu is portalled to <body>, outside any dialog's focus trap,
+    // so it moves focus itself (arrows, Home/End) and hands it back on close.
+    const enabledItems = () => /** @type {HTMLElement[]} */ (Array.from(menu.querySelectorAll(`[${optionAttr}]`)))
+        .filter((item) => !item.matches(':disabled, [disabled], [aria-disabled="true"]'));
+    const focusItem = (/** @type {number} */ delta) => {
+        const items = enabledItems();
+        if (items.length === 0) return;
+        const at = items.findIndex((item) => item === document.activeElement);
+        let next;
+        if (at < 0) {
+            const current = items.findIndex((item) => item.getAttribute(optionAttr) === select.value);
+            next = current >= 0 ? current : 0;
+        } else {
+            next = (at + delta + items.length) % items.length;
+        }
+        items[next].focus();
+    };
+    const closeToTrigger = () => {
+        const hadFocus = menu.contains(document.activeElement);
+        closeMenu();
+        if (hadFocus) trigger.focus();
+    };
+
     // Toggle — guard against disabled trigger (non-native elements don't block clicks)
     trigger.addEventListener('click', (e) => {
         if (trigger.matches(':disabled, [disabled], [aria-disabled="true"]')) {
@@ -193,7 +216,33 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             return;
         }
         e.stopPropagation();
-        menu.classList.contains('hidden') ? openMenu() : closeMenu();
+        if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+        openMenu();
+        // detail 0: activated with Enter / Space rather than a pointer.
+        if (e.detail === 0) focusItem(0);
+    }, { signal });
+
+    trigger.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        if (trigger.matches(':disabled, [disabled], [aria-disabled="true"]')) return;
+        e.preventDefault();
+        if (menu.classList.contains('hidden')) openMenu();
+        focusItem(0);
+    }, { signal });
+
+    menu.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            focusItem(e.key === 'ArrowDown' ? 1 : -1);
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            const items = enabledItems();
+            items[e.key === 'Home' ? 0 : items.length - 1]?.focus();
+        } else if (e.key === 'Escape' || e.key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeToTrigger();
+        }
     }, { signal });
 
     // Option click — guard against disabled items (non-native elements
@@ -207,10 +256,10 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             }
             e.stopPropagation();
             const val = item.getAttribute(optionAttr);
-            if (val === null || val === select.value) { closeMenu(); return; }
+            if (val === null || val === select.value) { closeToTrigger(); return; }
             select.value = val;
             syncUI();
-            closeMenu();
+            closeToTrigger();
             if (onChange) onChange(val, select);
         }, { signal });
     });
