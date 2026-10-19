@@ -384,7 +384,7 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
             const fallbacks = (fallbacksInput?.value || '').split('\n').map(/** @param {string} s */ s => s.trim()).filter(/** @param {string} s */ s => s);
 
             if (nameservers.length === 0) {
-                showNotification('At least one nameserver is required', 'error');
+                showNotification(/** @type {any} */ (translations)[currentLang]?.dnsNameserverRequired || 'At least one nameserver is required', 'error');
                 return;
             }
 
@@ -406,7 +406,7 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
                 invalidateSettingsCache();
 
                 closeModal();
-                showNotification('DNS configuration saved', 'success');
+                showNotification(/** @type {any} */ (translations)[currentLang]?.dnsConfigSaved || 'DNS configuration saved', 'success');
 
                 if (toggle.checked) {
                     await applyDnsRewrite();
@@ -414,7 +414,7 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
                 }
             } catch (err) {
                 dnsLogger.error('Failed to save DNS config', err);
-                showNotification('Failed to save DNS configuration', 'error');
+                showNotification(/** @type {any} */ (translations)[currentLang]?.dnsConfigSaveFailed || 'Failed to save DNS configuration', 'error');
             }
         });
     }
