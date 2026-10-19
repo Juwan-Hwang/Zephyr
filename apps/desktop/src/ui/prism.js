@@ -503,6 +503,7 @@ export async function traceFilterBySource(source) {
  * @property {number|null} updatedAt
  * @property {number} createdAt
  * @property {boolean|null} lastSuccess
+ * @property {string|null} [lastError]
  */
 
 /**
@@ -562,11 +563,12 @@ export async function overrideGetContent(id) {
 /** Save override content and execute.
  *  @param {string} id
  *  @param {string} content
- *  @param {boolean} [dryRun]
+ *  @param {boolean} [dryRun] - validate/execute without saving or writing config
+ *  @param {boolean} [saveOnly] - save (after validation) without executing
  *  @returns {Promise<OverrideLog>}
  */
-export async function overrideSetContent(id, content, dryRun = false) {
-    return invoke(COMMANDS.OVERRIDE.SET_CONTENT, { id, content, dryRun });
+export async function overrideSetContent(id, content, dryRun = false, saveOnly = false) {
+    return invoke(COMMANDS.OVERRIDE.SET_CONTENT, saveOnly ? { id, content, dryRun, saveOnly } : { id, content, dryRun });
 }
 
 /** Reorder override items.
