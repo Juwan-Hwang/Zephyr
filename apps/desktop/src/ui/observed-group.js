@@ -45,6 +45,9 @@ let _staticProxiesCache = null;
 Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
 Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
 
+/** Built-in exits that are not proxy nodes (matched exactly: a node may be named "REJECT-Paris"). */
+const NON_PROXY_EXITS = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'PASS-RULE', 'COMPATIBLE']);
+
 /**
  * Compute the observed group and node from active connections.
  * Pure function — no side effects.
@@ -67,9 +70,19 @@ export function computeObservedGroup(connections, proxiesData) {
     const sampled = connections.slice(-MAX_SAMPLE);
     const freq = Object.create(null);
     const groupNodeFreq = Object.create(null);
+    /** Connections that actually went through a proxy node (the share's denominator). */
+    let proxied = 0;
 
     for (const conn of sampled) {
         const chains = conn.chains || [];
+        // Traffic that leaves DIRECT or is rejected never uses a proxy node, so it says
+        // nothing about which group picks the user's node (Apple → 🎯 Direct → DIRECT).
+        const exit = String(chains[0] || '').toUpperCase();
+        if (!exit || NON_PROXY_EXITS.has(exit)) continue;
+        // A config can name its own direct/reject outbound anything ("Local" of type direct).
+        const exitType = String(proxiesData[chains[0]]?.type || '').toUpperCase();
+        if (NON_PROXY_EXITS.has(exitType)) continue;
+        proxied++;
 
         for (let i = 0; i < chains.length; i++) {
             const chainName = chains[i];
@@ -99,11 +112,11 @@ export function computeObservedGroup(connections, proxiesData) {
 
     const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) {
-        return { name: null, node: null, freq: 0, total: sampled.length, ratio: 0 };
+        return { name: null, node: null, freq: 0, total: proxied, ratio: 0 };
     }
 
     const [topName, topFreq] = entries[0];
-    const total = sampled.length;
+    const total = proxied;
     const ratio = total > 0 ? topFreq / total : 0;
 
     // Get the most frequent node within the top group

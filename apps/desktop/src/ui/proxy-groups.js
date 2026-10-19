@@ -335,6 +335,7 @@ function determineUiPrimaryGroup(ctx) {
  * @property {Record<string, string[]>} graph - Group → children adjacency list
  * @property {boolean} providerLoading - True when uiGroup uses include-all or include-all-providers and all[] has no real proxy nodes (empty or special-only)
  * @property {boolean} hasProxyProviders - True when the config defines proxy-providers (regardless of loading state)
+ * @property {boolean} uiGroupUsesProviders - True when the uiGroup itself pulls nodes from a provider (`use:` or include-all)
  */
 
 /**
@@ -467,6 +468,11 @@ export async function fetchProxyGroups(options = {}) {
             && !groupNames.has(name)
         );
     const providerLoading = hasProxyProviders && isIncludeAllGroup && !isGlobalGroup && !hasProviderProxies;
+    const uiGroupDef = Array.isArray(runConfig?.['proxy-groups'])
+        ? runConfig['proxy-groups'].find(/** @param {any} g */ g => g?.name === uiGroupName)
+        : null;
+    const uiGroupUsesProviders = hasProxyProviders && !isGlobalGroup
+        && (isIncludeAllGroup || (Array.isArray(uiGroupDef?.use) && uiGroupDef.use.length > 0));
 
     return {
         // Legacy compat fields
@@ -496,6 +502,10 @@ export async function fetchProxyGroups(options = {}) {
         // state).  Callers can use this to decide if a missing node might
         // still arrive from a provider that hasn't finished downloading.
         hasProxyProviders,
+
+        // The open group itself is fed by a provider, so an empty-looking member list
+        // may still fill once the provider downloads.
+        uiGroupUsesProviders,
     };
 }
 
