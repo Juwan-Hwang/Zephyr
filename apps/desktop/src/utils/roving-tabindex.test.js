@@ -32,6 +32,22 @@ describe('createRovingTabindex', () => {
     let roving = null;
     afterEach(() => { roving?.destroy(); roving = null; });
 
+    it('leaves arrow keys to a text field inside an option', () => {
+        const list = makeList(3);
+        roving = createRovingTabindex(list, { getColumns: () => 1 });
+        const input = document.createElement('input');
+        list.querySelectorAll('[role="option"]')[0].appendChild(input);
+        const ev = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+        input.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(tabindexes(list)).toEqual(['0', '-1', '-1']);
+        // A button inside an option still moves through the grid.
+        const btn = document.createElement('button');
+        list.querySelectorAll('[role="option"]')[0].appendChild(btn);
+        press(btn, 'ArrowDown');
+        expect(tabindexes(list)).toEqual(['-1', '0', '-1']);
+    });
+
     it('initialises the first item as the tab stop and navigates with arrows', () => {
         const list = makeList(3);
         roving = createRovingTabindex(list);
