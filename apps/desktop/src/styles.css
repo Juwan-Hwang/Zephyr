@@ -172,8 +172,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 .btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
 }
-
-/* Destructive confirms say what goes away in one line, so they get a wider card. */
+/* Destructive confirms say what changes and what stays, so they get a wider card. */
 #modal-container.is-danger {
   width: min(540px, calc(100vw - 2rem));
 }
@@ -186,6 +185,34 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 }
 #modal-confirm.btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
   background-color: color-mix(in srgb, var(--zephyr-color-danger) 88%, #000);
+}
+.confirm-points {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: var(--text-secondary);
+}
+.confirm-point {
+  position: relative;
+  padding-inline-start: 1.125rem;
+}
+.confirm-point::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.5625rem;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 9999px;
+}
+.confirm-point.is-danger::before { background-color: var(--zephyr-color-danger); }
+.confirm-point.is-success::before { background-color: var(--zephyr-color-success); }
+.confirm-point > strong {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .btn-warning {
@@ -2701,3 +2728,141 @@ button[data-home-mode] {
   content: "—"; visibility: visible; position: absolute; inset: 0; text-align: center;
 }
 .home-hero.is-empty .home-stat-value::before { font-size: 22px; font-weight: 300; }
+/* Settings: accent swatch in use gets a ring and a tick. */
+.theme-swatch { position: relative; }
+.theme-swatch.is-selected { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--color-accent); }
+.theme-swatch.is-selected::after {
+  content: ''; position: absolute; left: 50%; top: 45%; width: 5px; height: 9px; transform: translate(-50%, -50%) rotate(45deg);
+  border: solid #fff; border-width: 0 2px 2px 0;
+}
+/* Custom accent not picked yet: a plus on the rainbow says it opens a picker. */
+#custom-theme-swatch:not(.is-selected)::after {
+  content: ''; position: absolute; inset: 0; margin: auto; width: 10px; height: 10px;
+  background: linear-gradient(#fff, #fff) center / 10px 2px no-repeat, linear-gradient(#fff, #fff) center / 2px 10px no-repeat;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / .25));
+}
+.theme-swatch:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--zephyr-focus-ring); }
+/* The custom swatch is a hidden color input: show the ring on the visible circle. */
+.group:has(#custom-theme-color:focus-visible) #custom-theme-swatch { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--zephyr-focus-ring); }
+/* Opacity slider: visible track in light theme too. */
+.opacity-range { background: var(--zephyr-border-default); }
+
+
+/* Settings: shell-format chip beside "Copy" (was a hidden gear) */
+.env-format-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px 0 10px;
+  border-radius: var(--radius-full); border: 1px solid var(--zephyr-border-default);
+  background: var(--zephyr-bg-muted); color: var(--text-secondary);
+  font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.env-format-chip:hover, .env-format-chip[aria-expanded="true"] { color: var(--text-primary); border-color: var(--zephyr-border-strong); }
+.env-format-chip:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+.env-format-option.is-selected { color: var(--text-primary); font-weight: 600; }
+.env-format-option.is-selected::after { content: ''; width: 5px; height: 9px; margin-inline-end: 3px; transform: rotate(45deg) translateY(-1px); border: solid var(--accent-ink); border-width: 0 2px 2px 0; }
+
+/* Number field with its unit inside the field (log retention / size) — field keeps its full height */
+.input-unit { position: relative; }
+.input-unit > .form-control { width: 100%; padding-inline-end: 3rem; }
+.input-unit-label { position: absolute; inset-inline-end: 1rem; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
+
+/* Advanced page: the section a settings link opened briefly gets an accent ring */
+.adv-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s ease-out; }
+
+/* Settings rows: a switch row with a trailing text button keeps the button and switch on one line */
+[data-page="settings"] .ios-switch { flex-shrink: 0; }
+
+/* Dark mode details (settings, advanced, their dialogs) */
+/* Selected thumbs were white-5% on a white-5% track: only a hairline told them apart. */
+html.dark :is(#setting-theme-mode-slider, #setting-home-mode-slider),
+html.dark .seg-item[aria-pressed="true"],
+html.dark .seg-tab.active { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.14); }
+/* Row descriptions: #71717a on the dark glass sat near 4:1 at 11px. */
+html.dark :is([data-page="settings"], [data-page="advanced"], #log-settings-modal, #log-export-modal, #smart-config-modal, #port-config-modal) { --text-muted: #8e8e98; }
+/* Row dividers a touch firmer so cards keep their rhythm on the dark glass. */
+html.dark [data-page="settings"] .glass-card > .h-px,
+html.dark [data-page="settings"] #uwp-loopback-item > .h-px { background: rgba(255, 255, 255, 0.07); }
+/* Native date pickers and number spinners follow the theme. */
+html.dark :is(#log-export-modal, #port-config-modal, #smart-config-modal, #log-settings-modal) input { color-scheme: dark; }
+/* Light: the same raised white thumb as the header tabs (page-29). */
+html:not(.dark) :is(#setting-theme-mode-slider, #setting-home-mode-slider),
+html:not(.dark) .seg-item[aria-pressed="true"] { background: rgba(255, 255, 255, 0.9); }
+
+/* Settings section index (ui/settings-nav.js): short marks in the right gutter, covering
+   no rows. Names slide out beside the marks only while the rail is hovered or focused. */
+.settings-rail {
+  position: fixed; top: 50%; inset-inline-end: 10px; z-index: 30; transform: translateY(-50%);
+  width: auto; max-width: none; margin: 0; /* not the 800px column rule for settings children on wide windows */
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; /* 24px between item centres */
+}
+.settings-rail-item {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 18px;
+  padding: 0 2px 0 8px; border-radius: 9px; cursor: pointer; background: transparent;
+  transition: background-color var(--zephyr-time-standard) var(--zephyr-easing-ease-out);
+}
+.settings-rail-mark {
+  width: 8px; height: 2px; border-radius: 2px; flex-shrink: 0;
+  background: var(--text-tertiary); opacity: 0.45;
+  transition: width var(--zephyr-time-standard) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.settings-rail-item.active .settings-rail-mark { width: 16px; opacity: 1; background: var(--color-accent); }
+.settings-rail-item:hover .settings-rail-mark { opacity: 0.9; }
+.settings-rail-label {
+  font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--text-secondary);
+  opacity: 0; transform: translateX(6px); pointer-events: none;
+  /* Collapsed: no width, so the folded rail covers only its marks, never the controls beside it. */
+  max-width: 0; overflow: hidden;
+  transition: max-width var(--zephyr-time-standard) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), transform var(--zephyr-time-standard) var(--zephyr-easing-ease-out);
+}
+.settings-rail-item.active .settings-rail-label { color: var(--text-primary); font-weight: 600; }
+.settings-rail:is(:hover, :focus-within) .settings-rail-label { opacity: 1; transform: none; max-width: 240px; }
+.settings-rail:is(:hover, :focus-within) {
+  padding-inline-start: 4px; border-radius: 14px;
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.10), 0 1px 2px rgb(0 0 0 / 0.06);
+}
+html:not(.dark) .settings-rail:is(:hover, :focus-within) { background: rgba(248, 249, 251, 0.9); }
+html.dark .settings-rail:is(:hover, :focus-within) { background: rgba(36, 36, 40, 0.9); }
+.settings-rail-item:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.settings-rail-item:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+
+/* Settings search (ui/settings-nav.js): same field as the Proxies node search, right of the title. */
+[data-page="settings"] .settings-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; position: relative; z-index: 10; }
+.settings-search {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; width: 200px; padding: 0 6px 0 10px;
+  border-radius: var(--radius-button, 8px); color: var(--text-tertiary);
+  background: var(--zephyr-bg-input, var(--zephyr-surface-input)); border: 1px solid var(--zephyr-border-subtle);
+  transition: border-color var(--zephyr-time-standard), box-shadow var(--zephyr-time-standard);
+}
+.settings-search:focus-within { border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); box-shadow: 0 0 0 3px var(--zephyr-focus-ring); }
+.settings-search input { flex: 1; min-width: 0; height: 100%; font-size: 12px; color: var(--text-primary); background: transparent; outline: none; }
+.settings-search input::-webkit-search-cancel-button { display: none; }
+.settings-search input::placeholder { color: var(--text-tertiary); }
+.settings-search-clear { width: 20px; height: 20px; flex-shrink: 0; display: inline-grid; place-items: center; border-radius: 50%; color: var(--text-tertiary); }
+.settings-search-clear svg { width: 10px; height: 10px; }
+.settings-search-clear:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.settings-search-clear.hidden { display: none; }
+[data-page="settings"] .search-miss { display: none !important; }
+[data-page="settings"].is-searching .glass-card > .h-px { display: none; }
+.settings-search-empty { padding: 48px 0; text-align: center; font-size: 13px; color: var(--text-muted); }
+.settings-rail-item.search-miss { display: none; }
+[data-page="settings"].is-searching .glass-card > :not(.h-px) { padding-block: 8px; }
+
+/* Focus rings are for keyboard users only (ui/input-modality.js sets html.kb-nav).
+   Clicking or typing in a field shows no blue halo; Tab navigation and high-contrast mode still do. */
+html:not(.kb-nav) :is(input, textarea, select, [contenteditable]):focus,
+html:not(.kb-nav) :is(.form-control, .select-common):focus {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--zephyr-border-strong, var(--zephyr-border-subtle));
+}
+html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
+  box-shadow: none;
+  border-color: var(--zephyr-border-strong, var(--zephyr-border-subtle));
+}
+@media (forced-colors: active) {
+  /* Same selectors as the html:not(.kb-nav) reset above, and later, so they win. */
+  html:not(.kb-nav) :is(input, textarea, select, [contenteditable]):focus,
+  html:not(.kb-nav) :is(.form-control, .select-common):focus,
+  :is(input, textarea, select, [contenteditable]):focus { outline: 2px solid Highlight; }
+}
