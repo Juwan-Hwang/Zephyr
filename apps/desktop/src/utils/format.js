@@ -41,20 +41,30 @@ const _FILE_DIVISORS = [1, 1024, 1_048_576, 1_073_741_824, 1_099_511_627_776];
  * formatFileSize(0);          // "0 B"
  */
 export function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
+    // Coerce first: some callers pass numeric strings (e.g. values parsed from
+    // subscription headers), which the legacy Math.log implementation accepted
+    // implicitly. Number.isFinite alone would reject them. Number() throws on
+    // Symbols, so guard it the same way formatBytes does.
+    let n;
+    try {
+        n = Number(bytes);
+    } catch {
+        return 'NaN undefined';
+    }
+    if (n === 0) return '0 B';
     // Edge case guard for negative or non-finite values (matches legacy Math.log behavior)
-    if (bytes < 0 || !Number.isFinite(bytes)) {
+    if (n < 0 || !Number.isFinite(n)) {
         return 'NaN undefined';
     }
 
     // Performance optimization: Fast threshold branches replace floating-point Math.log
     let i = 0;
-    if (bytes >= 1_099_511_627_776) i = 4;
-    else if (bytes >= 1_073_741_824) i = 3;
-    else if (bytes >= 1_048_576) i = 2;
-    else if (bytes >= 1024) i = 1;
+    if (n >= 1_099_511_627_776) i = 4;
+    else if (n >= 1_073_741_824) i = 3;
+    else if (n >= 1_048_576) i = 2;
+    else if (n >= 1024) i = 1;
 
-    return `${(bytes / _FILE_DIVISORS[i]).toFixed(2)} ${_FILE_UNITS[i]}`;
+    return `${(n / _FILE_DIVISORS[i]).toFixed(2)} ${_FILE_UNITS[i]}`;
 }
 
 // ── Network-traffic helpers (decimal, base-1000) ──────────────────────
