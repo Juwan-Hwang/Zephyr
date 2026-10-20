@@ -1908,6 +1908,18 @@ if window.app_handle().get_webview_window("main").is_none() {
 invalidate_heartbeat(window.app_handle());
 }
 }
+                tauri::WindowEvent::ThemeChanged(_) => {
+                    // The idle tray glyph follows the OS colour mode, so
+                    // reapply the current mode's icon on live theme
+                    // switches instead of leaving it stale until the next
+                    // proxy state change.
+                    if window.label() == "main" {
+                        let app = window.app_handle();
+                        let mode = crate::tray::get_tray_proxy_status(app.clone())
+                            .unwrap_or_else(|_| "default".to_owned());
+                        let _ = crate::tray::apply_tray_icon(app, &mode);
+                    }
+                }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
                     // profile-transform lock, which an encryption batch holds

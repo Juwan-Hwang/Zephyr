@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/lockup.svg" alt="Zephyr - Modern Mihomo GUI Client Logo" width="420">
-
-# Zephyr
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/src-tauri/icons/lockup-white.svg">
+  <img src="apps/desktop/src-tauri/icons/lockup.svg" alt="Zephyr - Modern Mihomo GUI Client Logo" width="420">
+</picture>
 
 **Secure by Design · Light by Nature · Beautiful by Choice**
 

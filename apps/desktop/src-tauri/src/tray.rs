@@ -126,9 +126,10 @@ pub fn set_tray_menu_state(app: AppHandle, new_state: TrayMenuState) -> Result<(
 ///   to match the menu bar, so it must be applied with
 ///   `set_icon_as_template(true)`.
 /// - Windows: a plain glyph on transparency — ink for light taskbars, white
-///   for dark ones — chosen from the main window's current theme. When the
-///   window does not exist (lightweight mode) fall back to the white glyph:
-///   the Windows 11 default taskbar is dark.
+///   for dark ones. The taskbar follows the *system* colour mode
+///   (`SystemUsesLightTheme` in the registry), which Windows keeps separate
+///   from the *app* colour mode that `window.theme()` reports, so the
+///   registry value is the source of truth here.
 /// - Other platforms: the full app icon tile, as before.
 fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
     #[cfg(target_os = "macos")]
@@ -138,11 +139,7 @@ fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
     }
     #[cfg(target_os = "windows")]
     {
-        let dark_taskbar = app
-            .get_window("main")
-            .and_then(|window| window.theme().ok())
-            .map_or(true, |theme| theme == tauri::Theme::Dark);
-        if dark_taskbar {
+        if windows_taskbar_uses_dark_mode(app) {
             (include_bytes!("../icons/tray-idle-dark.png"), false)
         } else {
             (include_bytes!("../icons/tray-idle-light.png"), false)
@@ -157,8 +154,30 @@ fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
     }
 }
 
+/// Whether the Windows taskbar is in dark mode.
+///
+/// Reads `SystemUsesLightTheme` from the Personalize key. When the value
+/// cannot be read, fall back to the main window's theme (the app colour
+/// mode — not always the taskbar's, but the closest available signal),
+/// and then to dark, the Windows 11 default.
+#[cfg(target_os = "windows")]
+fn windows_taskbar_uses_dark_mode(app: &AppHandle) -> bool {
+    let system_light = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .ok();
+    match system_light {
+        Some(1) => false,
+        Some(_) => true,
+        None => app
+            .get_window("main")
+            .and_then(|window| window.theme().ok())
+            .map_or(true, |theme| theme == tauri::Theme::Dark),
+    }
+}
+
 /// Apply the tray icon for `mode`: "tun", "sysproxy", or idle for anything else.
-fn apply_tray_icon(app: &AppHandle, mode: &str) -> Result<(), String> {
+pub fn apply_tray_icon(app: &AppHandle, mode: &str) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;
