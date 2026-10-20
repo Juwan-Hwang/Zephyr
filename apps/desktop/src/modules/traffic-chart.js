@@ -431,15 +431,22 @@ function renderChart() {
 
   // Single-pass computation of Y-axis scale (min 10 KB/s floor) and validity check.
   // Avoids per-frame array allocations (`trafficHistory.filter(...)` and `.map(...)`).
+  // Samples are coerced with Number() and must be finite: numeric strings count
+  // (the legacy isNaN check accepted them), while NaN and ±Infinity are excluded
+  // here and normalised to 0 when drawn, so one bad sample cannot poison the scale.
+  // Each series is judged on its own: drawArea() plots a finite value even when
+  // the sample's other series is invalid, so a finite value must always count
+  // towards the scale — otherwise its curve would be drawn far off-canvas.
   let maxVal = 1024 * 10;
   let validCount = 0;
-  for (let i = 0; i < trafficHistory.length; i++) {
-    const d = trafficHistory[i];
-    if (typeof d.up === 'number' && typeof d.down === 'number' && !isNaN(d.up) && !isNaN(d.down)) {
-      validCount++;
-      if (d.up > maxVal) maxVal = d.up;
-      if (d.down > maxVal) maxVal = d.down;
-    }
+  for (const d of trafficHistory) {
+    const up = Number(d.up);
+    const down = Number(d.down);
+    const upValid = Number.isFinite(up);
+    const downValid = Number.isFinite(down);
+    if (upValid && up > maxVal) maxVal = up;
+    if (downValid && down > maxVal) maxVal = down;
+    if (upValid || downValid) validCount++;
   }
   if (validCount < 2) return;
 
@@ -496,7 +503,10 @@ function drawArea(history, key, color, getY, { lineWidth = 2, fillAlpha = 0.3 } 
   for (let i = 0; i < len; i++) {
     const pt = _pointsBuffer[i];
     pt.x = getX(i);
-    pt.y = getY(history[i][key] || 0);
+    // Same coercion rule as the scale pass in renderChart(): finite numbers
+    // (including numeric strings) draw at face value, anything else becomes 0.
+    const v = Number(history[i][key]);
+    pt.y = getY(Number.isFinite(v) ? v : 0);
   }
 
   ctx.beginPath();
