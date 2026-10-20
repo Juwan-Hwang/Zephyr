@@ -97,6 +97,35 @@ pub fn rule_read(state: State<PrismState>, filename: String) -> Result<String, S
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read rule file: {e}"))
 }
 
+/// Sanitize user-supplied rule YAML before it is written to disk.
+///
+/// - Content that does not parse as YAML is rejected outright (fail closed,
+///   the same behaviour as `rule_import_text`) instead of being saved raw.
+/// - A mapping has its dangerous keys stripped. If nothing was removed, the
+///   original text is kept verbatim so comments and formatting survive.
+///   An explicitly tagged mapping counts as a mapping: mihomo's decoder
+///   resolves the tag, so it must not bypass sanitization.
+/// - Non-mapping content (empty files, plain scalars) is kept as-is.
+fn sanitize_rule_yaml(content: &str) -> Result<String, String> {
+    let value = match serde_yaml::from_str::<serde_yaml::Value>(content) {
+        Ok(value) => value,
+        Err(e) => return Err(format!("Invalid YAML: {e}")),
+    };
+    let root_is_mapping = matches!(&value, serde_yaml::Value::Mapping(_))
+        || matches!(&value, serde_yaml::Value::Tagged(tagged) if tagged.value.is_mapping());
+    if !root_is_mapping {
+        return Ok(content.to_owned());
+    }
+    let mut sanitized = value.clone();
+    remove_dangerous_keys(&mut sanitized, false);
+    if sanitized == value {
+        Ok(content.to_owned())
+    } else {
+        serde_yaml::to_string(&sanitized)
+            .map_err(|e| format!("Failed to serialize sanitized YAML: {e}"))
+    }
+}
+
 #[tauri::command]
 pub fn rule_create(
     state: State<PrismState>,
@@ -111,13 +140,7 @@ pub fn rule_create(
         return Err(format!("Rule file '{filename}' already exists"));
     }
     // Strip dangerous keys from YAML input to prevent injection
-    let safe_content =
-        if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            remove_dangerous_keys(&mut yaml_value, false);
-            serde_yaml::to_string(&yaml_value).unwrap_or(content)
-        } else {
-            content
-        };
+    let safe_content = sanitize_rule_yaml(&content)?;
     write_file_secure(&path, &safe_content)?;
     Ok(filename)
 }
@@ -135,13 +158,7 @@ pub fn rule_update(
         return Err(format!("Rule file '{filename}' not found"));
     }
     // Strip dangerous keys from YAML input to prevent injection
-    let safe_content =
-        if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            remove_dangerous_keys(&mut yaml_value, false);
-            serde_yaml::to_string(&yaml_value).unwrap_or(content)
-        } else {
-            content
-        };
+    let safe_content = sanitize_rule_yaml(&content)?;
     write_file_secure(&path, &safe_content)
 }
 
@@ -438,4 +455,56 @@ pub async fn rule_import_url(
     }
     write_file_secure(&target, &safe_content)?;
     Ok(filename)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_rule_yaml;
+
+    #[test]
+    fn sanitize_strips_dangerous_keys() {
+        let out = sanitize_rule_yaml("script: evil.js\nrules:\n  - DOMAIN,example.com,DIRECT\n")
+            .expect("valid YAML should sanitize");
+        assert!(!out.contains("script"));
+        assert!(out.contains("rules"));
+    }
+
+    #[test]
+    fn sanitize_preserves_original_when_nothing_removed() {
+        let content = "# my rules\nrules:\n  - DOMAIN,example.com,DIRECT\n";
+        assert_eq!(sanitize_rule_yaml(content).unwrap(), content);
+    }
+
+    #[test]
+    fn sanitize_rejects_unparseable_yaml() {
+        assert!(sanitize_rule_yaml("rules: [unclosed\n").is_err());
+    }
+
+    #[test]
+    fn sanitize_keeps_empty_and_non_mapping_content() {
+        assert_eq!(sanitize_rule_yaml("").unwrap(), "");
+        assert_eq!(sanitize_rule_yaml("just text").unwrap(), "just text");
+    }
+
+    #[test]
+    fn sanitize_strips_dangerous_keys_in_tagged_root_mapping() {
+        let out = sanitize_rule_yaml(
+            "!custom {script: evil.js, rules: ['DOMAIN,example.com,DIRECT']}\n",
+        )
+        .expect("tagged mapping should sanitize");
+        assert!(!out.contains("script"), "script survived: {out}");
+        assert!(!out.contains("evil.js"), "payload survived: {out}");
+        assert!(out.contains("rules"), "rules lost: {out}");
+    }
+
+    #[test]
+    fn sanitize_strips_path_in_tagged_provider_mapping() {
+        let content = "proxy-providers:\n  \
+            p: !custom {type: http, url: 'https://example.com/p.yaml', path: /etc/passwd}\n\
+            rules:\n  - DOMAIN,example.com,DIRECT\n";
+        let out = sanitize_rule_yaml(content).expect("tagged provider should sanitize");
+        assert!(!out.contains("/etc/passwd"), "path survived: {out}");
+        assert!(out.contains("example.com"), "provider lost: {out}");
+        assert!(out.contains("rules"), "rules lost: {out}");
+    }
 }

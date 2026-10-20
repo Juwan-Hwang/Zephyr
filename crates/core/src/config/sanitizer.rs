@@ -174,6 +174,12 @@ fn remove_dangerous_keys_internal(
                 remove_dangerous_keys_internal(item, in_provider_context, depth + 1);
             }
         }
+        serde_yaml::Value::Tagged(tagged) => {
+            // A tagged value wraps the real node: mihomo's decoder looks
+            // through the tag, so a tagged mapping must be sanitised exactly
+            // like the mapping it wraps instead of being skipped.
+            remove_dangerous_keys_internal(&mut tagged.value, in_provider_context, depth + 1);
+        }
         _ => {}
     }
 }
@@ -582,6 +588,18 @@ proxy-providers:
             "tagged path survived: {provider:?}"
         );
         assert!(provider.contains_key("url"));
+    }
+
+    #[test]
+    fn test_dangerous_keys_removed_inside_tagged_values() {
+        let yaml = "proxy-providers:\n  p: !custom {type: http, url: 'https://example.com/p.yaml', path: /etc/passwd}\nwrapper: !custom {script: evil.js, name: keep}\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let out = serde_yaml::to_string(&value).unwrap();
+        assert!(!out.contains("/etc/passwd"), "path survived: {out}");
+        assert!(!out.contains("script"), "script survived: {out}");
+        assert!(out.contains("example.com"), "provider lost: {out}");
+        assert!(out.contains("keep"), "benign value lost: {out}");
     }
 
     #[test]
