@@ -391,9 +391,10 @@ export function startUnifiedSync() {
 
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const [realSysProxyState, actualMode, hasOwnership] = await Promise.all([
+            const [realSysProxyState, actualMode, proxyStatus, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.GET_TRAY_STATUS),
+                invoke(COMMANDS.GET_TRAY_PROXY_STATUS),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
 
@@ -407,6 +408,40 @@ export function startUnifiedSync() {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
+            }
+
+            // `get_tray_status` answers from the backend's live TUN state,
+            // while `expectedMode` below is built from this store. If the
+            // two disagree about TUN, re-applying the store's mode (the
+            // mismatch correction below) can never converge: the status
+            // does not read the icon the correction sets, so the sync
+            // would re-push the same mode every tick and the backend's
+            // own refresh would keep flipping the icon back. While the
+            // core is running its state is the truth the toggle claims
+            // to show, so align the store with it first. When the core
+            // is stopped the status carries no TUN information and the
+            // store's preference is left alone.
+            //
+            // The alignment does not use the samples above: they were
+            // taken when this tick started, and the slowest invoke can
+            // take long enough for a TUN toggle to finish meanwhile —
+            // writing the stale sample then would flip the store back to
+            // the pre-toggle state until the next tick. Pairing two of
+            // those samples can also straddle a core start, pairing a
+            // pre-start mode with a post-start running state. So the
+            // alignment re-reads the one status that reports running
+            // state and TUN together, and skips while a network update
+            // is in flight, checked again after the re-read: a toggle
+            // in progress owns `isTunEnabled` until it has recorded
+            // its outcome.
+            if (proxyStatus !== 'stopped' && !appStore.get('isNetworkUpdating')) {
+                const freshProxyStatus = await invoke(COMMANDS.GET_TRAY_PROXY_STATUS).catch(() => null);
+                if (freshProxyStatus && freshProxyStatus !== 'stopped' && !appStore.get('isNetworkUpdating')) {
+                    const backendTunEnabled = freshProxyStatus === 'tun';
+                    if (backendTunEnabled !== appStore.get('isTunEnabled')) {
+                        appStore.set('isTunEnabled', backendTunEnabled);
+                    }
+                }
             }
 
             let expectedMode;
