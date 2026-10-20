@@ -110,7 +110,14 @@ pub fn rule_create(
     if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
-    write_file_secure(&path, &content)?;
+    // Strip dangerous keys from YAML input to prevent injection
+    let safe_content = if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+        remove_dangerous_keys(&mut yaml_value, false);
+        serde_yaml::to_string(&yaml_value).unwrap_or(content)
+    } else {
+        content
+    };
+    write_file_secure(&path, &safe_content)?;
     Ok(filename)
 }
 
@@ -126,7 +133,14 @@ pub fn rule_update(
     if !path.exists() {
         return Err(format!("Rule file '{filename}' not found"));
     }
-    write_file_secure(&path, &content)
+    // Strip dangerous keys from YAML input to prevent injection
+    let safe_content = if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+        remove_dangerous_keys(&mut yaml_value, false);
+        serde_yaml::to_string(&yaml_value).unwrap_or(content)
+    } else {
+        content
+    };
+    write_file_secure(&path, &safe_content)
 }
 
 #[tauri::command]
