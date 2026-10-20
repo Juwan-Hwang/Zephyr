@@ -1475,6 +1475,21 @@ async fn notify_core_started(app: &AppHandle) {
     }
 }
 
+/// Repaint the tray icon now that a core start has succeeded.
+///
+/// A start that replaces a running core goes through `stop_core_inner`,
+/// which paints the idle icon once the old core is gone. Nothing else
+/// on the backend's start path repaints it afterwards, and in
+/// lightweight mode there is no frontend sync to do it either, so a
+/// backend-driven restart (for example the resume-from-sleep health
+/// restart) would leave the idle icon up while the new core already
+/// runs the system proxy or TUN. The status lookup behind the refresh
+/// can shell out, so it runs on a blocking task, not the async worker.
+async fn refresh_tray_icon_after_start(app: &AppHandle) {
+    let app_icon = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::tray::refresh_tray_icon(&app_icon)).await;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn store_child_in_core_state(
     state: &MihomoState,
@@ -1906,6 +1921,21 @@ pub async fn start_core_inner(
         global_prefs.as_ref(),
     )?;
 
+    // A fresh running config is about to replace the previous core: a
+    // live TUN override described that core, while this start derives
+    // TUN from the saved preference and the profile instead. Enabled
+    // overrides re-apply after the start and record a fresh override.
+    // The override is only dropped once preflight has passed (below):
+    // a macOS TUN-active start deliberately keeps the previous root
+    // core running through preflight, so a failure up to there leaves
+    // that core — and the override describing it — in place, while the
+    // tray would otherwise fall back to a saved preference that can
+    // disagree with it. The snapshot lets the one later path that also
+    // retains the previous core (authorization never reaching the
+    // privileged script) put the override back.
+    let (mut _previous_live_tun_override, mut _previous_live_tun_epoch) =
+        super::tun_manager::live_tun_snapshot();
+
     let run_config_path = paths.core_dir.join("run_config.yaml");
     #[cfg(target_os = "macos")]
     let prev_run_config = match std::fs::read(&run_config_path) {
@@ -1992,6 +2022,22 @@ pub async fn start_core_inner(
         }
     }
 
+    // Preflight passed, so the replacement core is going ahead: the
+    // previous core's live TUN override ends here (see the snapshot
+    // above). From here on, every failure path has either stopped the
+    // previous core or replaces it, except the macOS TUN path where
+    // authorization never reaches the privileged script — that path
+    // restores the snapshot before returning. A hot reload that
+    // confirmed a newer state for the still-running previous core
+    // during preflight refreshes the snapshot first, so the restore
+    // brings back the latest word on that core, not the stale one.
+    if super::tun_manager::live_tun_state_epoch() != _previous_live_tun_epoch {
+        (_previous_live_tun_override, _previous_live_tun_epoch) =
+            super::tun_manager::live_tun_snapshot();
+    }
+    super::tun_manager::clear_live_tun_override();
+    _previous_live_tun_epoch = super::tun_manager::live_tun_state_epoch();
+
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
@@ -2056,13 +2102,10 @@ pub async fn start_core_inner(
     ) {
         record_running_root_core_exe(app);
         set_tun_mode(true);
-        if let Err(err) = super::tun_manager::sync_tun_settings(app, true) {
-            emit_warn!(
-                Config,
-                CONFIG_PERSIST_FAILED,
-                "Failed to record tun_enabled after adopting root TUN core: {err}"
-            );
-        }
+        // The adopted core is running TUN, so record it in memory even
+        // if the preference write fails; `record_tun_started` warns
+        // about the failed write itself.
+        let _ = super::tun_manager::record_tun_started(app);
         // The script already terminated any tracked child; reap it before
         // replacing the tracked state so it does not linger as a zombie.
         reap_tracked_child(app).await;
@@ -2181,7 +2224,21 @@ pub async fn start_core_inner(
                     // nothing was killed: no root core and no tracked child
                     // were touched. Preserve the tracked child (the user's
                     // still-running core) and its state, restore the previous
-                    // run config via the guard, and surface the error.
+                    // run config via the guard, and surface the error. The
+                    // live TUN override dropped after preflight described
+                    // that still-running core, so it goes back too — but
+                    // only when nothing newer was recorded while the
+                    // authorization dialog was open: a hot reload of the
+                    // still-running core can confirm a newer state in
+                    // that window, and the snapshot must not overwrite it.
+                    if super::tun_manager::live_tun_state_epoch() == _previous_live_tun_epoch {
+                        match _previous_live_tun_override {
+                            Some(previous) => {
+                                super::tun_manager::set_live_tun_override(previous);
+                            }
+                            None => super::tun_manager::clear_live_tun_override(),
+                        }
+                    }
                     return Err(tun_start_error(&e));
                 }
                 // The script ran and the root core writes to the TUN log, so that is the
@@ -2231,6 +2288,7 @@ pub async fn start_core_inner(
                         );
                     }
                     notify_core_started(&app).await;
+                    refresh_tray_icon_after_start(&app).await;
                     let app_reconcile = app.clone();
                     tokio::spawn(async move {
                         let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile)
@@ -2354,6 +2412,7 @@ pub async fn start_core_inner(
             );
         }
         notify_core_started(&app).await;
+        refresh_tray_icon_after_start(&app).await;
         let app_reconcile = app.clone();
         tokio::spawn(async move {
             let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
@@ -2434,6 +2493,7 @@ pub async fn start_core_inner(
     }
 
     notify_core_started(&app).await;
+    refresh_tray_icon_after_start(&app).await;
     let app_reconcile = app.clone();
     tokio::spawn(async move {
         let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
@@ -2614,7 +2674,13 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
     }
 
     if !still_running_root {
+        // The core a live TUN override could describe is gone.
+        super::tun_manager::clear_live_tun_override();
         cleanup_run_config(app);
+        // The tray icon is backend-owned in lightweight mode, where no
+        // frontend sync runs: repaint it now, or the stopped core keeps
+        // showing the TUN / system-proxy icon it had while running.
+        crate::tray::refresh_tray_icon(app);
     }
 
     #[cfg(target_os = "macos")]
