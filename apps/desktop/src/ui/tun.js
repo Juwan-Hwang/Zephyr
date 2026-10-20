@@ -106,7 +106,7 @@ export function initTunToggle() {
                     // path — which re-prompts for administrator rights to kill the
                     // core this very toggle just started.
                     try {
-                        await invoke(RECORD_TUN_ENABLED, { enable: true });
+                        await invoke(RECORD_TUN_ENABLED, { enable: true, alreadyApplied: true });
                     } catch (recordErr) {
                         tunLogger.error('failed to record tun_enabled after root restart', recordErr);
                         committedWithLaterFailure = true;
@@ -192,7 +192,7 @@ export function initTunToggle() {
                 // the toggle would make it disagree with the running core. Same
                 // handling as the macOS branch.
                 try {
-                    await invoke(RECORD_TUN_ENABLED, { enable });
+                    await invoke(RECORD_TUN_ENABLED, { enable, alreadyApplied: true });
                 } catch (recordErr) {
                     tunLogger.error('failed to record tun_enabled after core confirmed TUN', recordErr);
                     committedWithLaterFailure = true;
@@ -267,7 +267,7 @@ export function initTunToggle() {
                             // healthy core and blames it for a settings write.
                             // Leaving the core as it is keeps the state exactly
                             // as it was before the permission grant.
-                            await invoke(RECORD_TUN_ENABLED, { enable: true });
+                            await invoke(RECORD_TUN_ENABLED, { enable: true, alreadyApplied: false });
                         } catch (recordErr) {
                             tunLogger.error('failed to record tun_enabled after permission grant', recordErr);
                             showNotification(
@@ -311,7 +311,7 @@ export function initTunToggle() {
                             // the core would simply stay stopped and the user
                             // would see no error for it.
                             try {
-                                await invoke(RECORD_TUN_ENABLED, { enable: false });
+                                await invoke(RECORD_TUN_ENABLED, { enable: false, alreadyApplied: true });
                             } catch (recordErr) {
                                 tunLogger.error('failed to record tun_enabled=false after retry failure', recordErr);
                             }
