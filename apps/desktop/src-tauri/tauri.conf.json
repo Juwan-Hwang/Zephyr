@@ -57,6 +57,7 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/Header.bmp",
         "sidebarImage": "icons/Sidebar.bmp",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false
