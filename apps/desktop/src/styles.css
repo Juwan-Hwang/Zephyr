@@ -41,6 +41,14 @@
   --font-mono: "Zephyr Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
     "Courier New", monospace;
+  /* 国旗由上面字体的 liga 连字拼出。Blink（含 WebView2）在 letter-spacing 非 0 时
+     会关掉可选连字，节点名的 tracking-tight、节点轮盘的 tracking-wide、规则策略列的
+     tracking-wider 等都会让国旗退化成两个方框字母。显式开启 liga 不受字间距影响。
+     UnoCSS preflight 在 html 上用 --default-font-featureSettings、在 code/kbd/samp/pre
+     上用 --default-monoFont-featureSettings 设置 font-feature-settings，从这两个钩子
+     开启：正文继承 html 的值，等宽元素直接取第二个钩子。 */
+  --default-font-featureSettings: "liga";
+  --default-monoFont-featureSettings: "liga";
   --color-accent: var(--accent-primary, #007AFF);
   --color-accent-glow: var(--accent-glow);
   --color-accent-rgb: var(--accent-rgb);

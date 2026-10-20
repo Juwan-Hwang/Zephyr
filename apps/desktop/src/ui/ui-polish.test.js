@@ -446,3 +446,39 @@ describe('sidebar nav tooltips', () => {
         expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.nav-tooltip\s*\{\s*transition:\s*none/);
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Flag emoji survive letter-spacing
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('flag emoji with letter-spacing', () => {
+    const css = read('styles.css');
+    const uno = read('uno-generated.css');
+    // Bodies of every top-level rule whose selector is exactly `selector`.
+    const rule = (src, selector) => {
+        const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`(?:^|[};\\s])${esc}\\s*\\{([^}]*)\\}`, 'g');
+        return [...src.matchAll(re)].map((m) => m[1]).join('\n');
+    };
+
+    it('the flag font is declared for regional indicators', () => {
+        const face = rule(css, '@font-face');
+        expect(face).toMatch(/font-family:\s*"Zephyr Country Flags"/);
+        expect(face).toMatch(/unicode-range:[^;]*U\+1F1E6-1F1FF/);
+    });
+
+    it('the preflight hooks enable liga so Blink keeps flag ligatures under tracking', () => {
+        const root = rule(css, ':root');
+        expect(root).toMatch(/--default-font-featureSettings:\s*"liga"/);
+        expect(root).toMatch(/--default-monoFont-featureSettings:\s*"liga"/);
+    });
+
+    it('the preflight reads those hooks on html and on monospace elements', () => {
+        expect(rule(uno, 'html, :host')).toMatch(/font-feature-settings:\s*var\(--default-font-featureSettings,/);
+        expect(rule(uno, 'code, kbd, samp, pre')).toMatch(/font-feature-settings:\s*var\(--default-monoFont-featureSettings,/);
+    });
+
+    it('nothing else resets font-feature-settings in our stylesheet', () => {
+        expect(css.match(/font-feature-settings\s*:/g) ?? []).toHaveLength(0);
+    });
+});
