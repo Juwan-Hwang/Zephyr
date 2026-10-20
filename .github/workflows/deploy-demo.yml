@@ -71,6 +71,10 @@ jobs:
           # Icons
           cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/app-lockup.svg dist/app/app-lockup.svg 2>/dev/null || true
+          cp main/apps/desktop/src/app-lockup-dark.svg dist/app/app-lockup-dark.svg 2>/dev/null || true
+          cp main/apps/desktop/src/app-icon.svg dist/app/app-icon.svg
+          cp main/apps/desktop/src/app-icon.svg dist/app-icon.svg
           cp main/apps/desktop/src/app-icon.png dist/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/dark-icon.png 2>/dev/null || true
 
@@ -89,7 +93,9 @@ jobs:
           echo "3. iframe src in site.js:"
           grep -c "app/index.html" dist/site.js
           echo "4. app-icon path in landing page:"
-          grep -c "app-icon.png" dist/index.html
+          grep -c "app-icon.svg" dist/index.html
+          echo "5. SVG icon files in place:"
+          test -f dist/app-icon.svg && test -f dist/app/app-icon.svg && echo "both present"
 
           echo "=== Dist structure ==="
           find dist -maxdepth 2 -type f | sort | head -40
