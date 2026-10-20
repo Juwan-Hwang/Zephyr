@@ -1908,6 +1908,31 @@ if window.app_handle().get_webview_window("main").is_none() {
 invalidate_heartbeat(window.app_handle());
 }
 }
+                // Only Windows picks the idle tray glyph by colour mode
+                // (macOS uses a template image the system re-tints itself,
+                // Linux does not depend on the theme). The status lookup
+                // can shell out to system tools, so it runs off the main
+                // thread.
+                #[cfg(target_os = "windows")]
+                tauri::WindowEvent::ThemeChanged(_) if window.label() == "main" => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        crate::tray::refresh_tray_icon(&app);
+                    });
+                }
+                // Changing only the taskbar colour mode in Windows
+                // Settings updates `SystemUsesLightTheme` without changing
+                // the app colour mode the window reports, so no
+                // ThemeChanged fires for it. That Settings visit takes
+                // focus away from the main window; re-check the glyph when
+                // the window regains focus.
+                #[cfg(target_os = "windows")]
+                tauri::WindowEvent::Focused(true) if window.label() == "main" => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        crate::tray::refresh_tray_icon(&app);
+                    });
+                }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
                     // profile-transform lock, which an encryption batch holds
