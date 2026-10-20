@@ -22,6 +22,10 @@ describe('formatFileSize', () => {
     it('1.00 MB', () => expect(formatFileSize(1048576)).toBe('1.00 MB'));
     it('1.00 TB', () => expect(formatFileSize(1099511627776)).toBe('1.00 TB'));
     it('negative produces NaN result', () => expect(formatFileSize(-1)).toBe('NaN undefined'));
+    it('numeric string is coerced', () => expect(formatFileSize('1024')).toBe('1.00 KB'));
+    it('numeric string zero', () => expect(formatFileSize('0')).toBe('0 B'));
+    it('non-numeric string produces NaN result', () => expect(formatFileSize('abc')).toBe('NaN undefined'));
+    it('values Number() cannot convert produce NaN result', () => expect(formatFileSize(/** @type {any} */ (Symbol('x')))).toBe('NaN undefined'));
 });
 
 describe('formatBytes (decimal)', () => {
