@@ -658,6 +658,7 @@ fn execute_prism_yaml_batch(
     // Step 4: Trigger hot-reload only if no JS overrides will follow
     if trigger_reload {
         crate::prism::pipeline::trigger_hot_reload(state)?;
+        crate::core_manager::core::tun_manager::reconcile_tun_with_run_config(&state.app);
     }
 
     // Build logs for each patch (all share the same compilation result)
@@ -731,6 +732,7 @@ fn execute_prism_yaml_write(
     crate::core_manager::write_file_secure(&run_config_path, &result.output_config)
         .map_err(|e| format!("Failed to write run_config.yaml: {e}"))?;
     crate::prism::pipeline::trigger_hot_reload(state)?;
+    crate::core_manager::core::tun_manager::reconcile_tun_with_run_config(&state.app);
 
     Ok(OverrideLog {
         script_id: item.id.clone(),
@@ -1027,6 +1029,7 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         let js_modified = results.iter().any(|r| r.success && r.config_modified);
         if js_modified || prism_success {
             crate::prism::pipeline::trigger_hot_reload(&state)?;
+            crate::core_manager::core::tun_manager::reconcile_tun_with_run_config(&state.app);
         }
 
         all_logs.extend(exec_logs);
