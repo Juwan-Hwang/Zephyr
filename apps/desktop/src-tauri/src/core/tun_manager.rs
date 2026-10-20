@@ -1548,6 +1548,36 @@ pub fn record_tun_disabled(app: &AppHandle) -> bool {
     false
 }
 
+/// Record TUN as on after the core is already running it.
+///
+/// Mirror of [`record_tun_disabled`] for the on direction, used where
+/// TUN has *already* started, so a failed `settings.json` write cannot
+/// be reported as "TUN still off". The in-memory preference is set to
+/// `true` even then: the tray status reads that memory, and a stale
+/// `false` there would keep showing the non-TUN icon for a core that
+/// is running TUN. The failed write is surfaced as a warning.
+///
+/// Returns whether the preference reached `settings.json`.
+#[must_use]
+pub fn record_tun_started(app: &AppHandle) -> bool {
+    let Err(err) = sync_tun_settings(app, true) else {
+        return true;
+    };
+    let state = app.state::<crate::SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.tun_enabled = Some(true);
+    drop(guard);
+    crate::emit_warn!(
+        Config,
+        CONFIG_PERSIST_FAILED,
+        "TUN is on, but saving that to settings failed: {err}"
+    );
+    false
+}
+
 /// Update TUN enable setting in `run_config.yaml` (without restarting core)
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
@@ -1599,10 +1629,10 @@ pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
-    // Every caller records `false` after TUN has already stopped.
-    // `record_tun_disabled` switches this session to the non-TUN path even when
-    // the write fails; the error only tells the caller to warn that the saved
-    // preference is stale, so the next launch could bring TUN back.
+    // Every caller records a state the core is already in, so both
+    // directions record it in memory even when the write fails; the
+    // error only tells the caller to warn that the saved preference is
+    // stale, so the next launch could pick the wrong path.
     if !enable {
         return if record_tun_disabled(&app) {
             Ok(())
@@ -1610,7 +1640,11 @@ pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), Str
             Err("TUN is off, but saving that preference failed".to_owned())
         };
     }
-    sync_tun_settings(&app, true)
+    if record_tun_started(&app) {
+        Ok(())
+    } else {
+        Err("TUN is on, but saving that preference failed".to_owned())
+    }
 }
 
 /// Initialize TUN mode flag from config file (call at app startup)
