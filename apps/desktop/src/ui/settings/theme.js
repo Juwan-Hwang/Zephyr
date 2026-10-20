@@ -117,10 +117,10 @@ export function initThemeSettings({
     const applyDarkMode = (isDark) => {
         if (isDark) {
             document.documentElement.classList.add('dark');
-            if (appTitleIcon) appTitleIcon.src = 'app-lockup-dark.png';
+            if (appTitleIcon) appTitleIcon.src = 'app-lockup-dark.svg';
         } else {
             document.documentElement.classList.remove('dark');
-            if (appTitleIcon) appTitleIcon.src = 'app-lockup.png';
+            if (appTitleIcon) appTitleIcon.src = 'app-lockup.svg';
         }
         if (appMainContainer) appMainContainer.style.backgroundColor = '';
     };
