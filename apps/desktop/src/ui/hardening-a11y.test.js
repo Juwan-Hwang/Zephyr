@@ -20,6 +20,41 @@ afterEach(() => {
     invokeMock.mockClear();
 });
 
+describe('home page switches and theme swatches accessibility', () => {
+    it('home page toggles have valid aria-labelledby and aria-describedby references', () => {
+        const doc = parseIndex();
+        const switches = [
+            { toggleId: 'sys-proxy-toggle', titleId: 'sys-proxy-title', descId: 'proxy-status-text' },
+            { toggleId: 'tun-proxy-toggle', titleId: 'home-tun-title', descId: 'tun-status-text' },
+        ];
+        for (const { toggleId, titleId, descId } of switches) {
+            const toggle = doc.getElementById(toggleId);
+            expect(toggle, toggleId).toBeTruthy();
+            expect(toggle?.getAttribute('aria-labelledby')).toBe(titleId);
+            expect(toggle?.getAttribute('aria-describedby')).toBe(descId);
+
+            expect(doc.getElementById(titleId), titleId).toBeTruthy();
+            expect(doc.getElementById(descId), descId).toBeTruthy();
+        }
+    });
+
+    it('preset theme color swatches carry translatable aria-labels', () => {
+        const doc = parseIndex();
+        const swatches = [
+            { theme: 'blue', key: 'themeColorBlue' },
+            { theme: 'green', key: 'themeColorGreen' },
+            { theme: 'orange', key: 'themeColorOrange' },
+            { theme: 'pink', key: 'themeColorPink' },
+        ];
+        for (const { theme, key } of swatches) {
+            const btn = doc.querySelector(`button.theme-swatch[data-theme="${theme}"]`);
+            expect(btn, theme).toBeTruthy();
+            expect(btn?.getAttribute('aria-label')).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-aria-label')).toBe(key);
+        }
+    });
+});
+
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();
