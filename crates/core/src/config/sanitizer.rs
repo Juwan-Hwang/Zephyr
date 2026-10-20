@@ -115,6 +115,44 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
     }
 }
 
+/// Whether `name` appears in `map` once YAML merge keys are resolved the way
+/// mihomo resolves them: a key inherited through `<<` counts, whether the
+/// merge source is a single mapping, a sequence of mappings, or a tagged
+/// version of either, and merge sources may themselves carry `<<`.
+fn merged_mapping_has_key(map: &serde_yaml::Mapping, name: &str, depth: usize) -> bool {
+    if map.keys().any(|k| resolved_key_str(k) == Some(name)) {
+        return true;
+    }
+    if depth > MAX_YAML_DEPTH {
+        return false;
+    }
+    map.iter()
+        .filter(|(k, _)| resolved_key_str(k) == Some(YAML_MERGE_KEY))
+        .any(|(_, source)| merged_value_has_key(source, name, depth + 1))
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_value_has_key(value: &serde_yaml::Value, name: &str, depth: usize) -> bool {
+    if depth > MAX_YAML_DEPTH {
+        return false;
+    }
+    match value {
+        // The mapping is the merge source itself, not a deeper nesting
+        // level: keep the depth the caller already accounted for, so this
+        // lookup advances exactly like `remove_dangerous_keys_internal`
+        // (one level per merge hop). Counting the mapping again would
+        // exhaust the depth budget after roughly half as many hops and
+        // let a provider hide its `type`/`url` at the end of a long
+        // merge chain while its local `path` survives.
+        serde_yaml::Value::Mapping(map) => merged_mapping_has_key(map, name, depth),
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter()
+            .any(|item| merged_value_has_key(item, name, depth + 1)),
+        serde_yaml::Value::Tagged(tagged) => merged_value_has_key(&tagged.value, name, depth + 1),
+        _ => false,
+    }
+}
+
 /// Internal implementation with depth tracking.
 #[allow(clippy::wildcard_enum_match_arm)]
 fn remove_dangerous_keys_internal(
@@ -153,8 +191,10 @@ fn remove_dangerous_keys_internal(
             // Check if this mapping looks like a provider
             // Providers have 'type' and either 'url' or 'path' fields
             // (keys are matched through explicit tags such as `!!str path`,
-            // which mihomo resolves to the plain key).
-            let has_key = |name: &str| map.keys().any(|k| resolved_key_str(k) == Some(name));
+            // which mihomo resolves to the plain key, and keys inherited
+            // through a `<<` merge key count too: a provider that inherits
+            // 'type' and 'url' but defines 'path' locally is still a provider).
+            let has_key = |name: &str| merged_mapping_has_key(map, name, depth);
             let is_provider = has_key("type") && (has_key("url") || has_key("path"));
 
             // Remove 'path' only in provider context to prevent path traversal
@@ -163,9 +203,21 @@ fn remove_dangerous_keys_internal(
                 remove_keys_resolved(map, &["path"]);
             }
 
-            // Recursively process all values in the mapping
-            for (_, v) in map.iter_mut() {
-                remove_dangerous_keys_internal(v, is_provider, depth + 1);
+            // Recursively process all values in the mapping. A `<<` merge
+            // source is part of this same logical mapping once mihomo
+            // resolves it, so it inherits the provider context this
+            // mapping was itself visited with, not just this mapping's
+            // own classification: otherwise a merge source nested inside
+            // another merge source would drop the context after one hop
+            // and keep a `path` the outer provider should have stripped.
+            for (k, v) in map.iter_mut() {
+                let is_merge_source = resolved_key_str(k) == Some(YAML_MERGE_KEY);
+                let child_in_provider_context = if is_merge_source {
+                    in_provider_context || is_provider
+                } else {
+                    is_provider
+                };
+                remove_dangerous_keys_internal(v, child_in_provider_context, depth + 1);
             }
         }
         serde_yaml::Value::Sequence(seq) => {
@@ -173,6 +225,12 @@ fn remove_dangerous_keys_internal(
             for item in seq.iter_mut() {
                 remove_dangerous_keys_internal(item, in_provider_context, depth + 1);
             }
+        }
+        serde_yaml::Value::Tagged(tagged) => {
+            // A tagged value wraps the real node: mihomo's decoder looks
+            // through the tag, so a tagged mapping must be sanitised exactly
+            // like the mapping it wraps instead of being skipped.
+            remove_dangerous_keys_internal(&mut tagged.value, in_provider_context, depth + 1);
         }
         _ => {}
     }
@@ -511,6 +569,99 @@ proxy-providers:
         assert!(provider.contains_key(serde_yaml::Value::String("type".to_owned())));
     }
 
+    #[test]
+    fn test_provider_path_removed_when_type_and_url_inherited_via_merge_key() {
+        let yaml = r"
+base: &base
+  type: http
+  url: https://example.com/proxies.yaml
+proxy-providers:
+  my-provider:
+    <<: *base
+    path: /etc/passwd
+    interval: 3600
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let providers = value.get("proxy-providers").unwrap().as_mapping().unwrap();
+        let provider = providers
+            .get(serde_yaml::Value::String("my-provider".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert!(
+            provider.keys().all(|k| resolved_key_str(k) != Some("path")),
+            "path survived merge-key provider detection: {provider:?}"
+        );
+        // Resolving the merge the way mihomo does must not resurface `path`.
+        let mut merged_provider = value
+            .get("proxy-providers")
+            .and_then(|v| v.get("my-provider"))
+            .cloned()
+            .unwrap();
+        resolve_merges(&mut merged_provider);
+        let merged = merged_provider.as_mapping().unwrap();
+        assert!(merged.keys().all(|k| resolved_key_str(k) != Some("path")));
+        assert_eq!(merged.get("type").unwrap().as_str().unwrap(), "http");
+        assert_eq!(merged.get("interval").unwrap().as_i64().unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_provider_path_removed_from_doubly_nested_merge_source() {
+        // The `path` sits in a merge source nested inside another merge
+        // source. The middle mapping has no `type`/`url` of its own, so
+        // the provider context of the outer provider must be carried
+        // through both merge hops or the inner `path` survives.
+        let yaml = r"
+proxy-providers:
+  p:
+    type: http
+    url: https://example.com/p.yaml
+    <<:
+      <<: {path: /etc/passwd}
+";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let out = serde_yaml::to_string(&value).unwrap();
+        assert!(!out.contains("/etc/passwd"), "path survived: {out}");
+        // Resolving the merges the way mihomo does must not resurface it.
+        let mut provider = value
+            .get("proxy-providers")
+            .and_then(|v| v.get("p"))
+            .cloned()
+            .unwrap();
+        resolve_merges(&mut provider);
+        let merged = provider.as_mapping().unwrap();
+        assert!(merged.keys().all(|k| resolved_key_str(k) != Some("path")));
+        assert_eq!(merged.get("type").unwrap().as_str().unwrap(), "http");
+    }
+
+    #[test]
+    fn test_provider_detected_through_long_merge_chain() {
+        // `type`/`url` inherited through 60 merge hops must still mark
+        // the destination mapping as a provider. Merge-key detection
+        // advances one depth level per hop, exactly like the sanitizer
+        // traversal; counting each hop twice would give up halfway and
+        // leave the local `path` in place.
+        let mut yaml = String::from("b0: &b0\n  type: http\n  url: https://example.com/p.yaml\n");
+        for i in 1..60 {
+            let prev = i - 1;
+            yaml.push_str(&format!("b{i}: &b{i}\n  <<: *b{prev}\n"));
+        }
+        yaml.push_str("proxy-providers:\n  p:\n    <<: *b59\n    path: /etc/passwd\n");
+        let mut value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let provider = value
+            .get("proxy-providers")
+            .and_then(|v| v.get("p"))
+            .and_then(serde_yaml::Value::as_mapping)
+            .unwrap();
+        assert!(
+            provider.keys().all(|k| resolved_key_str(k) != Some("path")),
+            "path survived long merge chain: {provider:?}"
+        );
+    }
+
     fn top_level_keys(value: &serde_yaml::Value) -> Vec<String> {
         value
             .as_mapping()
@@ -582,6 +733,18 @@ proxy-providers:
             "tagged path survived: {provider:?}"
         );
         assert!(provider.contains_key("url"));
+    }
+
+    #[test]
+    fn test_dangerous_keys_removed_inside_tagged_values() {
+        let yaml = "proxy-providers:\n  p: !custom {type: http, url: 'https://example.com/p.yaml', path: /etc/passwd}\nwrapper: !custom {script: evil.js, name: keep}\n";
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        remove_dangerous_keys_internal_pub(&mut value, false);
+        let out = serde_yaml::to_string(&value).unwrap();
+        assert!(!out.contains("/etc/passwd"), "path survived: {out}");
+        assert!(!out.contains("script"), "script survived: {out}");
+        assert!(out.contains("example.com"), "provider lost: {out}");
+        assert!(out.contains("keep"), "benign value lost: {out}");
     }
 
     #[test]
