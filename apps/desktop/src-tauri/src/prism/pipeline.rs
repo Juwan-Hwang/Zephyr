@@ -214,6 +214,7 @@ pub fn execute_write_pipeline(
         if let Some(modified) = &result.modified_config {
             write_running_config(state, modified)?;
             trigger_hot_reload(state)?;
+            crate::core_manager::core::tun_manager::reconcile_tun_with_run_config(&state.app);
         }
     }
 
@@ -361,6 +362,7 @@ pub fn execute_batch_pipeline(
         write_running_config(state, &config)?;
         if hot_reload {
             trigger_hot_reload(state)?;
+            crate::core_manager::core::tun_manager::reconcile_tun_with_run_config(&state.app);
         }
     }
 

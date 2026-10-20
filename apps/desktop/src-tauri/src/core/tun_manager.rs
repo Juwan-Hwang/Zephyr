@@ -1548,6 +1548,36 @@ pub fn record_tun_disabled(app: &AppHandle) -> bool {
     false
 }
 
+/// Record TUN as on after the core is already running it.
+///
+/// Mirror of [`record_tun_disabled`] for the on direction, used where
+/// TUN has *already* started, so a failed `settings.json` write cannot
+/// be reported as "TUN still off". The in-memory preference is set to
+/// `true` even then: the tray status reads that memory, and a stale
+/// `false` there would keep showing the non-TUN icon for a core that
+/// is running TUN. The failed write is surfaced as a warning.
+///
+/// Returns whether the preference reached `settings.json`.
+#[must_use]
+pub fn record_tun_started(app: &AppHandle) -> bool {
+    let Err(err) = sync_tun_settings(app, true) else {
+        return true;
+    };
+    let state = app.state::<crate::SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.tun_enabled = Some(true);
+    drop(guard);
+    crate::emit_warn!(
+        Config,
+        CONFIG_PERSIST_FAILED,
+        "TUN is on, but saving that to settings failed: {err}"
+    );
+    false
+}
+
 /// Update TUN enable setting in `run_config.yaml` (without restarting core)
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
@@ -1584,25 +1614,39 @@ pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String
     set_tun_enabled_internal(&app, enable)
 }
 
-/// Record the TUN preference after a caller has already applied TUN to the core.
+/// Record the TUN preference for a state a caller has applied — or, with
+/// `already_applied: false`, is about to apply.
 ///
-/// [`set_tun_enabled`] is the command for "make the core like this"; this one is
-/// for the flows that have already done that themselves — the privileged
-/// macOS restart, the non-macOS config patch, the Linux permission-gated
-/// restart — and only need the setting recorded. It deliberately does not touch
+/// [`set_tun_enabled`] is the command for "make the core like this"; this one
+/// is for the flows that handle the core themselves — the privileged macOS
+/// restart, the non-macOS config patch, the Linux permission-gated restart —
+/// and only need the setting recorded. It deliberately does not touch
 /// `run_config.yaml`, so it cannot undo a change those flows made.
 ///
 /// It exists so `patch_settings` can reject a non-null `tun_enabled`: a generic
 /// settings write is not aware that the flag describes the *running* core, and a
 /// stale or racing one could persist a value that disagrees with it. macOS
 /// startup reads this flag to choose the TUN path.
+///
+/// `already_applied` decides what a failed `settings.json` write leaves
+/// behind. When the core is already in the recorded state, the in-memory
+/// preference is updated even then: the error only tells the caller to warn
+/// that the saved preference is stale, so the next launch could pick the
+/// wrong path. The Linux permission-grant flow is the one caller that
+/// records *before* its restart, and it aborts on a failed write precisely
+/// so the state stays exactly as it was — for it a failed write must leave
+/// memory unchanged too, or the next core start would bring TUN up on a
+/// preference the user was just told did not take effect.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
-    // Every caller records `false` after TUN has already stopped.
-    // `record_tun_disabled` switches this session to the non-TUN path even when
-    // the write fails; the error only tells the caller to warn that the saved
-    // preference is stale, so the next launch could bring TUN back.
+pub fn record_tun_enabled(
+    app: tauri::AppHandle,
+    enable: bool,
+    already_applied: bool,
+) -> Result<(), String> {
+    if !already_applied {
+        return sync_tun_settings(&app, enable);
+    }
     if !enable {
         return if record_tun_disabled(&app) {
             Ok(())
@@ -1610,7 +1654,49 @@ pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), Str
             Err("TUN is off, but saving that preference failed".to_owned())
         };
     }
-    sync_tun_settings(&app, true)
+    if record_tun_started(&app) {
+        Ok(())
+    } else {
+        Err("TUN is on, but saving that preference failed".to_owned())
+    }
+}
+
+/// Reconcile the recorded TUN preference with the `tun.enable` an
+/// external writer just put into `run_config.yaml`.
+///
+/// Override scripts and patch batches rewrite the running config and
+/// hot-reload the core without going through the TUN commands, so the
+/// recorded preference can disagree with the core that is actually
+/// running — and tray status trusts that record over the file. When the
+/// two disagree, record the applied state the same way the flows that
+/// start or stop TUN on a live core do. With nothing recorded yet the
+/// tray falls back to the file itself, which already says the right
+/// thing, so there is nothing to reconcile.
+///
+/// Best-effort: a config that cannot be read leaves the record as it is.
+pub fn reconcile_tun_with_run_config(app: &AppHandle) {
+    let Ok(paths) = resolve_app_paths(app) else {
+        return;
+    };
+    let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) else {
+        return;
+    };
+    let applied = extract_tun_enabled_from_yaml(&content);
+    let recorded = {
+        let state = app.state::<crate::SettingsState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.tun_enabled
+    };
+    if recorded.is_some_and(|v| v != applied) {
+        if applied {
+            let _ = record_tun_started(app);
+        } else {
+            let _ = record_tun_disabled(app);
+        }
+    }
 }
 
 /// Initialize TUN mode flag from config file (call at app startup)
