@@ -164,12 +164,12 @@
                             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                         </div>
                         <div class="min-w-0">
-                            <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
+                            <h3 id="sys-proxy-title" class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
                             <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
                         </div>
                     </div>
                     <label class="ios-switch switch-lg shrink-0">
-    <input type="checkbox" id="sys-proxy-toggle">
+    <input type="checkbox" id="sys-proxy-toggle" aria-labelledby="sys-proxy-title" aria-describedby="proxy-status-text">
     <span class="switch-slider"></span>
 </label>
                 </div>
@@ -198,10 +198,10 @@
                                 <div class="w-8 h-8 shrink-0 rounded-[10px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
                                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                 </div>
-                                <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
+                                <h3 id="home-tun-title" class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
                             </div>
                             <label class="ios-switch shrink-0">
-    <input type="checkbox" id="tun-proxy-toggle">
+    <input type="checkbox" id="tun-proxy-toggle" aria-labelledby="home-tun-title" aria-describedby="tun-status-text">
     <span class="switch-slider"></span>
 </label>
                         </div>
@@ -517,10 +517,10 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button type="button" data-theme="blue" aria-label="blue" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="green" aria-label="green" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="orange" aria-label="orange" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="pink" aria-label="pink" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="blue" aria-label="Blue" data-i18n-aria-label="themeColorBlue" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="green" aria-label="Green" data-i18n-aria-label="themeColorGreen" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="orange" aria-label="Orange" data-i18n-aria-label="themeColorOrange" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="pink" aria-label="Pink" data-i18n-aria-label="themeColorPink" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
                                     <div class="relative group">
                                         <input type="color" id="custom-theme-color" aria-label="Theme Color" data-i18n-aria-label="themeColor" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
                                         <div id="custom-theme-swatch" class="theme-swatch w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 via-emerald-500 to-amber-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
