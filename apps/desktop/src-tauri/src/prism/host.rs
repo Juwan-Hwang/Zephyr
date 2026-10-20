@@ -229,6 +229,28 @@ impl PrismHost for ZephyrPrismHost {
         let hot_reload_success =
             http_status_code.is_some_and(crate::network_coordinator::is_http_success);
 
+        if hot_reload_success {
+            // This path hot-reloads on its own instead of going through
+            // `trigger_hot_reload_and_reconcile_tun`, so it owes the same
+            // reconciliation: a patch applied here can flip `tun.enable`
+            // on the running core, and without it the tray keeps
+            // reporting the recorded preference. Confirm the applied
+            // state with the core first, exactly as the pipeline path
+            // does — the file alone is never enough.
+            let app = self.app.clone();
+            // Same generation snapshot as the pipeline path: a TUN
+            // preference recorded while the core is being asked voids
+            // this reconciliation.
+            let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
+            std::thread::spawn(move || {
+                if let Some(applied) = super::pipeline::confirmed_tun_enabled(port, &secret) {
+                    crate::core_manager::core::tun_manager::reconcile_tun_with_core(
+                        &app, applied, epoch,
+                    );
+                }
+            });
+        }
+
         Ok(ApplyStatus {
             files_saved: true,
             hot_reload_success,
