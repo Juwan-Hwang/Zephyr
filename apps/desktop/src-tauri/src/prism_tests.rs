@@ -1393,5 +1393,23 @@ rules:
             let with_ext = ensure_prism_ext(&sanitized);
             assert_eq!(with_ext, "广告过滤.prism.yaml");
         }
+
+        #[test]
+        fn remove_dangerous_keys_strips_script_and_control_plane_from_prism_rule_yaml() {
+            use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
+
+            let yaml = "\
+script: malicious.js
+external-controller-unix: /tmp/mihomo.sock
+rules:
+  - DOMAIN-SUFFIX,example.com,PROXY
+";
+            let mut val: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            remove_dangerous_keys(&mut val, false);
+            let map = val.as_mapping().unwrap();
+            assert!(!map.contains_key(&serde_yaml::Value::String("script".to_owned())));
+            assert!(!map.contains_key(&serde_yaml::Value::String("external-controller-unix".to_owned())));
+            assert!(map.contains_key(&serde_yaml::Value::String("rules".to_owned())));
+        }
     }
 }
