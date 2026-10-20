@@ -218,7 +218,7 @@ async function retryStartWithoutTun(settings, startArgs, startErr) {
   if (typeof startErr !== 'string' || !startErr.startsWith(TUN_START_FAILED_MARKER)) {
     throw startErr;
   }
-  await invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: false }).catch((e) => {
+  await invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: false, alreadyApplied: true }).catch((e) => {
     apiLogger.warn('[Zephyr] saving TUN off before the retry failed', e);
   });
   apiLogger.warn('[Zephyr] TUN start failed; retrying without TUN', startErr);
@@ -229,7 +229,7 @@ async function retryStartWithoutTun(settings, startArgs, startErr) {
     apiLogger.warn('[Zephyr] start without TUN failed too', retryErr);
     // `tun_enabled` only accepts null through PATCH_SETTINGS (the reset).
     const restore = settings.tun_enabled === true
-      ? invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: true })
+      ? invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: true, alreadyApplied: true })
       : invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
     await restore.catch((e) => {
       apiLogger.warn('[Zephyr] restoring the TUN preference failed', e);

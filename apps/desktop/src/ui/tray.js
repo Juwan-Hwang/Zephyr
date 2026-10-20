@@ -391,9 +391,10 @@ export function startUnifiedSync() {
 
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const [realSysProxyState, actualMode, hasOwnership] = await Promise.all([
+            const [realSysProxyState, actualMode, proxyStatus, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.GET_TRAY_STATUS),
+                invoke(COMMANDS.GET_TRAY_PROXY_STATUS),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
 
@@ -407,6 +408,24 @@ export function startUnifiedSync() {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
+            }
+
+            // `get_tray_status` answers from the backend's live TUN state,
+            // while `expectedMode` below is built from this store. If the
+            // two disagree about TUN, re-applying the store's mode (the
+            // mismatch correction below) can never converge: the status
+            // does not read the icon the correction sets, so the sync
+            // would re-push the same mode every tick and the backend's
+            // own refresh would keep flipping the icon back. While the
+            // core is running its state is the truth the toggle claims
+            // to show, so align the store with it first. When the core
+            // is stopped the status carries no TUN information and the
+            // store's preference is left alone.
+            if (proxyStatus !== 'stopped') {
+                const backendTunEnabled = actualMode === 'tun';
+                if (backendTunEnabled !== appStore.get('isTunEnabled')) {
+                    appStore.set('isTunEnabled', backendTunEnabled);
+                }
             }
 
             let expectedMode;

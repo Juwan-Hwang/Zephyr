@@ -2056,13 +2056,10 @@ pub async fn start_core_inner(
     ) {
         record_running_root_core_exe(app);
         set_tun_mode(true);
-        if let Err(err) = super::tun_manager::sync_tun_settings(app, true) {
-            emit_warn!(
-                Config,
-                CONFIG_PERSIST_FAILED,
-                "Failed to record tun_enabled after adopting root TUN core: {err}"
-            );
-        }
+        // The adopted core is running TUN, so record it in memory even
+        // if the preference write fails; `record_tun_started` warns
+        // about the failed write itself.
+        let _ = super::tun_manager::record_tun_started(app);
         // The script already terminated any tracked child; reap it before
         // replacing the tracked state so it does not linger as a zombie.
         reap_tracked_child(app).await;
