@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - 现代 Mihomo GUI 客户端 Logo" width="128" height="128">
+<img src="apps/desktop/src-tauri/icons/lockup.png" alt="Zephyr - 现代 Mihomo GUI 客户端 Logo" width="420">
 
 # Zephyr
 

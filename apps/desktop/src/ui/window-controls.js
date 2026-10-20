@@ -46,8 +46,8 @@ function maybeShowTrayHint() {
 /**
  * Initialize window control event listeners.
  * - Close button: closes the application window
- * - Core loading icon: falls back to dark-icon.png on error
- * - App title icon: falls back to app-icon.png on error
+ * - Core loading icon: falls back to app-lockup-dark.png on error
+ * - App title lockup: falls back to app-lockup.png on error
  */
 export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
@@ -67,14 +67,14 @@ export function initWindowControls() {
     const coreLoadingIcon = document.getElementById('core-loading-icon');
     if (coreLoadingIcon) {
         /** @type {HTMLImageElement} */ (coreLoadingIcon).addEventListener('error', function() {
-            /** @type {HTMLImageElement} */ (this).src = 'dark-icon.png';
+            /** @type {HTMLImageElement} */ (this).src = 'app-lockup-dark.png';
         }, { once: true });
     }
 
     const appTitleIcon = document.getElementById('app-title-icon');
     if (appTitleIcon) {
         /** @type {HTMLImageElement} */ (appTitleIcon).addEventListener('error', function() {
-            /** @type {HTMLImageElement} */ (this).src = 'app-icon.png';
+            /** @type {HTMLImageElement} */ (this).src = 'app-lockup.png';
         }, { once: true });
     }
 

@@ -71,6 +71,8 @@ jobs:
           # Icons
           cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/app-lockup.png dist/app/app-lockup.png 2>/dev/null || true
+          cp main/apps/desktop/src/app-lockup-dark.png dist/app/app-lockup-dark.png 2>/dev/null || true
           cp main/apps/desktop/src/app-icon.png dist/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/dark-icon.png 2>/dev/null || true
 

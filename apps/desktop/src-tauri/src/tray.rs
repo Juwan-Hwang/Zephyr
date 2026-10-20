@@ -120,19 +120,54 @@ pub fn set_tray_menu_state(app: AppHandle, new_state: TrayMenuState) -> Result<(
     Ok(())
 }
 
-/// Change tray icon based on mode
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+/// Pick the idle (no proxy mode active) tray icon for the current platform.
+///
+/// - macOS: a pure-black template image. The system tints template images
+///   to match the menu bar, so it must be applied with
+///   `set_icon_as_template(true)`.
+/// - Windows: a plain glyph on transparency — ink for light taskbars, white
+///   for dark ones — chosen from the main window's current theme. When the
+///   window does not exist (lightweight mode) fall back to the white glyph:
+///   the Windows 11 default taskbar is dark.
+/// - Other platforms: the full app icon tile, as before.
+fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        (include_bytes!("../icons/tray-idle-template.png"), true)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let dark_taskbar = app
+            .get_window("main")
+            .and_then(|window| window.theme().ok())
+            .map_or(true, |theme| theme == tauri::Theme::Dark);
+        if dark_taskbar {
+            (include_bytes!("../icons/tray-idle-dark.png"), false)
+        } else {
+            (include_bytes!("../icons/tray-idle-light.png"), false)
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        #[allow(clippy::large_include_file)]
+        let bytes: &[u8] = include_bytes!("../icons/icon.png");
+        (bytes, false)
+    }
+}
+
+/// Apply the tray icon for `mode`: "tun", "sysproxy", or idle for anything else.
+fn apply_tray_icon(app: &AppHandle, mode: &str) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;
 
     #[allow(clippy::large_include_file)]
-    let icon_bytes: &[u8] = match mode.as_str() {
-        "tun" => include_bytes!("../icons/red-icon.png"),
-        "sysproxy" => include_bytes!("../icons/yellow-icon.png"),
-        _ => include_bytes!("../icons/icon.png"),
+    let (icon_bytes, as_template): (&[u8], bool) = match mode {
+        "tun" => (include_bytes!("../icons/tray-tun.png"), false),
+        "sysproxy" => (include_bytes!("../icons/tray-proxy.png"), false),
+        _ => idle_tray_icon(app),
     };
 
     let image = Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
@@ -140,7 +175,23 @@ pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
     tray.set_icon(Some(image))
         .map_err(|e| format!("Failed to set icon: {e}"))?;
 
+    // Template images only exist on macOS. The coloured state icons must
+    // explicitly leave template mode again, otherwise the system would
+    // tint them monochrome.
+    #[cfg(target_os = "macos")]
+    tray.set_icon_as_template(as_template)
+        .map_err(|e| format!("Failed to set icon template mode: {e}"))?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = as_template;
+
     Ok(())
+}
+
+/// Change tray icon based on mode
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+    apply_tray_icon(&app, mode.as_str())
 }
 
 /// Get current proxy mode for tray status
@@ -233,6 +284,10 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     tray_builder
         .build(app)
         .map_err(|e| format!("Failed to build tray: {e}"))?;
+
+    // Start from the platform's idle icon (template image on macOS,
+    // theme-matched glyph on Windows) instead of the window icon.
+    let _ = apply_tray_icon(app, "default");
 
     Ok(())
 }
