@@ -55,6 +55,15 @@ jobs:
 
           # 4. Copy demo-specific files to dist/
           cp demo-branch/landing.html dist/index.html
+          # The demo branch's landing page predates the new mark: point
+          # its favicon and launch image at the SVG copied to dist/
+          # below, the same references the in-repo landing page uses.
+          # The grep afterwards fails the step if a reference did not
+          # take, so a stale icon never ships silently.
+          sed -i 's#<link rel="apple-touch-icon" href="./app-icon.png" />#<link rel="icon" type="image/svg+xml" href="./app-icon.svg" />\n  <link rel="apple-touch-icon" href="./app-icon.png" />#' dist/index.html
+          sed -i 's#<img src="./app-icon.png" alt="Zephyr" class="demo-launch-icon"#<img src="./app-icon.svg" alt="Zephyr" class="demo-launch-icon"#' dist/index.html
+          grep -q 'rel="icon" type="image/svg+xml" href="./app-icon.svg"' dist/index.html
+          grep -q 'src="./app-icon.svg" alt="Zephyr" class="demo-launch-icon"' dist/index.html
           cp demo-branch/site.js dist/site.js
           cp demo-branch/site.css dist/site.css
           cp demo-branch/os.css dist/os.css
@@ -71,6 +80,10 @@ jobs:
           # Icons
           cp main/apps/desktop/src/app-icon.png dist/app/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/app/dark-icon.png 2>/dev/null || true
+          cp main/apps/desktop/src/app-lockup.svg dist/app/app-lockup.svg
+          cp main/apps/desktop/src/app-lockup-dark.svg dist/app/app-lockup-dark.svg
+          cp main/apps/desktop/src/app-icon.svg dist/app/app-icon.svg
+          cp main/apps/desktop/src/app-icon.svg dist/app-icon.svg
           cp main/apps/desktop/src/app-icon.png dist/app-icon.png 2>/dev/null || true
           cp main/apps/desktop/src/dark-icon.png dist/dark-icon.png 2>/dev/null || true
 
@@ -88,8 +101,26 @@ jobs:
           grep -c "mock-api" dist/app/main.js
           echo "3. iframe src in site.js:"
           grep -c "app/index.html" dist/site.js
-          echo "4. app-icon path in landing page:"
+          # dist/index.html is the demo branch's landing page, not the
+          # one in this repo: the assemble step rewrites its favicon and
+          # launch image to the SVG, while the PNG references stay as
+          # the touch icon and PNG favicon fallbacks.
+          echo "4. app-icon paths in landing page:"
+          grep -c "app-icon.svg" dist/index.html
           grep -c "app-icon.png" dist/index.html
+          echo "5. lockup SVG referenced in app page:"
+          grep -c "app-lockup.svg" dist/app/index.html
+          echo "6. Icon files in place:"
+          # Separate statements, not an && chain: under `bash -e` a
+          # failing link in an && chain does not stop the step, and the
+          # step's last command exits 0, so a missing icon would deploy
+          # anyway. As plain statements each failed check fails the step.
+          test -f dist/app-icon.png
+          test -f dist/app-icon.svg
+          test -f dist/app/app-icon.svg
+          test -f dist/app/app-lockup.svg
+          test -f dist/app/app-lockup-dark.svg
+          echo "all present"
 
           echo "=== Dist structure ==="
           find dist -maxdepth 2 -type f | sort | head -40
