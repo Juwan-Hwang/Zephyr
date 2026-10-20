@@ -111,12 +111,13 @@ pub fn rule_create(
         return Err(format!("Rule file '{filename}' already exists"));
     }
     // Strip dangerous keys from YAML input to prevent injection
-    let safe_content = if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-        remove_dangerous_keys(&mut yaml_value, false);
-        serde_yaml::to_string(&yaml_value).unwrap_or(content)
-    } else {
-        content
-    };
+    let safe_content =
+        if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            remove_dangerous_keys(&mut yaml_value, false);
+            serde_yaml::to_string(&yaml_value).unwrap_or(content)
+        } else {
+            content
+        };
     write_file_secure(&path, &safe_content)?;
     Ok(filename)
 }
@@ -134,12 +135,13 @@ pub fn rule_update(
         return Err(format!("Rule file '{filename}' not found"));
     }
     // Strip dangerous keys from YAML input to prevent injection
-    let safe_content = if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-        remove_dangerous_keys(&mut yaml_value, false);
-        serde_yaml::to_string(&yaml_value).unwrap_or(content)
-    } else {
-        content
-    };
+    let safe_content =
+        if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            remove_dangerous_keys(&mut yaml_value, false);
+            serde_yaml::to_string(&yaml_value).unwrap_or(content)
+        } else {
+            content
+        };
     write_file_secure(&path, &safe_content)
 }
 

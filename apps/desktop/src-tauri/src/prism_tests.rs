@@ -1407,9 +1407,9 @@ rules:
             let mut val: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             remove_dangerous_keys(&mut val, false);
             let map = val.as_mapping().unwrap();
-            assert!(!map.contains_key(&serde_yaml::Value::String("script".to_owned())));
-            assert!(!map.contains_key(&serde_yaml::Value::String("external-controller-unix".to_owned())));
-            assert!(map.contains_key(&serde_yaml::Value::String("rules".to_owned())));
+            assert!(!map.contains_key("script"));
+            assert!(!map.contains_key("external-controller-unix"));
+            assert!(map.contains_key("rules"));
         }
     }
 }
