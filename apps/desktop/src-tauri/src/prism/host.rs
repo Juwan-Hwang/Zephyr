@@ -221,6 +221,22 @@ impl PrismHost for ZephyrPrismHost {
         // from disk — NOT the raw YAML config. Sending raw YAML with
         // Content-Type: application/json causes a silent 400 Bad Request.
         let body = serde_json::json!({ "path": run_config_path.to_string_lossy() }).to_string();
+        // Snapshot the live-state generation before the reload, as the
+        // pipeline path does: the PUT below can block for seconds, and a
+        // snapshot taken only after it returns would include a TUN
+        // preference recorded in the meantime, letting the reconciliation
+        // below vouch for a result that preference should have voided.
+        // The reload-and-reconcile sequence lock itself is only taken
+        // on the reconciliation thread below, not here: this thread runs
+        // under the Prism inner lock, and blocking it on a sequence in
+        // flight would stall every command behind that lock for the
+        // other sequence's whole confirmation — and a standard mutex
+        // guard taken here could not be handed to that thread anyway
+        // (`MutexGuard` is not `Send`). A publish that lands between
+        // this snapshot and the reconciliation bumps the generation and
+        // voids this result, and the tray then keeps that newer
+        // publisher's state, which is the core's latest word.
+        let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
         // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
@@ -228,6 +244,40 @@ impl PrismHost for ZephyrPrismHost {
         set_current_apply_http_status(http_status_code);
         let hot_reload_success =
             http_status_code.is_some_and(crate::network_coordinator::is_http_success);
+
+        if hot_reload_success {
+            // This path hot-reloads on its own instead of going through
+            // `trigger_hot_reload_and_reconcile_tun`, so it owes the same
+            // reconciliation: a patch applied here can flip `tun.enable`
+            // on the running core, and without it the tray keeps
+            // reporting the recorded preference. Confirm the applied
+            // state with the core first, exactly as the pipeline path
+            // does — the file alone is never enough.
+            let app = self.app.clone();
+            // The generation snapshot was taken before the PUT above:
+            // a TUN preference recorded while the core is being asked
+            // voids this reconciliation. The sequence lock is taken and
+            // released on this thread, so the confirmation and the
+            // publication it feeds are serialized against the pipeline
+            // path's sequences; the tray repaint runs only after the
+            // lock is released, because tray writes wait on the main
+            // thread (see `reconcile_tun_with_core`).
+            std::thread::spawn(move || {
+                let tray_refresh_needed = {
+                    let _sequence = super::pipeline::acquire_reload_reconcile_lock();
+                    if let Some(applied) = super::pipeline::confirmed_tun_enabled(port, &secret) {
+                        crate::core_manager::core::tun_manager::reconcile_tun_with_core(
+                            &app, applied, epoch,
+                        )
+                    } else {
+                        false
+                    }
+                };
+                if tray_refresh_needed {
+                    crate::core_manager::core::tun_manager::refresh_tray_after_reconcile(&app);
+                }
+            });
+        }
 
         Ok(ApplyStatus {
             files_saved: true,
