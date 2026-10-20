@@ -6,6 +6,7 @@
 //! - Left-click to show window, right-click to show menu
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{
     image::Image,
@@ -120,19 +121,146 @@ pub fn set_tray_menu_state(app: AppHandle, new_state: TrayMenuState) -> Result<(
     Ok(())
 }
 
-/// Change tray icon based on mode
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+/// Generation of the last claimed tray icon update, with the mode that
+/// claim asked for. A refresh reads the proxy status slowly (it can
+/// shell out), so it snapshots the generation first and claims the next
+/// one only if no other writer — a proxy toggle, the frontend, init —
+/// has claimed one in the meantime; otherwise its now-stale icon would
+/// land on top of the fresher one.
+///
+/// Claiming alone cannot order the icon writes themselves: `set_icon`
+/// runs on the main thread and waits for it, so holding a lock across
+/// it could deadlock against a main-thread caller waiting for the same
+/// lock, and a writer can still be mid-apply when a newer claim lands.
+/// Writers therefore record the mode they claimed — before publishing
+/// the generation that goes with it, so a newer generation is never
+/// read alongside the previous claim's mode — and after applying, a
+/// writer that finds a newer claim re-applies that claim's mode. The
+/// correction is sent after its own stale write, and the newer writer's
+/// write lands either before it (the correction repeats the same icon)
+/// or after it (it wins directly): either way the last write on the
+/// tray is the newest claimed mode.
+static TRAY_ICON_GENERATION: AtomicU64 = AtomicU64::new(0);
+static TRAY_ICON_CLAIMED_MODE: Mutex<String> = Mutex::new(String::new());
+
+/// Record `mode` as the newest claim and publish its generation.
+fn claim_tray_icon(mode: &str) -> u64 {
+    let mut claimed = TRAY_ICON_CLAIMED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *claimed = mode.to_owned();
+    drop(claimed);
+    TRAY_ICON_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// The newest claim: its generation and the mode it asked for.
+fn claimed_tray_icon() -> (u64, String) {
+    let generation = TRAY_ICON_GENERATION.load(Ordering::SeqCst);
+    let claimed = TRAY_ICON_CLAIMED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    (generation, claimed.clone())
+}
+
+/// Pick the idle (no proxy mode active) tray icon for the current platform.
+///
+/// - macOS: a pure-black template image. The system tints template images
+///   to match the menu bar, so it must be applied with
+///   `set_icon_as_template(true)`.
+/// - Windows: a plain glyph on transparency — ink for light taskbars, white
+///   for dark ones. The taskbar follows the *system* colour mode
+///   (`SystemUsesLightTheme` in the registry), which Windows keeps separate
+///   from the *app* colour mode that `window.theme()` reports, so the
+///   registry value is the source of truth here.
+/// - Other platforms: the full app icon tile, as before.
+// Not a `const fn` on Windows, where the body reads the registry at
+// runtime; the lint only sees the constant-looking fallback body on
+// platforms where the other branches are compiled out.
+#[allow(clippy::missing_const_for_fn)]
+fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        (include_bytes!("../icons/tray-idle-template.png"), true)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if windows_taskbar_uses_dark_mode(app) {
+            (include_bytes!("../icons/tray-idle-dark.png"), false)
+        } else {
+            (include_bytes!("../icons/tray-idle-light.png"), false)
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        #[allow(clippy::large_include_file)]
+        let bytes: &[u8] = include_bytes!("../icons/icon.png");
+        (bytes, false)
+    }
+}
+
+/// Whether the Windows taskbar is in dark mode.
+///
+/// Reads `SystemUsesLightTheme` from the Personalize key. When the value
+/// cannot be read, fall back to the main window's theme (the app colour
+/// mode — not always the taskbar's, but the closest available signal),
+/// and then to light: consumer editions of Windows 11 ship with a light
+/// taskbar by default (only the commercial editions default to dark).
+#[cfg(target_os = "windows")]
+fn windows_taskbar_uses_dark_mode(app: &AppHandle) -> bool {
+    let system_light = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .ok();
+    match system_light {
+        Some(1) => false,
+        Some(_) => true,
+        None => app
+            .get_webview_window("main")
+            .and_then(|window| window.theme().ok())
+            .map_or(false, |theme| theme == tauri::Theme::Dark),
+    }
+}
+
+/// Apply the tray icon for `mode`: "tun", "sysproxy", or idle for anything else.
+pub fn apply_tray_icon(app: &AppHandle, mode: &str) -> Result<(), String> {
+    // Claim the newest generation: any refresh still holding an older
+    // snapshot will now skip applying its stale result.
+    let generation = claim_tray_icon(mode);
+    apply_tray_icon_reconciled(app, generation, mode)
+}
+
+/// Apply the icon for a claim, then keep re-applying the newest claimed
+/// mode for as long as newer claims landed while an apply was in flight,
+/// so a stale write never stays on the tray (see `TRAY_ICON_GENERATION`).
+fn apply_tray_icon_reconciled(
+    app: &AppHandle,
+    mut generation: u64,
+    mode: &str,
+) -> Result<(), String> {
+    let mut mode = mode.to_owned();
+    loop {
+        let result = apply_tray_icon_now(app, &mode);
+        let (latest_generation, latest_mode) = claimed_tray_icon();
+        if latest_generation == generation {
+            return result;
+        }
+        generation = latest_generation;
+        mode = latest_mode;
+    }
+}
+
+fn apply_tray_icon_now(app: &AppHandle, mode: &str) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;
 
     #[allow(clippy::large_include_file)]
-    let icon_bytes: &[u8] = match mode.as_str() {
-        "tun" => include_bytes!("../icons/red-icon.png"),
-        "sysproxy" => include_bytes!("../icons/yellow-icon.png"),
-        _ => include_bytes!("../icons/icon.png"),
+    let (icon_bytes, as_template): (&[u8], bool) = match mode {
+        "tun" => (include_bytes!("../icons/tray-tun.png"), false),
+        "sysproxy" => (include_bytes!("../icons/tray-proxy.png"), false),
+        _ => idle_tray_icon(app),
     };
 
     let image = Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
@@ -140,7 +268,58 @@ pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
     tray.set_icon(Some(image))
         .map_err(|e| format!("Failed to set icon: {e}"))?;
 
+    // Template images only exist on macOS. The coloured state icons must
+    // explicitly leave template mode again, otherwise the system would
+    // tint them monochrome.
+    #[cfg(target_os = "macos")]
+    tray.set_icon_as_template(as_template)
+        .map_err(|e| format!("Failed to set icon template mode: {e}"))?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = as_template;
+
     Ok(())
+}
+
+/// Re-read the proxy status and re-apply the tray icon for it, unless a
+/// newer icon update landed while the status was being read. Callers run
+/// this off the window event thread (see the theme handler in lib.rs):
+/// the status lookup can shell out, but that gap must not let this
+/// refresh overwrite a fresher icon with the mode it read earlier.
+pub fn refresh_tray_icon(app: &AppHandle) {
+    let generation = TRAY_ICON_GENERATION.load(Ordering::SeqCst);
+    let mode = get_tray_proxy_status(app.clone()).unwrap_or_else(|_| "default".to_owned());
+    // Record the mode before claiming, so the new generation is never
+    // read alongside the previous claim's mode. If the claim then fails,
+    // a fresher writer has claimed in the meantime: its own claim is
+    // recorded before its generation is published, and checkers only
+    // act on the recorded mode when the generation has moved past
+    // theirs, so the leftover record is never applied.
+    let mut claimed = TRAY_ICON_CLAIMED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *claimed = mode.clone();
+    drop(claimed);
+    // Apply only if the generation is still the snapshot's: claiming the
+    // next one fails as soon as any other writer has claimed one, which
+    // means a fresher icon is already on its way and wins.
+    if TRAY_ICON_GENERATION
+        .compare_exchange(
+            generation,
+            generation + 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        let _ = apply_tray_icon_reconciled(app, generation + 1, &mode);
+    }
+}
+
+/// Change tray icon based on mode
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+    apply_tray_icon(&app, mode.as_str())
 }
 
 /// Get current proxy mode for tray status
@@ -233,6 +412,10 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     tray_builder
         .build(app)
         .map_err(|e| format!("Failed to build tray: {e}"))?;
+
+    // Start from the platform's idle icon (template image on macOS,
+    // theme-matched glyph on Windows) instead of the window icon.
+    let _ = apply_tray_icon(app, "default");
 
     Ok(())
 }
