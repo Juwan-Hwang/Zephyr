@@ -52,13 +52,10 @@ pub struct PatchInfo {
     pub path: String,
 }
 
-/// Trigger a hot-reload request to Mihomo via its REST API.
-///
-/// Spawns a background thread to avoid blocking the caller. The request sends
-/// `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so that
-/// Mihomo reloads the config from disk.
-pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
-    let (port, secret, run_config_path) = {
+/// The endpoint a hot reload talks to: the running core's port and secret,
+/// plus the `run_config.yaml` path the reload asks it to load.
+fn hot_reload_target(state: &PrismState) -> Result<(u16, String, String), String> {
+    let (port, secret) = {
         let mihomo_state = state.app.state::<MihomoState>();
         let lock = mihomo_state
             .0
@@ -67,49 +64,128 @@ pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
         let port = lock.last_port().unwrap_or(9090);
         let secret = lock.last_secret().to_owned();
         drop(lock);
-
-        let paths = ensure_app_storage(&state.app)?;
-        let run_config_path = paths.core_dir.join("run_config.yaml");
-        (port, secret, run_config_path)
+        (port, secret)
     };
 
-    let run_config_path_str = run_config_path.to_string_lossy().to_string();
+    let paths = ensure_app_storage(&state.app)?;
+    let run_config_path_str = paths
+        .core_dir
+        .join("run_config.yaml")
+        .to_string_lossy()
+        .to_string();
+    Ok((port, secret, run_config_path_str))
+}
+
+/// Send the hot-reload request and report whether Mihomo accepted it.
+///
+/// Sends `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so
+/// that Mihomo reloads the config from disk. Blocking: call it from a
+/// background thread.
+fn perform_hot_reload(port: u16, secret: &str, run_config_path_str: &str) -> bool {
+    let url = format!("http://127.0.0.1:{port}/configs?force=true");
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .no_proxy()
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log_error!("[hot-reload] HTTP client error: {e}");
+            return false;
+        }
+    };
+    // Mihomo PUT /configs expects {"path": "..."} to reload from file
+    let body = serde_json::json!({ "path": run_config_path_str });
+    match client
+        .put(&url)
+        .header("Authorization", format!("Bearer {secret}"))
+        .json(&body)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                log_info!("[hot-reload] Success: {}", resp.status());
+                true
+            } else {
+                log_error!(
+                    "[hot-reload] Failed: {} - {}",
+                    resp.status(),
+                    resp.text().unwrap_or_default()
+                );
+                false
+            }
+        }
+        Err(e) => {
+            log_error!("[hot-reload] Request failed: {e}");
+            false
+        }
+    }
+}
+
+/// Trigger a hot-reload request to Mihomo via its REST API.
+///
+/// Spawns a background thread to avoid blocking the caller.
+pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
+    let (port, secret, run_config_path_str) = hot_reload_target(state)?;
 
     thread::spawn(move || {
-        let url = format!("http://127.0.0.1:{port}/configs?force=true");
-        let client = match reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .no_proxy()
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                log_error!("[hot-reload] HTTP client error: {e}");
-                return;
-            }
-        };
-        // Mihomo PUT /configs expects {"path": "..."} to reload from file
-        let body = serde_json::json!({ "path": run_config_path_str });
-        match client
-            .put(&url)
-            .header("Authorization", format!("Bearer {secret}"))
-            .json(&body)
-            .send()
-        {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    log_info!("[hot-reload] Success: {}", resp.status());
-                } else {
-                    log_error!(
-                        "[hot-reload] Failed: {} - {}",
-                        resp.status(),
-                        resp.text().unwrap_or_default()
-                    );
-                }
-            }
-            Err(e) => {
-                log_error!("[hot-reload] Request failed: {e}");
-            }
+        perform_hot_reload(port, &secret, &run_config_path_str);
+    });
+
+    Ok(())
+}
+
+/// Ask the running core which `tun.enable` it has actually applied.
+///
+/// `GET /configs` reports the config Mihomo is running, so this is the
+/// confirmation the TUN toggle flows already wait for before recording a
+/// state. Returns `None` when the core cannot be asked or its answer does
+/// not carry the flag. Blocking: call it from a background thread.
+pub(crate) fn confirmed_tun_enabled(port: u16, secret: &str) -> Option<bool> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .no_proxy()
+        .build()
+        .ok()?;
+    let resp = client
+        .get(format!("http://127.0.0.1:{port}/configs"))
+        .header("Authorization", format!("Bearer {secret}"))
+        .send()
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().ok()?;
+    body.get("tun")?.get("enable")?.as_bool()
+}
+
+/// Hot-reload, then reconcile the live TUN state with the core.
+///
+/// Like [`trigger_hot_reload`], but once Mihomo accepts the reload the
+/// thread asks the core which `tun.enable` it applied and hands that
+/// confirmed value to
+/// [`reconcile_tun_with_core`](crate::core_manager::core::tun_manager::reconcile_tun_with_core).
+/// A reload the core refuses — or whose outcome cannot be confirmed —
+/// leaves the live TUN state exactly as it was: the value sitting in
+/// `run_config.yaml` alone is never enough to change what the tray
+/// reports. The reconciliation only updates the in-memory live state;
+/// the saved `tun_enabled` preference is the user's own choice, and an
+/// override never rewrites it.
+pub fn trigger_hot_reload_and_reconcile_tun(state: &PrismState) -> Result<(), String> {
+    let (port, secret, run_config_path_str) = hot_reload_target(state)?;
+    let app = state.app.clone();
+
+    thread::spawn(move || {
+        // Snapshot the live-state generation before the reload: a TUN
+        // preference recorded while the reload and the confirmation
+        // query are in flight voids this reconciliation, even when the
+        // recorded value itself did not change.
+        let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
+        if !perform_hot_reload(port, &secret, &run_config_path_str) {
+            return;
+        }
+        if let Some(applied) = confirmed_tun_enabled(port, &secret) {
+            crate::core_manager::core::tun_manager::reconcile_tun_with_core(&app, applied, epoch);
         }
     });
 
@@ -213,7 +289,7 @@ pub fn execute_write_pipeline(
     if result.success && result.config_modified {
         if let Some(modified) = &result.modified_config {
             write_running_config(state, modified)?;
-            trigger_hot_reload(state)?;
+            trigger_hot_reload_and_reconcile_tun(state)?;
         }
     }
 
@@ -360,7 +436,7 @@ pub fn execute_batch_pipeline(
     if any_modified {
         write_running_config(state, &config)?;
         if hot_reload {
-            trigger_hot_reload(state)?;
+            trigger_hot_reload_and_reconcile_tun(state)?;
         }
     }
 
