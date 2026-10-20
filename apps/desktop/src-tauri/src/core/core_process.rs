@@ -1906,6 +1906,20 @@ pub async fn start_core_inner(
         global_prefs.as_ref(),
     )?;
 
+    // A fresh running config is about to replace the previous core: a
+    // live TUN override described that core, while this start derives
+    // TUN from the saved preference and the profile instead. Enabled
+    // overrides re-apply after the start and record a fresh override.
+    // The override is only dropped once preflight has passed (below):
+    // a macOS TUN-active start deliberately keeps the previous root
+    // core running through preflight, so a failure up to there leaves
+    // that core — and the override describing it — in place, while the
+    // tray would otherwise fall back to a saved preference that can
+    // disagree with it. The snapshot lets the one later path that also
+    // retains the previous core (authorization never reaching the
+    // privileged script) put the override back.
+    let _previous_live_tun_override = super::tun_manager::live_tun_override();
+
     let run_config_path = paths.core_dir.join("run_config.yaml");
     #[cfg(target_os = "macos")]
     let prev_run_config = match std::fs::read(&run_config_path) {
@@ -1992,6 +2006,14 @@ pub async fn start_core_inner(
         }
     }
 
+    // Preflight passed, so the replacement core is going ahead: the
+    // previous core's live TUN override ends here (see the snapshot
+    // above). From here on, every failure path has either stopped the
+    // previous core or replaces it, except the macOS TUN path where
+    // authorization never reaches the privileged script — that path
+    // restores the snapshot before returning.
+    super::tun_manager::clear_live_tun_override();
+
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
@@ -2056,13 +2078,10 @@ pub async fn start_core_inner(
     ) {
         record_running_root_core_exe(app);
         set_tun_mode(true);
-        if let Err(err) = super::tun_manager::sync_tun_settings(app, true) {
-            emit_warn!(
-                Config,
-                CONFIG_PERSIST_FAILED,
-                "Failed to record tun_enabled after adopting root TUN core: {err}"
-            );
-        }
+        // The adopted core is running TUN, so record it in memory even
+        // if the preference write fails; `record_tun_started` warns
+        // about the failed write itself.
+        let _ = super::tun_manager::record_tun_started(app);
         // The script already terminated any tracked child; reap it before
         // replacing the tracked state so it does not linger as a zombie.
         reap_tracked_child(app).await;
@@ -2181,7 +2200,15 @@ pub async fn start_core_inner(
                     // nothing was killed: no root core and no tracked child
                     // were touched. Preserve the tracked child (the user's
                     // still-running core) and its state, restore the previous
-                    // run config via the guard, and surface the error.
+                    // run config via the guard, and surface the error. The
+                    // live TUN override dropped after preflight described
+                    // that still-running core, so it goes back too.
+                    match _previous_live_tun_override {
+                        Some(previous) => {
+                            super::tun_manager::set_live_tun_override(previous);
+                        }
+                        None => super::tun_manager::clear_live_tun_override(),
+                    }
                     return Err(tun_start_error(&e));
                 }
                 // The script ran and the root core writes to the TUN log, so that is the
@@ -2614,6 +2641,8 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
     }
 
     if !still_running_root {
+        // The core a live TUN override could describe is gone.
+        super::tun_manager::clear_live_tun_override();
         cleanup_run_config(app);
     }
 

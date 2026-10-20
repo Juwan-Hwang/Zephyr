@@ -31,19 +31,19 @@
         <!-- Sidebar -->
         <nav id="sidebar-nav" class="w-20 flex flex-col items-center py-8 rounded-[var(--zephyr-radius-window-clip)] gap-8 relative z-10 backdrop-blur-sm" aria-label="Main navigation">
             <button type="button" data-nav="home" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-all duration-[var(--zephyr-time-standard)] bg-[var(--zephyr-bg-muted)] text-[var(--text-primary)] shadow-lg ring-1 ring-[var(--zephyr-border-strong)] is-active" aria-label="Home" data-i18n-aria-label="home" aria-current="page">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw" pathLength="1" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path class="p-draw d2" pathLength="1" d="M9 22V12h6v10"/></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw" pathLength="1" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path class="p-draw d2" pathLength="1" d="M9 22V12h6v10"/></svg>
                 <span class="sr-only" data-i18n="home">Home</span>
             </button>
             <button type="button" data-nav="proxies" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Proxies" data-i18n-aria-label="proxiesTitle">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-shaft" pathLength="1" d="M5 12h14"/><path class="p-head" d="m12 5 7 7-7 7"/></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-shaft" pathLength="1" d="M5 12h14"/><path class="p-head" d="m12 5 7 7-7 7"/></svg>
                 <span class="sr-only" data-i18n="proxiesTitle">Proxies</span>
             </button>
             <button type="button" data-nav="subscriptions" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Subscriptions" data-i18n-aria-label="subscriptions">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-doc" d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path class="p-fold" d="M14 2v4a2 2 0 0 0 2 2h4"/><path class="p-check" pathLength="1" d="m3 15 2 2 4-4"/></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-doc" d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path class="p-fold" d="M14 2v4a2 2 0 0 0 2 2h4"/><path class="p-check" pathLength="1" d="m3 15 2 2 4-4"/></svg>
                 <span class="sr-only" data-i18n="subscriptions">Subscriptions</span>
             </button>
             <button type="button" data-nav="connections" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Connections" data-i18n-aria-label="connectionsTitle">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <circle class="c-node" cx="5" cy="12" r="2.5"/>
                     <circle class="c-node c-node-r" cx="19" cy="12" r="2.5"/>
                     <path class="conn-line-dash" d="M7.5 12h9"/>
@@ -53,16 +53,16 @@
                 <span class="sr-only" data-i18n="connectionsTitle">Connections</span>
             </button>
             <button type="button" data-nav="rule-library" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Rule Library" data-i18n-aria-label="ruleLibraryTitle">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw p-book" pathLength="1" d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw p-book" pathLength="1" d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
                 <span class="sr-only" data-i18n="ruleLibraryTitle">Rule Library</span>
             </button>
             <button type="button" data-nav="logs" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Logs" data-i18n-aria-label="logsTitle">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-prompt" pathLength="1" d="m4 17 6-6-6-6"/><path class="p-cursor" d="M12 19h8"/></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-prompt" pathLength="1" d="m4 17 6-6-6-6"/><path class="p-cursor" d="M12 19h8"/></svg>
                 <span class="sr-only" data-i18n="logsTitle">Logs</span>
             </button>
             <div class="flex-1"></div>
             <button type="button" data-nav="settings" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Settings" data-i18n-aria-label="settingsTitle">
-                <svg class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g></svg>
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g></svg>
                 <span class="sr-only" data-i18n="settingsTitle">Settings</span>
             </button>
         </nav>
@@ -71,13 +71,12 @@
         <div class="flex-1 flex flex-col min-w-0 relative z-10">
             <!-- Title Bar -->
             <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-8 select-none cursor-grab active:cursor-grabbing">
-                <div class="flex items-center gap-2 pointer-events-none">
-                    <img src="app-icon.png" id="app-title-icon" alt="" aria-hidden="true" class="w-5 h-5 opacity-90 filter drop-shadow-[var(--zephyr-shadow-glow)] transition-all duration-[var(--zephyr-time-standard)]">
-                    <span class="text-xs font-semibold text-[var(--text-secondary)] tracking-wide">Zephyr</span>
+                <div class="flex items-center pointer-events-none">
+                    <img src="app-lockup.svg" id="app-title-icon" alt="Zephyr" class="h-5 w-auto opacity-90 transition-all duration-[var(--zephyr-time-standard)]">
                 </div>
                 <div class="flex items-center gap-3">
                     <button id="close-btn" type="button" class="group relative flex items-center justify-center w-3.5 h-3.5 rounded-full bg-close-btn hover:bg-close-btn/80 transition-colors shadow-sm before:absolute before:-inset-1.5 before:content-['']" aria-label="Close window" data-i18n-aria-label="closeWindow" data-i18n-title="closeWindow" title="Close window">
-                        <svg class="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 w-2 h-2 text-[var(--zephyr-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" class="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 w-2 h-2 text-[var(--zephyr-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
                         </svg>
@@ -168,8 +167,8 @@
                             <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
                         </div>
                     </div>
-                    <label class="ios-switch switch-lg shrink-0">
-    <input type="checkbox" id="sys-proxy-toggle">
+                    <label class="ios-switch switch-lg shrink-0" aria-label="System Proxy" data-i18n-aria-label="sysProxy">
+    <input type="checkbox" id="sys-proxy-toggle" aria-label="System Proxy" data-i18n-aria-label="sysProxy">
     <span class="switch-slider"></span>
 </label>
                 </div>
@@ -200,8 +199,8 @@
                                 </div>
                                 <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
                             </div>
-                            <label class="ios-switch shrink-0">
-    <input type="checkbox" id="tun-proxy-toggle">
+                            <label class="ios-switch shrink-0" aria-label="TUN Mode" data-i18n-aria-label="tunMode">
+    <input type="checkbox" id="tun-proxy-toggle" aria-label="TUN Mode" data-i18n-aria-label="tunMode">
     <span class="switch-slider"></span>
 </label>
                         </div>
@@ -226,15 +225,15 @@
                     </div>
                     <div class="flex items-center gap-3">
                         <button id="open-plugins-btn" class="btn-ghost" title="Override Scripts" data-i18n-title="overrideTitle">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span data-i18n="overrideTitle">Override Scripts</span>
                         </button>
                         <button id="update-all-sub-btn" class="btn-ghost" title="Update All" data-i18n-title="updateAll">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="updateAll">Update All</span>
                         </button>
                         <button id="add-sub-btn" class="btn-accent">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             <span data-i18n="add">Add</span>
                         </button>
                     </div>
@@ -266,7 +265,7 @@
                                 </span>
                             </nav>
                             <button id="close-plugins-btn" type="button" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" aria-label="Close" data-i18n-aria-label="dismiss">
-                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
                         <!-- Toolbar: search + new + bulk actions (hidden while editing a script) -->
@@ -280,7 +279,7 @@
                             <!-- New override dropdown -->
                             <div class="relative">
                                 <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
-                                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
                                 <div id="plugin-new-dropdown" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
@@ -349,7 +348,7 @@
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
                             <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
-                                <svg class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                                <svg aria-hidden="true" class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
                             <!-- Menu is dynamically created and attached to body -->
                         </div>
@@ -365,14 +364,14 @@
                         <!-- Sort Button -->
                         <div class="relative group">
                             <button id="sort-btn" class="btn-ghost" aria-haspopup="menu" aria-expanded="false">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
+                                <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
                                 <span id="sort-label" data-i18n="sortDefault">Default</span>
                                 <svg class="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
                             </button>
                         </div>
                         <!-- Latency Test Button -->
                         <button id="test-all-btn" class="btn-accent">
-                            <svg id="test-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <svg aria-hidden="true" id="test-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                             <span data-i18n="testLatency">Test Latency</span>
                         </button>
                     </div>
@@ -431,7 +430,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-lang-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="language">Language</p>
@@ -441,7 +440,7 @@
                                 <div id="setting-lang-wrap" class="relative w-40">
                                     <button id="setting-lang-trigger" type="button" aria-labelledby="setting-lang-title setting-lang-label" class="select-common w-full flex items-center justify-between">
                                         <span id="setting-lang-label">English</span>
-                                        <svg id="setting-lang-arrow" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <svg aria-hidden="true" id="setting-lang-arrow" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="m6 9 6 6 6-6"></path>
                                         </svg>
                                     </button>
@@ -488,7 +487,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="theme">Theme</p>
@@ -534,7 +533,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="appOpacity">App Transparency</p>
@@ -553,7 +552,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uiScale">UI Scale</p>
@@ -574,7 +573,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="homePageMode">Home Page Mode</p>
@@ -637,7 +636,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-silent-start-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="silentStart">Silent Start</p>
@@ -675,7 +674,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="globalShortcut">Global Shortcuts</p>
@@ -684,7 +683,7 @@
                                 </div>
                                 <button id="open-shortcut-settings-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="configure">Configure</span>
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
                         </div>
@@ -762,7 +761,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-unified-delay-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="unifiedDelay">Unified Delay</p>
@@ -813,7 +812,7 @@
                                 </div>
                                 <button id="port-config-btn" class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
                                     <span id="current-port-display">7890</span>
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
 
@@ -823,7 +822,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-allow-lan-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="allowLan">Allow LAN</p>
@@ -842,7 +841,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-ipv6-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ipv6Support">IPv6 Support</p>
@@ -913,7 +912,7 @@
                                             <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunnelsDesc">Forward local ports to remote servers</p>
                                         </div>
                                     </div>
-                                    <svg class="w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                    <svg aria-hidden="true" class="w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </summary>
                                 <div class="mt-4 ps-9 pe-2">
                                     <div class="flex items-center justify-between mb-3">
@@ -954,7 +953,7 @@
                                 <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uwpLoopback">UWP Loopback Exemption</p>
@@ -962,7 +961,7 @@
                                     </div>
                                 </div>
                                 <button id="exempt-uwp-btn" class="row-action flex items-center gap-1.5">
-                                    <svg id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <svg aria-hidden="true" id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
                                     <span data-i18n="exemptUwp">Exempt All UWP</span>
                                 </button>
                                 </div>
@@ -980,7 +979,7 @@
                                 <div class="flex items-center justify-between w-full">
                                     <div class="flex items-center gap-4">
                                         <div class="text-[var(--text-secondary)]">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 7.1"/></svg>
+                                            <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 7.1"/></svg>
                                         </div>
                                         <div>
                                             <p id="setting-fake-client-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="fakeClient">Subscription Fake Client</p>
@@ -1000,7 +999,7 @@
                                             <div id="fake-client-select-wrap" class="relative">
                                                 <button id="fake-client-trigger" type="button" aria-labelledby="fake-client-title fake-client-label" class="select-common w-full flex items-center justify-between">
                                                     <span id="fake-client-label">Clash Verge Rev</span>
-                                                    <svg class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                                                    <svg aria-hidden="true" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
                                                 </button>
                                                 <div id="fake-client-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
                                                     <div class="menu-scroll">
@@ -1024,11 +1023,11 @@
                                             <label for="fake-client-custom" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientCustomUA">Custom User-Agent</label>
                                             <div class="input-paste-wrapper">
                                                 <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="form-control form-control-md">
-                                                <button type="button" id="fake-client-custom-paste-btn" class="btn-paste-base btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
+                                                <button type="button" id="fake-client-custom-paste-btn" class="btn-paste-base btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
                                             </div>
                                         </div>
                                     </div>
-                                    <svg id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin mx-auto mt-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                    <svg aria-hidden="true" id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin mx-auto mt-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
                                 </div>
                             </div>
 
@@ -1066,7 +1065,7 @@
                                 </div>
                                 <button id="manage-rule-files-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="ruleLibraryManageFiles">Manage Rule Files</span>
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
 
@@ -1084,7 +1083,7 @@
                                     </div>
                                 </div>
                                 <button id="update-geo-btn" class="row-action flex items-center gap-1.5">
-                                    <svg id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <svg aria-hidden="true" id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
                                     <span data-i18n="updateNow">Update Now</span>
                                 </button>
                             </div>
@@ -1119,7 +1118,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-encrypt-configs-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="encryptConfigs">Encrypt Configs</p>
@@ -1138,7 +1137,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
                                     </div>
                                     <div>
                                         <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="configFolder">Config Folder</p>
@@ -1147,7 +1146,7 @@
                                 </div>
                                 <button id="open-config-folder-btn" class="row-action flex items-center gap-1">
                                     <span data-i18n="openFolder">Open Folder</span>
-                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>
                             </div>
 
@@ -1237,14 +1236,14 @@
                             <a id="btn-goto-github" href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start no-underline">
                                 <span class="flex items-center gap-4">
                                     <span class="flex items-center justify-center text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                                     </span>
                                     <span class="block">
                                         <span class="block text-sm font-semibold text-[var(--text-primary)] group-hover:text-accent transition-colors" data-i18n="githubHomepage">GitHub Homepage</span>
                                         <span class="block text-2xs text-[var(--text-muted)]" data-i18n="githubHomepageDesc">Star & Contribute</span>
                                     </span>
                                 </span>
-                                <svg class="w-4 h-4 text-[var(--text-muted)] group-hover:text-accent transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+                                <svg aria-hidden="true" class="w-4 h-4 text-[var(--text-muted)] group-hover:text-accent transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
                             </a>
 
                             <!-- Danger Zone: Restore Defaults -->
@@ -1252,7 +1251,7 @@
                                 <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
                                     <span class="flex items-center gap-4">
                                         <span class="flex items-center justify-center text-[var(--zephyr-color-danger)]">
-                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                            <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                         </span>
                                         <span class="block">
                                             <span class="block text-sm font-semibold text-[var(--zephyr-color-danger)] group-hover:opacity-80 transition-opacity" data-i18n="restoreDefaults">Restore Defaults</span>
@@ -1288,7 +1287,7 @@
                         <div class="textarea-paste-wrapper">
                             <textarea id="custom-args-input" class="form-control form-control-mono w-full h-24 p-3 text-xs" aria-label="Custom Startup Arguments" data-i18n-aria-label="customArgs" placeholder="--ext-ui ui&#10;--another-flag" spellcheck="false"></textarea>
                             <button type="button" id="custom-args-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                             </button>
                         </div>
                         <div class="flex justify-end">
@@ -1341,7 +1340,7 @@
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
                         <button type="button" id="dns-nameservers-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                         </button>
                     </div>
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
@@ -1352,7 +1351,7 @@
                     <div class="textarea-paste-wrapper">
                         <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
                         <button type="button" id="dns-fallbacks-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                         </button>
                     </div>
                     <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
@@ -1421,16 +1420,16 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <button id="fullscreen-editor-validate-btn" class="btn-ghost text-sm">
-                        <svg class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <svg aria-hidden="true" class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                         <span data-i18n="overrideValidate">验证</span>
                     </button>
                     <button type="button" id="fullscreen-editor-run-btn" class="btn-accent text-sm">
-                        <svg class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+                        <svg aria-hidden="true" class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
                         <span data-i18n="overrideSaveAndRun">保存并执行</span>
                     </button>
                     <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
                     <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm" aria-label="Close" data-i18n-aria-label="close">
-                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 </div>
             </div>
