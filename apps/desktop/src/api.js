@@ -253,7 +253,11 @@ async function listen(event, handler) {
  * @returns {Promise<void>}
  */
 async function openUrl(url) {
-  return invoke('plugin:opener|open_url', { url });
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new ApiError('openUrl only supports http and https URLs');
+  }
+  return invoke('plugin:opener|open_url', { url: trimmed });
 }
 
 /** Get a lightweight current-window handle (manual IPC wrapper) */
