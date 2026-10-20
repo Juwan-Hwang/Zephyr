@@ -159,7 +159,8 @@ fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
 /// Reads `SystemUsesLightTheme` from the Personalize key. When the value
 /// cannot be read, fall back to the main window's theme (the app colour
 /// mode — not always the taskbar's, but the closest available signal),
-/// and then to dark, the Windows 11 default.
+/// and then to light: consumer editions of Windows 11 ship with a light
+/// taskbar by default (only the commercial editions default to dark).
 #[cfg(target_os = "windows")]
 fn windows_taskbar_uses_dark_mode(app: &AppHandle) -> bool {
     let system_light = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
@@ -172,7 +173,7 @@ fn windows_taskbar_uses_dark_mode(app: &AppHandle) -> bool {
         None => app
             .get_window("main")
             .and_then(|window| window.theme().ok())
-            .map_or(true, |theme| theme == tauri::Theme::Dark),
+            .map_or(false, |theme| theme == tauri::Theme::Dark),
     }
 }
 

@@ -1908,17 +1908,19 @@ if window.app_handle().get_webview_window("main").is_none() {
 invalidate_heartbeat(window.app_handle());
 }
 }
-                tauri::WindowEvent::ThemeChanged(_) => {
-                    // The idle tray glyph follows the OS colour mode, so
-                    // reapply the current mode's icon on live theme
-                    // switches instead of leaving it stale until the next
-                    // proxy state change.
-                    if window.label() == "main" {
-                        let app = window.app_handle();
+                // Only Windows picks the idle tray glyph by colour mode
+                // (macOS uses a template image the system re-tints itself,
+                // Linux does not depend on the theme). The status lookup
+                // can shell out to system tools, so it runs off the main
+                // thread.
+                #[cfg(target_os = "windows")]
+                tauri::WindowEvent::ThemeChanged(_) if window.label() == "main" => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn_blocking(move || {
                         let mode = crate::tray::get_tray_proxy_status(app.clone())
                             .unwrap_or_else(|_| "default".to_owned());
-                        let _ = crate::tray::apply_tray_icon(app, &mode);
-                    }
+                        let _ = crate::tray::apply_tray_icon(&app, &mode);
+                    });
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
