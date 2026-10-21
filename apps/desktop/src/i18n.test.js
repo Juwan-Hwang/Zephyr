@@ -43,8 +43,8 @@ describe('translations', () => {
 
     it('en and zh have same key count', () => {
         // ja and ko have empty strings for untranslated keys, so only compare en and zh
-        const enKeys = Object.keys(translations.en).sort();
-        const zhKeys = Object.keys(translations.zh).sort();
+        const enKeys = Object.keys(translations.en).sort((a, b) => a.localeCompare(b));
+        const zhKeys = Object.keys(translations.zh).sort((a, b) => a.localeCompare(b));
         expect(zhKeys).toEqual(enKeys);
     });
 
@@ -132,7 +132,7 @@ describe('getLocAttributes', () => {
 
     it('returns only dir and lang properties', () => {
         const attrs = getLocAttributes('en-US');
-        expect(Object.keys(attrs).sort()).toEqual(['dir', 'lang']);
+        expect(Object.keys(attrs).sort((a, b) => a.localeCompare(b))).toEqual(['dir', 'lang']);
     });
 });
 

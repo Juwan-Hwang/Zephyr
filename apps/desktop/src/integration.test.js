@@ -309,8 +309,8 @@ describe('UI → i18n translation key contract', () => {
     });
 
     it('en and zh have identical key sets for ruleLibrary* keys', () => {
-        const enRuleKeys = Object.keys(translations.en).filter(k => k.startsWith('ruleLibrary')).sort();
-        const zhRuleKeys = Object.keys(translations.zh).filter(k => k.startsWith('ruleLibrary')).sort();
+        const enRuleKeys = Object.keys(translations.en).filter(k => k.startsWith('ruleLibrary')).sort((a, b) => a.localeCompare(b));
+        const zhRuleKeys = Object.keys(translations.zh).filter(k => k.startsWith('ruleLibrary')).sort((a, b) => a.localeCompare(b));
         expect(zhRuleKeys).toEqual(enRuleKeys);
     });
 

@@ -14,8 +14,8 @@ let now;
 
 class FakeResizeObserver {
     constructor(cb) { this.cb = cb; this.disconnected = false; observers.push(this); }
-    observe() {}
-    unobserve() {}
+    observe() { /* TODO document why this method 'observe' is empty */ }
+    unobserve() { /* TODO document why this method 'unobserve' is empty */ }
     disconnect() { this.disconnected = true; }
 }
 let observers;

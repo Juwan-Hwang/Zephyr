@@ -99,7 +99,7 @@ describe('traffic chart rendering', () => {
         rafSpy = vi.fn((/** @type {FrameRequestCallback} */ cb) => { frames.set(++nextFrameId, cb); return nextFrameId; });
         vi.stubGlobal('requestAnimationFrame', rafSpy);
         vi.stubGlobal('cancelAnimationFrame', vi.fn((/** @type {number} */ id) => { frames.delete(id); }));
-        vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+        vi.stubGlobal('ResizeObserver', class { observe() { /* TODO document why this method 'observe' is empty */ } disconnect() { /* TODO document why this method 'disconnect' is empty */ } });
 
         document.body.innerHTML = '<div><canvas id="trafficChart"></canvas></div>';
         const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('trafficChart'));

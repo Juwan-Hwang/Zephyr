@@ -22,7 +22,7 @@ class FakeResizeObserver {
         resizeObservers.push(this);
     }
     observe(el) { this.observed.push(el); }
-    unobserve() {}
+    unobserve() { /* TODO document why this method 'unobserve' is empty */ }
     disconnect() { this.disconnected = true; }
     trigger() { this.cb([], this); }
 }
