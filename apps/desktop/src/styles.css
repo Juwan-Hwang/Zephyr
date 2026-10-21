@@ -148,6 +148,87 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   display: none;
 }
 
+/* ── macOS optical centring (html.is-mac is set in main.js) ──
+   The capsules centre the text's line box, not the glyphs themselves; where
+   the glyphs sit inside the box is the font's business. On macOS the CJK
+   fallback is PingFang SC, whose metrics park the glyphs about a pixel
+   higher than the Windows fonts this UI was tuned against, so every capsule
+   label rides high. Inside the macOS scope only, drop the labels 1px onto
+   their optical centre — the same hand correction .score-badge applies to
+   its digits. The rules below cover every text-bearing pill in the app,
+   grouped by how each control is built:
+   - auto-height capsules rebalance their vertical padding (outer size
+     unchanged);
+   - fixed-height flex capsules take 2px of extra top padding, which moves
+     the centred content down exactly 1px;
+   - the mode-segmented buttons paint no background of their own (it lives
+     on the slider element), so they translate instead.
+   Textless pills — status dots, icon-only round buttons, the switch — carry
+   no glyphs and are left alone. The 1px is a first value, pending a check
+   on a real Mac. Windows is untouched. */
+html.is-mac :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary, .log-level-btn) {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+/* The group above also catches the icon-only buttons riding the .btn
+   classes; they carry no glyphs, so restore the symmetric padding their
+   icons are centred with. (.plugin-more-btn sets padding: 0 itself, but
+   the group rule's specificity outranks that declaration.) */
+html.is-mac .plugin-more-btn {
+  padding: 0;
+}
+html.is-mac :is(#plugin-script-fullscreen-btn, #fullscreen-editor-close-btn, #btn-back-settings) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+/* Header buttons become icon-only too when header-fit steps a header down
+   to .is-compact and hides their labels; the compact rule only restates
+   their inline padding, so restore the same symmetric vertical padding
+   for them while they carry no visible glyphs. */
+html.is-mac header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+html.is-mac .select-common {
+  padding-top: calc(0.5rem + 1px);
+  padding-bottom: calc(0.5rem - 1px);
+}
+html.is-mac .dz-picker-sub {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+html.is-mac .dz-switch-node-btn {
+  padding-top: 4px;
+  padding-bottom: 2px;
+}
+html.is-mac #node-wheel-trigger,
+html.is-mac #node-wheel-list [role="option"] {
+  padding-top: 7px;
+  padding-bottom: 5px;
+}
+html.is-mac .rl-pill {
+  padding-top: 3px;
+  padding-bottom: 1px;
+}
+html.is-mac :is(#proxy-group-trigger, .home-tun-status, .seg-item, .seg-tab, #rl-status, .conn-detail-closed-tag, .sub-in-use, .proxy-hidden-chip, .latency-result, .core-error-retry, .home-empty-btn) {
+  /* fixed-height flex capsules: 2px of extra top padding moves the centred
+     content down exactly 1px */
+  padding-top: 2px;
+}
+/* .latency-result-action sits inside .latency-result, so the parent rule
+   above already moves the whole button (label included) down 1px; giving
+   the button the same padding again would drop its label 1px below the
+   result text beside it. */
+html.is-mac .score-badge {
+  /* the badge already carries this correction at 1px for its digits; the
+     macOS metrics shift applies to them too, so deepen it by the same 1px
+     (top padding 1px → 3px moves the centred digits down 1px) */
+  padding-top: 3px;
+}
+html.is-mac .dz-mode-seg button {
+  transform: translateY(1px);
+}
+
 .btn-ghost {
   background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
@@ -1605,6 +1686,11 @@ button:focus-visible:not(:disabled, [disabled]),
    ============================================ */
 #proxies-list {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    /* .proxy-wrapper reaches 8px past the grid's right edge by design (room
+       for the selection badge); with only overflow-y set, the horizontal axis
+       computes to auto and those 8px surface as a useless horizontal
+       scrollbar. This page never scrolls sideways — clip it. */
+    overflow-x: hidden;
 }
 
 /* ============================================
@@ -1900,7 +1986,7 @@ html.dark #fullscreen-editor-output {
 .dz-node-latency { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .dz-latency-num { font-size: 28px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .dz-latency-num small { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 600; margin-inline-start: 2px; }
-.dz-test-btn { margin-inline-start: auto; }
+.dz-test-btn { margin-inline-start: auto; padding: 5px 12px; }
 
 /* Node card */
 .dz-node-wrap { position: relative; }

@@ -1380,7 +1380,7 @@ const TEMPLATE = `
                     <div class="dz-node-latency">
                         <span class="dz-latency-num"><span id="dz-node-lat">—</span><small>ms</small></span>
                         <span class="latency-badge latency-badge--fast" id="dz-node-lat-badge">—</span>
-                        <button class="btn-ghost dz-test-btn" id="dz-test-btn" style="padding:5px 12px;font-size:11px;">
+                        <button class="btn-ghost dz-test-btn" id="dz-test-btn" style="font-size:11px;">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="consoleTestLatency">Test</span>
                         </button>
