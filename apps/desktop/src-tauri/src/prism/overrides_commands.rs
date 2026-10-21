@@ -600,7 +600,7 @@ fn execute_prism_yaml_batch(
     state: &PrismState,
     patches: &[(String, String, String, String)], // (id, name, patch_filename, content)
     trigger_reload: bool,
-) -> Result<Vec<OverrideLog>, String> {
+) -> Result<(Vec<OverrideLog>, bool), String> {
     use crate::prism::pipeline::RUN_CONFIG_LOCK;
 
     let _guard = RUN_CONFIG_LOCK
@@ -618,13 +618,26 @@ fn execute_prism_yaml_batch(
             .map_err(|e| format!("Failed to write Prism patch for '{name}': {e}"))?;
     }
 
+    // Resolved before the apply: once `ext.apply` has reloaded the core, a
+    // later error must not report the patches it runs as failed.
+    let paths = crate::core_manager::ensure_app_storage(&state.app)?;
+    let run_config_path = paths.core_dir.join("run_config.yaml");
+
     // Step 2: Single compilation via ext.apply()
     let lock = state.lock_inner()?;
     let ext = lock
         .extension
         .as_ref()
         .ok_or_else(|| "Prism extension not initialized".to_owned())?;
-    let result = match ext.apply(ApplyOptions::default()) {
+    // `ext.apply` hands its output to the host, which hot-reloads the core
+    // on this thread; the guard captures whether the core took it, so the
+    // caller knows these patches are live even if a later reload fails.
+    let status_guard = crate::prism::host::HttpStatusGuard::enter();
+    let applied = ext.apply(ApplyOptions::default());
+    let reloaded = status_guard
+        .take()
+        .is_some_and(crate::network_coordinator::is_http_success);
+    let result = match applied {
         Ok(res) => res,
         Err(err) => {
             drop(lock);
@@ -642,7 +655,7 @@ fn execute_prism_yaml_batch(
                     logs: vec![],
                 })
                 .collect();
-            return Ok(logs);
+            return Ok((logs, false));
         }
     };
     drop(lock);
@@ -650,10 +663,25 @@ fn execute_prism_yaml_batch(
     let duration_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
 
     // Step 3: Write the output config back to run_config.yaml
-    let paths = crate::core_manager::ensure_app_storage(&state.app)?;
-    let run_config_path = paths.core_dir.join("run_config.yaml");
-    write_file_secure(&run_config_path, &result.output_config)
-        .map_err(|e| format!("Failed to write run_config.yaml: {e}"))?;
+    // When the core already took the reload `ext.apply` sent, the host wrote
+    // this same output before it, so the patches are live: a failed rewrite
+    // here is logged rather than reported as a failure of the patches. The
+    // write goes through a temporary file: a failed one leaves the file the
+    // core already loaded intact, so a later reload cannot load half of it.
+    if let Err(e) = crate::core_manager::core::secure_io::write_file_secure_atomic(
+        &run_config_path,
+        &result.output_config,
+    ) {
+        if !reloaded {
+            return Err(format!("Failed to write run_config.yaml: {e}"));
+        }
+        emit_warn!(
+            Override,
+            OVERRIDE_APPLY_FAILED,
+            "Prism patches are live, but rewriting run_config.yaml failed: {}",
+            e
+        );
+    }
 
     // Step 4: Trigger hot-reload only if no JS overrides will follow
     if trigger_reload {
@@ -684,7 +712,7 @@ fn execute_prism_yaml_batch(
         })
         .collect();
 
-    Ok(logs)
+    Ok((logs, reloaded))
 }
 
 /// Execute a Prism YAML override by writing it to the Prism workspace and applying.
@@ -860,9 +888,11 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
                 emit_warn!(
                     Override,
                     OVERRIDE_APPLY_FAILED,
-                    "MihomoState lock poisoned, scope filtering disabled: {e}"
+                    "MihomoState lock poisoned, overrides not applied: {e}"
                 );
-                return Ok(Vec::new());
+                // Not an empty success: nothing was applied, and the
+                // caller (restart recovery) has to count it as a failure.
+                return Err(format!("MihomoState lock poisoned: {e}"));
             }
         };
         lock.last_config_path().map(String::from)
@@ -957,11 +987,40 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
     let mut all_logs = pre_logs;
     let mut prism_success = false;
+    // Patches the core already runs: Prism's own reload during `ext.apply`
+    // was accepted, so a failed final reload does not undo them.
+    let mut live_prism_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut js_modified = false;
 
     // Phase 1: Apply Prism YAML overrides (batch: write all patches → single compile → single write)
     // Prism DSL runs first so JS overrides can read and modify Prism's output.
     if !prism_patches.is_empty() {
-        let prism_logs = execute_prism_yaml_batch(&state, &prism_patches, js_scripts.is_empty())?;
+        // The reload happens once at the end, awaited: the caller restores
+        // the proxy selection right after and must see the reloaded groups.
+        // A batch that fails as a whole (patch write, run config write, a
+        // poisoned lock) becomes one failed log per patch, saved like the
+        // others, and the JS overrides below still run.
+        let (prism_logs, prism_reloaded) = execute_prism_yaml_batch(&state, &prism_patches, false)
+            .unwrap_or_else(|e| {
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "Prism override batch failed: {e}"
+                );
+                let logs = prism_patches
+                    .iter()
+                    .map(|(id, name, _, _)| failed_apply_log(id.clone(), name.clone(), e.clone()))
+                    .collect();
+                (logs, false)
+            });
+        if prism_reloaded {
+            live_prism_ids.extend(
+                prism_logs
+                    .iter()
+                    .filter(|log| log.success)
+                    .map(|log| log.script_id.clone()),
+            );
+        }
         if let Some(first_log) = prism_logs.first() {
             prism_success = first_log.success;
         }
@@ -987,7 +1046,32 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
             .map(|(_, name, content)| (content.as_str(), name.as_str()))
             .collect();
 
-        let results = execute_batch_pipeline(&state, &script_refs, false)?;
+        // A batch that fails as a whole must not skip the reload below:
+        // Prism patches written in phase 1 would otherwise never reach the core.
+        let results = match execute_batch_pipeline(&state, &script_refs, false) {
+            Ok(results) => results,
+            Err(e) => {
+                emit_warn!(
+                    Override,
+                    OVERRIDE_APPLY_FAILED,
+                    "JS override batch failed: {e}"
+                );
+                for (id, name, _) in &js_scripts {
+                    let log = failed_apply_log(id.clone(), name.clone(), e.clone());
+                    // Saved like every other result, so the overrides
+                    // page does not keep showing the previous run's.
+                    if let Err(save_err) = overrides_store::save_log(&state, id, &log) {
+                        emit_warn!(
+                            Override,
+                            OVERRIDE_APPLY_FAILED,
+                            "Failed to save log for '{name}': {save_err}"
+                        );
+                    }
+                    all_logs.push(log);
+                }
+                Vec::new()
+            }
+        };
 
         // Convert pipeline results to override logs
         let exec_logs: Vec<OverrideLog> = js_scripts
@@ -1023,16 +1107,72 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
             })
             .collect();
 
-        // Trigger hot-reload if any JS script modified the config or Prism YAML patches succeeded
-        let js_modified = results.iter().any(|r| r.success && r.config_modified);
-        if js_modified || prism_success {
-            crate::prism::pipeline::trigger_hot_reload_and_reconcile_tun(&state)?;
-        }
-
+        js_modified = results.iter().any(|r| r.success && r.config_modified);
         all_logs.extend(exec_logs);
     }
 
+    // Hot-reload if any JS script modified the config or Prism YAML patches
+    // succeeded, and only return once the core has the new config. A reload
+    // the core refuses means none of those changes took effect: each saved
+    // result says so (the overrides page reads them), and the reload is
+    // reported as one more failed entry. Prism patches the core already
+    // took during their own apply stay successful: they are live.
+    if js_modified || prism_success {
+        if let Err(e) = crate::prism::pipeline::hot_reload_and_wait(&state).await {
+            let error = format!("The core did not reload the overridden config: {e}");
+            for log in &mut all_logs {
+                if !lost_by_failed_reload(log, &live_prism_ids) {
+                    continue;
+                }
+                log.success = false;
+                log.error = Some(error.clone());
+                let saved: &OverrideLog = log;
+                if let Err(save_err) = overrides_store::save_log(&state, &saved.script_id, saved) {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Failed to save log for '{}': {save_err}",
+                        saved.script_name
+                    );
+                }
+            }
+            all_logs.push(failed_apply_log(
+                String::new(),
+                "hot-reload".to_owned(),
+                error,
+            ));
+        }
+    }
+
     Ok(all_logs)
+}
+
+/// Whether a failed final reload means this override's change is not on the
+/// core: it changed the config, and it is not a Prism patch the core already
+/// took during its own apply.
+fn lost_by_failed_reload(
+    log: &OverrideLog,
+    live_prism_ids: &std::collections::HashSet<String>,
+) -> bool {
+    log.success
+        && log.config_modified
+        && !log.script_id.is_empty()
+        && !live_prism_ids.contains(&log.script_id)
+}
+
+/// A log entry for a step of `override_apply_all` that failed before or
+/// after the scripts themselves ran.
+fn failed_apply_log(script_id: String, script_name: String, error: String) -> OverrideLog {
+    OverrideLog {
+        script_id,
+        script_name,
+        executed_at: chrono::Utc::now().timestamp_millis(),
+        duration_us: 0,
+        success: false,
+        config_modified: false,
+        error: Some(error),
+        logs: Vec::new(),
+    }
 }
 
 /// Download remote content directly first, falling back to managed core proxy if direct connection fails.

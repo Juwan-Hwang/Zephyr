@@ -60,8 +60,8 @@ use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tauri_plugin_window_state::WindowExt as _;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
 use updater::{
-    get_latest_client_version, get_latest_client_versions, get_latest_version, update_client,
-    update_core, update_geo_data,
+    end_update_hold, get_latest_client_version, get_latest_client_versions, get_latest_version,
+    set_page_busy, update_client, update_core, update_geo_data,
 };
 use uwp_loopback::exempt_uwp_apps;
 
@@ -656,6 +656,10 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
         if is_webview_alive(app) {
             let _ = window.show();
             let _ = window.set_focus();
+            updater::window_reopened();
+            // Shown again, focused or not: a close the update hold turned
+            // into a hide no longer stands.
+            updater::window_reopened();
             // Only apply the grace period when the window was previously
             // hidden — if it was already visible, the heartbeat is current and
             // artificially aging it could cause false-positive recreation.
@@ -712,6 +716,7 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
             // `recreate_window` closure from destroying this new window.
             let _ = window.show();
             let _ = window.set_focus();
+            updater::window_reopened();
         }
         Err(e) => {
             emit_error!(
@@ -1894,7 +1899,8 @@ pub fn run() {
 
                     if close_to_tray {
                         api.prevent_close();
-                        if lightweight_mode {
+                        // An update still running in the page keeps it alive.
+                        if lightweight_mode && !updater::keep_webview_on_close() {
                             // Lightweight mode: destroy the WebView to free memory.
                             // The app stays alive in the tray because we prevent
                             // exit on ExitRequested. Tray click recreates the window.
@@ -1939,12 +1945,18 @@ invalidate_heartbeat(window.app_handle());
                 // ThemeChanged fires for it. That Settings visit takes
                 // focus away from the main window; re-check the glyph when
                 // the window regains focus.
-                #[cfg(target_os = "windows")]
                 tauri::WindowEvent::Focused(true) if window.label() == "main" => {
-                    let app = window.app_handle().clone();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        crate::tray::refresh_tray_icon(&app);
-                    });
+                    // Reopened: a lightweight-mode close the update hold
+                    // turned into a hide no longer stands, so a later hide
+                    // (the global shortcut) is not released as that close.
+                    updater::window_reopened();
+                    #[cfg(target_os = "windows")]
+                    {
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            crate::tray::refresh_tray_icon(&app);
+                        });
+                    }
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
@@ -2019,6 +2031,8 @@ invalidate_heartbeat(window.app_handle());
             rename_config,
             get_latest_version,
             update_core,
+            end_update_hold,
+            set_page_busy,
             enable_sysproxy,
             disable_sysproxy,
             get_sys_proxy,

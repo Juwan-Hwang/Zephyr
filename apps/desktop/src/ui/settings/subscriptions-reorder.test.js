@@ -16,7 +16,7 @@ vi.mock('../../api.js', () => ({
 /** @type {Promise<void> | null} A slot the test holds back. */
 let slotGate = null;
 vi.mock('./sub-download-gate.js', async (importOriginal) => ({ ...(await importOriginal()), subDownloadSlot: async () => { if (slotGate) await slotGate; } }));
-vi.mock('../lifecycle.js', () => ({ switchToConfig: vi.fn(), postRestartRecovery: vi.fn() }));
+vi.mock('../lifecycle.js', () => ({ switchToConfig: vi.fn(), postRestartRecovery: vi.fn(), withPageBusy: (fn) => fn() }));
 vi.mock('../tray.js', () => ({ updateTrayMenu: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../cache.js', () => ({
     getSettingsCached: vi.fn(async () => ({ ...settings })),

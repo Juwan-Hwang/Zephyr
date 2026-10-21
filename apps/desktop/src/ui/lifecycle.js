@@ -122,29 +122,31 @@ export async function switchToConfig(configName, customArgs = []) {
 }
 
 /**
- * Post-restart recovery: rebuild prism patches, reapply all override scripts,
- * restore the last proxy selection, and refresh the proxy UI.
- *
- * Must be called after every `restartCore()` invocation — `restartCore`
- * rewrites `run_config.yaml` from the raw profile, so all previously-applied
- * overrides (JS proxy-groups, Prism YAML patches, etc.) are lost.
- *
- * @param {string} configName - The active profile name (used for restoreProxySelection).
+ * Recovery step 1. Each step logs its own failure and returns how many
+ * failures to count; none throws.
+ * @returns {Promise<number>}
  */
-export async function postRestartRecovery(configName) {
-  invalidateRunConfigCache();
-
-  // 1. Rebuild prism patches (__when__.profile conditions need re-evaluation)
+async function rebuildPrismStep() {
   try {
     const { rebuild } = await import('./prism.js');
-    await rebuild();
+    const result = await rebuild();
+    // Rewritten config the core refused: the patches are saved but not running.
+    if (result?.hot_reload_success === false) {
+      apiLogger.warn('[postRestartRecovery] prism.rebuild: the core rejected the reload');
+      return 1;
+    }
+    return 0;
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] prism.rebuild failed:', e);
+    return 1;
   }
+}
 
-  // 2. Re-apply all enabled override scripts
-  //    JS overrides may modify proxy-groups; without re-execution, rules
-  //    referencing those groups will fail.
+/**
+ * Recovery step 2: counts each override script that failed.
+ * @returns {Promise<number>}
+ */
+async function reapplyOverridesStep() {
   try {
     const { overrideApplyAll } = await import('./prism.js');
     const logs = await overrideApplyAll();
@@ -154,21 +156,86 @@ export async function postRestartRecovery(configName) {
     if (overrideLogs.length > 0) {
       apiLogger.info(`[postRestartRecovery] override_apply_all: ${successCount} succeeded, ${failCount} failed`);
     }
+    return failCount;
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] override_apply_all failed:', e);
+    return 1;
   }
+}
+
+/**
+ * Recovery step 3. The core is waited for once: one that is not ready
+ * counts as one failure, and the selection restore (which needs it) is
+ * skipped rather than waiting all over again.
+ * @param {string} configName
+ * @returns {Promise<number>}
+ */
+async function restoreSelectionStep(configName) {
+  try {
+    const { restoreProxySelectionResult, waitForMihomoReady } = await import('./proxy-memory.js');
+    if (!(await waitForMihomoReady())) {
+      apiLogger.warn('[postRestartRecovery] the core did not become ready');
+      return 1;
+    }
+    // It reports its own errors instead of throwing.
+    return await restoreProxySelectionResult(configName) === 'failed' ? 1 : 0;
+  } catch (e) {
+    apiLogger.warn('[postRestartRecovery] restoreProxySelection failed:', e);
+    return 1;
+  }
+}
+
+/**
+ * Run page work that must not be cut short (a core restart and its
+ * recovery) under the network lock when it is free, so a lightweight-mode
+ * close only hides the page meanwhile. When another operation holds the
+ * lock the page is already marked busy; that holder releases it.
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withPageBusy(fn) {
+  const owns = !appStore.get('isNetworkUpdating');
+  if (owns) appStore.set('isNetworkUpdating', true);
+  try {
+    return await fn();
+  } finally {
+    if (owns) appStore.set('isNetworkUpdating', false);
+  }
+}
+
+/**
+ * Post-restart recovery: rebuild prism patches, reapply all override scripts,
+ * restore the last proxy selection, and refresh the proxy UI.
+ *
+ * Must be called after every `restartCore()` invocation — `restartCore`
+ * rewrites `run_config.yaml` from the raw profile, so all previously-applied
+ * overrides (JS proxy-groups, Prism YAML patches, etc.) are lost.
+ *
+ * Each step's failure is logged and the remaining steps still run.
+ *
+ * @param {string} configName - The active profile name (used for restoreProxySelection).
+ * @returns {Promise<{ failed: number }>} How many steps did not complete,
+ *   counting each override script that failed to apply.
+ */
+export async function postRestartRecovery(configName) {
+  let failed = 0;
+  invalidateRunConfigCache();
+
+  // 1. Rebuild prism patches (__when__.profile conditions need re-evaluation)
+  failed += await rebuildPrismStep();
+
+  // 2. Re-apply all enabled override scripts
+  //    JS overrides may modify proxy-groups; without re-execution, rules
+  //    referencing those groups will fail.
+  failed += await reapplyOverridesStep();
 
   // 3. Restore last proxy selection for this profile
   //    Re-invalidate run_config cache — the concurrent CORE_RESTARTED
   //    → renderProxies() handler may have repopulated it with pre-override
   //    data (GH#603 race condition).
   invalidateRunConfigCache();
-  try {
-    const { restoreProxySelection } = await import('./proxy-memory.js');
-    await restoreProxySelection(configName);
-  } catch (e) {
-    apiLogger.warn('[postRestartRecovery] restoreProxySelection failed:', e);
-  }
+  failed += await restoreSelectionStep(configName);
 
   // 4. Refresh frontend proxy display (overrides may have modified proxy-groups)
   //    Cache invalidations happen AFTER overrides are applied and BEFORE rendering.
@@ -179,8 +246,6 @@ export async function postRestartRecovery(configName) {
   try {
     const { Bus, Events } = await import('./events.js');
     const { startSmartAutoTest, syncCoreConfig } = await import('./proxies.js');
-    const { waitForMihomoReady } = await import('./proxy-memory.js');
-    await waitForMihomoReady();
     // Re-invalidate all caches after overrides applied, before rendering.
     // This clears any stale data repopulated by the CORE_RESTARTED render cycle.
     // Rendering is handled by the CONFIG_UPDATED event below — no need for
@@ -188,10 +253,30 @@ export async function postRestartRecovery(configName) {
     invalidateProxiesCache();
     invalidateConfigCache();
     invalidateRunConfigCache();
-    await syncCoreConfig();
-    Bus.emit(Events.CONFIG_UPDATED);
+    try {
+      await syncCoreConfig();
+    } catch (e) {
+      apiLogger.warn('[postRestartRecovery] syncing the core config failed:', e);
+      failed += 1;
+    }
+    // reloaded: the running config was replaced (DNS rewrite re-applies).
+    // Emitted even when the sync above failed: the reload happened anyway.
+    // Handlers hand back the work that restores the config (the DNS
+    // rewrite); recovery, and the page hold around it, wait for it. Work
+    // that resolves to false, or rejects, could not be restored.
+    /** @type {Promise<unknown>[]} */
+    const restoring = [];
+    Bus.emit(Events.CONFIG_UPDATED, { reloaded: true, waitFor: (/** @type {Promise<unknown>} */ p) => { restoring.push(p); } });
+    for (const r of await Promise.allSettled(restoring)) {
+      if (r.status === 'rejected' || r.value === false) {
+        apiLogger.warn('[postRestartRecovery] restoring the config after the reload failed', r.status === 'rejected' ? r.reason : '');
+        failed += 1;
+      }
+    }
     startSmartAutoTest();
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] refresh proxies failed:', e);
+    failed += 1;
   }
+  return { failed };
 }

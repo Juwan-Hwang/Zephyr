@@ -307,6 +307,54 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             expect(showNotification).not.toHaveBeenCalledWith(t('consoleWidthTip'), 'info', null, { log: false });
         });
 
+        it('after a failed save shows the mode on disk, not the one the screen had', async () => {
+            // Disk holds console (saved earlier), while the screen still shows
+            // minimal, as after a reset whose repaint was skipped.
+            appStore.set('homePageMode', 'minimal');
+            await switchHomePageMode('console', vi.fn());
+            appStore.set('homePageMode', 'minimal');
+            const setHomeModeUIMock = vi.fn();
+            invoke.mockRejectedValueOnce(new Error('Persistence failure'));
+            await expect(switchHomePageMode('console', setHomeModeUIMock)).rejects.toThrow('Persistence failure');
+            expect(setHomeModeUIMock).toHaveBeenLastCalledWith('console');
+            expect(appStore.get('homePageMode')).toBe('console');
+        });
+
+        it('saves the mode only after a settings write already queued', async () => {
+            const { queueSmartConfigWrite } = await import('./settings/auto-switch.js');
+            appStore.set('homePageMode', 'minimal');
+            let release;
+            const earlier = queueSmartConfigWrite(() => new Promise((resolve) => { release = resolve; }));
+            invoke.mockClear();
+            const p = switchHomePageMode('console', vi.fn());
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(invoke).not.toHaveBeenCalledWith('patch_settings', { patch: { home_page_mode: 'console' } });
+            release();
+            await earlier;
+            await p;
+            expect(invoke).toHaveBeenCalledWith('patch_settings', { patch: { home_page_mode: 'console' } });
+        });
+
+        it('a reset does not take over a click that is still waiting to save', async () => {
+            const { queueSmartConfigWrite } = await import('./settings/auto-switch.js');
+            const { resetKeepsHomeMode, homeModeWritesForTests } = await import('./settings.js');
+            appStore.set('homePageMode', 'minimal');
+            const resetWrite = homeModeWritesForTests();
+            expect(resetKeepsHomeMode(resetWrite)).toBe(true);
+            let release;
+            const earlier = queueSmartConfigWrite(() => new Promise((resolve) => { release = resolve; }));
+            const p = switchHomePageMode('console', vi.fn());
+            // Nothing written since, but the click is pending: reset must not repaint.
+            expect(resetKeepsHomeMode(resetWrite)).toBe(false);
+            await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+            release();
+            await earlier;
+            await p;
+            // Saved after the snapshot: still the click's.
+            expect(resetKeepsHomeMode(resetWrite)).toBe(false);
+        });
+
         it('prevents concurrent mode switches — second call is a no-op while first is in flight', async () => {
             appStore.set('homePageMode', 'minimal');
             const setHomeModeUIMock = vi.fn();
