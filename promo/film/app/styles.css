@@ -1,0 +1,3184 @@
+/* ═══════════════════════════════════════════════════════════════
+   styles.css — CSS 单入口
+   @import 必须在最顶部（CSS 规范）。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 1. UnoCSS 生成物（preflight + theme vars + utilities） */
+@import "./uno-generated.css";
+
+/* 2. Design Tokens (Style Dictionary) — 构建时复制到 src/ 目录 */
+@import "./tokens-variables.css";
+@import "./tokens-theme.css";
+
+/* ═══════════════════════════════════════════════════════════════
+   RTL Foundation — direction-aware CSS custom properties
+   --rtl-sign: 1 in LTR, -1 in RTL. Used for translateX flips.
+   --scroll-fade-dir: controls gradient mask direction for scrolling text.
+   ═══════════════════════════════════════════════════════════════ */
+:root[dir="rtl"] { --rtl-sign: -1; --scroll-fade-dir: left; --scale-origin-x: right; }
+
+/* ── 国旗 emoji 字体 ──
+   Windows 的 Segoe UI Emoji 不含国旗字形，区域指示符会显示成两个字母
+   （如 "🇯🇵" → "JP"）。用 unicode-range 限定只接管区域指示符与
+   subdivision 旗帜标签，其余字符继续走系统字体。
+   字形来自 Catrinity Flags（SIL OFL 1.1，按 OFL 要求子集改名），见 NOTICE。 */
+@font-face {
+  font-family: "Zephyr Country Flags";
+  src: url("./fonts/ZephyrCountryFlags.woff2") format("woff2");
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  font-display: swap;
+}
+
+/* ── Font stack + Accent + 圆角系统 (原 @theme → :root) ── */
+:root {
+  --rtl-sign: 1;
+  --scroll-fade-dir: right;
+  --ui-scale: 1;
+  --scale-origin-x: left;
+  --font-sans: "Zephyr Country Flags", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+    "Noto Sans", "DejaVu Sans", "WenQuanYi Micro Hei",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+  --font-mono: "Zephyr Country Flags", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "DejaVu Sans Mono", "Ubuntu Mono",
+    "Courier New", monospace;
+  /* 国旗由上面字体的 liga 连字拼出。Blink（含 WebView2）在 letter-spacing 非 0 时
+     会关掉可选连字，节点名的 tracking-tight、节点轮盘的 tracking-wide、规则策略列的
+     tracking-wider 等都会让国旗退化成两个方框字母。显式开启 liga 不受字间距影响。
+     UnoCSS preflight 在 html 上用 --default-font-featureSettings、在 code/kbd/samp/pre
+     上用 --default-monoFont-featureSettings 设置 font-feature-settings，从这两个钩子
+     开启：正文继承 html 的值，等宽元素直接取第二个钩子。 */
+  --default-font-featureSettings: "liga";
+  --default-monoFont-featureSettings: "liga";
+  --color-accent: var(--accent-primary, #007AFF);
+  --color-accent-glow: var(--accent-glow);
+  --color-accent-rgb: var(--accent-rgb);
+  --radius-sm: var(--zephyr-radius-control);
+  --radius-md: var(--zephyr-radius-md);
+  --radius-lg: var(--zephyr-radius-overlay);
+  --zephyr-radius-window-clip: var(--zephyr-radius-overlay);
+  --radius-full: var(--zephyr-radius-full);
+  --radius-dropdown-option: var(--zephyr-radius-dropdown-option);
+  --radius-button: var(--zephyr-button-radius);
+  --radius-input: var(--zephyr-input-radius);
+  --radius-card: var(--zephyr-card-radius);
+  --radius-card-compact: 16px;
+  --radius-panel: var(--zephyr-panel-radius);
+  --radius-modal: var(--zephyr-modal-radius);
+  --radius-nav: var(--zephyr-radius-md);
+  --radius-badge: var(--zephyr-badge-radius);
+  --radius-dropdown: var(--zephyr-dropdown-radius);
+  --radius-option: var(--zephyr-dropdown-item-radius);
+  --radius-switch: var(--zephyr-switch-radius);
+}
+
+/* Thin scrollbar - visible on hover */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--zephyr-bg-muted);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+html:not(.dark) ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.05);
+}
+html:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--zephyr-bg-muted) transparent;
+}
+
+/* ── Custom Utilities (原 @utility → 普通 CSS 类) ── */
+.text-2xs {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+/* ── CJK typography floor ──
+   Latin-only micro labels (units, protocol abbreviations) may stay at 11px, but anything
+   that can render Chinese/Japanese/Korean is lifted to at least 12px, and the
+   English-style uppercase tracking is dropped because it only spreads Han glyphs apart. */
+:lang(zh) .text-2xs, :lang(ja) .text-2xs, :lang(ko) .text-2xs,
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  font-size: 0.75rem;
+}
+:lang(zh) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ja) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(ko) :is(.uppercase, .tracking-wide, .tracking-wider, .tracking-widest),
+:lang(zh) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ja) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary),
+:lang(ko) :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  letter-spacing: normal;
+}
+
+/* ── Button System ── */
+.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--zephyr-button-gap);
+  /* one control height across every header/toolbar/dialog: 32px */
+  min-height: 2rem;
+  padding: 5px var(--zephyr-button-padding-x);
+  border-radius: var(--radius-button);
+  white-space: nowrap;
+  font-size: var(--zephyr-button-font-size);
+  line-height: 1.4;
+  font-weight: var(--zephyr-button-weight);
+  text-transform: var(--zephyr-button-transform);
+  letter-spacing: var(--zephyr-button-tracking);
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+  cursor: pointer;
+}
+/* The display above must not beat the .hidden utility (uno loads first). */
+:is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary).hidden {
+  display: none;
+}
+
+.btn-ghost {
+  background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--zephyr-text-primary);
+}
+.btn-ghost:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--zephyr-text-primary);
+}
+.btn-ghost.active {
+  background-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+}
+
+.btn-accent {
+  background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+}
+.btn-accent:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.btn-danger {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+  color: var(--zephyr-color-danger);
+}
+.btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+}
+/* Destructive confirm in a dialog: solid red, the one unmistakable button. */
+.btn-danger.is-solid {
+  background-color: var(--zephyr-color-danger); border-color: transparent; color: #fff;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--zephyr-color-danger) 30%, transparent);
+}
+.btn-danger.is-solid:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 88%, #000);
+}
+
+/* Destructive confirms spell out what goes away (and what stays), so they get a wider card. */
+#modal-container.is-danger {
+  width: min(540px, calc(100vw - 2rem));
+}
+/* Confirm dialogs: a destructive confirm is a solid red button, not a tint. */
+#modal-confirm.btn-danger {
+  background-color: var(--zephyr-color-danger);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--zephyr-color-danger) 30%, transparent);
+}
+#modal-confirm.btn-danger:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 88%, #000);
+}
+.confirm-points {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: var(--text-secondary);
+}
+.confirm-point {
+  position: relative;
+  padding-inline-start: 1.125rem;
+}
+.confirm-point::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.5625rem;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 9999px;
+}
+.confirm-point.is-danger::before { background-color: var(--zephyr-color-danger); }
+.confirm-point.is-success::before { background-color: var(--zephyr-color-success); }
+.confirm-point > strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.btn-warning {
+  background-color: color-mix(in srgb, var(--zephyr-color-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
+  color: var(--zephyr-color-warning);
+}
+.btn-warning:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
+}
+
+.btn-success {
+  background-color: color-mix(in srgb, var(--zephyr-color-success) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zephyr-color-success) 25%, transparent);
+  color: var(--zephyr-color-success);
+}
+.btn-success:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  background-color: color-mix(in srgb, var(--zephyr-color-success) 25%, transparent);
+}
+
+.btn-primary {
+  background-color: var(--color-accent);
+  color: var(--zephyr-text-on-accent);
+  box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.btn-primary:hover:not(:disabled, [disabled], [aria-disabled="true"], .active) {
+  opacity: 0.85;
+}
+
+/* ── Button State Matrix (PR3 §3.3) ── */
+/* Disabled — through native attribute, no extra class needed */
+:is(button, input, select, textarea, .btn, .form-control, .select-common, .dropdown-item, [role="button"]):is(:disabled, [disabled], [aria-disabled="true"]) {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+}
+
+/* Prevent hover/active background on disabled dropdown items and menu buttons */
+.dropdown-item:is(:disabled, [disabled], [aria-disabled="true"]):is(.active, :hover),
+[id$="-menu"] button:is(:disabled, [disabled], [aria-disabled="true"]):is(.active, :hover) {
+  background: transparent;
+}
+
+/* Loading — through aria-busy attribute, synced with DOM semantics */
+.btn[aria-busy="true"] {
+  pointer-events: none;
+  opacity: 0.7;
+}
+.btn[aria-busy="true"]::after {
+  content: '';
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-inline-start: 0.5rem;
+  border: 2px solid currentcolor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* 极简滚动动画 */
+@keyframes node-marquee {
+    0%, 12% { transform: translateX(0); }
+    88%, 100% { transform: translateX(calc(var(--rtl-sign, 1) * -1 * var(--marquee-shift, 0px))); }
+}
+
+button,
+[role="button"],
+input[type="checkbox"],
+input[type="range"],
+.cursor-pointer {
+    cursor: pointer !important;
+}
+
+/* Proxy card node name: ellipsis at rest, measured marquee on hover/focus (always on). */
+.node-name {
+    overflow: hidden;
+}
+.node-name-text {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.node-name.is-marquee {
+    mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to var(--scroll-fade-dir, right), black 85%, transparent 100%);
+}
+.node-name.is-marquee .node-name-text {
+    overflow: visible;
+    text-overflow: clip;
+    width: max-content;
+    animation: node-marquee var(--marquee-duration, 4s) linear infinite alternate;
+}
+
+/* Hide scrollbar on node wheel dropdown */
+#node-wheel-scroll::-webkit-scrollbar {
+    display: none;
+}
+#node-wheel-scroll {
+    -ms-overflow-style: none;
+}
+/* Keyboard focus on a wheel node (options are tabindex=-1, so the global ring skips them) */
+#node-wheel-list [role="option"]:focus { outline: none; }
+#node-wheel-list [role="option"]:focus-visible {
+    /* box-shadow follows the rounded corners of the scaled option (outline left corner slivers) */
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 5px var(--zephyr-focus-ring);
+}
+
+
+:root {
+  color-scheme: light dark;
+
+  /* Semantic aliases — reference zephyr tokens for backward compatibility */
+  --text-primary: var(--zephyr-text-primary);
+  --text-secondary: var(--zephyr-text-secondary);
+  --text-tertiary: var(--zephyr-text-tertiary);
+  --text-muted: var(--zephyr-text-muted);
+  --bg-secondary: var(--zephyr-bg-secondary);
+  --bg-tertiary: var(--zephyr-bg-tertiary);
+  --border-primary: var(--zephyr-border-primary);
+  --app-opacity: 0.6;
+  --accent-primary: #007AFF;
+  --accent-rgb: 0, 122, 255;
+  --accent-glow: rgba(0, 122, 255, 0.2);
+
+  /* Brightness control for glass effects */
+  --brightness: 0.95;
+
+  /* ── Motion system ──
+     Three durations + two curves, sourced from packages/tokens:
+       fast 120ms  → press / hover            (--zephyr-time-micro)
+       base 200ms  → expand / toggle / switch (--zephyr-time-standard)
+       slow 320ms  → page / large panels      (--zephyr-time-slow) */
+  --motion-fast: var(--zephyr-time-micro);
+  --motion-base: var(--zephyr-time-standard);
+  --motion-slow: var(--zephyr-time-slow);
+  --motion-ease-out: var(--zephyr-easing-ease-out);
+  --motion-ease-in-out: var(--zephyr-easing-ease-in-out);
+
+  /* Transition system — reference zephyr tokens */
+  --transition-micro: var(--zephyr-transition-micro);
+  --transition-standard: var(--zephyr-transition-standard);
+  --transition-slow: var(--zephyr-transition-slow);
+
+  /* Glass blur levels */
+  --glass-card: var(--zephyr-glass-blur);
+
+  /* Shadow system */
+  --dialog-shadow-color: rgba(0, 0, 0, 0.55);
+  --shadow-dialog: var(--zephyr-shadow-dialog);
+
+  /* Z-index layers */
+  --z-sticky: var(--zephyr-z-index-sticky);
+  --z-modal: var(--zephyr-z-index-modal);
+  --z-toast: var(--zephyr-z-index-toast);
+
+  /* Focus ring adapter — follows the theme accent, with a visible blue
+     hard fallback so the ring can never resolve to transparent. */
+  --zephyr-focus-ring: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-ring-alpha, 90%), transparent);
+  --zephyr-focus-ring-soft: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-ring-soft-alpha, 30%), transparent);
+  --zephyr-focus-border: color-mix(in srgb, var(--accent-primary, #007AFF) var(--zephyr-focus-border-alpha, 50%), transparent);
+}
+
+html:not(.dark) {
+  --brightness: 0.95;
+  /* Light surfaces: bright accents (green, orange) fall to ~2.2:1 against
+     white, so the ring uses a darker shade of the same accent (>= 3:1 for
+     every preset) at full opacity. Blue fallback keeps it always visible. */
+  --zephyr-focus-ring: color-mix(in srgb, var(--accent-primary, #007AFF) 75%, black);
+  --dialog-shadow-color: rgba(0, 0, 0, 0.25);
+}
+
+html.dark {
+  --brightness: 0.88;
+  --dialog-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+/* Clip the root element to the window's overlay radius, preventing
+   WebView2's rectangular dark edge from showing at the corners.
+   Reset to 0 when the window is maximized to avoid rounding the
+   OS rectangular frame. */
+html {
+  clip-path: inset(0 round var(--zephyr-radius-window-clip, 24px));
+}
+html.is-maximized {
+  --zephyr-radius-window-clip: 0px;
+
+  clip-path: none;
+}
+
+/* 隐藏数字输入框默认的上下箭头 */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* ── Glass card ── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: var(--glass-card);
+  -webkit-backdrop-filter: var(--glass-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-card);
+  box-shadow: var(--zephyr-shadow-sm);
+  transition-property: background-color, border-color, box-shadow, backdrop-filter, -webkit-backdrop-filter;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+/* Only surfaces you can act on react to the pointer; static panels stay still */
+.glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
+  background: var(--zephyr-bg-muted);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: var(--zephyr-shadow-md);
+  --glass-card-hover: blur(16px) saturate(1.2) brightness(calc(var(--brightness, 1) * 0.9));
+  backdrop-filter: var(--glass-card-hover);
+  -webkit-backdrop-filter: var(--glass-card-hover);
+}
+
+.movie-card-base {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+/* iOS Switch Component */
+.ios-switch {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    width: var(--zephyr-switch-width);
+    height: var(--zephyr-switch-height);
+}
+.ios-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.switch-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: #8e8e93;
+    transition: background-color var(--motion-base) var(--motion-ease-in-out), box-shadow var(--motion-base) var(--motion-ease-in-out);
+    border-radius: var(--zephyr-switch-radius);
+}
+.switch-slider:before {
+    position: absolute;
+    content: "";
+    background-color: white;
+    transition: transform var(--motion-base) var(--motion-ease-in-out);
+    border-radius: 50%;
+    height: 20px;
+    width: 20px;
+    inset-inline-start: 2px;
+    bottom: 2px;
+}
+input:checked + .switch-slider {
+    background-color: var(--color-accent);
+}
+/* The real checkbox is 0x0, so draw the keyboard focus ring on the visible track. */
+.ios-switch input:focus-visible + .switch-slider {
+    outline: 2px solid var(--color-accent, #0A84FF);
+    outline-offset: 2px;
+}
+/* Busy (system proxy being applied): not clickable, slightly faded. */
+.ios-switch input:disabled + .switch-slider {
+    cursor: progress;
+    opacity: 0.6;
+}
+
+/* Default size: 40x24 */
+input:checked + .switch-slider:before {
+    transform: translateX(calc(var(--rtl-sign, 1) * 16px));
+}
+
+/* Large size: 48x28 */
+.ios-switch.switch-lg {
+    width: 48px;
+    height: 28px;
+}
+.ios-switch.switch-lg .switch-slider:before {
+    height: 24px;
+    width: 24px;
+    inset-inline-start: 2px;
+    bottom: 2px;
+}
+.ios-switch.switch-lg input:checked + .switch-slider:before {
+    transform: translateX(calc(var(--rtl-sign, 1) * 20px));
+}
+
+/* Small size: 32x18 */
+.ios-switch.switch-sm {
+    width: 32px;
+    height: 18px;
+}
+.ios-switch.switch-sm .switch-slider:before {
+    height: 14px;
+    width: 14px;
+    inset-inline-start: 2px;
+    bottom: 2px;
+}
+.ios-switch.switch-sm input:checked + .switch-slider:before {
+    transform: translateX(calc(var(--rtl-sign, 1) * 14px));
+}
+
+/* UI Scale — applied on body to avoid conflicting with #app-main-container transitions.
+   transform-origin follows the inline-start edge via --scale-origin-x
+   (defined in the :root / :root[dir="rtl"] rules above):
+   LTR → top left, RTL → top right (CSS 2.1 §10.3.3).
+   Scaling from the wrong edge pushes content outside the viewport. */
+body {
+  transform: scale(var(--ui-scale));
+  transform-origin: top var(--scale-origin-x);
+  width: calc(100% / var(--ui-scale));
+  height: calc(100% / var(--ui-scale));
+  clip-path: inset(0 round var(--zephyr-radius-window-clip, 24px));
+  transition: transform var(--zephyr-transition-page),
+              width var(--zephyr-transition-page),
+              height var(--zephyr-transition-page);
+}
+
+/* Main container background driven by theme + opacity variable */
+#app-main-container {
+  background-color: rgb(255 255 255 / var(--app-opacity, 0.6));
+}
+
+html.dark #app-main-container {
+  background-color: rgb(24 24 27 / var(--app-opacity, 0.6));
+}
+
+/* Sidebar — theme-aware subtle background */
+html.dark #sidebar-nav {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.01);
+}
+html.dark .glass-card {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+html.dark .glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* Left-top title icon: keep original colors (we swap src in JS) */
+#app-title-icon {
+  filter: drop-shadow(0 0 8px var(--color-accent-glow));
+}
+
+/* Sidebar — light mode: soft off-white panel, one step below the cards */
+html:not(.dark) #sidebar-nav {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(15, 30, 60, 0.06);
+}
+
+/* Light theme: low-saturation blue/cyan mist behind the glass, so cards read as
+   glass floating on colour instead of white on white. Accent tint follows the
+   chosen theme colour; the cyan layer is fixed. */
+html:not(.dark) #app-main-container {
+  background-color: rgb(232 233 236 / var(--app-opacity, 0.4));
+  background-image:
+    radial-gradient(55% 50% at 10% 6%, rgba(var(--accent-rgb), 0.09), transparent 72%),
+    radial-gradient(48% 46% at 94% 18%, rgba(6, 182, 212, 0.07), transparent 72%),
+    radial-gradient(70% 55% at 62% 104%, rgba(var(--accent-rgb), 0.07), transparent 70%);
+}
+
+/* Cards sit ~1.16:1 above the page, matching the dark theme's depth, and stay
+   off-white (never pure white) so large areas don't glare. */
+html:not(.dark) .glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(15, 30, 60, 0.06);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.05), 0 8px 24px -12px rgba(30, 64, 110, 0.16);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html:not(.dark) .glass-card:is(.cursor-pointer, [role="button"], [role="option"], button, a):hover {
+  background: #fff;
+  border-color: rgba(15, 30, 60, 0.08);
+  box-shadow: 0 1px 2px rgba(30, 50, 80, 0.06), 0 14px 28px -12px rgba(30, 64, 110, 0.2);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html:not(.dark) #setting-lang-menu {
+  background-color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(30, 41, 59, 0.16);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+/* ============================================
+   Shared Component Classes
+   ============================================ */
+
+/* --- Button System (see @utility definitions above) --- */
+/* Delete icon button (small, inline) — kept as plain CSS */
+.btn-delete-icon {
+  padding: 0.375rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition-property: color, background-color, border-color, opacity;
+  transition-timing-function: ease-out;
+}
+.btn-delete-icon:hover {
+  color: var(--zephyr-color-danger);
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
+}
+
+/* --- Form Control System (PR3 §3.4) --- */
+/* Converges input-common / input-modal / input-mono / textarea-common into one system */
+.form-control {
+  width: 100%;
+  border-radius: var(--zephyr-radius-md);
+  background-color: var(--zephyr-surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--zephyr-border-subtle);
+}
+.form-control::placeholder {
+  color: var(--zephyr-text-tertiary);
+}
+/* Size variants */
+.form-control-sm { padding: 0.25rem 0.75rem; font-size: var(--zephyr-font-size-2xs); }
+.form-control-md { padding: 0.5rem 1rem;    font-size: var(--zephyr-font-size-xs); }
+.form-control-lg { padding: 0.75rem 1.5rem;   font-size: var(--zephyr-font-size-sm); }
+/* Font variant */
+.form-control-mono { font-family: var(--font-mono); }
+
+/* --- Input & Textarea with Paste Button Helper --- */
+.input-paste-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.input-paste-wrapper input.form-control,
+.input-paste-wrapper input[type="text"],
+.input-paste-wrapper input[type="search"] {
+  padding-inline-end: 2.25rem !important;
+}
+
+.textarea-paste-wrapper {
+  position: relative;
+  display: flex;
+  width: 100%;
+}
+.textarea-paste-wrapper textarea.form-control,
+.textarea-paste-wrapper textarea {
+  padding-inline-end: 2.5rem !important;
+}
+
+/* Shared base for all paste buttons — positioning, sizing, visual, and hover states */
+.btn-paste-base {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--zephyr-radius-sm, 6px);
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease-out), background-color var(--motion-fast) var(--motion-ease-out), opacity var(--motion-fast) var(--motion-ease-out), transform var(--motion-fast) var(--motion-ease-out);
+  z-index: 2;
+  line-height: 1;
+}
+.btn-paste-base:hover {
+  color: var(--text-primary, #ffffff);
+  background-color: var(--zephyr-bg-muted, rgba(255, 255, 255, 0.08));
+}
+.btn-paste-base:focus-visible {
+  color: var(--text-primary, #ffffff);
+  outline: 2px solid var(--accent-primary, #007AFF);
+  outline-offset: 1px;
+}
+
+/* Input variant — vertically centered */
+.btn-input-paste {
+  inset-inline-end: 0.375rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.btn-input-paste:active {
+  transform: translateY(-50%) scale(0.92);
+}
+
+/* Textarea variant — top-anchored */
+.btn-textarea-paste {
+  inset-inline-end: 0.5rem;
+  top: 0.5rem;
+}
+.btn-textarea-paste:active {
+  transform: scale(0.92);
+}
+
+/* --- Status Components (PR3 §3.5) --- */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--zephyr-radius-full);
+  flex-shrink: 0;
+}
+.status-dot--online  { background: var(--zephyr-color-success); }
+.status-dot--offline { background: var(--zephyr-text-muted); }
+.status-dot--error   { background: var(--zephyr-color-danger); }
+.status-dot--warning { background: var(--zephyr-color-warning); }
+
+.latency-badge {
+  font-size: var(--zephyr-font-size-2xs);
+  font-weight: 700;
+  padding: var(--zephyr-badge-padding);
+  border-radius: var(--zephyr-radius-control);
+  font-variant-numeric: tabular-nums;
+}
+.latency-badge--fast   { color: var(--zephyr-color-success); background: color-mix(in srgb, var(--zephyr-color-success) 15%, transparent); }
+.latency-badge--medium { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent); }
+.latency-badge--slow   { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent); }
+
+/* --- Danger Zone (PR3 §3.6) --- */
+.danger-zone {
+  margin-top: var(--zephyr-space-8);
+  padding-top: var(--zephyr-space-6);
+  border-top: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+}
+.danger-zone__title {
+  color: var(--zephyr-color-danger);
+  font-size: var(--zephyr-font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--zephyr-space-3);
+}
+
+/* --- Badge System --- */
+.badge {
+  font-size: var(--zephyr-badge-font-size);
+  line-height: 1.4;
+  font-weight: 700;
+  padding: var(--zephyr-badge-padding);
+  border-radius: var(--radius-badge);
+  border: 1px solid;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.badge--default {
+  background-color: var(--zephyr-bg-input);
+  color: var(--zephyr-text-badge);
+  border-color: var(--zephyr-border-subtle);
+}
+.badge--success {
+  background-color: color-mix(in srgb, var(--zephyr-color-success) 15%, transparent);
+  color: var(--zephyr-color-success);
+  border-color: color-mix(in srgb, var(--zephyr-color-success) 20%, transparent);
+}
+.badge--warning {
+  background-color: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent);
+  color: var(--zephyr-color-warning);
+  border-color: color-mix(in srgb, var(--zephyr-color-warning) 20%, transparent);
+}
+.badge--danger {
+  background-color: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent);
+  color: var(--zephyr-color-danger);
+  border-color: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent);
+}
+
+/* --- Type Badge (legacy alias) --- */
+.type-badge {
+  font-size: var(--zephyr-badge-font-size);
+  line-height: 1.4;
+  font-weight: 700;
+  padding: var(--zephyr-badge-padding);
+  border-radius: var(--radius-badge);
+  background-color: var(--zephyr-bg-input);
+  color: var(--zephyr-text-badge);
+  border: 1px solid var(--zephyr-border-subtle);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* --- Proxy node cards (dense 96px cards: compact radius, selection, delay tier) --- */
+.proxy-card.glass-card {
+  border-radius: var(--radius-card-compact, 16px);
+}
+html:not(.dark) .proxy-card.glass-card,
+html:not(.dark) .proxy-card.glass-card:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+html .proxy-card.proxy-card--selected.glass-card,
+html .proxy-card.proxy-card--selected.glass-card:hover {
+  border-color: var(--accent-primary);
+  /* 1px border + 0.5px inset ring = 1.5px accent stroke without shifting layout.
+     No outer shadow: the virtualised wrapper uses content-visibility (paint containment),
+     which would clip an outer shadow into a visible rectangle. */
+  box-shadow: inset 0 0 0 0.5px var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.proxy-check {
+  position: absolute;
+  /* Sits on the card's top-end corner, over the border. */
+  /* Centred on the rounded corner's arc, so it reads as part of the border. */
+  top: -4px;
+  inset-inline-end: -4px;
+  width: 18px;
+  height: 18px;
+  z-index: 1;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 1px 3px color-mix(in srgb, var(--accent-primary) 35%, transparent);
+  pointer-events: none;
+}
+.proxy-check svg {
+  width: 11px;
+  height: 11px;
+}
+.delay-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--zephyr-text-muted) 55%, transparent);
+}
+.delay-dot[data-tier="good"] {
+  background: var(--zephyr-color-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-success) 45%, transparent);
+}
+.delay-dot[data-tier="ok"] {
+  background: var(--zephyr-color-warning);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-warning) 45%, transparent);
+}
+.delay-dot[data-tier="bad"] {
+  background: var(--zephyr-color-danger);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--zephyr-color-danger) 40%, transparent);
+}
+
+/* --- Score Badge (Smart Proxy) --- */
+.score-badge {
+  /* Quiet by design: the latency already carries colour, so the score stays neutral
+     and only a small tier dot says good / fair / poor. */
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 18px;
+  /* 1px top padding drops the digits onto the pill's optical centre (digit glyphs sit high
+     in their line box); the dot is nudged up to the digits' centre line. */
+  padding: 1px 6px 0;
+  box-sizing: border-box;
+  margin-inline-start: 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, var(--text-muted));
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+.score-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--zephyr-color-success);
+  transform: translateY(-1px);
+}
+html:root[style*="--smart-enabled: 1"] .score-badge,
+html:root[style*="--smart-enabled:1"] .score-badge {
+  display: inline-flex;
+}
+.score-badge.score-medium::before { background: var(--zephyr-color-warning); }
+.score-badge.score-low::before { background: var(--zephyr-color-danger); }
+/* Same specificity as the smart-enabled rule above, so an empty badge stays hidden. */
+.score-badge:empty,
+html:root[style*="--smart-enabled: 1"] .score-badge:empty,
+html:root[style*="--smart-enabled:1"] .score-badge:empty { display: none; }
+.proxy-card--selected .score-badge {
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+/* --- Plugin Panel --- */
+.plugin-panel {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-button);
+  box-shadow: var(--zephyr-shadow-plugin);
+  overflow-x: hidden;
+}
+html:not(.dark) .plugin-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.15);
+}
+
+/* --- Script Editor --- */
+.script-editor {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  tab-size: 2;
+  resize: vertical;
+  min-height: 120px;
+}
+/* Shortcut hint inside the override editor buttons ("Save  Ctrl S"). */
+.script-kbd {
+  margin-inline-start: 0.5rem;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+/* The inline override editor grows with the panel; CodeMirror fills it. */
+#plugin-script-cm6 { display: flex; flex-direction: column; }
+#plugin-script-cm6 > .cm-editor { flex: 1; min-height: 0; }
+.script-output {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+}
+html:not(.dark) .script-editor,
+html:not(.dark) .script-output {
+  color: var(--zephyr-text-primary);
+}
+
+/* Common dropdown trigger styles - pill shape like language selector */
+.select-common {
+  background-color: var(--zephyr-bg-input);
+  border: 1px solid var(--zephyr-border-subtle);
+  border-radius: 9999px;
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  transition-property: color, background-color, border-color, box-shadow;
+  appearance: none;
+  cursor: pointer;
+}
+
+/* --- Dropdown Panel System --- */
+.dropdown-panel {
+  background-color: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-default);
+  border-radius: var(--radius-dropdown);
+  box-shadow: var(--zephyr-shadow-dropdown);
+  overflow: hidden;
+  padding: var(--zephyr-dropdown-padding);
+}
+[id$="-menu"] {
+  background-color: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-default);
+  border-radius: var(--radius-dropdown);
+  box-shadow: var(--zephyr-shadow-dropdown);
+  overflow: hidden;
+  padding: 0;
+}
+.menu-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+[id$="-menu"] .menu-scroll {
+  padding: var(--zephyr-dropdown-padding);
+}
+
+.dropdown-item,
+[id$="-menu"] button {
+  border-radius: var(--radius-option);
+  margin-bottom: var(--zephyr-space-3);
+  cursor: pointer;
+}
+.dropdown-item:last-child,
+[id$="-menu"] button:last-child {
+  margin-bottom: 0;
+}
+.dropdown-item:hover,
+[id$="-menu"] button:hover {
+  background: var(--zephyr-bg-subtle);
+}
+.dropdown-item.active,
+[id$="-menu"] button.active {
+  background: var(--zephyr-bg-muted);
+}
+
+/* Shortcut dropdown menu */
+.shortcut-dropdown-menu {
+  background-color: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-default);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--zephyr-shadow-md);
+}
+.shortcut-dropdown-menu button {
+  color: var(--zephyr-text-primary);
+}
+.shortcut-dropdown-menu button:hover {
+  background: var(--zephyr-bg-subtle);
+}
+.shortcut-dropdown-menu button.active {
+  background: var(--zephyr-bg-muted);
+}
+
+/* Textarea — use form-control + form-control-mono + resize-none utility */
+
+/* Form control focus consolidated under Focus Visibility section below */
+html:not(.dark) .form-control::placeholder,
+html:not(.dark) .select-common::placeholder {
+  color: var(--zephyr-text-tertiary);
+}
+
+/* Light mode focus border for form controls (matches original input-common/input-modal/textarea-common) */
+html:not(.dark) .form-control:focus {
+  border-color: var(--color-accent);
+}
+
+/* ============================================
+   Connections Page Styles
+   ============================================ */
+
+/* Connection row hover animation */
+#connections-list > div {
+  transition-property: background-color, border-color, opacity;
+  transition-duration: var(--zephyr-time-standard);
+}
+
+#connections-list > div:hover {
+  background: var(--zephyr-bg-subtle);
+}
+
+/* Rule badge pill animation */
+#connections-list .group span[class*="bg-"] {
+  transition-property: background-color, color, opacity;
+  transition-duration: var(--zephyr-time-standard);
+}
+
+/* Close button reveal on hover */
+.conn-close-btn {
+  transition: opacity var(--transition-standard), background var(--transition-micro), transform var(--transition-micro);
+}
+
+.conn-close-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Stats bar number animation */
+#conn-stats-bar span[id^="stat-"] {
+  transition: color var(--transition-standard);
+}
+
+/* Search input focus glow */
+/* Connection list smooth scroll */
+#connections-list {
+  scroll-behavior: smooth;
+}
+
+/* Empty state icon subtle pulse */
+#connections-empty svg {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}
+
+@keyframes gentle-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+/* ============================================
+   Sidebar — Luxury Micro-Animations
+   奢侈品级微动效系统（pathLength=1 零漂移描绘 + 触觉反馈 + 离场呼气）
+   ============================================ */
+
+/* —— 动效曲线 —— */
+:root {
+  --nav-glide: cubic-bezier(.22, 1, .36, 1);
+  --nav-spring: cubic-bezier(.34, 1.4, .64, 1);
+}
+
+/* —— 图标基底：按压触感 + 选中弹出 + 离场呼气 —— */
+.nav-btn .icon {
+  transition: transform .45s var(--nav-spring), filter .45s var(--nav-glide);
+}
+.nav-btn:active .icon {
+  transform: scale(.82);
+  transition-duration: .12s;
+}
+.nav-btn.is-active .icon {
+  animation: nav-icon-pop .6s var(--nav-spring);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-accent) 40%, transparent));
+}
+@keyframes nav-icon-pop {
+  0% { transform: scale(.78); }
+  100% { transform: scale(1); }
+}
+.nav-btn.is-leaving .icon { animation: nav-icon-exhale .5s var(--nav-glide); }
+@keyframes nav-icon-exhale {
+  0% { transform: scale(1); }
+  45% { transform: scale(.84); }
+  100% { transform: scale(1); }
+}
+
+/* —— 侧栏图标提示：悬停 / 键盘聚焦时显示页面名（ui/nav-tooltip.js） —— */
+.nav-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-toast, 1100);
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: var(--zephyr-radius-control, 8px);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1.3;
+  color: var(--zephyr-text-primary);
+  background: color-mix(in srgb, var(--zephyr-bg-elevated) 82%, transparent);
+  border: 1px solid var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+  backdrop-filter: var(--glass-card);
+  -webkit-backdrop-filter: var(--glass-card);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-4px, -50%);
+  transition: opacity var(--motion-fast) var(--motion-ease-out),
+              transform var(--motion-base) var(--nav-glide),
+              visibility 0s linear var(--motion-fast);
+}
+.nav-tooltip[data-side="start"] { transform: translate(calc(-100% + 4px), -50%); }
+.nav-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+  transition-delay: 0s;
+}
+.nav-tooltip[data-side="start"].is-visible { transform: translate(-100%, -50%); }
+@media (prefers-reduced-motion: reduce) {
+  .nav-tooltip { transition: none; transform: translate(0, -50%); }
+  .nav-tooltip[data-side="start"] { transform: translate(-100%, -50%); }
+}
+
+/* ============================================
+   Draw-On 引擎：pathLength=1 归一化，dashoffset 描绘（零漂移）
+   ============================================ */
+.p-draw, .p-shaft, .p-prompt, .p-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+@keyframes nav-draw-on {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* — 1. Home：屋顶先落笔，门后落笔（By-Layer 错峰） — */
+.is-active .p-draw { animation: nav-draw-on .55s var(--nav-glide) both; }
+.is-active .p-draw.d2 { animation: nav-draw-on .4s var(--nav-glide) .18s both; }
+
+/* — 2. Proxies：箭杆一笔到位 → 箭头以箭尖为轴弹性释放 — */
+.is-active .p-shaft { animation: nav-draw-on .32s var(--nav-glide) both; }
+.p-head { transform-box: fill-box; transform-origin: 100% 50%; }
+.is-active .p-head { animation: nav-arrow-release .55s var(--nav-spring) .2s both; }
+@keyframes nav-arrow-release {
+  from { transform: scaleX(.08); }
+  to { transform: scaleX(1); }
+}
+
+/* — 3. Subscriptions：折角翻开 → 对勾以墨色描绘（accent 着色） — */
+.p-fold { transform-box: fill-box; transform-origin: 0 0; }
+.is-active .p-fold { animation: nav-fold-flip .5s var(--nav-spring) .1s both; }
+@keyframes nav-fold-flip {
+  from { transform: scale(.2); opacity: .3; }
+  to { transform: scale(1); opacity: 1; }
+}
+.is-active .p-check { animation: nav-draw-on .45s var(--nav-glide) .3s both; stroke: var(--color-accent); }
+.p-check { transition: stroke .4s var(--nav-glide); }
+
+/* — 4. Connections：节点弹入 + 数据流（保留 conn-nav-paused 语义） — */
+.c-node { transform-box: fill-box; transform-origin: center; }
+.is-active .c-node { animation: nav-node-pop .5s var(--nav-spring) both; }
+.is-active .c-node-r { animation-delay: .09s; }
+@keyframes nav-node-pop {
+  from { transform: scale(.3); }
+  to { transform: scale(1); }
+}
+.conn-line-dash {
+  stroke-dasharray: 3 3;
+  animation: nav-conn-flow 1.2s linear infinite;
+  animation-play-state: paused;
+}
+.conn-pulse-dot {
+  opacity: 0;
+  transition: fill .4s;
+}
+.conn-dot-2 { animation-delay: .6s; }
+.is-active .conn-pulse-dot {
+  opacity: 1;
+  fill: var(--color-accent);
+  animation: nav-dot-pulse 1.2s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.is-active:not(.conn-nav-paused) .conn-line-dash,
+.is-active:not(.conn-nav-paused) .conn-pulse-dot { animation-play-state: running; }
+@keyframes nav-conn-flow { to { stroke-dashoffset: -12; } }
+@keyframes nav-dot-pulse {
+  0%, 100% { opacity: .15; }
+  50% { opacity: 1; }
+}
+
+/* — 5. Rule Library：整本书一笔勾勒，钢笔速写感 — */
+.is-active .p-book { animation: nav-draw-on .75s var(--nav-glide) both; }
+
+/* — 6. Logs：提示符描绘 + 光标绘入并呼吸闪烁 — */
+.is-active .p-prompt { animation: nav-draw-on .38s var(--nav-glide) both; }
+.p-cursor {
+  transform-box: fill-box;
+  transform-origin: 0 50%;
+  opacity: .45;
+  transition: opacity .4s var(--nav-glide), stroke .4s var(--nav-glide);
+}
+.is-active .p-cursor {
+  opacity: 1;
+  stroke: var(--color-accent);
+  animation: nav-cursor-in .3s var(--nav-glide) .28s both,
+             nav-cursor-blink 1.1s steps(1) .9s infinite;
+}
+@keyframes nav-cursor-in { from { transform: scaleX(0); } }
+@keyframes nav-cursor-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: .15; }
+}
+
+/* — 7. Settings：表冠上弦——旋转 90° 过冲咬合 — */
+.gear { transform-box: fill-box; transform-origin: center; }
+.is-active .gear { animation: nav-gear-wind .8s var(--nav-spring) both; }
+@keyframes nav-gear-wind {
+  0% { transform: rotate(0); }
+  55% { transform: rotate(104deg); }
+  100% { transform: rotate(90deg); }
+}
+.is-leaving .gear { animation: nav-gear-unwind .5s var(--nav-glide) both; }
+@keyframes nav-gear-unwind {
+  from { transform: rotate(90deg); }
+  to { transform: rotate(0); }
+}
+
+/* ============================================
+   Connections Page - Tab Styles
+   ============================================ */
+
+.conn-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* ── Connections table: 4 columns, two lines per row ── */
+.conn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1.7fr) minmax(84px, 1fr) minmax(84px, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+.conn-head {
+  align-items: start;
+  padding: 8px 20px 8px 20px;
+  user-select: none;
+  border-bottom: 1px solid var(--zephyr-border-subtle);
+}
+.conn-head-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.conn-head .sortable {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--zephyr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.conn-head .sortable.conn-head-sub {
+  font-weight: 500;
+  color: var(--zephyr-text-tertiary);
+}
+.conn-head .sortable:hover { color: var(--text-primary); }
+:lang(zh) .conn-head .sortable, :lang(ja) .conn-head .sortable, :lang(ko) .conn-head .sortable {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.conn-num { text-align: end; align-items: flex-end; }
+.conn-row {
+  padding: 8px 12px;
+  border-radius: var(--zephyr-radius-surface);
+  border: 1px solid transparent;
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.conn-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+.conn-main {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.conn-host { color: var(--text-primary); font-weight: 500; }
+.conn-rate { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.conn-rate--down { color: var(--zephyr-color-download); }
+.conn-rate--up { color: var(--zephyr-color-upload); }
+.conn-sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--zephyr-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+:lang(zh) .conn-sub, :lang(ja) .conn-sub, :lang(ko) .conn-sub { font-size: 12px; }
+.conn-rule {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-row--closed { opacity: .6; }
+.conn-row--idle { opacity: .55; }
+.conn-row--closed:hover, .conn-row--idle:hover, .conn-row:focus-visible { opacity: 1; }
+
+/* ============================================
+   Connection Detail Panel
+   ============================================ */
+
+/* Row click hint */
+.conn-row {
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 54px; /* two-line row ≈ 53px */
+}
+
+/* Proxy card wrapper: content-visibility for virtual scroll perf */
+.proxy-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 104px;
+  /* Room for the selected check on the card's corner: content-visibility clips paint
+     to this box, so it extends 8px past the card into the grid gap. */
+  padding-top: 8px;
+  padding-inline-end: 8px;
+  margin-top: -8px;
+  margin-inline-end: -8px;
+}
+.proxy-wrapper:hover {
+  content-visibility: visible;
+  z-index: 10;
+  position: relative;
+}
+
+.conn-row:hover {
+  background: var(--zephyr-bg-muted) !important;
+  border-color: var(--zephyr-border-default) !important;
+}
+
+/* Detail panel backdrop */
+#conn-detail-bg {
+  align-items: center;
+  justify-content: center;
+}
+
+/* Detail panel stat cards hover */
+#conn-detail-panel .grid > div:hover {
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+}
+
+/* Detail close button animation */
+#detail-close-btn {
+  transition-property: color, background-color, opacity;
+  transition-duration: var(--zephyr-time-standard);
+}
+
+#detail-close-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--zephyr-color-danger) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--zephyr-color-danger) 40%, transparent) !important;
+}
+
+#detail-close-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Extended grid columns (beyond Tailwind default 12) ── */
+.grid-cols-13 { grid-template-columns: repeat(13, minmax(0, 1fr)); }
+.grid-cols-14 { grid-template-columns: repeat(14, minmax(0, 1fr)); }
+.grid-cols-15 { grid-template-columns: repeat(15, minmax(0, 1fr)); }
+
+/* ============================================
+   Focus Visibility (theme-aware)
+   ============================================ */
+/* Global outline for keyboard navigation visibility */
+:where(button, a, input, select, textarea, [tabindex], [contenteditable]):where(:not([tabindex^="-"], :disabled, [disabled])):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Buttons get a soft box-shadow supplement (outline hidden in standard mode, preserved for high-contrast) */
+.btn:focus-visible:not(:disabled, [disabled]),
+button:focus-visible:not(:disabled, [disabled]),
+[role="button"]:focus-visible:not(:disabled, [disabled]) {
+  box-shadow: 0 0 0 4px var(--zephyr-focus-ring);
+  outline: 2px solid transparent;
+}
+
+/* Restore visible outline in Forced Colors Mode (Windows High Contrast) */
+@media (forced-colors: active) {
+  .btn:focus-visible:not(:disabled, [disabled]),
+  button:focus-visible:not(:disabled, [disabled]),
+  [role="button"]:focus-visible:not(:disabled, [disabled]) {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* Select focus (pill-shaped, keeps its own focus style) */
+.select-common:focus {
+  box-shadow: none;
+  outline: 2px solid transparent;
+  border-color: var(--zephyr-border-strong);
+}
+
+.form-control:focus-visible:not(:disabled, [disabled]),
+.select-common:focus-visible:not(:disabled, [disabled]) {
+  /* text fields are focused whenever you type: a solid accent border plus a
+     soft 3px halo reads as "active" without the heavy 4px solid band */
+  border-color: var(--color-accent);
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring-soft);
+}
+
+/* ============================================
+   Reduced Motion Support
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Exempt essential progress indicators (WCAG 2.2.2) */
+  .btn[aria-busy="true"]::after {
+    animation-duration: 1s !important;
+  }
+  .sr-turn.sr-spinning {
+    animation-duration: 2s !important;
+  }
+  .sr-fill.sr-dashing {
+    animation-duration: 2.5s !important;
+  }
+  .btn[aria-busy="true"]::after,
+  .sr-turn.sr-spinning,
+  .sr-fill.sr-dashing {
+    animation-iteration-count: infinite !important;
+  }
+    /* Disable decorative animations */
+  .conn-line-dash,
+  .conn-pulse-dot,
+  .nav-btn .icon,
+  .p-draw, .p-shaft, .p-prompt, .p-check, .p-head, .p-fold, .p-book, .p-cursor,
+  .c-node, .gear,
+  .node-name-text,
+  #connections-empty svg {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Transition System (PR4 4.5)
+   ============================================ */
+.form-control,
+.select-common,
+.dropdown-item,
+[id$="-menu"] button,
+.dropdown-panel,
+.glass-card {
+  transition-property: color, background-color, border-color, box-shadow, opacity, backdrop-filter, -webkit-backdrop-filter;
+  transition-duration: var(--zephyr-time-standard);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+.nav-button,
+.tab-button,
+.status-dot {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--zephyr-time-micro);
+  transition-timing-function: var(--zephyr-easing-ease-out);
+}
+
+[data-page],
+#modal-container {
+  transition-property: opacity, transform;
+  transition-duration: var(--zephyr-time-page);
+  transition-timing-function: var(--zephyr-easing-ease-in-out);
+}
+
+/* ============================================
+   High Contrast Mode
+   ============================================ */
+@media (prefers-contrast: more) {
+  .glass-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  html:not(.dark) .glass-card {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ============================================
+   Dialog Composite Shadow
+   ============================================ */
+#modal-container,
+#dns-config-modal > .glass-card {
+  box-shadow: var(--shadow-dialog);
+}
+
+/* ============================================
+   Proxies Page — Auto-fill grid
+   Columns are added/removed automatically based on
+   available width. Minimum card width 180px.
+   Unlimited max columns.
+   ============================================ */
+#proxies-list {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+/* ============================================
+   Logs Page Styles
+   ============================================ */
+
+/* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
+.log-level-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--zephyr-button-gap);
+    min-height: 2rem;
+    padding: 5px var(--zephyr-button-padding-x);
+    border-radius: var(--radius-button);
+    font-size: var(--zephyr-button-font-size);
+    line-height: 1.4;
+    font-weight: var(--zephyr-button-weight);
+    text-transform: var(--zephyr-button-transform);
+    letter-spacing: var(--zephyr-button-tracking);
+    color: var(--zephyr-text-primary);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
+    transition-property: color, background-color, border-color, opacity;
+    transition-timing-function: ease-out;
+    cursor: pointer;
+}
+.log-level-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--zephyr-text-primary);
+}
+.log-level-btn.active {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+.log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.15); border-color: rgba(107, 114, 128, 0.25); }
+.log-level-btn[data-level="info"].active { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-info) 25%, transparent); }
+.log-level-btn[data-level="warn"].active { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-warning) 25%, transparent); }
+.log-level-btn[data-level="error"].active { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-danger) 25%, transparent); }
+.log-level-btn[data-level="fatal"].active { color: #dc2626; background: rgba(220, 38, 38, 0.20); border-color: rgba(220, 38, 38, 0.35); }
+
+/* ── Log Content Area ── */
+.log-line {
+    padding: 1px 0;
+    border-bottom: 1px solid var(--zephyr-border-subtle);
+    transition: background var(--motion-fast) var(--motion-ease-out);
+}
+.log-line:hover {
+    background: var(--zephyr-bg-subtle);
+}
+/* Structured core log row: local time / level badge / message */
+.log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    min-height: 1.4em;
+}
+.log-raw { overflow-wrap: anywhere; padding: 3px 6px; }
+.log-time {
+    flex-shrink: 0;
+    color: var(--zephyr-text-muted);
+    user-select: none;
+}
+.log-badge {
+    flex-shrink: 0;
+    min-width: 46px;
+    text-align: center;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    color: var(--zephyr-text-secondary);
+    background: var(--zephyr-bg-input);
+}
+.log-badge[data-level="info"] { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 14%, transparent); }
+.log-badge[data-level="warn"] { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 16%, transparent); }
+.log-badge[data-level="error"], .log-badge[data-level="fatal"] { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 16%, transparent); }
+.log-msg {
+    min-width: 0;
+    color: var(--zephyr-text-primary);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.log-row[data-level="debug"] .log-msg { color: var(--zephyr-text-muted); }
+.log-row[data-level="warn"] { background: color-mix(in srgb, var(--zephyr-color-warning) 7%, transparent); }
+.log-row[data-level="error"], .log-row[data-level="fatal"] { background: color-mix(in srgb, var(--zephyr-color-danger) 8%, transparent); }
+
+/* ============================================
+   Logs Page — Light Mode Overrides
+   ============================================ */
+
+html:not(.dark) .log-level-btn {
+    color: var(--zephyr-text-primary);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+html:not(.dark) .log-level-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+/* The light base rule above outranks .log-level-btn.active, so "All" needs its own active state */
+html:not(.dark) .log-level-btn.active {
+    color: color-mix(in srgb, var(--color-accent) 80%, black);
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+html:not(.dark) .log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.12); border-color: rgba(107, 114, 128, 0.20); }
+html:not(.dark) .log-level-btn[data-level="info"].active { color: #2563eb; background: rgba(37, 99, 235, 0.12); border-color: rgba(37, 99, 235, 0.20); }
+html:not(.dark) .log-level-btn[data-level="warn"].active { color: #d97706; background: rgba(217, 119, 6, 0.12); border-color: rgba(217, 119, 6, 0.20); }
+html:not(.dark) .log-level-btn[data-level="error"].active { color: #dc2626; background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.20); }
+html:not(.dark) .log-level-btn[data-level="fatal"].active { color: #991b1b; background: rgba(153, 27, 27, 0.15); border-color: rgba(153, 27, 27, 0.25); }
+
+html:not(.dark) .log-line {
+    border-bottom-color: rgba(0, 0, 0, 0.04);
+}
+html:not(.dark) .log-line:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Fullscreen Editor - Light/Dark Mode Support
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Light mode - overlay uses same style as other modals */
+html:not(.dark) #fullscreen-editor-overlay {
+    background: var(--zephyr-bg-overlay);
+}
+
+html:not(.dark) #fullscreen-editor-container {
+    background: rgba(255, 255, 255, 0.98);
+    border-color: var(--zephyr-border-default);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+}
+
+html:not(.dark) #fullscreen-editor-title {
+    color: var(--text-primary);
+}
+
+html:not(.dark) #fullscreen-editor-output {
+    color: var(--text-secondary);
+}
+
+html:not(.dark) #fullscreen-editor-output .italic {
+    color: var(--text-muted, var(--zephyr-text-tertiary));
+}
+
+/* Dark mode */
+html.dark #fullscreen-editor-overlay {
+    background: var(--zephyr-bg-overlay);
+}
+
+html.dark #fullscreen-editor-container {
+    background: rgba(24, 24, 27, 0.95);
+    border-color: var(--zephyr-border-default);
+}
+
+html.dark #fullscreen-editor-title {
+    color: var(--zephyr-text-primary);
+}
+
+html.dark #fullscreen-editor-output {
+    color: var(--zephyr-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Status Ring — compact circular progress indicator
+   Replaces update buttons during in-progress operations.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.sr-zone {
+    align-items: center;
+    justify-content: center;
+}
+
+.sr-wrap {
+    position: relative;
+    width: 40px;
+    height: 40px;
+}
+
+.sr-svg {
+    display: block;
+}
+
+.sr-fill {
+    transition: stroke-dashoffset 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+                stroke 0.4s ease;
+}
+
+/* Indeterminate: breathing dash + seamless rotation */
+.sr-fill.sr-dashing {
+    animation: sr-dash 1.5s ease-in-out infinite;
+}
+
+.sr-turn.sr-spinning {
+    transform-origin: 20px 20px;
+    animation: sr-spin 1.15s cubic-bezier(0.55, 0.15, 0.35, 0.85) infinite;
+}
+
+@keyframes sr-dash {
+    0%   { stroke-dasharray: 15 86; stroke-dashoffset: 0; }
+    50%  { stroke-dasharray: 50 51; stroke-dashoffset: -25; }
+    100% { stroke-dasharray: 15 86; stroke-dashoffset: -101; }
+}
+
+@keyframes sr-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Center overlay */
+.sr-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.sr-pct {
+    font-size: 9px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.3px;
+    color: var(--text-muted);
+}
+
+/* Icon draw animation */
+@keyframes sr-draw {
+    to { stroke-dashoffset: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Console Dashboard (dz-* prefix — self-contained layout for the console home page)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dz-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 32px 32px 0; display: flex; flex-direction: column; gap: 16px; }
+.dz-content > .dz-header { margin-bottom: 8px; }
+
+/* ── Page header: title + view switch ── */
+.dz-header { display: flex; align-items: flex-end; justify-content: space-between; flex-shrink: 0; min-width: 0; }
+.dz-header h1 { font-size: 24px; line-height: 2rem; font-weight: 300; color: var(--zephyr-text-primary); margin: 0; letter-spacing: -0.01em; }
+.dz-header .dz-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dz-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--zephyr-color-success); box-shadow: 0 0 8px var(--zephyr-color-success); animation: dz-pulse 2s ease-in-out infinite; }
+@keyframes dz-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ── KPI indicator strip ── */
+.dz-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
+.dz-kpi { padding: 16px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; min-width: 0; }
+.dz-kpi-top { display: flex; align-items: center; justify-content: space-between; }
+.dz-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
+.dz-kpi-icon { width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dz-kpi-icon svg { width: 12px; height: 12px; }
+.dz-kpi-value { display: flex; align-items: baseline; gap: 4px; }
+.dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
+.dz-kpi-value span { font-size: 13px; font-weight: 500; color: var(--zephyr-text-muted); }
+.dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Keep footer text clear of the sparkline drawn in the bottom corner */
+.dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
+.dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The footer is a flex row: ellipsize its text pieces, not just the row. */
+.dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
+
+/* ── Main grid ── */
+.dz-grid-main { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
+.dz-grid-main > .glass-card { min-width: 0; overflow: hidden; }
+.dz-card-pad { padding: 20px; }
+.dz-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.dz-card-title { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); }
+.dz-card-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: dz-pulse 2s ease-in-out infinite; }
+.dz-legend { display: flex; align-items: center; gap: 14px; }
+.dz-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--zephyr-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.dz-legend-swatch { width: 8px; height: 8px; border-radius: 3px; }
+/* grows with its card so a taller side column never leaves a blank band under the meta row */
+.dz-chart-wrap { flex: 1 1 216px; min-height: 216px; position: relative; overflow: hidden; }
+.dz-chart-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dz-chart-meta { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--zephyr-border-subtle); overflow: hidden; }
+.dz-chart-meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dz-chart-meta span, .dz-chart-meta b { white-space: nowrap; }
+.dz-chart-meta span { font-size: 11px; color: var(--zephyr-text-tertiary); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.dz-chart-meta b { font-size: 13px; font-weight: 600; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; }
+
+/* Sidebar card stack */
+.dz-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* Current node card */
+.dz-node-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dz-node-name { font-size: 15px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-node-sub { font-size: 11px; color: var(--zephyr-text-muted); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+.dz-node-latency { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.dz-latency-num { font-size: 28px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dz-latency-num small { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 600; margin-inline-start: 2px; }
+.dz-test-btn { margin-inline-start: auto; }
+
+/* Node card */
+.dz-node-wrap { position: relative; }
+.dz-node-sub span { cursor: copy; transition: color var(--motion-base) var(--motion-ease-out); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dz-node-sub span:hover { color: var(--color-accent); }
+.dz-switch-node-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--zephyr-radius-full); border: 1px solid var(--zephyr-border-subtle); background: var(--zephyr-bg-muted); color: var(--zephyr-text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
+.dz-switch-node-btn:hover, .dz-switch-node-btn.open { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.dz-switch-node-btn svg { width: 10px; height: 10px; transition: transform var(--motion-base) var(--motion-ease-out); }
+.dz-switch-node-btn.open svg { transform: rotate(180deg); }
+
+/* Node picker panel */
+.dz-node-picker { position: absolute; top: calc(100% + 8px); inset-inline: 0; z-index: 40; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-elevated); border: 1px solid var(--zephyr-border-default); box-shadow: var(--zephyr-shadow-dialog); animation: dz-pop var(--motion-base) var(--motion-ease-out); }
+html:not(.dark) .dz-node-picker { background: rgba(255,255,255,.97); }
+@keyframes dz-pop { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+.dz-picker-subs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dz-picker-sub { padding: 5px 12px; border-radius: var(--zephyr-radius-full); font-size: 10.5px; font-weight: 600; color: var(--zephyr-text-secondary); background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
+.dz-picker-sub.active { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); }
+.dz-picker-list { display: flex; flex-direction: column; max-height: 216px; overflow-y: auto; }
+.dz-picker-node { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--zephyr-radius-control); cursor: pointer; transition: background var(--motion-fast) var(--motion-ease-out); }
+.dz-picker-node:hover { background: var(--zephyr-bg-subtle); }
+.dz-picker-node.active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.dz-picker-node-main { flex: 1; min-width: 0; }
+.dz-picker-node-name { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-picker-node-meta { font-size: 11px; color: var(--zephyr-text-tertiary); font-family: var(--font-mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-picker-check { width: 14px; height: 14px; color: var(--color-accent); flex-shrink: 0; visibility: hidden; }
+.dz-picker-node.active .dz-picker-check { visibility: visible; }
+.dz-picker-sub-count { opacity: .55; font-weight: 500; margin-inline-start: 2px; }
+
+/* Connection sort button */
+.dz-sort-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 600; background: none; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); white-space: nowrap; }
+.dz-sort-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.dz-sort-btn svg { width: 10px; height: 10px; }
+
+/* Connection chain colors */
+.dz-chain-direct { color: var(--zephyr-color-success); }
+.dz-chain-proxy { color: var(--color-accent); }
+
+/* Keyboard focus */
+.dz-mode-seg button:focus-visible,
+.dz-sort-btn:focus-visible, .dz-mini-btn:focus-visible,
+.dz-switch-node-btn:focus-visible, .dz-picker-sub:focus-visible,
+.dz-picker-node:focus-visible,
+.dz-node-sub span[role="button"]:focus-visible {
+    outline: 2px solid var(--color-accent); outline-offset: 1px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .dz-live-dot, .dz-card-title .dot, .dz-progress-fill::after { animation: none !important; }
+    .dz-node-picker { animation: none; }
+    .dz-kpi, .dz-quick-row, .dz-node-sub span, .dz-switch-node-btn, .dz-picker-sub, .dz-mode-slider { transition: none !important; }
+}
+
+/* Quick controls card */
+.dz-quick-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.dz-quick-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-subtle); border: 1px solid var(--zephyr-border-subtle); }
+.dz-quick-row-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--zephyr-text-secondary); }
+.dz-quick-row-label svg { width: 14px; height: 14px; color: var(--zephyr-text-muted); }
+.dz-mode-seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px; background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); border-radius: var(--radius-lg); height: 36px; width: 100%; margin-top: 12px; }
+.dz-mode-slider { position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc((100% - 8px)/3); border-radius: var(--radius-lg); box-shadow: var(--zephyr-shadow-sm); border: 1px solid var(--zephyr-border-default); transition: transform var(--motion-base) var(--motion-ease-out); }
+html.dark .dz-mode-slider { background: rgba(255,255,255,.09); }
+html:not(.dark) .dz-mode-slider { background: #fff; }
+/* Minimal home: same white selected segment in light theme (grey-on-grey was invisible). */
+html:not(.dark) #mode-slider { background: #fff; }
+.dz-mode-seg button { position: relative; z-index: 1; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--zephyr-text-secondary); background: none; border: none; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out); white-space: nowrap; overflow: hidden; }
+.dz-mode-seg button.active { color: var(--color-accent); }
+
+/* ── Bottom three-column grid ── */
+.dz-grid-bottom { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 230px; min-width: 0; }
+.dz-grid-bottom > .glass-card { min-width: 0; overflow: hidden; }
+
+/* Active connections */
+.dz-conn-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; margin: 0 -6px; padding: 0 6px; }
+.dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background var(--motion-fast) var(--motion-ease-out); min-width: 0; }
+.dz-conn-row:hover { background: var(--zephyr-bg-subtle); }
+.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
+.dz-conn-info { flex: 1; min-width: 0; }
+.dz-conn-host { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-conn-chain { font-size: 11px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
+.dz-conn-speed { font-size: 11px; font-weight: 700; color: var(--zephyr-text-secondary); font-variant-numeric: tabular-nums; text-align: end; flex-shrink: 0; }
+.dz-conn-speed small { display: block; font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; }
+
+/* Subscription traffic */
+.dz-sub-used { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+.dz-sub-used b { font-size: 26px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dz-sub-used span { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.dz-progress { height: 6px; border-radius: 3px; background: var(--zephyr-bg-muted); overflow: hidden; margin-top: 14px; }
+.dz-progress-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 65%, white)); position: relative; overflow: hidden; }
+.dz-progress-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 35%, transparent), transparent); animation: dz-shimmer 2.6s ease-in-out infinite; }
+@keyframes dz-shimmer { 0% { transform: translateX(calc(var(--rtl-sign, 1) * -100%)); } 60%,100% { transform: translateX(calc(var(--rtl-sign, 1) * 100%)); } }
+.dz-sub-rows { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dz-sub-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; min-width: 0; }
+.dz-sub-row span { color: var(--zephyr-text-tertiary); font-weight: 500; flex-shrink: 0; white-space: nowrap; }
+.dz-sub-row b { color: var(--zephyr-text-secondary); font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: end; }
+.dz-sub-actions { display: flex; gap: 8px; margin-top: 16px; }
+.dz-mini-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 0; border-radius: var(--zephyr-radius-md); font-size: 11px; font-weight: 600; cursor: pointer; transition: color var(--motion-base) var(--motion-ease-out), background-color var(--motion-base) var(--motion-ease-out), border-color var(--motion-base) var(--motion-ease-out), box-shadow var(--motion-base) var(--motion-ease-out); border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); color: var(--zephyr-text-primary); white-space: nowrap; }
+.dz-mini-btn:hover { background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
+.dz-mini-btn.accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 25%, transparent); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
+.dz-mini-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+/* Log stream */
+.dz-log-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: auto; min-height: 0; min-width: 0; font-family: var(--font-mono); }
+.dz-log-line { display: flex; align-items: baseline; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--zephyr-border-subtle); font-size: 10.5px; line-height: 1.5; min-width: max-content; }
+.dz-log-line:last-child { border-bottom: none; }
+.dz-log-time { color: var(--zephyr-text-tertiary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.dz-log-level { flex-shrink: 0; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 4px; }
+.dz-log-level.info { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 12%, transparent); }
+.dz-log-level.warn { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 12%, transparent); }
+.dz-log-level.error { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent); }
+.dz-log-level.debug { color: var(--zephyr-text-muted); background: var(--zephyr-bg-muted); }
+.dz-log-msg { color: var(--zephyr-text-secondary); white-space: nowrap; }
+
+
+.dz-hidden { display: none !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   RTL Utilities — direction-aware transforms & positioning
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Hover slide for card items — replaces hover:translate-x-1.
+   Both .group and .rtl-slide are on the same element, so use self-hover
+   rather than a descendant combinator. */
+.rtl-slide:hover {
+    transform: translateX(calc(var(--rtl-sign, 1) * 0.25rem));
+}
+
+/* Notification enter/exit animation — replaces translate-x-full */
+.notif-offscreen {
+    transform: translateX(calc(var(--rtl-sign, 1) * 100%));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RTL Safety-Net — global overrides for physical leftovers
+   These rules catch UnoCSS utilities that don't have logical
+   equivalents and ensure they flip correctly in RTL.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Scrollbar container inherits RTL direction from <html> */
+/* Code/log panes that must stay LTR are handled below */
+
+/* Ensure textarea/code/log inputs keep LTR for code even in RTL UI */
+[dir="rtl"] [data-code-editor],
+[dir="rtl"] textarea.font-mono,
+[dir="rtl"] textarea.form-control-mono,
+[dir="rtl"] input.font-mono,
+[dir="rtl"] input.form-control-mono,
+[dir="rtl"] pre.font-mono,
+[dir="rtl"] #log-content,
+[dir="rtl"] #log-ext-content,
+[dir="rtl"] #plugin-script-output,
+[dir="rtl"] #fullscreen-editor-output {
+    direction: ltr;
+    text-align: left;
+}
+
+/* CJK floor for console labels that can carry Chinese/Japanese/Korean text */
+:lang(zh) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ja) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span),
+:lang(ko) :is(.dz-kpi-label, .dz-kpi-foot, .dz-card-title, .dz-legend-item, .dz-chart-meta span, .dz-switch-node-btn, .dz-sort-btn, .dz-mode-seg button, .dz-conn-chain, .dz-header .dz-sub, .dz-node-sub, .dz-sub-row, .dz-mini-btn, .dz-sub-used span) {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+
+/* Responsive - switch to single-column on narrow viewports */
+@media (max-width: 1080px) {
+    /* 2 + 3: download/upload are the primary metrics (3 of 6 columns each), the rest share the second row */
+    .dz-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .dz-kpi:nth-child(-n + 2) { grid-column: span 3; }
+    .dz-kpi:nth-child(n + 3) { grid-column: span 2; }
+    .dz-grid-main, .dz-grid-bottom { grid-template-columns: minmax(0, 1fr); }
+    /* Single-column: let sections take natural height, cap inner lists */
+    .dz-grid-main { flex-shrink: 1; }
+    .dz-grid-bottom { flex: 0 0 auto; min-height: 0; }
+    .dz-conn-list { max-height: 200px; }
+    .dz-log-list { max-height: 200px; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Minimal home hero: speed read-out layered over a full-width live area chart
+   ═══════════════════════════════════════════════════════════════════════════ */
+.home-hero {
+  /* the hero takes whatever height the controls below leave, so the last card
+     always lands on the sidebar's bottom edge (860×620, 720×540 and wide alike) */
+  flex: 1 1 auto;
+  min-height: 144px;
+  display: flex;
+  flex-direction: column;
+}
+/* chart, node pill and speed read-out; the figures row sits under it as the card's footer */
+.home-hero-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 56px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+.home-hero-chart {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  opacity: .5;
+  pointer-events: none;
+  /* fade the chart out toward the top so the node pill and numbers sit on calm glass */
+  mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
+}
+html:not(.dark) .home-hero-chart { opacity: .6; }
+.home-hero-speeds {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(32px, 9vw, 112px);
+  /* optical centring: lift the read-out so its ink sits 46% down the band between the
+     node pill and the footer (the eye reads the true middle as low); ≈ 4% of that band */
+  top: calc(-4% - 4px);
+}
+.home-speed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 1 260px;
+  min-width: 0;
+  cursor: default;
+}
+.home-speed-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+:lang(zh) .home-speed-label, :lang(ja) .home-speed-label, :lang(ko) .home-speed-label {
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.home-speed-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+.home-speed-value {
+  /* scales with the window height: 42px at 540, 48px at 620, 62px at 800 — sized so the
+     page's visual weight centres on the middle of the window instead of the top */
+  font-size: clamp(40px, 7.7vh, 66px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--zephyr-bg-elevated, #000) 35%, transparent);
+}
+
+/* Segmented control items without a sliding thumb (e.g. UI scale): selected = raised grey, same as the sliders */
+.seg-item {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: var(--text-secondary);
+  background: transparent;
+}
+.seg-item:hover { color: var(--text-primary); }
+.seg-item[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+
+/* Subscription card: days left until expiry */
+.sub-expiry { font-variant-numeric: tabular-nums; }
+.sub-expiry[data-tone="warning"] { color: var(--zephyr-color-warning); font-weight: 600; }
+.sub-expiry[data-tone="danger"] { color: var(--zephyr-color-danger); font-weight: 600; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Page transitions (transform + opacity only; disabled under reduced motion)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+[data-page].page-enter {
+  animation: page-enter 180ms var(--motion-ease-out) both;
+}
+/* A transformed page becomes the containing block of its position:fixed
+   children, so while a fixed overlay inside the page is open (the plugin
+   panel) the page only fades; the overlay keeps covering the window. */
+@keyframes page-enter-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-page].page-enter:has(.fixed:not(.hidden)) {
+  animation-name: page-enter-fade;
+}
+
+/* Sidebar: one highlight that slides between items */
+#sidebar-nav .nav-btn { position: relative; z-index: 1; }
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: var(--radius-md);
+  background: var(--zephyr-bg-muted);
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1), 0 0 0 1px var(--zephyr-border-strong);
+  pointer-events: none;
+  transition: transform 260ms cubic-bezier(.34, 1.36, .64, 1), width var(--motion-base) var(--motion-ease-out), height var(--motion-base) var(--motion-ease-out);
+}
+.nav-indicator.no-anim { transition: none; }
+#sidebar-nav.has-nav-indicator .nav-btn.is-active {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* Background glows cross-fade (opacity only); hidden ones stop painting once faded out */
+.page-glow {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms var(--motion-ease-in-out), visibility 0s linear 400ms;
+}
+.page-glow.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 400ms var(--motion-ease-in-out), visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-page].page-enter { animation: none; }
+  .nav-indicator, .page-glow, .page-glow.is-active { transition: none; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Round-2 polish
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Text-strength accent / download for small text on light glass (>= 4.5:1).
+   Areas (buttons, switches, chart lines) keep the bright hue. */
+:root { --accent-ink: var(--accent-primary); --download-ink: var(--zephyr-color-download); }
+html:not(.dark) { --accent-ink: color-mix(in srgb, var(--accent-primary) 78%, #000); --download-ink: #0062CC; }
+html:not(.dark) .home-status-text.text-accent,
+html:not(.dark) .btn-accent,
+html:not(.dark) .btn-ghost.active,
+html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-ink); }
+.text-download-ink, html:not(.dark) .text-download, html:not(.dark) .conn-rate--down { color: var(--download-ink); }
+.text-upload-ink { color: var(--zephyr-color-upload); }
+
+/* Home: TUN status row mirrors the 36px segmented control next to it */
+.home-tun-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-subtle);
+  min-width: 0;
+}
+
+/* Home: live figures — the hero card's footer row, three equal cells split by hairlines */
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--zephyr-border-subtle);
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
+  background: rgba(255, 255, 255, .025);
+}
+html:not(.dark) .home-stats { background: rgba(15, 30, 60, .018); }
+.home-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 16px;
+}
+.home-stat + .home-stat { border-inline-start: 1px solid var(--zephyr-border-subtle); }
+.home-stat-label {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-stat-value { display: flex; align-items: baseline; justify-content: center; gap: 4px; min-width: 0; max-width: 100%; height: 28px; line-height: 28px; color: var(--text-primary); }
+.home-stat-value b {
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* line-height 1 keeps the unit from stretching the row (it pushed the latency footnote 3px low) */
+.home-stat-value small { font-size: 11px; line-height: 1; font-weight: 600; color: var(--text-muted); }
+.home-stat-foot {
+  display: block;
+  max-width: 100%;
+  height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary, var(--zephyr-text-tertiary));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+html:not(.dark) .home-stat-foot { color: var(--text-muted); }
+
+/* Short windows: drop the per-cell footnote, keep label + figure */
+@media (max-height: 580px) {
+  [data-page="home"] { gap: 12px; }
+  .home-stat-foot { display: none; }
+  .home-stats { padding: 8px 0; }
+  .home-hero-body { padding-top: 52px; padding-bottom: 16px; }
+}
+
+/* While the quick-switch wheel is open it owns the hero: the read-out steps
+   back so the node list is not drawn over the big numbers. */
+.home-hero-speeds { transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), filter var(--zephyr-time-standard) var(--zephyr-easing-ease-out); }
+#home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { opacity: .08; filter: blur(3px); }
+@media (prefers-reduced-motion: reduce) {
+  .home-hero-speeds { transition: none; }
+  #home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { filter: none; }
+}
+
+/* Home node quick-switch: the open wheel unfolds downward from the pill and
+   stays inside the hero (its 140px list starts 4px under the hero's top edge
+   instead of being centred on the pill and poking 30px above the card). */
+#node-wheel-dropdown.node-wheel-dropdown { transform-origin: 50% 19%; }
+
+/* Settings: section headings sit on the card's inner content line (20px),
+   sentence case — the same line the row icons start on */
+.settings-section-title {
+  padding-inline: 20px;
+  margin-bottom: 2px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.settings-section-desc {
+  padding-inline: 20px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+/* Settings: one trailing-action style (text button with a quiet hover pill);
+   the negative end margin keeps its text on the card's 20px content edge */
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  margin-inline-end: -10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--accent-ink);
+  transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.row-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); }
+.row-action:active:not(:disabled) { background: color-mix(in srgb, var(--accent-primary) 16%, transparent); }
+.row-action + .row-action { margin-inline-start: 0; }
+.flex > .row-action:not(:last-child) { margin-inline-end: 0; }
+.row-action svg { width: 14px; height: 14px; }
+
+/* Segmented tabs (logs, rule library): one 32px pill track, raised thumb —
+   the same selected look as the settings segmented controls */
+.seg-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 2px;
+  height: 32px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-subtle);
+}
+.seg-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.seg-tab:hover { color: var(--text-primary); }
+.seg-tab.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-default);
+  box-shadow: var(--zephyr-shadow-sm);
+}
+html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
+/* Full-width tabs inside dialogs get a roomier 40px track */
+.seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
+.seg-tabs-lg .seg-tab { font-size: 13px; }
+
+/* Rule library: groups read as quiet section labels (like settings), files
+   sit flush on the page edge; groups are 24px apart */
+.rl-group + .rl-group { margin-top: 24px; }
+.rl-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: var(--zephyr-radius-control);
+  cursor: pointer;
+  transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.rl-group-header > div { min-width: 0; }
+.rl-group-header:hover { background: var(--zephyr-bg-muted); }
+
+/* Empty states: centred in the space they have, one rhythm everywhere */
+.empty-state {
+  flex: 1;
+  min-height: 240px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.empty-state.hidden { display: none; }
+
+/* Nested panel inside a settings card: 16px radius (24 outer − 8) */
+#fake-client-options .glass-card { border-radius: var(--radius-md); }
+
+/* Dialogs: one title style everywhere (was 20px light / 14px bold depending on the dialog) */
+.dialog-title {
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+/* Toasts: neutral text on glass, a status dot carries the type colour */
+/* Toasts sit top-right under the page header: away from the switches at the
+   bottom of the home page. Fixed width so a stack reads as one column. */
+#notif-container { inset-inline-end: 32px; top: 76px; width: 280px; }
+#notif-container > .toast { width: 100%; }
+.toast-sticky { pointer-events: auto; }
+.toast-close {
+  flex-shrink: 0; margin: -4px -6px 0 auto; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 15px; line-height: 1; color: var(--text-tertiary);
+  cursor: pointer; transition: background-color var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.toast-close:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--zephyr-shadow-dialog, 0 8px 32px rgba(0, 0, 0, .25));
+}
+html.dark .toast { background: rgba(28, 28, 32, 0.82); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+html:not(.dark) .toast { background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); }
+.toast-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--color-accent); }
+.toast[data-type="success"] .toast-dot { background: var(--zephyr-color-success); }
+.toast[data-type="error"] .toast-dot { background: var(--zephyr-color-danger); }
+.toast[data-type="warning"] .toast-dot { background: var(--zephyr-color-warning); }
+.toast-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.toast-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
+.toast-msg { font-size: 12px; line-height: 17px; color: var(--text-secondary); white-space: pre-line; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Round-2 finish: long locales, RTL figures, wide windows
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page headers keep the title on one line; when the row runs out of room
+   (Russian/Spanish at 720px) ui/header-fit.js steps it down: icon-only
+   buttons first, then the secondary read-outs. Nothing spills past the edge. */
+[data-page] > header { gap: 16px; }
+[data-page] > header > * { flex-shrink: 0; }
+[data-page] > header h2 { white-space: nowrap; }
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* 14px icon + 2×8px + 1px borders = a 32px square, same height as before */
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) { padding-inline: 8px; min-width: 2rem; }
+header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
+
+/* Proxy group pill: one line, long group names end in an ellipsis */
+#proxy-group-trigger { white-space: nowrap; max-width: 16rem; }
+#proxy-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Last step of the header fit: the group pill gives up width (label ellipsized)
+   so a long group name cannot push the search and buttons past the page edge. */
+[data-page="proxies"] > header.is-compact-2 > div:first-child,
+[data-page="proxies"] > header.is-compact-2 #proxy-group-selector { min-width: 0; }
+[data-page="proxies"] > header.is-compact-2 #proxy-group-trigger { max-width: 100%; }
+[data-page="proxies"] > header.is-compact-2 > div:first-child > h2,
+[data-page="proxies"] > header.is-compact-2 > div:last-child { flex-shrink: 0; white-space: nowrap; }
+
+/* Connections table head: a long column name truncates inside its own column
+   instead of running into the next one */
+.conn-head .sortable { max-width: 100%; }
+
+/* Segmented controls (proxy mode, theme, home mode): a label that does not fit
+   its third ends in an ellipsis rather than touching its neighbour */
+#mode-selector-container > button,
+button[data-theme-mode],
+button[data-home-mode] {
+  display: block;
+  line-height: 26px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RTL: a figure and its unit read as one left-to-right token ("249.32 KB/s"),
+   while the cell itself keeps its right-to-left alignment */
+[dir="rtl"] .home-speed > .flex,
+[dir="rtl"] .home-stat-value { direction: ltr; }
+[dir="rtl"] .home-stat-foot { direction: ltr; text-align: center; }
+[dir="rtl"] :is(#conn-stats-bar span[id], .conn-summary span[id^="stat-"], .conn-num > .conn-main, .conn-num > .conn-sub) { direction: ltr; unicode-bidi: isolate; }
+
+/* Wide windows: settings rows stop at a readable measure (label and control
+   stay within one glance) and the column is centred under the title */
+@media (min-width: 1100px) {
+  [data-page="settings"] > * { width: 100%; max-width: 800px; margin-inline: auto; }
+}
+/* Connection details: "closed" tag once the connection ends while open. */
+.conn-detail-closed-tag {
+  display: inline-flex; align-items: center; height: 18px; margin-top: 4px; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+/* Connections: search with no matches. */
+.conn-search-empty-title { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.conn-search-clear {
+  position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 999px;
+  color: var(--text-secondary); background: transparent; border: 0; cursor: pointer;
+}
+.conn-search-clear:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.conn-search-clear.hidden { display: none; }
+.conn-summary { display: inline-flex; align-items: center; gap: 12px; padding-inline-end: 4px; font-size: 12px; color: var(--text-secondary); }
+
+.conn-summary-count { font-weight: 700; color: var(--text-primary); }
+.conn-summary-num { font-weight: 600; }
+
+/* Connection row: hover ✕ closes that connection. */
+.conn-row { position: relative; }
+.conn-row-close {
+  position: absolute; inset-inline-end: 28px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zephyr-color-danger) 30%, transparent); opacity: 0; pointer-events: none;
+  transition: opacity var(--zephyr-time-standard);
+}
+.conn-row:hover .conn-row-close, .conn-row:focus-within .conn-row-close { opacity: 1; pointer-events: auto; }
+/* The ✕ takes the upload column's place instead of covering its numbers. */
+.conn-row:has(.conn-row-close):hover .conn-cell:nth-child(4),
+.conn-row:has(.conn-row-close):focus-within .conn-cell:nth-child(4) { visibility: hidden; }
+
+/* Logs: "jump to latest" pill shown after scrolling up. */
+#log-panel-core { position: relative; }
+.log-jump-latest {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 20;
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: #fff; background: var(--color-accent); box-shadow: var(--zephyr-shadow-sm);
+}
+.log-jump-latest.hidden { display: none; }
+
+/* Active rules: light list rows instead of one glass card per rule. */
+.active-rule-row { min-height: 32px; padding: 6px 12px; border-bottom: 1px solid var(--zephyr-border-subtle); }
+.active-rule-row:last-child { border-bottom: 0; }
+.active-rule-row:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+
+/* Rule import: file picker / drop zone, same height as the tall inputs. */
+.rl-import-drop {
+  display: flex; align-items: center; justify-content: center; min-height: 96px; padding: 16px; cursor: pointer;
+  border-radius: var(--zephyr-radius-md); border: 1px dashed var(--zephyr-border-default);
+  background: var(--zephyr-surface-input); font-size: 12px; color: var(--text-secondary); text-align: center;
+}
+.rl-import-drop:hover, .rl-import-drop.is-over { border-color: var(--color-accent); color: var(--text-primary); }
+.rl-import-drop:focus-within { box-shadow: 0 0 0 3px var(--zephyr-focus-ring); }
+
+/* Rule forms (insert dialog, inline rule editor) */
+.rl-field-label { display: block; font-size: 12px; color: var(--text-muted); }
+.rl-form-select {
+  min-height: 46px; padding: 0.75rem 1rem; gap: 8px;
+  border-radius: var(--zephyr-radius-md); font-size: var(--zephyr-font-size-sm); color: var(--text-primary);
+  background-color: var(--zephyr-surface-input);
+}
+.rl-form-menu { max-height: 260px; overflow-y: auto; }
+.rl-insert-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 5fr); gap: 12px; }
+.rl-insert-form .form-control-lg { padding-inline: 1rem; }
+.rl-pos-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; padding: 1px; }
+.rl-pos-option {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-height: 46px; padding: 0 14px; cursor: pointer;
+  border-radius: var(--zephyr-radius-md); border: 1px solid var(--zephyr-border-subtle);
+  background: var(--zephyr-surface-input); font-size: 13px; color: var(--text-secondary);
+  transition: border-color var(--zephyr-time-micro), background-color var(--zephyr-time-micro);
+}
+.rl-pos-option:hover { border-color: var(--zephyr-border-strong); }
+.rl-pos-option:has(input:checked) {
+  border-color: var(--color-accent); color: var(--text-primary);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--zephyr-surface-input));
+}
+.rl-pos-option input { accent-color: var(--color-accent); width: 14px; height: 14px; margin: 0; flex-shrink: 0; }
+.rl-pos-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-pos-hint { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+
+/* Small icon buttons (rule rows, file cards) */
+.rl-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--zephyr-radius-control, 8px);
+  color: var(--text-muted); background: transparent;
+  transition: color var(--zephyr-time-micro), background-color var(--zephyr-time-micro), opacity var(--zephyr-time-micro);
+}
+.rl-icon-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--zephyr-bg-muted); }
+.rl-icon-btn.is-danger:hover:not(:disabled) { color: var(--zephyr-color-danger); }
+.rl-icon-btn.is-ok { color: var(--zephyr-color-success); }
+.rl-icon-btn.is-round { border-radius: 999px; border: 1px solid var(--zephyr-border-subtle); }
+.rl-icon-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Rule library file card: switch, edit and ⋯ always visible */
+.rl-file-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; }
+.rl-file-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.rl-file-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--zephyr-border-subtle); }
+.rl-file-card.is-disabled .rl-file-main { opacity: 0.55; }
+.rl-group-header .rl-group-more { width: 24px; height: 24px; }
+
+/* Rule editor: compact list, inline form rows */
+.rl-editor-list { border: 1px solid var(--zephyr-border-subtle); border-radius: var(--zephyr-radius-md); overflow: hidden; }
+.rl-rule-row {
+  display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 6px 12px;
+  border-bottom: 1px solid var(--zephyr-border-subtle); cursor: pointer;
+}
+.rl-rule-row:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.rl-rule-row.is-editing { cursor: default; background: color-mix(in srgb, var(--color-accent) 6%, transparent); }
+.rl-rule-num { width: 24px; flex-shrink: 0; font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.rl-rule-value { flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary); }
+.rl-rule-policy { max-width: 30%; flex-shrink: 0; }
+.rl-rule-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; opacity: 0.45; transition: opacity var(--zephyr-time-micro); }
+.rl-rule-row:hover .rl-rule-actions, .rl-rule-row:focus-within .rl-rule-actions { opacity: 1; }
+.rl-rule-form { display: flex; align-items: center; gap: 8px; width: 100%; }
+.rl-rule-form > .rl-form-dropdown:first-child { width: 140px; flex-shrink: 0; }
+.rl-rule-form > .rl-form-dropdown:nth-of-type(2) { width: 160px; flex-shrink: 0; }
+.rl-rule-form .rl-form-select { min-height: 40px; padding: 0.4rem 0.75rem; font-size: var(--zephyr-font-size-xs); }
+.rl-rule-form-value { flex: 1; min-width: 0; min-height: 40px; }
+.form-control.is-invalid { border-color: var(--zephyr-color-danger); }
+.rl-dirty { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--zephyr-color-warning); }
+.rl-dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.rl-dirty.hidden { display: none; }
+
+/* Focus placed by script after a mouse/touch interaction (dialogs opening,
+   focus returning to the trigger): no ring. A key press removes the class,
+   so keyboard users still get :focus-visible. See utils/focus-trap.js. */
+.focus-quiet:focus-visible { outline: none !important; box-shadow: none !important; }
+.rl-rule-row.hidden, .rl-file-card.hidden { display: none; }
+
+/* Custom-content modals hide the default Cancel/Confirm; drop the empty action row so it leaves no gap */
+#modal-content-area + div:has(> .hidden + .hidden:last-child) { display: none; }
+#modal-content-area:has(+ div > .hidden + .hidden:last-child) { margin-block-end: 0; }
+
+/* Core failed to start: the card replaces the hero's speed area; the rest of
+   the home page stays in place, dimmed and inert (ui/core-error.js). */
+.home-hero.is-core-error .home-hero-body { visibility: hidden; }
+.core-error-card {
+  position: absolute; inset: 0 0 auto 0; bottom: var(--home-stats-h, 96px); z-index: 3;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 16px 24px; text-align: center;
+}
+.core-error-card.is-floating {
+  position: fixed; z-index: 60; inset: 50% auto auto 50%; bottom: auto; transform: translate(-50%, -50%);
+  width: min(440px, calc(100% - 48px)); padding: 24px; border-radius: var(--radius-lg, 12px);
+}
+.core-error-icon {
+  width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent);
+  margin-bottom: 4px;
+}
+.core-error-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.core-error-sub { font-size: 12px; color: var(--text-secondary); }
+.core-error-detail {
+  max-width: min(560px, 100%); margin-top: 2px; padding: 3px 10px; border-radius: 10px;
+  font-size: 11px; line-height: 18px; color: var(--text-tertiary);
+  background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  /* The whole reason stays readable: wrap, and scroll past five lines. */
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 90px; overflow-y: auto;
+}
+.core-error-retry {
+  margin-top: 8px; height: 28px; padding: 0 18px; border-radius: 999px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary, #007AFF);
+  background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #007AFF) 30%, transparent);
+  outline: none;
+}
+.core-error-actions { display: flex; gap: 8px; margin-top: 8px; }
+.core-error-actions .core-error-retry { margin-top: 0; }
+.core-error-retry.is-secondary {
+  color: var(--text-secondary); background: var(--zephyr-bg-muted);
+  border-color: var(--zephyr-border-strong, transparent);
+}
+.core-error-card.has-log { justify-content: flex-start; padding-top: 20px; }
+.core-error-log {
+  width: min(640px, 100%); flex: 1 1 auto; min-height: 60px; margin-top: 8px; padding: 8px 10px;
+  overflow: auto; text-align: start; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 11px/16px var(--font-mono, ui-monospace, monospace); color: var(--text-secondary);
+  background: var(--zephyr-bg-muted); border-radius: var(--radius-md, 8px); user-select: text;
+}
+.core-error-retry:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
+.core-error-retry:disabled { opacity: .6; cursor: default; }
+#app-main-container.core-down .home-hero.is-core-error .home-stats,
+#app-main-container.core-down [data-page="home"] > :not(#home-hero),
+#app-main-container.core-down [data-page="console"] {
+  opacity: .45; pointer-events: none; filter: saturate(.6);
+}
+
+/* No subscription yet: the hero shows one title and the Add button (ui/no-subscription.js). */
+.home-hero.is-empty .home-hero-body { visibility: hidden; }
+.dz-traffic-card { position: relative; }
+.dz-traffic-card.is-empty > :not(.home-empty-state) { visibility: hidden; }
+.home-empty-state {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; text-align: center; padding: 0 24px;
+}
+.home-hero > .home-empty-state { bottom: var(--home-stats-h, 96px); }
+.home-empty-icon {
+  width: 36px; height: 36px; border-radius: 10px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent-primary, #007AFF); background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+}
+.home-empty-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.home-empty-sub { font-size: 12px; color: var(--text-secondary); }
+.home-empty-btn {
+  margin-top: 10px; height: 28px; padding: 0 18px; border-radius: 999px; cursor: pointer; outline: none;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary, #007AFF);
+  background: color-mix(in srgb, var(--accent-primary, #007AFF) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #007AFF) 30%, transparent);
+}
+.home-empty-btn:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
+.home-hero.is-empty .home-stats { opacity: .5; }
+.home-hero.is-empty .home-stat-value,
+.home-hero.is-empty .home-stat-foot { visibility: hidden; position: relative; }
+.home-hero.is-empty .home-stat-value::before,
+.home-hero.is-empty .home-stat-foot::before {
+  content: "—"; visibility: visible; position: absolute; inset: 0; text-align: center;
+}
+.home-hero.is-empty .home-stat-value::before { font-size: 22px; font-weight: 300; }
+/* Edit subscription: current link shown read-only until "Change"; tall controls throughout. */
+.edit-url-current {
+  display: flex; align-items: center; gap: 8px; min-height: 42px; padding-block: 0; padding-inline: 14px 6px;
+  border-radius: var(--zephyr-radius-md); background: var(--zephyr-surface-input); border: 1px solid var(--zephyr-border-subtle);
+}
+.edit-url-current.hidden { display: none; }
+.edit-url-display { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; color: var(--text-secondary); }
+.edit-url-current::before { content: ''; flex-shrink: 0; width: 14px; height: 14px; background: var(--text-tertiary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E") center / contain no-repeat; }
+.edit-url-current button#edit-url-change.btn-ghost { border: 0; box-shadow: none; height: 28px; padding: 0 10px; background: transparent; color: var(--color-accent); font-size: 12px; font-weight: 600; }
+.edit-url-current button#edit-url-change.btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.edit-field-hint { font-size: 11px; line-height: 16px; color: var(--text-tertiary); margin: 0; }
+.edit-field-hint.hidden { display: none; }
+.edit-select-tall { min-height: 42px; padding-inline: 1rem; border-radius: var(--zephyr-radius-md); }
+
+/* Subscription cards: name 13px, "in use" pill, full-strength action icons. */
+.sub-card-name { font-size: 13px; }
+.sub-in-use {
+  height: 18px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.sub-action-btn {
+  width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-muted); transition: color var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.sub-action-btn svg { width: 14px; height: 14px; }
+.sub-action-btn:hover:not(:disabled) { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.sub-action-btn.is-danger:hover:not(:disabled) { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 12%, transparent); }
+.sub-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Code editor syntax colours (ui/editor/prism-editor.js maps CodeMirror's tags here). No purple. */
+:root {
+  --cm-keyword: #0060DF; --cm-atom: #B25000; --cm-number: #0E7C86; --cm-string: #248A3D;
+  --cm-regexp: #A15C00; --cm-def: #0A7EA4; --cm-type: #00756A; --cm-prop: #1F5FA8; --cm-comment: #8E8E93;
+}
+html.dark {
+  --cm-keyword: #4DA3FF; --cm-atom: #FFB340; --cm-number: #5DD3C9; --cm-string: #30D158;
+  --cm-regexp: #FFD60A; --cm-def: #64D2FF; --cm-type: #63E6BE; --cm-prop: #9CDCFE; --cm-comment: #8E8E93;
+}
+
+/* Override cards: disabled ones read quieter. */
+#plugin-list .glass-card.is-disabled .text-sm { color: var(--text-tertiary); }
+
+/* New subscription: brief highlight once its card appears. */
+.sub-card-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s; }
+
+/* Context menus: opaque so the card underneath (traffic bars) doesn't show through. */
+html.dark .ctx-menu-root.glass-card { background: rgb(30, 30, 34); }
+html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
+
+/* .hidden loses to these components' own display rule — keep hidden things hidden. */
+.input-paste-wrapper.hidden, .edit-url-current.hidden { display: none; }
+
+/* Link dialog (add subscription / import override): inline link error, "optional" tag. */
+.link-dialog-error { min-height: 16px; margin: 0; padding-inline: 4px; font-size: 11px; line-height: 16px; color: var(--zephyr-color-danger); }
+.link-dialog-error:empty { min-height: 0; }
+#link-dialog input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--zephyr-color-danger) 70%, transparent); }
+.link-dialog-optional { margin-inline-start: 4px; font-weight: 400; color: var(--text-tertiary); }
+#link-dialog .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Subscription cards: drag handle (drag starts only here) and keyboard focus (Alt+↑/↓ moves). */
+.sub-drag-handle {
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 24px; margin-inline: -6px -4px; border-radius: 4px; cursor: grab;
+  color: var(--text-tertiary); opacity: 0.45; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.sub-drag-handle:active { cursor: grabbing; }
+[data-config-name]:hover .sub-drag-handle, [data-config-name]:focus-within .sub-drag-handle { opacity: 1; }
+.sub-drag-handle:hover { color: var(--text-secondary); }
+#configs-list [data-config-name]:focus-visible { outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: -2px; }
+
+/* Override list: drag handle, drop marker, keyboard focus. Handle hidden while searching. */
+.override-drag-handle {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 16px; height: 24px; margin-inline: -8px -10px; border-radius: 4px; cursor: grab;
+  color: var(--text-tertiary); opacity: 0.45; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard);
+}
+.override-drag-handle:active { cursor: grabbing; }
+#plugin-list [data-id]:hover .override-drag-handle, #plugin-list [data-id]:focus-within .override-drag-handle { opacity: 1; }
+#plugin-list.is-filtered :is(.override-drag-handle, .override-up-btn, .override-down-btn) { visibility: hidden; }
+#plugin-list [data-id].is-dragging { opacity: 0.5; }
+#plugin-list [data-id].drop-above { box-shadow: 0 -2px 0 0 var(--color-accent); }
+#plugin-list [data-id].drop-below { box-shadow: 0 2px 0 0 var(--color-accent); }
+/* Override rows: handle only on hover (always shown where there is no hover); "Applies to" is a quiet text button; failure is the one status. */
+@media (hover: hover) {
+  #plugin-list .override-drag-handle { opacity: 0; }
+}
+.plugin-more-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; }
+.override-scope-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
+.override-scope-btn:hover [data-scope-value] { text-decoration: underline; text-underline-offset: 2px; }
+.override-status { display: inline-flex; align-items: center; gap: 6px; color: var(--zephyr-color-danger); }
+.override-status.hidden { display: none; }
+.override-status::before { content: ""; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; flex-shrink: 0; }
+#plugin-list [data-id]:focus-visible { outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: -2px; }
+/* Proxies: "traffic goes through another group" hint (ui/group-mismatch.js decides). */
+.group-mismatch-bar {
+  align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+.group-mismatch-icon { flex-shrink: 0; display: inline-flex; color: var(--color-accent); }
+.group-mismatch-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.group-mismatch-title { font-size: 12px; line-height: 18px; font-weight: 600; color: var(--text-primary); }
+.group-mismatch-hint { font-size: 11.5px; line-height: 16px; color: var(--text-secondary); }
+.group-mismatch-action {
+  flex-shrink: 0; height: 26px; padding: 0 10px; border-radius: var(--radius-button, 8px);
+  font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  transition: background-color var(--zephyr-time-standard);
+}
+.group-mismatch-action:hover:not(.is-disabled) { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.group-mismatch-action.is-disabled { color: var(--text-tertiary); background: transparent; cursor: not-allowed; }
+.group-mismatch-close {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; font-size: 15px; line-height: 1;
+  color: var(--text-tertiary); display: inline-flex; align-items: center; justify-content: center;
+}
+.group-mismatch-close:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+
+/* Proxies: empty states (direct mode, no nodes) fill the list height and sit centred. */
+#proxies-list:has(> .proxies-empty-state) { flex: 1 1 auto; grid-template-rows: 1fr; }
+.proxies-empty-state {
+  grid-column: 1 / -1; min-height: 100%; align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 48px 24px 15vh; text-align: center;
+}
+.proxies-empty-icon {
+  width: 56px; height: 56px; border-radius: 16px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.proxies-empty-icon svg { width: 24px; height: 24px; }
+.proxies-empty-state.is-danger .proxies-empty-icon {
+  color: var(--zephyr-color-danger);
+  background: color-mix(in srgb, var(--zephyr-color-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--zephyr-color-danger) 18%, transparent);
+}
+.proxies-empty-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.proxies-empty-detail { max-width: 360px; font-size: 13px; line-height: 20px; color: var(--text-secondary); }
+.proxies-empty-action { margin-top: 10px; min-width: 140px; }
+
+/* Latency test running: the button fills left to right as nodes finish. */
+#test-all-btn.is-testing {
+  background-image: linear-gradient(to right,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) var(--test-progress, 0%),
+    transparent var(--test-progress, 0%));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Proxies header: node search, node count, hidden-timeout chip. */
+.proxy-search {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; width: clamp(120px, 16vw, 168px); padding: 0 10px;
+  border-radius: var(--radius-button, 8px); color: var(--text-tertiary);
+  background: var(--zephyr-bg-input); border: 1px solid var(--zephyr-border-subtle);
+  transition: border-color var(--zephyr-time-standard), box-shadow var(--zephyr-time-standard);
+}
+.proxy-search:focus-within { border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); box-shadow: 0 0 0 3px var(--zephyr-focus-ring); }
+.proxy-search input { flex: 1; min-width: 0; height: 100%; font-size: 12px; color: var(--text-primary); background: transparent; outline: none; }
+.proxy-search input::-webkit-search-cancel-button { display: none; }
+.proxy-search input::placeholder { color: var(--text-tertiary); }
+.proxy-search-count { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+.proxy-hidden-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+  font-size: 11px; white-space: nowrap; color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+.proxy-hidden-chip.hidden { display: none; }
+/* .btn-ghost / .btn-accent set display after the utility class, so hide them explicitly. */
+#sort-btn.hidden, #test-all-btn.hidden { display: none; }
+.proxy-hidden-chip button { color: var(--color-accent); font-weight: 600; }
+
+/* Proxy card: per-node re-test button, shown on hover / keyboard focus. */
+.node-retest-btn {
+  pointer-events: auto; width: 20px; height: 20px; margin-inline-end: 6px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary);
+  opacity: 0; transition: opacity var(--zephyr-time-standard), color var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.glass-card:hover .node-retest-btn, .glass-card:focus-within .node-retest-btn, .node-retest-btn:focus-visible, .node-retest-btn.is-spinning { opacity: 1; }
+/* No hover on touch / pen: keep the button visible. */
+@media (hover: none) { .node-retest-btn { opacity: 1; } }
+.node-retest-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.node-retest-btn.is-spinning svg { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .node-retest-btn.is-spinning svg { animation: none; } }
+
+/* Proxies: group menu — opaque (dark 0.97 let the 3D cards show through), current group ticked, route on the right. */
+html.dark .proxy-group-menu { background: rgb(30, 30, 34); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+html:not(.dark) .proxy-group-menu { background: rgb(252, 252, 253); }
+.proxy-group-menu { min-width: 320px; }
+.proxy-group-option { display: flex; align-items: center; gap: 8px; }
+.proxy-group-check { width: 12px; height: 12px; flex-shrink: 0; display: grid; place-items: center; color: var(--color-accent); }
+.proxy-group-check svg { width: 12px; height: 12px; }
+.proxy-group-name { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-group-route { margin-inline-start: auto; padding-inline-start: 12px; flex-shrink: 1; max-width: 62%; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-tertiary); }
+
+/* Proxies: sort menu (same surface as the group menu) and a steady-width sort button. */
+header:not(.is-compact) #sort-btn { min-width: 112px; }
+.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; }
+.proxy-sort-menu.is-end { inset-inline-start: auto; inset-inline-end: 0; }
+.proxy-sort-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border-radius: var(--radius-dropdown-option); text-align: start; }
+.proxy-sort-option .proxy-sort-body { flex: 1; min-width: 0; }
+.proxy-sort-option:hover, .proxy-sort-option:focus-visible { background: var(--zephyr-bg-muted); outline: none; }
+.proxy-sort-option[aria-checked="true"] { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.proxy-sort-option .proxy-group-check { flex-shrink: 0; width: 14px; height: 14px; display: grid; place-items: center; color: var(--accent-primary); }
+.proxy-sort-option .proxy-group-check svg { width: 14px; height: 14px; }
+.proxy-sort-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.proxy-sort-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.proxy-sort-desc { font-size: 11px; color: var(--text-tertiary); }
+[data-page="proxies"] > header { z-index: 20; }
+
+/* Keyboard focus on a proxy card follows the card's rounded corners. */
+#proxies-list > [role="option"] { border-radius: 16px; }
+
+/* Latency test result: one line at the bottom of the proxies page. */
+.latency-result {
+  position: absolute; left: 50%; bottom: 20px; z-index: 20;
+  display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - 64px);
+  height: 32px; padding: 0 6px 0 14px; border-radius: 999px;
+  font-size: 12px; color: var(--text-secondary, var(--text-muted)); white-space: nowrap;
+  background: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-default);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+  opacity: 0; transform: translate(-50%, 8px);
+  transition: opacity var(--zephyr-time-standard, 200ms) ease, transform var(--zephyr-time-standard, 200ms) ease;
+}
+.latency-result.is-shown { opacity: 1; transform: translate(-50%, 0); }
+.latency-result-dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: var(--zephyr-color-success); }
+.latency-result[data-tone="warn"] .latency-result-dot { background: var(--zephyr-color-warning); }
+.latency-result-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.latency-result:not(:has(.latency-result-action)) { padding-inline-end: 14px; }
+.latency-result-action {
+  flex-shrink: 0; height: 22px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--accent-primary);
+}
+.latency-result-action:hover, .latency-result-action:focus-visible { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); outline: none; }
+
+/* Direct mode: one panel filling the list area, content centred, so the page isn't half empty. */
+.proxies-empty-state.is-card {
+  min-height: 100%; align-self: stretch; padding: 36px 32px 40px; gap: 8px;
+  border-radius: var(--radius-card, 20px);
+  background: var(--zephyr-bg-elevated);
+  border: 1px solid var(--zephyr-border-subtle, var(--zephyr-border-default));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03), 0 8px 24px rgb(0 0 0 / 0.04);
+}
+.proxies-empty-state.is-card .proxies-empty-detail { max-width: 340px; line-height: 1.6; }
+.proxies-empty-state.is-card .proxies-empty-action { min-width: 0; margin-top: 8px; }
+/* Settings: accent swatch in use gets a ring and a tick. */
+.theme-swatch { position: relative; }
+.theme-swatch.is-selected { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--color-accent); }
+.theme-swatch.is-selected::after {
+  content: ''; position: absolute; left: 50%; top: 45%; width: 5px; height: 9px; transform: translate(-50%, -50%) rotate(45deg);
+  border: solid #fff; border-width: 0 2px 2px 0;
+}
+/* Custom accent not picked yet: a plus on the rainbow says it opens a picker. */
+#custom-theme-swatch:not(.is-selected)::after {
+  content: ''; position: absolute; inset: 0; margin: auto; width: 10px; height: 10px;
+  background: linear-gradient(#fff, #fff) center / 10px 2px no-repeat, linear-gradient(#fff, #fff) center / 2px 10px no-repeat;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / .25));
+}
+.theme-swatch:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--zephyr-focus-ring); }
+/* The custom swatch is a hidden color input: show the ring on the visible circle. */
+.group:has(#custom-theme-color:focus-visible) #custom-theme-swatch { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--zephyr-focus-ring); }
+/* Opacity slider: visible track in light theme too. */
+.opacity-range { background: var(--zephyr-border-default); }
+
+
+/* Settings: shell-format chip beside "Copy" (was a hidden gear) */
+.env-format-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px 0 10px;
+  border-radius: var(--radius-full); border: 1px solid var(--zephyr-border-default);
+  background: var(--zephyr-bg-muted); color: var(--text-secondary);
+  font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
+  transition: color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.env-format-chip:hover, .env-format-chip[aria-expanded="true"] { color: var(--text-primary); border-color: var(--zephyr-border-strong); }
+.env-format-chip:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+.env-format-option.is-selected { color: var(--text-primary); font-weight: 600; }
+.env-format-option.is-selected::after { content: ''; width: 5px; height: 9px; margin-inline-end: 3px; transform: rotate(45deg) translateY(-1px); border: solid var(--accent-ink); border-width: 0 2px 2px 0; }
+
+/* Number field with its unit inside the field (log retention / size) — field keeps its full height */
+.input-unit { position: relative; }
+.input-unit > .form-control { width: 100%; padding-inline-end: 3rem; }
+.input-unit-label { position: absolute; inset-inline-end: 1rem; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
+
+/* Advanced page: the section a settings link opened briefly gets an accent ring */
+.adv-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s ease-out; }
+
+/* Settings rows: a switch row with a trailing text button keeps the button and switch on one line */
+[data-page="settings"] .ios-switch { flex-shrink: 0; }
+
+/* Dark mode details (settings, advanced, their dialogs) */
+/* Selected thumbs were white-5% on a white-5% track: only a hairline told them apart. */
+html.dark :is(#setting-theme-mode-slider, #setting-home-mode-slider),
+html.dark .seg-item[aria-pressed="true"],
+html.dark .seg-tab.active { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.14); }
+/* Row descriptions: #71717a on the dark glass sat near 4:1 at 11px. */
+html.dark :is([data-page="settings"], [data-page="advanced"], #log-settings-modal, #log-export-modal, #smart-config-modal, #port-config-modal) { --text-muted: #8e8e98; }
+/* Row dividers a touch firmer so cards keep their rhythm on the dark glass. */
+html.dark [data-page="settings"] .glass-card > .h-px,
+html.dark [data-page="settings"] #uwp-loopback-item > .h-px { background: rgba(255, 255, 255, 0.07); }
+/* Native date pickers and number spinners follow the theme. */
+html.dark :is(#log-export-modal, #port-config-modal, #smart-config-modal, #log-settings-modal) input { color-scheme: dark; }
+/* Light: the same raised white thumb as the header tabs (page-29). */
+html:not(.dark) :is(#setting-theme-mode-slider, #setting-home-mode-slider),
+html:not(.dark) .seg-item[aria-pressed="true"] { background: rgba(255, 255, 255, 0.9); }
+
+/* Settings section index (ui/settings-nav.js): short marks in the right gutter, covering
+   no rows. Names slide out beside the marks only while the rail is hovered or focused. */
+.settings-rail {
+  position: fixed; top: 50%; inset-inline-end: 10px; z-index: 30; transform: translateY(-50%);
+  width: auto; max-width: none; margin: 0; /* not the 800px column rule for settings children on wide windows */
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; /* 24px between item centres */
+}
+.settings-rail-item {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 18px;
+  padding: 0 2px 0 8px; border-radius: 9px; cursor: pointer; background: transparent;
+  transition: background-color var(--zephyr-time-standard) var(--zephyr-easing-ease-out);
+}
+.settings-rail-mark {
+  width: 8px; height: 2px; border-radius: 2px; flex-shrink: 0;
+  background: var(--text-tertiary); opacity: 0.45;
+  transition: width var(--zephyr-time-standard) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-standard), background-color var(--zephyr-time-standard);
+}
+.settings-rail-item.active .settings-rail-mark { width: 16px; opacity: 1; background: var(--color-accent); }
+.settings-rail-item:hover .settings-rail-mark { opacity: 0.9; }
+.settings-rail-label {
+  font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--text-secondary);
+  opacity: 0; transform: translateX(6px); pointer-events: none;
+  /* Collapsed: no width, so the folded rail covers only its marks, never the controls beside it. */
+  max-width: 0; overflow: hidden;
+  transition: max-width var(--zephyr-time-standard) var(--zephyr-easing-ease-out), opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), transform var(--zephyr-time-standard) var(--zephyr-easing-ease-out);
+}
+.settings-rail-item.active .settings-rail-label { color: var(--text-primary); font-weight: 600; }
+.settings-rail:is(:hover, :focus-within) .settings-rail-label { opacity: 1; transform: none; max-width: 240px; }
+.settings-rail:is(:hover, :focus-within) {
+  padding-inline-start: 4px; border-radius: 14px;
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.10), 0 1px 2px rgb(0 0 0 / 0.06);
+}
+html:not(.dark) .settings-rail:is(:hover, :focus-within) { background: rgba(248, 249, 251, 0.9); }
+html.dark .settings-rail:is(:hover, :focus-within) { background: rgba(36, 36, 40, 0.9); }
+.settings-rail-item:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.settings-rail-item:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+.settings-section-title:focus { outline: none; }
+.settings-section-title:focus-visible { outline: 2px solid transparent; outline-offset: 2px; border-radius: 4px; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+
+/* Settings search (ui/settings-nav.js): same field as the Proxies node search, right of the title. */
+[data-page="settings"] .settings-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; position: relative; z-index: 10; }
+.settings-search {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; width: 200px; padding: 0 6px 0 10px;
+  border-radius: var(--radius-button, 8px); color: var(--text-tertiary);
+  background: var(--zephyr-bg-input, var(--zephyr-surface-input)); border: 1px solid var(--zephyr-border-subtle);
+  transition: border-color var(--zephyr-time-standard), box-shadow var(--zephyr-time-standard);
+}
+.settings-search:focus-within { border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); box-shadow: 0 0 0 3px var(--zephyr-focus-ring); }
+.settings-search input { flex: 1; min-width: 0; height: 100%; font-size: 12px; color: var(--text-primary); background: transparent; outline: none; }
+.settings-search input::-webkit-search-cancel-button { display: none; }
+.settings-search input::placeholder { color: var(--text-tertiary); }
+.settings-search-clear { width: 20px; height: 20px; flex-shrink: 0; display: inline-grid; place-items: center; border-radius: 50%; color: var(--text-tertiary); }
+.settings-search-clear svg { width: 10px; height: 10px; }
+.settings-search-clear:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.settings-search-clear.hidden { display: none; }
+[data-page="settings"] .search-miss { display: none !important; }
+[data-page="settings"].is-searching .glass-card > .h-px { display: none; }
+.settings-search-empty { padding: 48px 0; text-align: center; font-size: 13px; color: var(--text-muted); }
+.settings-rail-item.search-miss { display: none; }
+[data-page="settings"].is-searching .glass-card > :not(.h-px) { padding-block: 8px; }
+
+/* Focus rings are for keyboard users only (ui/input-modality.js sets html.kb-nav).
+   Clicking or typing in a field shows no blue halo; Tab navigation and high-contrast mode still do. */
+html:not(.kb-nav) :is(input, textarea, select, [contenteditable]):focus,
+html:not(.kb-nav) :is(.form-control, .select-common):focus {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--zephyr-border-strong, var(--zephyr-border-subtle));
+}
+html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
+  box-shadow: none;
+  border-color: var(--zephyr-border-strong, var(--zephyr-border-subtle));
+}
+@media (forced-colors: active) {
+  /* Same selectors as the html:not(.kb-nav) reset above, and later, so they win. */
+  html:not(.kb-nav) :is(input, textarea, select, [contenteditable]):focus,
+  html:not(.kb-nav) :is(.form-control, .select-common):focus,
+  :is(input, textarea, select, [contenteditable]):focus { outline: 2px solid Highlight; }
+}

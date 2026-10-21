@@ -1,0 +1,309 @@
+// @ts-check
+/**
+ * Navigation logic - page switching and sidebar initialization.
+ * Extracted from ui.js lines ~81-86, ~594-630.
+ *
+ * @module ui/navigation
+ */
+
+import { setup3DEffect } from './3d-effect.js';
+import { appStore } from './state.js';
+
+/** @returns {boolean} */
+function prefersReducedMotion() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** @type {WeakMap<Element, (e: AnimationEvent) => void>} */
+const pageEnterListeners = new WeakMap();
+
+/** @param {Element} p */
+function dropPageEnterListener(p) {
+    const fn = pageEnterListeners.get(p);
+    if (!fn) return;
+    p.removeEventListener('animationend', /** @type {EventListener} */ (fn));
+    pageEnterListeners.delete(p);
+}
+
+/**
+ * Switch the visible page by pageId.
+ * Only the incoming page animates (fade + 6px rise, transform/opacity only);
+ * the outgoing page is hidden immediately, so there is nothing to flicker.
+ * The shared background glows cross-fade instead of jumping.
+ *
+ * @param {string} pageId - The data-page attribute value of the target page
+ */
+export function switchPage(pageId) {
+    const pages = document.querySelectorAll('[data-page]');
+    const animate = !prefersReducedMotion();
+    pages.forEach(p => {
+        if (p.getAttribute('data-page') === pageId) {
+            const wasHidden = p.classList.contains('hidden');
+            p.classList.remove('hidden');
+            if (animate && wasHidden && p instanceof HTMLElement) {
+                p.classList.remove('page-enter');
+                void p.offsetWidth; // restart the keyframes when re-entering quickly
+                p.classList.add('page-enter');
+                dropPageEnterListener(p);
+                /** @param {AnimationEvent} e */
+                const onEnd = (e) => {
+                    // animationend bubbles: ignore animations of the page's children.
+                    if (e.target !== p) return;
+                    p.classList.remove('page-enter');
+                    dropPageEnterListener(p);
+                };
+                pageEnterListeners.set(p, onEnd);
+                p.addEventListener('animationend', onEnd);
+            }
+        } else {
+            p.classList.add('hidden');
+            p.classList.remove('page-enter');
+            dropPageEnterListener(p);
+        }
+    });
+
+    // Cross-fade the shared background glow for the active page
+    document.querySelectorAll('[id^="glow-"]').forEach(g => {
+        g.classList.add('page-glow');
+        g.classList.remove('hidden');
+        g.classList.toggle('is-active', g.id === `glow-${pageId}`);
+    });
+}
+
+/**
+ * Sliding highlight behind the active sidebar item. It replaces the
+ * per-button raised background so selection glides between items.
+ * @type {HTMLElement|null}
+ */
+let _navIndicator = null;
+
+/**
+ * Move the sidebar indicator under `target`.
+ * @param {Element|null} target
+ * @param {boolean} [instant] - jump without animating (first paint, resize)
+ */
+function moveNavIndicator(target, instant = false) {
+    const nav = document.getElementById('sidebar-nav');
+    if (!nav || !(target instanceof HTMLElement)) return;
+    if (!_navIndicator || !_navIndicator.isConnected) {
+        _navIndicator = document.createElement('span');
+        _navIndicator.className = 'nav-indicator';
+        _navIndicator.setAttribute('aria-hidden', 'true');
+        nav.prepend(_navIndicator);
+        nav.classList.add('has-nav-indicator');
+        instant = true;
+    }
+    const ind = _navIndicator;
+    if (instant) ind.classList.add('no-anim');
+    ind.style.width = `${target.offsetWidth}px`;
+    ind.style.height = `${target.offsetHeight}px`;
+    ind.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
+    if (instant) {
+        void ind.offsetWidth;
+        ind.classList.remove('no-anim');
+    }
+}
+
+/** Store leave-timeout IDs without polluting DOM element types. */
+const leaveTimeouts = new WeakMap();
+
+/** @type {((page: string) => void) | null} Reference set by initNavigation for programmatic use. */
+let _navigateToRef = null;
+
+/**
+ * Programmatic navigation that fires leave/enter callbacks and updates
+ * internal currentPage state, just like a sidebar click.
+ * Must be called after initNavigation().
+ *
+ * @param {string} pageId - The target page (e.g. 'home', 'console', 'proxies')
+ */
+export function navigateTo(pageId) {
+    if (_navigateToRef) {
+        _navigateToRef(pageId);
+    } else {
+        // Fallback: just switch the page without callbacks
+        switchPage(pageId);
+    }
+}
+
+/** @type {Record<string, string>} Map page id to callback name. */
+const PAGE_CALLBACK_MAP = {
+    'proxies': 'onProxies',
+    'advanced': 'onAdvanced',
+    'home': 'onHome',
+    'console': 'onConsole',
+    'rule-library': 'onRuleLibrary',
+    'connections': 'onConnections',
+    'logs': 'onLogs',
+};
+
+/** @type {Record<string, string>} Map page id to leave-callback name. */
+const PAGE_LEAVE_MAP = {
+    'logs': 'onLeaveLogs',
+    'proxies': 'onLeaveProxies',
+    'console': 'onLeaveConsole',
+};
+
+/**
+ * Normalize 'home' to 'console' when console mode is enabled.
+ * Ensures all navigation paths follow the same redirect rule.
+ * @param {string} page
+ * @returns {string}
+ */
+function normalizePage(page) {
+    return (page === 'home' && appStore.get('homePageMode') === 'console')
+        ? 'console'
+        : page;
+}
+
+/**
+ * Initialize sidebar navigation.
+ * Sets up click handlers on [data-nav] items and applies 3D hover effects.
+ * When a nav item is clicked, it updates active styling and switches pages.
+ * Page-specific initialization callbacks are triggered on navigation.
+ * Page-specific destroy callbacks are triggered when leaving a page.
+ *
+ * @param {Object} [callbacks] - Optional page-specific init/destroy callbacks
+ * @param {Function} [callbacks.onProxies] - Called when navigating to proxies page
+ * @param {Function} [callbacks.onAdvanced] - Called when navigating to advanced page
+ * @param {Function} [callbacks.onHome] - Called when navigating to home page
+ * @param {Function} [callbacks.onConnections] - Called when navigating to connections page
+ * @param {Function} [callbacks.onRules] - Called when navigating to rules page
+ * @param {Function} [callbacks.onRuleLibrary] - Called when navigating to rule-library page
+ * @param {Function} [callbacks.onLogs] - Called when navigating to logs page
+ * @param {Function} [callbacks.onLeaveLogs] - Called when navigating away from logs page
+ * @param {Function} [callbacks.onLeaveProxies] - Called when navigating away from proxies page
+ * @param {Function} [callbacks.onConsole] - Called when navigating to console page
+ * @param {Function} [callbacks.onLeaveConsole] - Called when navigating away from console page
+ */
+export function initNavigation(callbacks = {}) {
+    const navItems = document.querySelectorAll('[data-nav]');
+
+    // Apply 3D effect to sidebar icons
+    setup3DEffect(navItems);
+
+    /** @type {string|null} Track the current page for leave callbacks */
+    // Detect which page is initially visible (main.js may have already switched to console)
+    let currentPage = null;
+    const initialVisible = document.querySelector('[data-page]:not(.hidden)');
+    if (initialVisible) {
+        const initialPage = /** @type {HTMLElement} */ (initialVisible).dataset.page ?? null;
+        // If console mode redirected home to console, treat it as 'console' not 'home'
+        currentPage = normalizePage(initialPage ?? '');
+    }
+
+    /**
+     * Update nav-item active/leaving styling for the target page.
+     * @param {string} targetPage
+     */
+    function updateNavStyling(targetPage) {
+        // When target is 'console', the sidebar item is 'home' (console reuses home slot)
+        const navSelector = targetPage === 'console' ? '[data-nav="home"]' : `[data-nav="${targetPage}"]`;
+        const targetNav = document.querySelector(navSelector);
+        // Pages without a sidebar item (e.g. 'advanced') keep the current
+        // active item highlighted instead of clearing the whole sidebar.
+        if (!targetNav) return;
+        const oldActive = document.querySelector('.nav-btn.is-active');
+        if (oldActive && oldActive !== targetNav) {
+            oldActive.classList.add('is-leaving');
+            oldActive.classList.remove('is-active');
+            const prevTimer = leaveTimeouts.get(oldActive);
+            if (prevTimer) clearTimeout(prevTimer);
+            const timer = setTimeout(() => {
+                oldActive.classList.remove('is-leaving');
+                leaveTimeouts.delete(oldActive);
+            }, 500);
+            leaveTimeouts.set(oldActive, timer);
+        }
+        const itemTimer = leaveTimeouts.get(targetNav);
+        if (itemTimer) {
+            clearTimeout(itemTimer);
+            leaveTimeouts.delete(targetNav);
+        }
+        navItems.forEach(i => {
+            i.classList.remove('is-active', 'bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+            i.classList.add('text-[var(--text-muted)]');
+            i.removeAttribute('aria-current');
+        });
+        targetNav.classList.add('is-active', 'bg-[var(--zephyr-bg-muted)]', 'text-[var(--text-primary)]', 'shadow-lg', 'ring-1', 'ring-[var(--zephyr-border-strong)]');
+        targetNav.classList.remove('text-[var(--text-muted)]', 'is-leaving');
+        targetNav.setAttribute('aria-current', 'page');
+        moveNavIndicator(targetNav);
+    }
+
+    /**
+     * Fire leave callback for the previous page if leaving.
+     * @param {string} targetPage
+     */
+    function fireLeaveCallback(targetPage) {
+        const leaveKey = PAGE_LEAVE_MAP[currentPage ?? ''];
+        if (leaveKey && targetPage !== currentPage) {
+            const fn = /** @type {(() => void) | undefined} */ (/** @type {Record<string, unknown>} */ (callbacks)[leaveKey]);
+            if (fn) fn();
+        }
+    }
+
+    /**
+     * Fire enter callback for the target page.
+     * @param {string} targetPage
+     */
+    function fireEnterCallback(targetPage) {
+        const enterKey = PAGE_CALLBACK_MAP[targetPage];
+        if (enterKey) {
+            const fn = /** @type {(() => void) | undefined} */ (/** @type {Record<string, unknown>} */ (callbacks)[enterKey]);
+            if (fn) fn();
+        }
+    }
+
+    /**
+     * Internal navigation function shared by click handler and navigateTo().
+     * @param {string} targetPage
+     */
+    function navigateToInternal(targetPage) {
+        // Normalize 'home' to 'console' when console mode is enabled, so
+        // programmatic navigation follows the same redirect rule as sidebar clicks.
+        const normalizedPage = normalizePage(targetPage);
+
+        // Short-circuit: no-op when navigating to the already-current page
+        if (normalizedPage === currentPage) return;
+
+        // Guard: no-op if the target page element doesn't exist
+        const pageEl = document.querySelector(`[data-page="${normalizedPage}"]`);
+        if (!pageEl) return;
+
+        fireLeaveCallback(normalizedPage);
+        updateNavStyling(normalizedPage);
+        switchPage(normalizedPage);
+        currentPage = normalizedPage;
+        fireEnterCallback(normalizedPage);
+    }
+
+    // Expose for programmatic navigation (e.g. HOME_PAGE_MODE_CHANGED handler)
+    _navigateToRef = navigateToInternal;
+
+    // Sliding sidebar highlight: place it under the initial item, then keep it
+    // aligned when the sidebar resizes (window height, UI scale).
+    moveNavIndicator(document.querySelector('.nav-btn.is-active'), true);
+    const sidebar = document.getElementById('sidebar-nav');
+    if (sidebar && typeof ResizeObserver === 'function') {
+        new ResizeObserver(() => moveNavIndicator(document.querySelector('.nav-btn.is-active'), true)).observe(sidebar);
+    }
+    // Initial glow state without animation. Glows switchPage() already
+    // adopted carry .page-glow and must keep their is-active state; only the
+    // untouched markup still uses `hidden` to mean "inactive".
+    document.querySelectorAll('[id^="glow-"]').forEach(g => {
+        if (g.classList.contains('page-glow')) return;
+        const active = !g.classList.contains('hidden');
+        g.classList.add('page-glow');
+        g.classList.remove('hidden');
+        g.classList.toggle('is-active', active);
+    });
+
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            // navigateToInternal() applies the home → console redirect.
+            const targetPage = /** @type {HTMLElement} */ (item).dataset.nav ?? null;
+            if (targetPage) navigateToInternal(targetPage);
+        });
+    });
+}

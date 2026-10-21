@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="zh-CN" dir="ltr" class="bg-transparent h-screen w-screen overflow-hidden">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zephyr</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="pf-override.css" />
+    <script type="importmap">
+    {
+        "imports": {
+            "@zephyr/shared": "./_shared/index.js"
+        }
+    }
+    </script>
+    <script defer src="js-yaml.min.js"></script>
+    <script type="module" src="main.js" defer></script>
+
+<!-- Demo Bootstrap -->
+<script>
+// Create mutable target for demo API injection
+var _demoTarget = {
+  invoke: function(cmd, args) { return Promise.resolve(null); },
+  transformCallback: function(fn) { return 'mock-cb'; },
+  metadata: { currentWindow: { label: 'main' } },
+};
+window.__TAURI_INTERNALS__ = new Proxy(_demoTarget, {
+  get: function(target, prop) { return target[prop]; },
+  set: function(target, prop, value) { target[prop] = value; return true; }
+});
+window.__DEMO_INTERNALS_TARGET__ = _demoTarget;
+window.__AETHER_DEMO__ = true;
+</script>
+<!-- End Demo Bootstrap -->
+</head>
+<body class="bg-transparent overflow-hidden select-none">
+    <div id="app-main-container" class="w-full h-full flex overflow-hidden p-3 gap-0 rounded-[var(--zephyr-radius-window-clip)] transition-all duration-[var(--zephyr-time-standard)] relative">
+        <!-- Page Background Glows (shared layer, above sidebar but below content) -->
+        <div id="glow-home" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0"></div>
+        <div id="glow-console" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-accent/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-subscriptions" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-proxies" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-connections" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-cyan/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-rule-library" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
+        <div id="glow-logs" class="absolute top-[6%] end-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden"></div>
+        <div id="glow-settings" class="absolute top-[6%] start-[5%] w-[500px] h-[300px] bg-accent/5 blur-[100px] pointer-events-none rounded-full z-0 hidden transition-colors duration-[var(--zephyr-time-page)]"></div>
+        <div id="glow-advanced" class="absolute top-[6%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full z-0 hidden"></div>
+
+        <!-- Sidebar -->
+        <nav id="sidebar-nav" class="w-20 flex flex-col items-center py-8 rounded-[var(--zephyr-radius-window-clip)] gap-8 relative z-10 backdrop-blur-sm" aria-label="Main navigation">
+            <button type="button" data-nav="home" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-all duration-[var(--zephyr-time-standard)] bg-[var(--zephyr-bg-muted)] text-[var(--text-primary)] shadow-lg ring-1 ring-[var(--zephyr-border-strong)] is-active" aria-label="Home" data-i18n-aria-label="home" aria-current="page">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw" pathLength="1" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path class="p-draw d2" pathLength="1" d="M9 22V12h6v10"/></svg>
+                <span class="sr-only" data-i18n="home">Home</span>
+            </button>
+            <button type="button" data-nav="proxies" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Proxies" data-i18n-aria-label="proxiesTitle">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-shaft" pathLength="1" d="M5 12h14"/><path class="p-head" d="m12 5 7 7-7 7"/></svg>
+                <span class="sr-only" data-i18n="proxiesTitle">Proxies</span>
+            </button>
+            <button type="button" data-nav="subscriptions" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Subscriptions" data-i18n-aria-label="subscriptions">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-doc" d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path class="p-fold" d="M14 2v4a2 2 0 0 0 2 2h4"/><path class="p-check" pathLength="1" d="m3 15 2 2 4-4"/></svg>
+                <span class="sr-only" data-i18n="subscriptions">Subscriptions</span>
+            </button>
+            <button type="button" data-nav="connections" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Connections" data-i18n-aria-label="connectionsTitle">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle class="c-node" cx="5" cy="12" r="2.5"/>
+                    <circle class="c-node c-node-r" cx="19" cy="12" r="2.5"/>
+                    <path class="conn-line-dash" d="M7.5 12h9"/>
+                    <circle class="conn-pulse-dot conn-dot-1" cx="10.5" cy="12" r="0.8" fill="currentColor"/>
+                    <circle class="conn-pulse-dot conn-dot-2" cx="13.5" cy="12" r="0.8" fill="currentColor"/>
+                </svg>
+                <span class="sr-only" data-i18n="connectionsTitle">Connections</span>
+            </button>
+            <button type="button" data-nav="rule-library" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Rule Library" data-i18n-aria-label="ruleLibraryTitle">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-draw p-book" pathLength="1" d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                <span class="sr-only" data-i18n="ruleLibraryTitle">Rule Library</span>
+            </button>
+            <button type="button" data-nav="logs" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Logs" data-i18n-aria-label="logsTitle">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="p-prompt" pathLength="1" d="m4 17 6-6-6-6"/><path class="p-cursor" d="M12 19h8"/></svg>
+                <span class="sr-only" data-i18n="logsTitle">Logs</span>
+            </button>
+            <div class="flex-1"></div>
+            <button type="button" data-nav="settings" class="nav-btn w-12 h-12 flex items-center justify-center rounded-md cursor-pointer transition-colors duration-[var(--zephyr-time-standard)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--zephyr-bg-muted)]" aria-label="Settings" data-i18n-aria-label="settingsTitle">
+                <svg aria-hidden="true" class="w-6 h-6 icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g></svg>
+                <span class="sr-only" data-i18n="settingsTitle">Settings</span>
+            </button>
+        </nav>
+
+        <!-- Main Area -->
+        <div class="flex-1 flex flex-col min-w-0 relative z-10">
+            <!-- Title Bar -->
+            <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-8 select-none cursor-grab active:cursor-grabbing">
+                <div class="flex items-center pointer-events-none">
+                    <img src="app-lockup.svg" id="app-title-icon" alt="Zephyr" class="h-5 w-auto opacity-90 transition-all duration-[var(--zephyr-time-standard)]">
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="close-btn" type="button" class="group relative flex items-center justify-center w-3.5 h-3.5 rounded-full bg-close-btn hover:bg-close-btn/80 transition-colors shadow-sm before:absolute before:-inset-1.5 before:content-['']" aria-label="Close window" data-i18n-aria-label="closeWindow" data-i18n-title="closeWindow" title="Close window">
+                        <svg aria-hidden="true" class="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 w-2 h-2 text-[var(--zephyr-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div data-page="home" class="flex-1 flex flex-col px-8 pt-8 gap-4 overflow-y-auto custom-scrollbar relative">
+
+                <!-- Hero: live traffic area chart behind the speed read-out -->
+                <section id="home-hero" class="home-hero glass-card relative z-20">
+                    <div class="home-hero-body">
+                        <div class="home-hero-chart" aria-hidden="true">
+                            <canvas id="trafficChart" class="absolute inset-0 w-full h-full"></canvas>
+                        </div>
+                        <!-- Current Node Display (Interactive Wheel) -->
+                        <div id="node-wheel-container" class="absolute top-0 inset-inline-0 flex justify-center z-[var(--z-sticky)] perspective-1000 h-8 mt-4">
+                            <button type="button" id="node-wheel-trigger" class="absolute top-0 px-4 py-1.5 rounded-full bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] flex items-center gap-2 backdrop-blur-md cursor-pointer transition-[transform,color,box-shadow] duration-[var(--zephyr-time-standard)] hover:scale-[1.02] hover:bg-[var(--zephyr-bg-muted)] hover:shadow-[var(--zephyr-shadow-sm)] z-20" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="node-wheel-trigger-label current-node-name">
+                                <span id="node-wheel-trigger-label" class="sr-only" data-i18n="consoleNodePicker">Switch node</span>
+                                <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[var(--zephyr-shadow-glow)]" aria-hidden="true"></span>
+                                <span id="current-node-name" class="text-xs text-[var(--text-primary)] font-semibold truncate max-w-[280px]">Loading...</span><svg class="node-pill-chevron w-3 h-3 shrink-0 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+
+                            <!-- Wheel Dropdown -->
+                            <div id="node-wheel-dropdown" class="node-wheel-dropdown absolute top-[58px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-[140px] opacity-0 pointer-events-none transition-all duration-[var(--zephyr-time-standard)] ease-[var(--motion-ease-out)] z-10" style="mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);">
+                                <div id="node-wheel-scroll" class="w-full h-full overflow-y-auto" style="scroll-snap-type: y mandatory; scroll-behavior: smooth; scrollbar-width: none;">
+                                    <div id="node-wheel-padding-top" style="height: 56px;"></div>
+                                    <div id="node-wheel-list" class="flex flex-col items-center gap-1 w-full px-8">
+                                        <!-- Node capsules will be inserted here -->
+                                    </div>
+                                    <div id="node-wheel-padding-bottom" style="height: 56px;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="home-hero-speeds relative z-10">
+                            <!-- Downstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-download/80" aria-hidden="true"></span><span data-i18n="downstream">Downstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-down-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-down-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="w-px h-14 bg-gradient-to-b from-transparent via-[var(--zephyr-border-default)] to-transparent" aria-hidden="true"></div>
+
+                            <!-- Upstream -->
+                            <div class="home-speed">
+                                <span class="home-speed-label"><span class="home-speed-swatch bg-upload/80" aria-hidden="true"></span><span data-i18n="upstream">Upstream</span></span>
+                                <div class="flex items-baseline justify-center w-full gap-1.5">
+                                    <span id="speed-up-val" class="home-speed-value text-[var(--text-primary)] tabular-nums">0.00</span>
+                                    <span id="speed-up-unit" class="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">KB/s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Footer row of the hero card: live figures that already exist elsewhere (console / connections) -->
+                    <div id="home-stats" class="home-stats">
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleTotalTraffic">Total Traffic</span>
+                            <span class="home-stat-value"><b id="home-stat-total">—</b></span>
+                            <span class="home-stat-foot"><span class="text-download-ink" aria-hidden="true">↓</span> <span id="home-stat-down">—</span> · <span class="text-upload-ink" aria-hidden="true">↑</span> <span id="home-stat-up">—</span></span>
+                        </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleActiveConn">Active Connections</span>
+                            <span class="home-stat-value"><b id="home-stat-conn">—</b></span>
+                            <span class="home-stat-foot">TCP <span id="home-stat-tcp">—</span> · UDP <span id="home-stat-udp">—</span></span>
+                        </div>
+                        <div class="home-stat">
+                            <span class="home-stat-label" data-i18n="consoleNodeLatency">Node Latency</span>
+                            <span class="home-stat-value"><b id="home-stat-lat">—</b><small>ms</small></span>
+                            <span class="home-stat-foot truncate" id="home-stat-node">—</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Proxy Toggle -->
+                <div class="glass-card p-4 flex items-center justify-between gap-4 relative z-10 shrink-0">
+                    <div class="flex items-center gap-4 min-w-0">
+                        <div class="w-12 h-12 shrink-0 rounded-[var(--radius-md)] bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+                            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
+                        </div>
+                    </div>
+                    <label class="ios-switch switch-lg shrink-0">
+    <input type="checkbox" id="sys-proxy-toggle">
+    <span class="switch-slider"></span>
+</label>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 shrink-0">
+                    <!-- Proxy Mode Selector -->
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center gap-3 h-8 min-w-0">
+                            <div class="w-8 h-8 shrink-0 rounded-[10px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            </div>
+                            <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="mode">Proxy Mode</h3>
+                        </div>
+                        <div id="mode-selector-container" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)]">
+                            <div id="mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                            <button data-mode="rule" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="rule">Rule</button>
+                            <button data-mode="global" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="global">Global</button>
+                            <button data-mode="direct" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="direct">Direct</button>
+                        </div>
+                    </div>
+
+                    <!-- TUN Mode Toggle: same two-row rhythm as the mode card (header row, then a 36px control row) -->
+                    <div class="glass-card p-4 flex flex-col gap-3 relative z-10 min-w-0">
+                        <div class="flex items-center justify-between gap-3 h-8 min-w-0">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <div class="w-8 h-8 shrink-0 rounded-[10px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                </div>
+                                <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
+                            </div>
+                            <label class="ios-switch shrink-0">
+    <input type="checkbox" id="tun-proxy-toggle">
+    <span class="switch-slider"></span>
+</label>
+                        </div>
+                        <div class="home-tun-status">
+                            <div id="tun-spinner" class="hidden w-2.5 h-2.5 shrink-0 border border-accent border-t-transparent rounded-full animate-spin transition-all"></div>
+                            <p class="home-status-text text-xs text-[var(--text-muted)] font-medium transition-colors truncate" id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Console Dashboard Page (injected by ui/console-home.js) -->
+            <div data-page="console" class="flex-1 hidden flex flex-col overflow-hidden relative min-w-0"></div>
+
+            <!-- Subscriptions Page -->
+            <div data-page="subscriptions" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div>
+                        <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="subscriptions">Subscriptions</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button id="open-plugins-btn" class="btn-ghost" title="Override Scripts" data-i18n-title="overrideTitle">
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <span data-i18n="overrideTitle">Override Scripts</span>
+                        </button>
+                        <button id="update-all-sub-btn" class="btn-ghost" title="Update All" data-i18n-title="updateAll">
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                            <span data-i18n="updateAll">Update All</span>
+                        </button>
+                        <button id="add-sub-btn" class="btn-accent">
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            <span data-i18n="add">Add</span>
+                        </button>
+                    </div>
+                </header>
+
+                <div id="configs-list" class="flex-1 overflow-y-auto space-y-3 pt-2 -mt-2 custom-scrollbar relative z-10">
+                    <!-- Subscriptions will be rendered here -->
+                </div>
+
+                <!-- Plugin Panel (overlay) -->
+                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+                    <div class="absolute inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md" id="plugin-panel-backdrop"></div>
+                    <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
+                        <!-- Panel header: title + close -->
+                        <div class="flex items-center justify-between shrink-0">
+                            <h3 id="plugin-panel-title" class="dialog-title" data-i18n="overrideTitle">覆写脚本</h3>
+                            <!-- While editing: ‹ Override Scripts / name [JS] ● Unsaved -->
+                            <nav id="plugin-script-crumb" class="hidden flex items-center gap-2 min-w-0 text-base" aria-label="Breadcrumb">
+                                <button id="plugin-script-back-btn" type="button" class="flex items-center gap-1 shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+                                    <span data-i18n="overrideTitle">覆写脚本</span>
+                                </button>
+                                <span class="text-[var(--text-tertiary)]" aria-hidden="true">/</span>
+                                <h3 id="plugin-script-title" class="dialog-title truncate" aria-current="page"></h3>
+                                <span id="plugin-script-type" class="text-2xs font-semibold px-1.5 py-0.5 rounded-sm shrink-0"></span>
+                                <span id="plugin-script-dirty" class="hidden flex shrink-0 items-center gap-1 text-xs text-[var(--zephyr-color-warning)]">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-current" aria-hidden="true"></span>
+                                    <span data-i18n="overrideUnsaved">未保存</span>
+                                </span>
+                            </nav>
+                            <button id="close-plugins-btn" type="button" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" aria-label="Close" data-i18n-aria-label="dismiss">
+                                <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                        <!-- Toolbar: search + new + bulk actions (hidden while editing a script) -->
+                        <div id="plugin-toolbar" class="flex items-center gap-2 shrink-0">
+                            <input
+                                id="plugin-search-input"
+                                aria-label="Search overrides" data-i18n-aria-label="overrideSearchPlaceholder"
+                                class="form-control form-control-md flex-1"
+                                placeholder="搜索覆写" data-i18n-placeholder="overrideSearchPlaceholder"
+                            />
+                            <!-- New override dropdown -->
+                            <div class="relative">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                                    <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    <span data-i18n="overrideNew">新建</span>
+                                </button>
+                                <div id="plugin-new-dropdown" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
+                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
+                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
+                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
+                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
+                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
+                                </div>
+                            </div>
+                            <!-- More: bulk enable / disable -->
+                            <div class="relative">
+                                <button id="plugin-more-btn" type="button" class="btn-ghost plugin-more-btn" aria-haspopup="menu" aria-expanded="false" title="更多" aria-label="更多" data-i18n-title="overrideMore" data-i18n-aria-label="overrideMore">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                                </button>
+                                <div id="plugin-more-dropdown" role="menu" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[140px]">
+                                    <button id="plugin-enable-all-btn" type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-i18n="overrideEnableAll">启用全部</button>
+                                    <button id="plugin-disable-all-btn" type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-i18n="overrideDisableAll">禁用全部</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Override cards list -->
+                        <div id="plugin-list" class="flex-1 overflow-y-auto overflow-x-hidden space-y-2 pb-1 custom-scrollbar">
+                            <!-- Override cards rendered by plugins.js -->
+                        </div>
+                        <!-- Script editor area -->
+                        <div id="plugin-script-area" class="hidden flex flex-col flex-1 gap-3 overflow-hidden" style="min-height: 0;">
+                            <!-- CodeMirror editor -->
+                            <div id="plugin-script-cm6" data-code-editor class="w-full flex-1 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg overflow-hidden" style="min-height: 240px;"></div>
+                            <!-- Status + actions -->
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span id="plugin-script-cursor" class="text-2xs text-[var(--text-tertiary)] tabular-nums whitespace-nowrap me-auto"></span>
+                                <button id="plugin-script-fullscreen-btn" type="button" class="btn-ghost text-xs !px-2" data-i18n-title="overrideFullscreen" data-i18n-aria-label="overrideFullscreen" title="全屏" aria-label="全屏">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                                </button>
+                                <button id="plugin-script-validate-btn" type="button" class="btn-ghost text-xs" data-i18n="overrideCheckSyntax">检查语法</button>
+                                <button id="plugin-script-save-btn" type="button" class="btn-ghost text-xs" aria-keyshortcuts="Control+S">
+                                    <span data-i18n="overrideSave">保存</span><kbd class="script-kbd">Ctrl S</kbd>
+                                </button>
+                                <button id="plugin-script-run-btn" type="button" class="btn-primary text-xs" aria-keyshortcuts="Control+Enter">
+                                    <span data-i18n="overrideSaveApply">保存并应用</span><kbd class="script-kbd">Ctrl ↵</kbd>
+                                </button>
+                            </div>
+                            <!-- One-line result of the last check / save / apply -->
+                            <div id="plugin-script-result" class="hidden shrink-0 flex items-center gap-2 px-4 py-2.5 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg text-xs min-w-0" role="status" aria-live="polite">
+                                <span id="plugin-script-result-icon" class="w-4 h-4 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold" aria-hidden="true"></span>
+                                <span id="plugin-script-status" class="font-semibold text-[var(--text-primary)] shrink-0"></span>
+                                <span id="plugin-script-result-detail" class="text-[var(--text-tertiary)] truncate min-w-0"></span>
+                                <button id="plugin-script-log-btn" type="button" class="hidden ms-auto shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline" data-i18n="overrideViewLog">查看日志</button>
+                            </div>
+                            <div id="plugin-script-output" class="script-output hidden shrink-0 px-4 py-2 bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg text-[var(--text-secondary)] whitespace-pre-wrap break-all custom-scrollbar" style="max-height: 120px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Proxies Page -->
+            <div data-page="proxies" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
+                        <!-- Group Selector Dropdown -->
+                        <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                                <span id="proxy-group-label">Auto</span>
+                                <svg aria-hidden="true" class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            </button>
+                            <!-- Menu is dynamically created and attached to body -->
+                        </div>
+                        <span id="proxy-hidden-chip" class="proxy-hidden-chip hidden"></span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <!-- Node search: filters the cards as you type, Esc clears -->
+                        <label class="proxy-search" for="proxy-search">
+                            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                            <input id="proxy-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search nodes" data-i18n-placeholder="searchNodes" aria-label="Search nodes" data-i18n-aria-label="searchNodes">
+                            <span id="proxy-search-count" class="proxy-search-count" aria-live="polite"></span>
+                        </label>
+                        <!-- Sort Button -->
+                        <div class="relative group">
+                            <button id="sort-btn" class="btn-ghost" aria-haspopup="menu" aria-expanded="false">
+                                <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
+                                <span id="sort-label" data-i18n="sortDefault">Default</span>
+                                <svg class="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+                        </div>
+                        <!-- Latency Test Button -->
+                        <button id="test-all-btn" class="btn-accent">
+                            <svg aria-hidden="true" id="test-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span data-i18n="testLatency">Test Latency</span>
+                        </button>
+                    </div>
+                </header>
+                <!-- Group Explanation Bar: shown when uiGroup differs from effectiveGroup -->
+                <div id="group-explanation-bar" class="group-mismatch-bar hidden relative z-10 shrink-0" role="status" data-flex-class="flex"></div>
+                <!-- Container added p-4 to prevent 3D scale clipping -->
+                <div id="proxies-list" role="listbox" aria-label="Proxy Nodes" class="grid gap-4 overflow-y-auto px-4 pt-4 pb-0 -mx-4 -mt-4 custom-scrollbar relative z-10">
+                    <!-- Cards will be injected here -->
+                </div>
+            </div>
+
+            <!-- Connections Page (HTML injected by connections.js module) -->
+            <div data-page="connections" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
+
+            <!-- Logs Page (HTML injected by logs.js module) -->
+            <div data-page="logs" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
+
+            <!-- Rule Library Page -->
+            <div data-page="rule-library" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+                <header class="flex items-center justify-between relative z-10 shrink-0">
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="ruleLibraryTitle">Rule Library</h2>
+                        <span id="rl-status" class="inline-flex items-center h-6 text-xs px-2.5 rounded-full bg-[var(--zephyr-bg-muted)] text-[var(--text-muted)] whitespace-nowrap"></span>
+                        <span id="rl-stats" class="text-xs text-[var(--text-muted)] tabular-nums whitespace-nowrap truncate"></span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="rl-btn-new-group" class="btn-ghost">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
+                            <span data-i18n="ruleLibraryNewGroup">New Group</span>
+                        </button>
+                        <button type="button" id="rl-btn-import" class="btn-accent">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span data-i18n="ruleLibraryImport">Import Rules</span>
+                        </button>
+                    </div>
+                </header>
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 space-y-4 relative z-10">
+                    <!-- Rendered by rule-library.js -->
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div data-page="settings" class="flex-1 hidden flex flex-col px-8 pt-8 pb-10 overflow-y-auto custom-scrollbar relative">
+
+                <h2 class="text-2xl font-light text-[var(--text-primary)] mb-6 relative z-10" data-i18n="settingsTitle">Settings</h2>
+
+                <div class="space-y-6 relative z-10">
+
+                    <!-- 1. Appearance -->
+                    <section id="settings-sec-appearance">
+                        <h3 class="settings-section-title" data-i18n="settingsAppearance">Appearance</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAppearanceDesc">Interface language, theme, color and window transparency</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Language -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-lang-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="language">Language</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="languageDesc">Choose your interface language</p>
+                                    </div>
+                                </div>
+                                <div id="setting-lang-wrap" class="relative w-40">
+                                    <button id="setting-lang-trigger" type="button" aria-labelledby="setting-lang-title setting-lang-label" class="select-common w-full flex items-center justify-between">
+                                        <span id="setting-lang-label">English</span>
+                                        <svg aria-hidden="true" id="setting-lang-arrow" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="m6 9 6 6 6-6"></path>
+                                        </svg>
+                                    </button>
+                                    <div id="setting-lang-menu" class="hidden absolute end-0 top-[calc(100%+8px)] w-full rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                                        <div class="menu-scroll max-h-[300px]">
+                                            <button type="button" data-lang-value="en" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">English</button>
+                                            <button type="button" data-lang-value="zh" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">简体中文</button>
+                                            <button type="button" data-lang-value="ja" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">日本語</button>
+                                            <button type="button" data-lang-value="ko" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">한국어</button>
+                                            <button type="button" data-lang-value="my" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">ဗမာ</button>
+                                            <button type="button" data-lang-value="vi" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Tiếng Việt</button>
+                                            <button type="button" data-lang-value="ru" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Русский</button>
+                                            <button type="button" data-lang-value="es" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Español</button>
+                                            <button type="button" data-lang-value="tr" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Türkçe</button>
+                                            <button type="button" data-lang-value="tk" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Türkmen</button>
+                                            <button type="button" data-lang-value="sw" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Kiswahili</button>
+                                            <button type="button" data-lang-value="fa" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">فارسی</button>
+                                            <button type="button" data-lang-value="ar" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">العربية</button>
+                                            <button type="button" data-lang-value="ur" class="setting-lang-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">اردو</button>
+                                        </div>
+                                    </div>
+                                    <select id="setting-lang" class="hidden" aria-label="Language" data-i18n-aria-label="language">
+                                        <option value="en">English</option>
+                                        <option value="zh">简体中文</option>
+                                        <option value="ja">日本語</option>
+                                        <option value="ko">한국어</option>
+                                        <option value="my">ဗမာ</option>
+                                        <option value="vi">Tiếng Việt</option>
+                                        <option value="ru">Русский</option>
+                                        <option value="es">Español</option>
+                                        <option value="tr">Türkçe</option>
+                                        <option value="tk">Türkmen</option>
+                                        <option value="sw">Kiswahili</option>
+                                        <option value="fa">فارسی</option>
+                                        <option value="ar">العربية</option>
+                                        <option value="ur">اردو</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Theme Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="theme">Theme</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="themeDesc">Auto / Light / Dark appearance</p>
+                                    </div>
+                                </div>
+                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
+                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
+                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
+                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Theme Color -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="themeColor">Theme Color</p>
+                                        <p id="theme-color-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="themeColorDesc">Customize the interface accent color</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" data-theme="blue" aria-label="blue" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="green" aria-label="green" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="orange" aria-label="orange" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="pink" aria-label="pink" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <div class="relative group">
+                                        <input type="color" id="custom-theme-color" aria-label="Theme Color" data-i18n-aria-label="themeColor" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
+                                        <div id="custom-theme-swatch" class="theme-swatch w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 via-emerald-500 to-amber-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- App Transparency -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="appOpacity">App Transparency</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="appOpacityDesc">Adjust main window background opacity</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xs text-[var(--text-secondary)] w-9 text-end tabular-nums" id="opacity-val-text">100%</span>
+                                    <input type="range" id="setting-opacity" aria-label="App Transparency" data-i18n-aria-label="appOpacity" min="10" max="100" value="100" class="opacity-range w-24 h-1 rounded-full appearance-none cursor-pointer accent-accent">
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- UI Scale -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uiScale">UI Scale</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
+                                    </div>
+                                </div>
+                                <div class="seg-control relative grid grid-cols-4 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 w-[220px]" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
+                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">100%</button>
+                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">110%</button>
+                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">125%</button>
+                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">150%</button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Home Page Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="homePageMode">Home Page Mode</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="homePageModeDesc">Switch between minimal and console dashboard</p>
+                                    </div>
+                                </div>
+                                <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
+                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
+                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageMinimal">Minimal</button>
+                                    <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageConsole">Console</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 2. General -->
+                    <section id="settings-sec-general">
+                        <h3 class="settings-section-title" data-i18n="settingsAppBehavior">General</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAppBehaviorDesc">Window, startup and shortcuts</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Close Behavior -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-close-tray-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="minToTray">Hide on Close</p>
+                                        <p id="setting-close-tray-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="minToTrayDesc">Hide to tray instead of quitting when closing window</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-close-tray" aria-labelledby="setting-close-tray-title" aria-describedby="setting-close-tray-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Launch at Login -->
+                            <div id="row-autostart" class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-autostart-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autostart">Launch at Login</p>
+                                        <p id="setting-autostart-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="autostartDesc">Start the application automatically when you sign in</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-autostart" aria-labelledby="setting-autostart-title" aria-describedby="setting-autostart-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Silent Start -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-silent-start-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="silentStart">Silent Start</p>
+                                        <p id="setting-silent-start-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="silentStartDesc">Launch hidden in tray without showing the window</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-silent-start" aria-labelledby="setting-silent-start-title" aria-describedby="setting-silent-start-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Lightweight Mode -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z"/><path d="M16 8 2 22"/><path d="M17.5 15H9"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-lightweight-mode-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="lightweightMode">Lightweight Mode</p>
+                                        <p id="setting-lightweight-mode-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="lightweightModeDesc">Destroy WebView on close to save memory, tray click to restore</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-lightweight-mode" aria-labelledby="setting-lightweight-mode-title" aria-describedby="setting-lightweight-mode-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Global Shortcuts -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="globalShortcut">Global Shortcuts</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="globalShortcutDesc">Configure keyboard shortcuts</p>
+                                    </div>
+                                </div>
+                                <button id="open-shortcut-settings-btn" class="row-action flex items-center gap-1">
+                                    <span data-i18n="configure">Configure</span>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 3. Proxy -->
+                    <section id="settings-sec-proxy">
+                        <h3 class="settings-section-title" data-i18n="settingsProxyBehavior">Proxy</h3>
+                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">TUN, node switching and latency tests</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- TUN (mirrors the home card) -->
+                            <div id="row-settings-tun" class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunModeShort">TUN Mode</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunModeDesc">Route all system traffic through the core</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button type="button" id="settings-tun-config-btn" class="row-action" data-i18n-title="tunConfigOpen" title="TUN settings"><span data-i18n="tunConfigBtn">Settings</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                                    <label class="ios-switch">
+                                        <input type="checkbox" id="settings-tun-toggle" aria-label="TUN Mode" data-i18n-aria-label="tunModeShort">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Auto switch nodes (failover + node scoring + scheduled tests) -->
+                            <div id="row-auto-switch" class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-7.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoSwitchNodes">Auto-Switch Nodes</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoSwitchNodesDesc">Test nodes periodically, score them and leave a failing node</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button type="button" id="smart-config-btn" class="row-action"><span data-i18n="autoSwitchParams">Parameters</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                                    <label class="ios-switch">
+                                        <input type="checkbox" id="setting-auto-switch" aria-label="Auto-Switch Nodes" data-i18n-aria-label="autoSwitchNodes">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Hide Timeout Nodes -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-hide-timeout-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="hideTimeout">Hide Timeout Nodes</p>
+                                        <p id="setting-hide-timeout-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="hideTimeoutDesc">Hide unavailable proxy nodes in the list</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="setting-hide-timeout" aria-labelledby="setting-hide-timeout-title" aria-describedby="setting-hide-timeout-desc">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Unified Delay -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-unified-delay-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="unifiedDelay">Unified Delay</p>
+                                        <p id="setting-unified-delay-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="unifiedDelayDesc">Use uniform delay testing strategy</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-unified-delay" aria-labelledby="setting-unified-delay-title" aria-describedby="setting-unified-delay-desc" checked>
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Advanced settings (drill-in) -->
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="advancedTitle">Advanced Settings</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="advancedEntryDesc">Core configuration and startup arguments</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button type="button" id="btn-goto-advanced" class="row-action"><span data-i18n="openAction">Open</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 4. Network -->
+                    <section id="settings-sec-network">
+                        <h3 class="settings-section-title" data-i18n="settingsNetwork">Network</h3>
+                        <p class="settings-section-desc" data-i18n="settingsNetworkDesc">Ports, LAN, DNS and port forwarding</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Port Settings (值行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="portSettings">Port Settings</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="portSettingsDesc">Configure proxy and DNS ports</p>
+                                    </div>
+                                </div>
+                                <button id="port-config-btn" class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                    <span id="current-port-display">7890</span>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Allow LAN -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-allow-lan-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="allowLan">Allow LAN</p>
+                                        <p id="setting-allow-lan-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="allowLanDesc">Allow local network devices to connect</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-allow-lan" aria-labelledby="setting-allow-lan-title" aria-describedby="setting-allow-lan-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- IPv6 -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-ipv6-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ipv6Support">IPv6 Support</p>
+                                        <p id="setting-ipv6-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="ipv6SupportDesc">Enable IPv6 routing and connections</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-ipv6" aria-labelledby="setting-ipv6-title" aria-describedby="setting-ipv6-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- DNS leak protection -->
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Leak Protection</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="dnsRewriteDesc">Take over system DNS</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button type="button" id="dns-config-btn" class="row-action"><span data-i18n="dnsServersBtn">Servers</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                                    <label class="ios-switch">
+                                        <input type="checkbox" id="dns-rewrite-toggle" aria-label="DNS Leak Protection" data-i18n-aria-label="dnsRewrite">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Copy proxy env -->
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="copyProxyEnv">Copy Proxy Env</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="copyProxyEnvDesc">Copy proxy env vars for terminal use</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <div id="copy-env-format-wrap" class="relative">
+                                        <button type="button" id="copy-env-format-btn" class="env-format-chip" aria-haspopup="menu" aria-expanded="false" data-i18n-title="copyEnvFormat" title="Shell Format"><span id="copy-env-format-label">Bash</span><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                                        <div id="copy-env-format-menu" role="menu" class="hidden absolute end-0 top-[calc(100%+6px)] w-40 rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30"><div class="menu-scroll"></div></div>
+                                    </div>
+                                    <button type="button" id="copy-env-btn" class="row-action"><span data-i18n="copy">Copy</span></button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Port Forwarding (折叠区) -->
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-[var(--text-secondary)]">
+                                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunnels">Port Forwarding</p>
+                                            <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunnelsDesc">Forward local ports to remote servers</p>
+                                        </div>
+                                    </div>
+                                    <svg aria-hidden="true" class="w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </summary>
+                                <div class="mt-4 ps-9 pe-2">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="text-xs font-medium text-[var(--text-muted)]" data-i18n="tunnelsList">Rules</span>
+                                        <button type="button" id="add-tunnel-btn" class="row-action" data-i18n="add">Add</button>
+                                    </div>
+                                    <div id="tunnels-list" class="space-y-3">
+                                        <!-- Dynamic Tunnels Rendered Here -->
+                                        <div class="text-center text-xs text-[var(--text-tertiary)] py-4" id="tunnels-empty" data-i18n="noTunnels">No port forwarding rules configured</div>
+                                    </div>
+                                </div>
+                            </details>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Network Optimization (状态点 + 低权重动作) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="networkOptim">Network Optimization</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="networkOptimDesc">Optimize TCP parameters for better throughput</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div id="network-optim-status-dot" class="w-2 h-2 rounded-full bg-[var(--text-tertiary)] transition-colors"></div>
+                                    <button id="network-optim-btn" class="row-action">
+                                        <span data-i18n="networkOptimApply">Apply</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- UWP Loopback (divider included so it hides with the row on non-Windows) -->
+                            <div id="uwp-loopback-item" class="flex flex-col">
+                                <div class="h-px bg-[var(--zephyr-bg-muted)] mb-4"></div>
+                                <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="uwpLoopback">UWP Loopback Exemption</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="uwpLoopbackDesc">Allow Windows Store apps to use local proxy</p>
+                                    </div>
+                                </div>
+                                <button id="exempt-uwp-btn" class="row-action flex items-center gap-1.5">
+                                    <svg aria-hidden="true" id="uwp-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <span data-i18n="exemptUwp">Exempt All UWP</span>
+                                </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 5. Subscription & Rules -->
+                    <section id="settings-sec-rules">
+                        <h3 class="settings-section-title" data-i18n="settingsSubscriptionRules">Subscription & Rules</h3>
+                        <p class="settings-section-desc" data-i18n="settingsSubscriptionRulesDesc">Subscription downloads, rule files and Geo data</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Subscription Fake Client -->
+                            <div class="flex items-start justify-between flex-col gap-3">
+                                <div class="flex items-center justify-between w-full">
+                                    <div class="flex items-center gap-4">
+                                        <div class="text-[var(--text-secondary)]">
+                                            <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 7.1"/></svg>
+                                        </div>
+                                        <div>
+                                            <p id="setting-fake-client-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="fakeClient">Subscription Fake Client</p>
+                                            <p id="setting-fake-client-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="fakeClientDesc">Bypass UA sniffing when downloading subscriptions</p>
+                                        </div>
+                                    </div>
+                                    <label class="ios-switch">
+    <input type="checkbox" id="setting-fake-client" aria-labelledby="setting-fake-client-title" aria-describedby="setting-fake-client-desc">
+    <span class="switch-slider"></span>
+</label>
+                                </div>
+
+                                <div id="fake-client-options" class="w-full ps-9 pe-2 transition-all duration-[var(--zephyr-time-standard)] max-h-0 opacity-0 overflow-hidden">
+                                    <div class="glass-card rounded-[var(--radius-md)] p-3 mt-2 space-y-3">
+                                        <div>
+                                            <span id="fake-client-title" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientType">Client Type</span>
+                                            <div id="fake-client-select-wrap" class="relative">
+                                                <button id="fake-client-trigger" type="button" aria-labelledby="fake-client-title fake-client-label" class="select-common w-full flex items-center justify-between">
+                                                    <span id="fake-client-label">Clash Verge Rev</span>
+                                                    <svg aria-hidden="true" class="w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                                                </button>
+                                                <div id="fake-client-menu" class="hidden absolute inset-inline-0 top-[calc(100%+6px)] rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30">
+                                                    <div class="menu-scroll">
+                                                        <button type="button" data-value="clash-verge/1.6.0" data-label="Clash Verge Rev" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Clash Verge Rev</button>
+                                                        <button type="button" data-value="mihomo-party/1.0.0" data-label="mihomo-party" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">mihomo-party</button>
+                                                        <button type="button" data-value="Flclash/1.0.0" data-label="Flclash" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Flclash</button>
+                                                        <button type="button" data-value="Shadowrocket/3.0.0" data-label="Shadowrocket" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Shadowrocket</button>
+                                                        <button type="button" data-value="custom" data-label="Custom..." data-i18n="custom" class="dropdown-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors">Custom...</button>
+                                                    </div>
+                                                </div>
+                                                <select id="fake-client-select" class="hidden" aria-label="Client Type" data-i18n-aria-label="fakeClientType">
+                                                    <option value="clash-verge/1.6.0">Clash Verge Rev</option>
+                                                    <option value="mihomo-party/1.0.0">mihomo-party</option>
+                                                    <option value="Flclash/1.0.0">Flclash</option>
+                                                    <option value="Shadowrocket/3.0.0">Shadowrocket</option>
+                                                    <option value="custom" data-i18n="custom">Custom...</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div id="fake-client-custom-container" class="hidden">
+                                            <label for="fake-client-custom" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="fakeClientCustomUA">Custom User-Agent</label>
+                                            <div class="input-paste-wrapper">
+                                                <input type="text" id="fake-client-custom" placeholder="e.g. MyClient/1.0" data-i18n-placeholder="fakeClientCustomPlaceholder" class="form-control form-control-md">
+                                                <button type="button" id="fake-client-custom-paste-btn" class="btn-paste-base btn-input-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste"><svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <svg aria-hidden="true" id="fake-client-spinner" class="hidden w-4 h-4 text-accent animate-spin mx-auto mt-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Extension Rules Auto Apply -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-auto-apply-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ruleLibraryAutoApply">Auto Apply Changes</p>
+                                        <p id="setting-auto-apply-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="ruleLibraryAutoApplyDesc">Automatically apply when rule files change</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="setting-auto-apply" aria-labelledby="setting-auto-apply-title" aria-describedby="setting-auto-apply-desc">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Manage Rule Files (低权重链接行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-3a2 2 0 0 1-2-2V2"/><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"/><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="ruleLibraryManageFiles">Manage Rule Files</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="ruleLibraryManageFilesDesc">Open the prism rules directory in file manager</p>
+                                    </div>
+                                </div>
+                                <button id="manage-rule-files-btn" class="row-action flex items-center gap-1">
+                                    <span data-i18n="ruleLibraryManageFiles">Manage Rule Files</span>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Geo Data Update (低权重动作行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="geoData">Geo Databases</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="geoDataDesc">Update GeoIP and GeoSite routing databases</p>
+                                    </div>
+                                </div>
+                                <button id="update-geo-btn" class="row-action flex items-center gap-1.5">
+                                    <svg aria-hidden="true" id="geo-spinner" class="hidden w-3 h-3 border-2 border-[var(--zephyr-border-default)] border-t-transparent rounded-full animate-spin"></svg>
+                                    <span data-i18n="updateNow">Update Now</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 6. Data & Security -->
+                    <section id="settings-sec-data">
+                        <h3 class="settings-section-title" data-i18n="settingsSecurityDiagnostics">Data & Security</h3>
+                        <p class="settings-section-desc" data-i18n="settingsSecurityDiagnosticsDesc">Backups, encryption, files and logs</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Backup & Restore -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="backupRestore">Backup & Restore</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="backupRestoreDesc">Export or import your configuration</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <button id="export-backup-btn" class="row-action" data-i18n="exportBackup">Export</button>
+                                    <button id="import-backup-btn" class="row-action" data-i18n="importBackup">Import</button>
+                                </div>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Encrypt Configs -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-encrypt-configs-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="encryptConfigs">Encrypt Configs</p>
+                                        <p id="setting-encrypt-configs-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="encryptConfigsDesc">Encrypt config files with machine key, preventing use on other devices</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="setting-encrypt-configs" aria-labelledby="setting-encrypt-configs-title" aria-describedby="setting-encrypt-configs-desc">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Config Folder (低权重链接行) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="configFolder">Config Folder</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="configFolderDesc">Open the YAML directory for drag-and-drop imports</p>
+                                    </div>
+                                </div>
+                                <button id="open-config-folder-btn" class="row-action flex items-center gap-1">
+                                    <span data-i18n="openFolder">Open Folder</span>
+                                    <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Logs -->
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="logSettings">Logs</p>
+                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="logSettingsDesc">Persist and export application and core logs</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button type="button" id="log-settings-btn" class="row-action"><span data-i18n="logSettingsBtn">Settings</span></button>
+                                    <button type="button" id="log-export-btn" class="row-action"><span data-i18n="logExportBtn">Export…</span></button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 7. About -->
+                    <section id="settings-sec-about">
+                        <h3 class="settings-section-title" data-i18n="settingsAbout">About</h3>
+                        <p class="settings-section-desc" data-i18n="settingsAboutDesc">Version, updates and reset</p>
+                        <div class="glass-card p-5 space-y-4">
+                            <!-- Version Info (Check Updates 行尾低权重) -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                    </div>
+                                    <div>
+                                    <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="curVersion">Current Version</p>
+                                    <p class="text-2xs text-[var(--text-muted)]"><span data-i18n="appVersion">App</span>: <span id="app-version-text">-</span> | <span data-i18n="coreVersion">Core</span>: <span id="core-version-text">Checking...</span></p>
+                                    </div>
+                                </div>
+                                <button id="check-update-btn" class="row-action" data-i18n="checkUpdate">
+                                    Check for Updates
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Auto Check Client Update -->
+                            <div id="row-client-update" class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-auto-update-client-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoUpdateClient">Auto-check client updates</p>
+                                        <p id="setting-auto-update-client-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="autoUpdateClientDesc">Automatically check for Zephyr client updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update-client" aria-labelledby="setting-auto-update-client-title" aria-describedby="setting-auto-update-client-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Auto Check Core Update -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></svg>
+                                    </div>
+                                    <div>
+                                        <p id="setting-auto-update-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoCheckUpdate">Auto Check Core Updates</p>
+                                        <p id="setting-auto-update-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="autoCheckUpdateDesc">Automatically check for core updates on startup</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch">
+    <input type="checkbox" id="setting-auto-update" aria-labelledby="setting-auto-update-title" aria-describedby="setting-auto-update-desc">
+    <span class="switch-slider"></span>
+</label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- GitHub Homepage (链接行) -->
+                            <a id="btn-goto-github" href="https://github.com/Juwan-Hwang/Zephyr" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start no-underline">
+                                <span class="flex items-center gap-4">
+                                    <span class="flex items-center justify-center text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
+                                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                    </span>
+                                    <span class="block">
+                                        <span class="block text-sm font-semibold text-[var(--text-primary)] group-hover:text-accent transition-colors" data-i18n="githubHomepage">GitHub Homepage</span>
+                                        <span class="block text-2xs text-[var(--text-muted)]" data-i18n="githubHomepageDesc">Star & Contribute</span>
+                                    </span>
+                                </span>
+                                <svg aria-hidden="true" class="w-4 h-4 text-[var(--text-muted)] group-hover:text-accent transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+                            </a>
+
+                            <!-- Danger Zone: Restore Defaults -->
+                            <div class="border-t border-[var(--zephyr-bg-muted)] pt-4">
+                                <button type="button" id="btn-restore-defaults" class="w-full flex items-center justify-between cursor-pointer group bg-transparent border-0 p-0 text-start">
+                                    <span class="flex items-center gap-4">
+                                        <span class="flex items-center justify-center text-[var(--zephyr-color-danger)]">
+                                            <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                        </span>
+                                        <span class="block">
+                                            <span class="block text-sm font-semibold text-[var(--zephyr-color-danger)] group-hover:opacity-80 transition-opacity" data-i18n="restoreDefaults">Restore Defaults</span>
+                                            <span class="block text-2xs text-[var(--text-muted)]" data-i18n="restoreDefaultsDesc">Reset all settings to default values</span>
+                                        </span>
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                </div>
+            </div>
+
+            <!-- Advanced Page -->
+            <div data-page="advanced" class="flex-1 flex flex-col px-8 pt-8 pb-10 gap-6 overflow-y-auto hidden custom-scrollbar relative">
+
+                <header class="flex items-center gap-3 relative z-10">
+                    <button type="button" id="btn-back-settings" class="btn-ghost shrink-0" data-i18n-title="backToSettings" title="Back to Settings" data-i18n-aria-label="backToSettings" aria-label="Back to Settings">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+                    </button>
+                    <div class="min-w-0">
+                        <h2 class="text-2xl font-light text-[var(--text-primary)] leading-tight" data-i18n="advancedTitle">Advanced Settings</h2>
+                        <p class="text-xs text-[var(--text-muted)] mt-0.5" data-i18n="advancedSubtitle">Running core configuration</p>
+                    </div>
+                </header>
+
+                <!-- Custom startup arguments -->
+                <section class="relative z-10">
+                    <h3 class="settings-section-title" data-i18n="customArgs">Custom Startup Arguments</h3>
+                    <p class="settings-section-desc" data-i18n="customArgsDesc">Extra Mihomo flags, one per line</p>
+                    <div class="glass-card p-5 space-y-3">
+                        <div class="textarea-paste-wrapper">
+                            <textarea id="custom-args-input" class="form-control form-control-mono w-full h-24 p-3 text-xs" aria-label="Custom Startup Arguments" data-i18n-aria-label="customArgs" placeholder="--ext-ui ui&#10;--another-flag" spellcheck="false"></textarea>
+                            <button type="button" id="custom-args-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                                <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            </button>
+                        </div>
+                        <div class="flex justify-end">
+                            <button type="button" id="apply-args-btn" class="btn-accent" data-i18n="applyAndRestart">Apply & Restart Core</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="relative z-10 -mb-3">
+                    <h3 class="settings-section-title" data-i18n="advancedCoreConfig">Core Configuration</h3>
+                    <p class="settings-section-desc" data-i18n="advancedCoreConfigDesc">Changes apply to the running core and are written to the active profile</p>
+                </section>
+
+                <div id="advanced-settings-container" class="space-y-4 relative z-10">
+                    <!-- Dynamic settings will be rendered here -->
+                    <div class="flex flex-col items-center justify-center py-20">
+                        <div class="w-12 h-12 border-4 border-accent/20 border-t-accent rounded-full animate-spin"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications Container -->
+    <div id="notif-container" role="status" aria-live="polite" class="fixed z-[var(--z-toast)] flex flex-col gap-2 pointer-events-none items-end"></div>
+
+    <!-- Modal Background -->
+    <div id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="modal-title" class="fixed inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md z-[var(--z-modal)] hidden flex items-center justify-center transition-all duration-[var(--zephyr-time-standard)] opacity-0 pointer-events-auto">
+        <div id="modal-container" class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10 transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
+            <h3 id="modal-title" class="dialog-title mb-5">Subscription Name</h3>
+            <div class="space-y-6">
+                <div id="modal-content-area"></div>
+<div class="flex gap-3 justify-end">
+<button id="modal-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
+<button id="modal-confirm" class="btn-primary" data-i18n="confirm">Confirm</button>
+</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNS Configuration Modal -->
+    <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+            <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
+
+            <div class="space-y-4">
+                <div>
+                    <label for="dns-nameservers-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
+                    <div class="textarea-paste-wrapper">
+                        <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
+                        <button type="button" id="dns-nameservers-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
+                </div>
+
+                <div>
+                    <label for="dns-fallbacks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
+                    <div class="textarea-paste-wrapper">
+                        <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
+                        <button type="button" id="dns-fallbacks-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
+                            <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
+                </div>
+            </div>
+
+            <div class="flex gap-3 justify-end mt-6">
+                <button id="dns-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
+                <button id="dns-config-save" class="btn-primary" data-i18n="confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Port Configuration Modal -->
+    <div id="port-config-modal" role="dialog" aria-modal="true" aria-labelledby="port-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
+        <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
+            <h3 id="port-config-title" class="dialog-title mb-1" data-i18n="portConfigTitle">Port Configuration</h3>
+            <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="portConfigDesc">Set ports for proxy protocols</p>
+
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label for="port-mixed-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="mixedPort">Mixed Port</label>
+                    <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890">
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
+                </div>
+
+                <div>
+                    <label for="port-socks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="socksPort">SOCKS5 Port</label>
+                    <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891">
+                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
+                </div>
+                </div>
+                <p class="text-2xs text-[var(--text-muted)] -mt-1 ms-1" data-i18n="portZeroHint">0 = off</p>
+
+                <div id="port-linux-group" class="grid grid-cols-2 gap-3">
+                <p class="col-span-2 text-xs font-semibold text-[var(--text-secondary)] -mb-1" data-i18n="portLinuxOnly">Transparent proxy</p>
+
+                <div>
+                    <label for="port-redir-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="redirPort">Redir Port</label>
+                    <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
+                </div>
+
+                <div>
+                    <label for="port-tproxy-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="tproxyPort">TProxy Port</label>
+                    <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
+                </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3 justify-end mt-6">
+                <button id="port-config-cancel" class="btn-ghost" data-i18n="cancel">Cancel</button>
+                <button id="port-config-save" class="btn-primary" data-i18n="save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Editor Overlay -->
+    <div id="fullscreen-editor-overlay" role="dialog" aria-modal="true" aria-labelledby="fullscreen-editor-title" class="hidden fixed inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md z-[var(--z-modal)] flex items-center justify-center p-4 transition-all duration-[var(--zephyr-time-standard)] opacity-0 pointer-events-none">
+        <div id="fullscreen-editor-container" class="w-[90vw] h-[85vh] max-w-[1400px] border rounded-lg flex flex-col shadow-2xl overflow-hidden glass-card transform scale-95 transition-all duration-[var(--zephyr-time-standard)]">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b shrink-0" style="border-color: var(--border-primary, rgba(255,255,255,0.1));">
+                <div class="flex items-center gap-3">
+                    <h3 id="fullscreen-editor-title" class="text-lg font-medium" data-i18n="overrideEditScript">编辑脚本</h3>
+                    <span id="fullscreen-editor-type-badge" class="text-2xs px-2 py-0.5 rounded-sm bg-blue-500/20 text-blue-400">JS</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="fullscreen-editor-validate-btn" class="btn-ghost text-sm">
+                        <svg aria-hidden="true" class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <span data-i18n="overrideValidate">验证</span>
+                    </button>
+                    <button type="button" id="fullscreen-editor-run-btn" class="btn-accent text-sm">
+                        <svg aria-hidden="true" class="w-4 h-4 me-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+                        <span data-i18n="overrideSaveAndRun">保存并执行</span>
+                    </button>
+                    <div class="w-px h-6 mx-2" style="background: var(--border-primary, rgba(255,255,255,0.1));"></div>
+                    <button id="fullscreen-editor-close-btn" class="btn-ghost text-sm" aria-label="Close" data-i18n-aria-label="close">
+                        <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <!-- Editor Area -->
+            <div class="flex-1 flex overflow-hidden">
+                <!-- Main Editor -->
+                <div id="fullscreen-editor-main" class="flex-1 flex flex-col min-w-[300px]" style="flex-basis: 60%;">
+                    <div id="fullscreen-editor-cm6" data-code-editor class="flex-1 w-full overflow-hidden"></div>
+                    <!-- Status Bar -->
+                    <div class="px-4 py-2 border-t flex items-center justify-between text-xs shrink-0" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
+                        <div class="flex items-center gap-4" style="color: var(--text-muted);">
+                            <span id="fullscreen-editor-cursor-pos" class="tabular-nums"></span>
+                            <span id="fullscreen-editor-char-count" class="tabular-nums"></span>
+                        </div>
+                        <span id="fullscreen-editor-status"></span>
+                    </div>
+                </div>
+                <!-- Resizer Handle -->
+                <div id="fullscreen-editor-resizer" class="w-1.5 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 group relative" style="background: var(--bg-tertiary);">
+                    <div class="absolute inset-y-0 -start-1 -end-1"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-primary, #007AFF);"></div>
+                </div>
+                <!-- Right Sidebar - Output Panel -->
+                <div id="fullscreen-editor-sidebar" class="flex flex-col min-w-[200px] max-w-[600px]" style="flex-basis: 350px; border-left: 1px solid var(--zephyr-border-primary); background: var(--zephyr-bg-secondary);">
+                    <div class="px-4 py-3 border-b flex items-center justify-between shrink-0" style="border-color: var(--zephyr-border-primary);">
+                        <span class="text-sm font-medium text-[var(--text-primary)]" data-i18n="overrideOutput">输出</span>
+                        <div class="flex items-center gap-3">
+                            <button id="fullscreen-editor-copy-output-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors" data-i18n="overrideCopy">复制</button>
+                            <button id="fullscreen-editor-clear-output-btn" class="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors" data-i18n="overrideClear">清空</button>
+                        </div>
+                    </div>
+                    <div id="fullscreen-editor-output" class="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-all overflow-y-auto custom-scrollbar text-[var(--text-secondary)]">
+                        <div class="text-[var(--text-tertiary)]" data-i18n="overrideOutputEmpty">No output</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

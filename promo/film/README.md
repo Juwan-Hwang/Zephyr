@@ -19,21 +19,18 @@
 ## 复现
 
 ```bash
-# 1. 依赖仓库与素材
-git clone https://github.com/Juwan-Hwang/PingFang-SF  # 取 PingFangSF.ttf → film/fonts/
-git clone -b demo https://github.com/Juwan-Hwang/Zephyr app && (cd app && git apply ../patches/demo-mock-api.patch)
-git clone https://github.com/Leonxlnx/earshot repos/Leonxlnx_earshot
-(cd film && npm i)
-sh provision.sh
-# 2. 录制 → 3D → 渲染 → 声音 → 编码
-python3 capture2.py console lang minimal proxies prism theme close
-python3 r3d_seq.py open 5.85 film/frames/open --sub 3
-python3 r3d_seq.py end 6.6 film/frames/end --sub 3
-python3 render_film.py --comp comp2.html --out film/out2/frames --workers 3
-(cd film && python3 music2.py && python3 sound2.py)
-ffmpeg -framerate 30 -i film/out2/frames/%05d.jpg -i film/audio/mix2.wav -c:v libx264 -crf 16 -pix_fmt yuv420p \
-  -c:a aac -b:a 256k -af loudnorm=I=-14:TP=-1:LRA=9 -shortest -movflags +faststart deliver/Zephyr-promo-v3.mp4
+sh reproduce.sh              # 用分支内已提交的实录素材与 3D 帧，按原参数重新合成、配乐、编码
+RECAPTURE=1 sh reproduce.sh  # 额外从 app/ 快照重新录制 UI、重新渲染 3D
 ```
+
+分支内已包含 v3 的全部输入，因此可以完整复现：
+
+- `app/`：录制用的前端快照（Zephyr UI、Argon v9 logo、demo mock 及修复补丁）。
+- `footage2/`：UI 实录序列，含鼠标轨迹、点击时刻与 DOM 测量。
+- `film/frames/`：3D 开场与结尾帧。
+- `film/fonts/PingFangSF.ttf`、`film/node_modules/three@0.170.0`。
+
+配乐与音效使用固定随机种子，`requirements.txt` 锁定了各依赖的版本。`film/out2/frames/` 存有 v3 渲染出的全部 1414 帧，`deliver/` 存有成片。
 
 ## demo mock 修复（`patches/demo-mock-api.patch`，针对 `demo` 分支）
 

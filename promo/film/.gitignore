@@ -1,6 +1,4 @@
 repos/
-app/
-film/node_modules/
 film/out/
 *.log
 __pycache__/

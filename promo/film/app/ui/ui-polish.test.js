@@ -1,0 +1,486 @@
+// @ts-check
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../api.js', () => ({
+    invoke: vi.fn().mockResolvedValue({}),
+}));
+
+import { translations, setLanguage } from '../i18n.js';
+import { renderTunStatus } from './tun-status.js';
+import { initNavTooltips, getNavLabel, NAV_TOOLTIP_HOVER_DELAY } from './nav-tooltip.js';
+import { Bus, Events } from './events.js';
+import { readSrc as read, parseIndex } from '../test/index-dom.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  1. TUN status labels
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('TUN status labels', () => {
+    const all = /** @type {Record<string, Record<string, unknown>>} */ (/** @type {unknown} */ (translations));
+
+    it('every locale has dedicated, non-empty tunActive / tunInactive strings', () => {
+        for (const [lang, dict] of Object.entries(all)) {
+            expect(typeof dict.tunActive, `${lang}.tunActive`).toBe('string');
+            expect(typeof dict.tunInactive, `${lang}.tunInactive`).toBe('string');
+            expect(String(dict.tunActive).length, `${lang}.tunActive`).toBeGreaterThan(0);
+            expect(dict.tunActive, `${lang}`).not.toBe(dict.tunInactive);
+            // Must not reuse the system-proxy wording.
+            expect(dict.tunActive, `${lang}`).not.toBe(dict.proxyActive);
+            expect(dict.tunInactive, `${lang}`).not.toBe(dict.proxyInactive);
+        }
+    });
+
+    afterEach(() => setLanguage('en'));
+
+    it('renderTunStatus() writes the localized text, data-i18n key and colour classes', () => {
+        setLanguage('zh');
+        const el = document.createElement('p');
+        el.className = 'text-2xs text-[var(--text-muted)]';
+
+        renderTunStatus(el, true);
+        expect(el.textContent).toBe('TUN 已启用');
+        expect(el.dataset.i18n).toBe('tunActive');
+        expect(el.classList.contains('text-accent')).toBe(true);
+        expect(el.classList.contains('text-[var(--text-muted)]')).toBe(false);
+
+        renderTunStatus(el, false);
+        expect(el.textContent).toBe('TUN 已关闭');
+        expect(el.dataset.i18n).toBe('tunInactive');
+        expect(el.classList.contains('text-accent')).toBe(false);
+        expect(el.classList.contains('text-[var(--text-muted)]')).toBe(true);
+    });
+
+    it('keeps the current state when the language changes (data-i18n is updated)', () => {
+        setLanguage('en');
+        document.body.innerHTML = '<p id="tun-status-text" data-i18n="tunInactive">TUN disabled</p>';
+        const el = /** @type {HTMLElement} */ (document.getElementById('tun-status-text'));
+        renderTunStatus(el, true);
+        setLanguage('ja');
+        expect(el.textContent).toBe(all.ja.tunActive);
+        document.body.innerHTML = '';
+    });
+
+    it('is a no-op for a missing element', () => {
+        expect(() => renderTunStatus(null, true)).not.toThrow();
+    });
+
+    it('the configuring state keeps data-i18n in step for a mid-toggle language switch', () => {
+        expect(read('ui/tun.js')).toContain("statusText.dataset.i18n = 'configuringTun';");
+        for (const lang of Object.keys(all)) {
+            expect(typeof all[lang].configuringTun).toBe('string');
+        }
+    });
+
+    it('TUN code paths no longer borrow the system-proxy strings', () => {
+        const tun = read('ui/tun.js');
+        expect(tun).not.toMatch(/t\.proxyActive/);
+        expect(tun).not.toMatch(/t\.virtualAdapter/);
+        const proxies = read('ui/proxies.js');
+        expect(proxies).not.toMatch(/tunEnable \? t\.proxyActive/);
+        expect(proxies).toMatch(/renderTunStatus\(/);
+    });
+
+    it('TUN card uses the same two rows as the mode card: header, then a 36px status row', () => {
+        const doc = parseIndex();
+        const status = /** @type {HTMLElement} */ (doc.getElementById('tun-status-text'));
+        expect(status).toBeTruthy();
+        expect(status.dataset.i18n).toBe('tunInactive');
+        const title = /** @type {HTMLElement} */ (doc.querySelector('[data-i18n="tunMode"]'));
+        const card = title.closest('.glass-card');
+        expect(card?.contains(status)).toBe(true);
+        // The status sits in its own control row, the counterpart of #mode-selector-container.
+        expect(status.closest('.home-tun-status')).toBeTruthy();
+        expect(card?.contains(doc.getElementById('tun-proxy-toggle'))).toBe(true);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  2 + 3. Speed units and tabular numerals
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('speed units and numerals', () => {
+    const css = read('styles.css');
+    /** Body of the first rule whose selector starts a line and is exactly `selector`. */
+    const rule = (/** @type {string} */ selector) => {
+        for (let at = css.indexOf(selector); at >= 0; at = css.indexOf(selector, at + 1)) {
+            if (at > 0 && css[at - 1] !== '\n') continue;
+            const rest = css.slice(at + selector.length);
+            const open = rest.length - rest.trimStart().length;
+            if (rest[open] !== '{') continue;
+            const close = rest.indexOf('}', open);
+            return close < 0 ? '' : rest.slice(open + 1, close);
+        }
+        return '';
+    };
+
+    it('KPI unit span is not uppercased (KB/s stays KB/s)', () => {
+        const body = rule('.dz-kpi-value span');
+        expect(body).toBeTruthy();
+        expect(body).not.toMatch(/text-transform\s*:\s*uppercase/);
+    });
+
+    it('KPI labels keep their uppercase styling', () => {
+        expect(rule('.dz-kpi-label')).toMatch(/text-transform\s*:\s*uppercase/);
+    });
+
+    it('home speed unit spans are not uppercased', () => {
+        const doc = parseIndex();
+        for (const id of ['speed-down-unit', 'speed-up-unit']) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.classList.contains('uppercase'), id).toBe(false);
+        }
+    });
+
+    it('dynamic numeric readouts use tabular numerals', () => {
+        for (const sel of ['.dz-kpi-value b', '.dz-kpi-foot', '.dz-header .dz-sub', '.dz-sub-used span', '.dz-latency-num', '.dz-chart-meta b', '.dz-conn-speed']) {
+            expect(rule(sel), sel).toMatch(/font-variant-numeric\s*:\s*tabular-nums/);
+        }
+        const doc = parseIndex();
+        for (const id of ['speed-down-val', 'speed-up-val']) {
+            expect(doc.getElementById(id)?.classList.contains('tabular-nums'), id).toBe(true);
+        }
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  4. Sidebar tooltips
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('sidebar nav tooltips', () => {
+    /** @type {() => void} */
+    let cleanup = () => {};
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        document.documentElement.setAttribute('dir', 'ltr');
+        document.body.innerHTML = `
+            <nav id="sidebar-nav">
+                <button type="button" data-nav="home" class="nav-btn" aria-label="Home" data-i18n-aria-label="home"><svg class="icon"></svg><span class="sr-only" data-i18n="home">首页</span></button>
+                <button type="button" data-nav="logs" class="nav-btn" aria-label="Logs" data-i18n-aria-label="logs"><svg class="icon"></svg><span class="sr-only" data-i18n="logs">日志</span></button>
+            </nav>`;
+        cleanup = initNavTooltips(document.getElementById('sidebar-nav'));
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+        document.body.innerHTML = '';
+        document.documentElement.removeAttribute('dir');
+    });
+
+    const tip = () => /** @type {HTMLElement} */ (document.getElementById('nav-tooltip'));
+    const btn = (/** @type {string} */ nav) => /** @type {HTMLElement} */ (document.querySelector(`[data-nav="${nav}"]`));
+    const over = (/** @type {Element} */ el, /** @type {Element | null} */ related = null) =>
+        el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: related }));
+    const out = (/** @type {Element} */ el, /** @type {Element | null} */ related = null) =>
+        el.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: related }));
+
+    it('creates one aria-hidden tooltip node on <body>', () => {
+        expect(document.querySelectorAll('#nav-tooltip').length).toBe(1);
+        expect(tip().getAttribute('aria-hidden')).toBe('true');
+        expect(tip().parentElement).toBe(document.body);
+    });
+
+    it('reads the localized label from the sr-only span', () => {
+        expect(getNavLabel(btn('home'))).toBe('首页');
+        const bare = document.createElement('button');
+        bare.setAttribute('aria-label', 'Settings');
+        expect(getNavLabel(bare)).toBe('Settings');
+    });
+
+    it('shows after the hover intent delay and hides on leave', () => {
+        over(btn('home'));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        expect(tip().textContent).toBe('首页');
+        expect(tip().dataset.side).toBe('end');
+
+        out(btn('home'), document.body);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('follows immediately when moving to another nav button', () => {
+        over(btn('home'));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        out(btn('home'), btn('logs'));
+        over(btn('logs'), btn('home'));
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        expect(tip().textContent).toBe('日志');
+    });
+
+    it('cancels a pending show when the pointer leaves first', () => {
+        over(btn('home'));
+        out(btn('home'), document.body);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('shows on keyboard focus (focus-visible) and hides on blur / Escape', () => {
+        const home = btn('home');
+        const spy = vi.spyOn(home, 'matches').mockImplementation((sel) => sel === ':focus-visible');
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(tip().classList.contains('is-visible')).toBe(true);
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        home.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+        spy.mockRestore();
+    });
+
+    it('hands the label back to the keyboard-focused button when the pointer leaves', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockImplementation((sel) => sel === ':focus-visible');
+        home.focus();
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(tip().textContent).toBe('首页');
+
+        over(btn('logs'), home);
+        expect(tip().textContent).toBe('日志');
+        out(btn('logs'), document.body);
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        expect(tip().textContent).toBe('首页');
+    });
+
+    it('keeps the hovered label when keyboard focus leaves the sidebar', () => {
+        const logs = btn('logs');
+        vi.spyOn(logs, 'matches').mockImplementation((sel) => sel === ':focus-visible');
+        logs.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        over(btn('home'), logs);
+        expect(tip().textContent).toBe('首页');
+
+        logs.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        expect(tip().textContent).toBe('首页');
+    });
+
+    it('does not break when :focus-visible is unsupported (older WebKit)', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockImplementation(() => { throw new SyntaxError('unsupported selector'); });
+        home.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        home.focus();
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(() => out(home, document.body)).not.toThrow();
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('still shows on keyboard focus when :focus-visible is unsupported', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockImplementation(() => { throw new SyntaxError('unsupported selector'); });
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        expect(tip().textContent).toBe('首页');
+    });
+
+    it('hides when the sidebar scrolls', () => {
+        over(btn('home'));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        btn('home').parentElement?.dispatchEvent(new Event('scroll'));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('does not show for mouse focus (not focus-visible)', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockReturnValue(false);
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('hides on pointerdown (click)', () => {
+        over(btn('home'));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        btn('home').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('stays hidden after a click while the pointer moves within the same button', () => {
+        const home = btn('home');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        home.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        over(/** @type {Element} */ (home.querySelector('svg')), home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+
+        // Leaving the button lifts the suppression for the next hover.
+        out(home, document.body);
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().classList.contains('is-visible')).toBe(true);
+    });
+
+    it('stays hidden after Escape while the pointer moves within the same button', () => {
+        const home = btn('home');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        over(/** @type {Element} */ (home.querySelector('.sr-only')), home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('a visible label follows a language change', () => {
+        const home = btn('home');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        /** @type {HTMLElement} */ (home.querySelector('.sr-only')).textContent = 'Home';
+        document.documentElement.setAttribute('dir', 'rtl');
+        Bus.emit(Events.I18N_APPLIED);
+        expect(tip().textContent).toBe('Home');
+        expect(tip().dataset.side).toBe('start');
+        cleanup();
+        cleanup = () => {};
+        expect(() => Bus.emit(Events.I18N_APPLIED)).not.toThrow();
+    });
+
+    it('Escape cancels a hover that is still waiting out its delay', () => {
+        const home = btn('home');
+        over(home);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+        over(/** @type {Element} */ (home.querySelector('svg')), home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('a dismissed label stays hidden when focus then leaves the sidebar', () => {
+        const home = btn('home');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        home.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        home.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('compensates for the body UI scale when positioning', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'getBoundingClientRect').mockReturnValue(
+            /** @type {DOMRect} */ ({ top: 100, left: 0, right: 60, bottom: 140, width: 60, height: 40, x: 0, y: 100, toJSON() {} }));
+        document.documentElement.style.setProperty('--ui-scale', '2');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().style.top).toBe('60px');
+        expect(tip().style.left).toBe('40px');
+        document.documentElement.style.removeProperty('--ui-scale');
+    });
+
+    it('hides when a focused button is activated from the keyboard', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockImplementation((sel) => sel === ':focus-visible');
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(tip().classList.contains('is-visible')).toBe(true);
+        home.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('a keyboard activation does not suppress the next hover on that button', () => {
+        const home = btn('home');
+        vi.spyOn(home, 'matches').mockImplementation((sel) => sel === ':focus-visible');
+        home.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        home.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+        home.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().classList.contains('is-visible')).toBe(true);
+    });
+
+    it('moving onto a dismissed button drops the previous button\'s label', () => {
+        const home = btn('home');
+        const logs = btn('logs');
+        over(home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        // A missed pointerout leaves home suppressed while logs shows its label.
+        over(logs, home);
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().textContent).toBe('日志');
+        over(home, logs);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('cancels a pending hover when the window loses focus', () => {
+        over(btn('home'));
+        window.dispatchEvent(new Event('blur'));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY * 2);
+        expect(tip().classList.contains('is-visible')).toBe(false);
+    });
+
+    it('flips to the start side in RTL layouts', () => {
+        document.documentElement.setAttribute('dir', 'rtl');
+        over(btn('home'));
+        vi.advanceTimersByTime(NAV_TOOLTIP_HOVER_DELAY);
+        expect(tip().dataset.side).toBe('start');
+    });
+
+    it('cleanup removes the tooltip node', () => {
+        cleanup();
+        expect(document.getElementById('nav-tooltip')).toBeNull();
+        cleanup = () => {};
+    });
+
+    it('index.html nav buttons drop the native title and carry localized aria-labels', () => {
+        const doc = parseIndex();
+        const buttons = [...doc.querySelectorAll('#sidebar-nav .nav-btn')];
+        expect(buttons.length).toBeGreaterThan(0);
+        for (const b of buttons) {
+            const nav = b.getAttribute('data-nav');
+            expect(b.hasAttribute('title'), `${nav} title`).toBe(false);
+            expect(b.getAttribute('aria-label'), `${nav} aria-label`).toBeTruthy();
+            const key = b.getAttribute('data-i18n-aria-label');
+            expect(key, `${nav} data-i18n-aria-label`).toBeTruthy();
+            expect(b.querySelector('.sr-only')?.getAttribute('data-i18n')).toBe(key);
+        }
+    });
+
+    it('tooltip styles respect reduced motion', () => {
+        const css = read('styles.css');
+        expect(css).toMatch(/\.nav-tooltip\s*\{/);
+        expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.nav-tooltip\s*\{\s*transition:\s*none/);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Flag emoji survive letter-spacing
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('flag emoji with letter-spacing', () => {
+    const css = read('styles.css');
+    // Every `@font-face` body, kept apart so one face must carry both the
+    // family and the range.
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]);
+    const root = [...css.matchAll(/(?:^|[};\s]):root\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+
+    it('the flag font is declared for regional indicators', () => {
+        expect(faces.some((face) =>
+            /font-family:\s*"Zephyr Country Flags"/.test(face)
+            && /unicode-range:[^;]*U\+1F1E6-1F1FF/.test(face),
+        )).toBe(true);
+    });
+
+    it('the preflight hooks enable liga so Blink keeps flag ligatures under tracking', () => {
+        expect(root).toMatch(/--default-font-featureSettings:\s*"liga"/);
+        expect(root).toMatch(/--default-monoFont-featureSettings:\s*"liga"/);
+    });
+
+    it('the preflight reads those hooks on html and on monospace elements', async () => {
+        // Generate the preflight from our own UnoCSS config instead of reading
+        // the build output, which is gitignored and absent on a clean checkout.
+        const { createGenerator } = await import('unocss');
+        const { default: config } = await import('../../uno.config.js');
+        const { css: preflight } = await (await createGenerator(config)).generate('', { preflights: true });
+        expect(preflight).toMatch(/(?:^|[};\s])html,\s*:host\s*\{[^}]*font-feature-settings:\s*var\(--default-font-featureSettings,/);
+        expect(preflight).toMatch(/(?:^|[};\s])code,\s*kbd,\s*samp,\s*pre\s*\{[^}]*font-feature-settings:\s*var\(--default-monoFont-featureSettings,/);
+    });
+
+    it('nothing else resets font-feature-settings in our stylesheet', () => {
+        expect(css.match(/font-feature-settings\s*:/g) ?? []).toHaveLength(0);
+    });
+});

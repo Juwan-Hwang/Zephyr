@@ -1,0 +1,918 @@
+// @ts-check
+import { setWsBaseUrl, setWsSecret } from './websocket.js';
+import { COMMANDS } from '@zephyr/shared';
+import { apiLogger } from './utils/logger.js';
+import { Bus, Events } from './ui/events.js';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Internal state (declared early — used by apiFetch below)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** @type {string} mihomo RESTful API 基地址 */
+let BASE_URL = 'http://127.0.0.1:9090';
+
+/** 运行时状态（sealed，防止意外扩展） */
+const _state = Object.seal({ secret: '' });
+
+/** @type {boolean} 内核是否可达（连接未被拒绝） */
+let _coreReachable = true;
+
+/** @type {boolean} 是否已输出过一次连接拒绝日志（避免重复报错） */
+let _connectionRefusedLogged = false;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ApiError — 统一错误类型
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * REST API 统一错误类。
+ * 所有 apiFetch 及上层业务函数在遇到异常时均抛出此类型，
+ * 方便调用方按 `instanceof ApiError` 做统一拦截。
+ *
+ * @example
+ * try {
+ *   const cfg = await getConfig();
+ * } catch (e) {
+ *   if (e instanceof ApiError) console.warn(e.status, e.endpoint);
+ * }
+ */
+export class ApiError extends Error {
+  /**
+   * @param {string}  message   - 人类可读的错误描述
+   * @param {object}  [opts]
+   * @param {number}  [opts.status]    - HTTP 状态码（若有）
+   * @param {string}  [opts.endpoint]  - 请求的 API 路径
+   * @param {Error}   [opts.cause]     - 原始异常
+   * @param {string}  [opts.body]      - 非 2xx 响应的正文（截断，若可读）
+   */
+  constructor(message, { status, endpoint, cause, body } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status ?? null;
+    this.endpoint = endpoint ?? null;
+    this.cause = cause ?? null;
+    this.body = body ?? null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  apiFetch — 带超时的 fetch 封装
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** @type {number} 默认超时 10 s */
+const DEFAULT_TIMEOUT = 10_000;
+
+/**
+ * 对原生 fetch 的封装，自动注入请求头、超时控制与错误归一化。
+ *
+ * - 自动携带 `Authorization`（若已设置 secret）
+ * - 默认 10 s 超时，可通过 `timeout` 选项覆盖
+ * - HTTP 非 2xx 响应统一抛出 {@link ApiError}
+ * - 网络异常 / 超时同样抛出 {@link ApiError}
+ *
+ * @param {string} endpoint  - 相对于 BASE_URL 的路径，如 `/proxies`
+ * @param {RequestInit & { timeout?: number }} [init]
+ * @returns {Promise<Response>}
+ * @throws {ApiError}
+ */
+async function apiFetch(endpoint, init = {}) {
+  const { timeout = DEFAULT_TIMEOUT, signal: externalSignal, headers, ...rest } = init;
+  const safeTimeout = Math.max(1000, Math.min(timeout, 300000));
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), safeTimeout);
+
+  // 外部信号（如 testProxy 的全局中止）与内部超时联动
+  if (externalSignal?.aborted) {
+    clearTimeout(timer);
+    throw new ApiError(`Request cancelled: ${endpoint}`, { endpoint, cause: new DOMException('Aborted', 'AbortError') });
+  }
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+
+  try {
+    const res = await fetch(`${BASE_URL}${endpoint}`, {
+      ...rest,
+      signal: controller.signal,
+      headers: { ...getHeaders(), ...headers },
+    });
+
+    if (!res.ok) {
+      /** @type {string|undefined} */
+      let body;
+      try { body = (await res.text()).slice(0, 2000); } catch { /* unreadable body */ }
+      throw new ApiError(`HTTP ${res.status}: ${res.statusText}`, {
+        status: res.status,
+        endpoint,
+        body,
+      });
+    }
+
+    // 请求成功 — 标记内核可达
+    if (!_coreReachable) {
+      _coreReachable = true;
+      _connectionRefusedLogged = false;
+      apiLogger.info('core connection restored');
+    }
+
+    return res;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+
+    const error = /** @type {Error} */ (err);
+    const isAbort = error.name === 'AbortError';
+
+    // 检测连接被拒绝（内核未运行）
+    const isConnectionRefused = !isAbort && isConnectionRefusedError(error);
+
+    if (isConnectionRefused) {
+      _coreReachable = false;
+      // 只在首次连接拒绝时输出 warn，后续降级为 debug
+      if (!_connectionRefusedLogged) {
+        _connectionRefusedLogged = true;
+        apiLogger.warn(`core unreachable: ${endpoint}`);
+      } else {
+        apiLogger.debug(`core unreachable: ${endpoint}`);
+      }
+    }
+
+    throw new ApiError(
+      isAbort ? `Request timeout (${timeout}ms): ${endpoint}` : `Network request failed: ${endpoint}`,
+      { endpoint, cause: error },
+    );
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Tauri IPC bridge (withGlobalTauri: false)
+// ═══════════════════════════════════════════════════════════════════════════════
+// When withGlobalTauri is false, Tauri v2 still injects __TAURI_INTERNALS__
+// into the webview. Unlike __TAURI__, the internal object has a FLAT structure:
+//   invoke / transformCallback / metadata are directly on the root — NOT under .core
+const _t = typeof window !== 'undefined' ? window.__TAURI_INTERNALS__ : undefined;
+
+/** Raw IPC invoke: sends a command to the Rust backend
+ * @param {string} cmd
+ * @param {any} [args]
+ * @returns {Promise<any>}
+ */
+function invoke(cmd, args) {
+  if (!_t?.invoke) throw new Error('[API] Tauri IPC not available');
+  return _t.invoke(cmd, args);
+}
+
+/** Listen to a Tauri event emitted from Rust backend.
+ *  Since the event plugin's JS shim isn't loaded without global Tauri,
+ *  we manually wire up via transformCallback + raw IPC.
+ *
+ *  When Tauri v2 fires an event via `WebviewWindow::emit()`, the runtime's
+ *  `event_initialization_script` dispatches to the callback registered
+ *  here. The callback receives the full TauriEvent object:
+ *  `{ event: string, payload: T, id: number }`.
+ *
+ * @param {string} event
+ * @param {(event: { payload: any, event: string, id: number }) => void} handler
+ * @returns {Promise<() => Promise<void>>}
+ */
+async function listen(event, handler) {
+  if (!_t?.transformCallback) throw new Error('[API] Tauri IPC not available');
+
+  const callbackId = _t.transformCallback(handler);
+  let eventId;
+  try {
+    eventId = await invoke('plugin:event|listen', {
+      event,
+      target: { kind: 'Window', label: 'main' },
+      handler: callbackId,
+    });
+  } catch (e) {
+    // Best-effort cleanup: if this throws, we must still rethrow the
+    // original `invoke('plugin:event|listen')` error, not the cleanup error.
+    try {
+      if (typeof _t.unregisterCallback === 'function') {
+        _t.unregisterCallback(callbackId);
+      } else {
+        _t.transformCallback(undefined, false, callbackId);
+      }
+    } catch (cleanupErr) {
+      apiLogger.warn(`[API] cleanup after failed listen for event "${event}" threw:`, cleanupErr);
+    }
+    throw e;
+  }
+  return async () => {
+    // Deregister the JS callback. Tauri v2 exposes `unregisterCallback(id)`
+    // for this purpose; `transformCallback(undefined, …)` does NOT
+    // deregister an existing callback — the third argument is ignored.
+    // Fall back to transformCallback for older Tauri versions that lack
+    // unregisterCallback.
+    try {
+      if (typeof _t.unregisterCallback === 'function') {
+        _t.unregisterCallback(callbackId);
+      } else {
+        _t.transformCallback(undefined, false, callbackId);
+      }
+    } catch (err) {
+      apiLogger.warn(`[API] unregisterCallback(${callbackId}) failed:`, err);
+    }
+    // Clean up the listener entry from the internal listeners object.
+    // Tauri's unlisten_js_script only calls unregisterCallback but does NOT
+    // delete `obj[event][eventId]`, leaving a stale entry. This causes
+    // emit_to_main to falsely believe a listener still exists and dispatch
+    // events to a dead callback (which silently fails, losing the event).
+    //
+    // The `delete` may throw TypeError if the property is non-configurable
+    // (sealed/frozen internal object). We only catch TypeError so that other
+    // unexpected failures are not silently masked.
+    try {
+      const obj = /** @type {any} */ (window)['__internal_unstable_listeners_object_id__'];
+      if (obj?.[event]) {
+        delete obj[event][eventId];
+        // If no listeners remain for this event, clean up the event key too
+        // so emit_to_main correctly detects "no listeners" and buffers the event.
+        if (Object.getOwnPropertyNames(obj[event]).length === 0) {
+          delete obj[event];
+        }
+      }
+    } catch (err) {
+      if (err instanceof TypeError) {
+        // Non-configurable property — expected on sealed/frozen internal objects.
+        apiLogger.warn(`[API] listener-map cleanup for event "${event}" skipped (non-configurable)`);
+      } else {
+        throw err;
+      }
+    }
+    await invoke('plugin:event|unlisten', { event, eventId });
+  };
+}
+
+/** Open URL in system default browser
+ * @param {string} url
+ * @returns {Promise<void>}
+ */
+async function openUrl(url) {
+  return invoke('plugin:opener|open_url', { url });
+}
+
+/** Get a lightweight current-window handle (manual IPC wrapper) */
+function getCurrentWindow() {
+  const label = _t?.metadata?.currentWindow?.label ?? 'main';
+  return {
+    label,
+    hide:        () => invoke('plugin:window|set_visible', { label, value: false }),
+    show:        () => invoke('plugin:window|set_visible', { label, value: true }),
+    close:       () => invoke('plugin:window|close',           { label }),
+    minimize:    () => invoke('plugin:window|minimize',         { label }),
+    maximize:    () => invoke('plugin:window|maximize',         { label }),
+    setTitle: (/** @type {string} */ t) => invoke('plugin:window|set_title',         { label, value: t }),
+    /** @returns {Promise<boolean>} */
+    isVisible:    () => invoke('plugin:window|is_visible',      { label }),
+    setFocus:     () => invoke('plugin:window|set_focus',        { label }),
+  };
+}
+
+// Re-export for all other modules
+export { invoke, listen, openUrl, getCurrentWindow };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 设置 API 基地址
+ * @param {string} url - 完整的 HTTP 基地址，如 `http://127.0.0.1:9090`
+ */
+export function setBaseUrl(url) {
+  if (BASE_URL !== url) clearProviderCache();
+  BASE_URL = url;
+}
+
+/**
+ * 设置 API Secret（用于 Bearer Token 认证）
+ * @param {string} s
+ */
+export function setSecret(s) {
+  if (_state.secret !== (s || '')) clearProviderCache();
+  _state.secret = s || '';
+}
+
+/**
+ * 判断错误是否为"连接被拒绝"（内核未运行）
+ * 用于 apiFetch 和 websocket.js 共享同一检测逻辑。
+ *
+ * @param {Error} error
+ * @returns {boolean}
+ */
+export function isConnectionRefusedError(error) {
+  const msg = typeof error?.message === 'string' ? error.message : '';
+  if (!msg) return false;
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('Connection refused') ||
+    msg.includes('ERR_CONNECTION_REFUSED') ||
+    msg.includes('Load failed')
+  );
+}
+
+/**
+ * 查询内核是否可达
+ * @returns {boolean}
+ */
+export function isCoreReachable() {
+  return _coreReachable;
+}
+
+/**
+ * 设置内核可达状态（内核重启成功后调用重置为 true）
+ * @param {boolean} reachable
+ */
+export function setCoreReachable(reachable) {
+  _coreReachable = reachable;
+  if (reachable) {
+    _connectionRefusedLogged = false;
+  }
+}
+
+/**
+ * 构造通用请求头
+ * @returns {Record<string, string>}
+ */
+function getHeaders() {
+  /** @type {Record<string, string>} */
+  const headers = { 'Content-Type': 'application/json' };
+  if (_state.secret) {
+    headers['Authorization'] = `Bearer ${_state.secret}`;
+  }
+  return headers;
+}
+
+/**
+ * 判断是否为"自启动注册表项不存在"的系统错误。
+ * Windows 上表现为 os error 2 或中文/英文找不到文件的提示。
+ *
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isMissingAutostartEntryError(err) {
+  const message = String(err || '').toLowerCase();
+  return (
+    message.includes('os error 2') ||
+    message.includes('系统找不到指定的文件') ||
+    message.includes('cannot find the file specified')
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REST API — Proxies
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 获取全部代理组数据
+ * @returns {Promise<Object>} mihomo `/proxies` 响应体
+ * @throws {ApiError} 请求失败时抛出
+ */
+export async function getProxies() {
+  const res = await apiFetch('/proxies');
+  return res.json();
+}
+
+/**
+ * 获取全部代理提供者数据（含 provider 下载的节点详情）
+ * mihomo 的 /proxies API 不包含 proxy-provider 下载的节点，
+ * 需要通过 /providers/proxies 获取。
+ * @returns {Promise<Object>} mihomo `/providers/proxies` 响应体
+ * @throws {ApiError}
+ */
+export async function getProxyProviders() {
+  const res = await apiFetch('/providers/proxies');
+  return res.json();
+}
+
+// ── Provider 缓存（避免轮询期间重复拉取 /providers/proxies） ─────────────
+/** @type {any} */
+let _providerCache = null;
+/** @type {any} */
+let _providerInFlight = null;
+let _providerGen = 0; // Incremented on core restart to invalidate in-flight requests
+const _PROVIDER_CACHE_TTL = 5000;
+const _PROVIDER_CACHE_PARTIAL_TTL = 1500; // Aligned with poller interval (1.5s)
+
+// Safari/old WebView compat: Object.hasOwn is not available everywhere
+const hasOwn = (/** @type {any} */ obj, /** @type {string} */ key) => Object.prototype.hasOwnProperty.call(obj, key); // NOSONAR — intentional compat workaround
+
+/**
+ * Built-in proxy names that never have detail records in /proxies.
+ * Shared between api.js and ui/proxies.js to prevent drift.
+ */
+export const SPECIAL_PROXY_NAMES = Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE']));
+
+/**
+ * Clear provider cache. Called on core restart to prevent stale data.
+ */
+export function clearProviderCache() {
+  _providerCache = null;
+  _providerInFlight = null;
+  _providerGen++;
+}
+
+/**
+ * Collect proxy names from all group.all[] arrays.
+ * @param {Record<string, any>} proxiesMap - The proxies map from /proxies
+ * @returns {Set<string>} All names found in any group's all[]
+ */
+function collectAllProxyNames(proxiesMap) {
+  const names = new Set();
+  for (const key of Object.keys(proxiesMap)) {
+    const entry = proxiesMap[key];
+    if (entry?.all && Array.isArray(entry.all)) {
+      for (const name of entry.all) {
+        if (typeof name === 'string') names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Extract provider nodes from /providers/proxies response into a flat map.
+ * @param {any} providersResp - Response from /providers/proxies
+ * @returns {Record<string, any>} Map of proxy name → proxy detail
+ */
+function extractProviderNodes(providersResp) {
+  const result = Object.create(null);
+  const providers = Object.values(providersResp?.providers ?? {});
+  for (const provider of providers) {
+    const proxies = Array.isArray(provider?.proxies) ? provider.proxies : [];
+    for (const proxy of proxies) {
+      if (proxy?.name) result[proxy.name] = proxy;
+    }
+  }
+  return result;
+}
+
+/**
+ * Check provider cache for a valid hit and merge cached nodes.
+ * Returns merged data object if cache hit, null if cache miss.
+ * @param {string[]} missingNames - Names missing from /proxies
+ * @param {Record<string, any>} mergedProxies - Cloned proxies map to merge into
+ * @param {number} now - Current timestamp
+ * @param {any} data - Original /proxies response (for spreading)
+ * @returns {any | null} Merged data or null
+ */
+function tryProviderCache(missingNames, mergedProxies, now, data) {
+  if (!_providerCache) return null;
+  const age = now - _providerCache.ts;
+  const cached = _providerCache.proxies;
+  // Merge cached provider nodes into mergedProxies (shared by both paths below)
+  const mergeCached = () => {
+    for (const name of missingNames) {
+      if (cached[name]) mergedProxies[name] = cached[name];
+    }
+  };
+  // If previous fetch failed, skip retry within full TTL but still merge
+  // last-known-good nodes so UI doesn't lose provider data on transient errors.
+  if (_providerCache.failed && age < _PROVIDER_CACHE_TTL) {
+    mergeCached();
+    return { ...data, proxies: mergedProxies };
+  }
+  if (age >= _PROVIDER_CACHE_TTL) return null;
+  // Merge whatever cached nodes we have (even partial coverage).
+  const hasAnyMissing = missingNames.some(n => !cached[n]);
+  // If cache doesn't cover all missing names, only use it for a shorter TTL
+  // so provider downloads converge faster.
+  if (hasAnyMissing && age >= _PROVIDER_CACHE_PARTIAL_TTL) return null;
+  mergeCached();
+  return { ...data, proxies: mergedProxies };
+}
+
+/**
+ * 合并 /proxies + /providers/proxies 的数据。
+ * 按需懒加载：只有当 /proxies 的节点缺失时才拉 provider 数据。
+ *
+ * @param {any} [existingData] - 已有的 /proxies 响应（避免重复请求）
+ * @returns {Promise<any>} 合并后的数据
+ * @throws {ApiError}
+ */
+export async function getProxiesMerged(existingData) {
+  const data = existingData || await getProxies();
+  if (!data?.proxies) return data;
+
+  const allNames = collectAllProxyNames(data.proxies);
+  const missingNames = [...allNames].filter(
+    n => !SPECIAL_PROXY_NAMES.has(n.toUpperCase()) && !hasOwn(data.proxies, n)
+  );
+  if (missingNames.length === 0) {
+    // Opportunistically expire stale cache to free memory
+    if (_providerCache && (Date.now() - _providerCache.ts) >= _PROVIDER_CACHE_TTL) {
+      _providerCache = null;
+    }
+    return data;
+  }
+
+  const now = Date.now();
+
+  // Clone proxies map with null prototype to prevent prototype pollution
+  const mergedProxies = Object.assign(Object.create(null), data.proxies);
+
+  // Cache hit: TTL valid AND cached map covers all currently-missing names.
+  const cached = tryProviderCache(missingNames, mergedProxies, now, data);
+  if (cached) return cached;
+
+  // Dedup concurrent requests — reuse in-flight promise if same generation
+  const gen = _providerGen;
+  if (_providerInFlight?.gen !== gen) {
+    _providerInFlight = {
+      gen,
+      promise: getProxyProviders().then(providersResp => {
+        const providerProxies = extractProviderNodes(providersResp);
+        // Only write cache if generation hasn't changed (no restart)
+        if (gen === _providerGen) {
+          _providerCache = { proxies: providerProxies, ts: Date.now() };
+          _providerInFlight = null;
+        }
+        return providerProxies;
+      }).catch(err => {
+        if (gen === _providerGen) {
+          // Preserve previous cache if it had valid data; only set failed flag
+          // so we don't wipe good nodes on a transient failure.
+          if (_providerCache && !_providerCache.failed) {
+            _providerCache.failed = true;
+            _providerCache.ts = Date.now();
+          } else {
+            _providerCache = { proxies: Object.create(null), ts: Date.now(), failed: true };
+          }
+          _providerInFlight = null;
+        }
+        apiLogger.warn('[getProxiesMerged] /providers/proxies fetch failed, using raw /proxies data', err);
+        return null;
+      }),
+    };
+  }
+
+  const providerProxies = await _providerInFlight.promise;
+  // Ignore results from a previous generation (pre-restart)
+  if (providerProxies && gen === _providerGen) {
+    for (const name of missingNames) {
+      if (providerProxies[name] && !hasOwn(mergedProxies, name)) {
+        mergedProxies[name] = providerProxies[name];
+      }
+    }
+  }
+
+  return { ...data, proxies: mergedProxies };
+}
+
+/**
+ * 切换代理组中的选中节点，并带回这一次被拒绝的原因
+ * @param {string} group - 代理组名称
+ * @param {string} name  - 目标节点名称
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError }>} reason is
+ *   the backend's rejection for this request (null when it succeeded or gave none);
+ *   error is the HTTP refusal itself when the core answered non-2xx
+ * @throws {ApiError}
+ */
+export async function switchProxyResult(group, name) {
+  try {
+    // GLOBAL switches go through the backend so the user-change generation is
+    // bumped under the restore lock; otherwise an in-flight fallback restore
+    // could silently overwrite the user's selection. Only the reserved GLOBAL
+    // group (exact name) uses this path; user-defined groups named e.g.
+    // "Global" keep the direct HTTP PUT.
+    if (group === 'GLOBAL') {
+      await invoke(COMMANDS.SWITCH_GLOBAL_NODE, { name });
+      return { ok: true, reason: null };
+    }
+    await apiFetch(`/proxies/${encodeURIComponent(group)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    });
+    return { ok: true, reason: null };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      // A refused switch is a non-2xx answer with the cause in the body
+      // ({"message": "..."}); network failures (no status) still throw.
+      if (err.status == null) throw err;
+      const text = String(err.body || '').trim();
+      /** @type {string|null} */
+      let reason = null;
+      try { reason = String(JSON.parse(text)?.message || '').trim() || null; } catch { reason = text || null; }
+      return { ok: false, reason: (reason || err.message).slice(0, 300), error: err };
+    }
+    // The backend rejects with a plain Error carrying the real reason (e.g.
+    // "Subscription update in progress, please try again", "GLOBAL proxy group
+    // no longer contains node '<name>'").
+    apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
+    return { ok: false, reason: err };
+  }
+}
+
+/**
+ * 切换代理组中的选中节点
+ * @param {string} group - 代理组名称
+ * @param {string} name  - 目标节点名称
+ * @returns {Promise<boolean>} 是否成功
+ * @throws {ApiError}
+ */
+export async function switchProxy(group, name) {
+  const result = await switchProxyResult(group, name);
+  // Callers of this form expect an HTTP refusal to reject, as before.
+  if (result.error) throw result.error;
+  return result.ok;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REST API — Config
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 获取当前核心运行配置
+ * @returns {Promise<Object>} mihomo `/configs` 响应体
+ * @throws {ApiError} 请求失败时抛出
+ */
+export async function getConfig() {
+  const res = await apiFetch('/configs');
+  return res.json();
+}
+
+/**
+ * 动态修改核心配置 (PATCH)
+ * @param {Object} payload - 要合并的配置片段
+ * @returns {Promise<boolean>} 是否成功
+ * @throws {ApiError}
+ */
+export async function patchConfig(payload) {
+  await apiFetch('/configs', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  return true;
+}
+
+/**
+ * 从磁盘热重载核心配置文件
+ * @param {string} [_path='run_config.yaml'] - 配置文件名（仅用于语义，实际由 core 决定）
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function reloadConfig(_path = 'run_config.yaml') {
+  try {
+    const res = await apiFetch('/configs?force=true', {
+      method: 'PUT',
+      body: JSON.stringify({ path: '', payload: '' }),
+    });
+    return res.ok;
+  } catch (err) {
+    apiLogger.debug('reloadConfig failed:', err);
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REST API — Connections
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 断开所有活跃连接
+ * @returns {Promise<void>}
+ */
+export async function closeAllConnections() {
+  await apiFetch('/connections', { method: 'DELETE' });
+}
+
+/**
+ * 获取当前活跃连接列表
+ * @returns {Promise<{ connections: Array<object> }>} mihomo `/connections` 响应体
+ * @throws {ApiError}
+ */
+export async function getConnections() {
+  const res = await apiFetch('/connections');
+  return res.json();
+}
+
+/**
+ * 关闭指定连接
+ * @param {string|string[]} id - 单个连接 ID 或 ID 数组
+ * @returns {Promise<void>}
+ */
+export async function closeConnection(id) {
+  // Mihomo closes one connection at DELETE /connections/:id; a bare DELETE /connections closes all.
+  const ids = typeof id === 'string' ? [id] : id;
+  await Promise.all(ids.map((one) => apiFetch(`/connections/${encodeURIComponent(one)}`, { method: 'DELETE' })));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REST API — Latency Test
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 全局延迟测试中止控制器 */
+let latencyTestController = new AbortController();
+
+/**
+ * Controllers that still have tests in flight, with how many. A test keeps the
+ * controller it started under, so a reset for a new run must not detach Stop
+ * from a single-node retest that began just before it.
+ * @type {Map<AbortController, number>}
+ */
+const liveLatencyControllers = new Map();
+
+/**
+ * 获取当前延迟测试的 AbortSignal（供 worker 循环检查是否被中止）。
+ */
+export function getLatencyTestSignal() {
+  return latencyTestController.signal;
+}
+
+/**
+ * 重置延迟测试控制器（在每次测速开始前调用）。
+ * 必须在 api.js 内部调用，确保每次测速都有新的未中止的 controller。
+ */
+export function resetLatencyTestController() {
+  latencyTestController = new AbortController();
+}
+
+/**
+ * 中止所有正在进行的延迟测试。
+ *
+ * 不再创建新 controller —— 新 controller 在下次测速开始时通过 resetLatencyTestController() 创建。
+ * 旧实现中 abort 后立即 new 会导致后续 testProxy() 绑定到新的未中止 signal，
+ * 使 abort 形同虚设。
+ */
+export function abortLatencyTests() {
+  latencyTestController.abort();
+  for (const controller of liveLatencyControllers.keys()) controller.abort();
+}
+
+/**
+ * 测试指定代理节点的延迟
+ *
+ * 使用 gstatic 204 作为测试 URL，通过 mihomo 的 `/proxies/:name/delay` 端点
+ * 发起延迟测量。支持全局中止（`abortLatencyTests`）和单次超时。
+ *
+ * @param {string}  name            - 代理节点名称
+ * @param {number}  [customTimeout=5000] - 单次测试超时（ms）
+ * @returns {Promise<number>} 延迟（ms），失败或中止时返回 -1
+ */
+export async function testProxy(name, customTimeout = 5000) {
+  const localController = new AbortController();
+  const timeout = setTimeout(() => localController.abort(), customTimeout + 1000);
+
+  const onGlobalAbort = () => localController.abort();
+  // Keep the controller this test started under: a reset during the request
+  // swaps the module-level one, and cleanup must detach from the original.
+  const globalController = latencyTestController;
+  liveLatencyControllers.set(globalController, (liveLatencyControllers.get(globalController) ?? 0) + 1);
+  globalController.signal.addEventListener('abort', onGlobalAbort, { once: true });
+
+  try {
+    const testUrl = 'https://www.gstatic.com/generate_204';
+    const apiUrl = `/proxies/${encodeURIComponent(name)}/delay?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`;
+
+    const res = await apiFetch(apiUrl, {
+      signal: localController.signal,
+      timeout: customTimeout + 2000,
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.delay;
+    }
+
+    return -1;
+  } catch (err) {
+    if (err instanceof ApiError && err.status != null) {
+      // HTTP 错误（如 404/503/504）— 延迟测试中的正常情况
+      return -1;
+    }
+
+    if (err instanceof ApiError && err.cause?.name === 'AbortError') {
+      // 超时或手动中止
+      return -1;
+    }
+
+    // 其他网络异常（ERR_CONNECTION_RESET 等）同样静默
+    return -1;
+  } finally {
+    clearTimeout(timeout);
+    globalController.signal.removeEventListener('abort', onGlobalAbort);
+    const left = (liveLatencyControllers.get(globalController) ?? 1) - 1;
+    if (left > 0) liveLatencyControllers.set(globalController, left);
+    else liveLatencyControllers.delete(globalController);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Tauri Commands — AutoStart / Config / Core
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 启用系统开机自启动
+ * @returns {Promise<boolean>} 是否成功
+ * @throws {Error}
+ */
+export async function enableAutoStart() {
+  await invoke('plugin:autostart|enable');
+  return true;
+}
+
+/**
+ * 禁用系统开机自启动。
+ * 若当前未启用或注册表项不存在，直接返回 false 而不抛异常。
+ *
+ * @returns {Promise<boolean>} 是否成功禁用
+ * @throws {Error}
+ */
+export async function disableAutoStart() {
+  try {
+    const enabled = await isAutoStartEnabled();
+    if (!enabled) return false;
+    await invoke('plugin:autostart|disable');
+    return true;
+  } catch (err) {
+    if (isMissingAutostartEntryError(err)) return false;
+    throw err;
+  }
+}
+
+/**
+ * 查询系统开机自启动是否已启用
+ * @returns {Promise<boolean>}
+ */
+export async function isAutoStartEnabled() {
+  try {
+    return await invoke('plugin:autostart|is_enabled');
+  } catch (err) {
+    apiLogger.debug('isAutoStartEnabled failed:', err);
+    return false;
+  }
+}
+
+/**
+ * 在系统文件管理器中打开配置文件夹
+ * @returns {Promise<void>}
+ * @throws {Error}
+ */
+export async function openConfigFolder() {
+  return invoke(COMMANDS.OPEN_FOLDER);
+}
+
+/**
+ * Open the Prism rule library folder in the system file manager.
+ */
+export async function openPrismFolder() {
+  return invoke(COMMANDS.RULE.OPEN_PRISM_FOLDER);
+}
+
+/**
+ * 重启 mihomo 核心，并同步更新本模块及 websocket 模块的连接参数。
+ *
+ * @param {string}   configPath        - 配置文件路径
+ * @param {string[]} [customArgs=[]]   - 传递给核心的额外命令行参数
+ * @returns {Promise<{ port: number, secret: string, active_config: string | null }>} 核心启动结果（含 port、secret、active_config 等）
+ * @throws {Error}
+ */
+export async function restartCore(configPath, customArgs = []) {
+  // eslint-disable-next-line no-console
+  console.log(`[API] restartCore called (config=${configPath})`);
+  const coreResult = await invoke(COMMANDS.START_CORE, {
+    configPath,
+    customArgs,
+    force: true,
+  });
+  setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
+  setSecret(coreResult.secret);
+  setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
+  setWsSecret(coreResult.secret);
+  setCoreReachable(true);
+  clearProviderCache();
+  Bus.emit(Events.CORE_RESTARTED, { activeConfig: coreResult.active_config });
+  return coreResult;
+}
+
+/**
+ * Switch to a different subscription config with full lifecycle management.
+ * Shared by UI subscription switch and tray subscription switch.
+ *
+ * Steps:
+ *   1. Abort any ongoing latency tests (user-invisible)
+ *   2. Save current proxy selection
+ *   3. Restart core with new config
+ *   4. Update settings, close connections, rebuild prism, restore proxy selection
+ *
+ * @param {string} configName - Target config file name
+ * @param {string[]} [customArgs=[]] - Custom core arguments
+ * @returns {Promise<Object>} coreResult from restartCore
+ */
+// Note: switchToConfig has been moved to ui/lifecycle.js to avoid layering violations.
+// Import it from there instead of from api.js.
+
+/**
+ * Read mihomo core log (incremental)
+ * @param {number} [offset=0] - Byte offset to start reading from
+ * @param {number} [limit=500] - Max lines to read
+ * @returns {Promise<{lines: string[], next_offset: number, file_size: number, has_more: boolean, rotated?: boolean}>}
+ */
+export async function readCoreLog(offset = 0, limit = 500) {
+  return invoke(COMMANDS.READ_LOG, { offset, limit });
+}

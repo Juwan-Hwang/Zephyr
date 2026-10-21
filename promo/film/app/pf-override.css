@@ -1,0 +1,6 @@
+@font-face{font-family:"PingFang SF";src:url("fonts/PingFangSF.ttf") format("truetype");font-weight:100 900;font-stretch:80% 120%;font-display:block}
+:root{--font-sans:"Zephyr Country Flags","PingFang SF",sans-serif !important;}
+html,body{font-family:var(--font-sans)}
+@font-face{font-family:"JetBrains Mono";src:url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");font-weight:400}
+:root{--font-mono:"Zephyr Country Flags","JetBrains Mono","PingFang SF",monospace !important;}
+.cm-editor,.cm-content,.cm-gutters{font-family:var(--font-mono) !important}

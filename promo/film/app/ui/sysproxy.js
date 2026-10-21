@@ -1,0 +1,203 @@
+// @ts-check
+/**
+ * System proxy toggle logic.
+ * Extracted from ui.js for modularity.
+ */
+
+import { getConfig, invoke } from '../api.js';
+import { sysproxyLogger } from '../utils/logger.js';
+import { showNotification } from './notifications.js';
+import { translations, currentLang, t } from '../i18n.js';
+import { updateTrayStatus } from './tray.js';
+import { appStore } from './state.js';
+import { COMMANDS } from '@zephyr/shared';
+
+export async function updateSysProxyUI() {
+    const statusText = document.getElementById('proxy-status-text');
+    const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('sys-proxy-toggle'));
+
+    try {
+        const isActive = await invoke(COMMANDS.GET_SYS_PROXY);
+
+        appStore.set('isSysProxyEnabled', isActive);
+
+        if (toggle && toggle.checked !== isActive) {
+            toggle.checked = isActive;
+        }
+
+        if (!statusText) return;
+
+        if (isActive) {
+            statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusActive || 'Proxy Active';
+            statusText.classList.remove('text-[var(--text-muted)]');
+            statusText.classList.add('text-accent');
+        } else {
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
+            statusText.classList.remove('text-accent');
+            statusText.classList.add('text-[var(--text-muted)]');
+        }
+    } catch (err) {
+        sysproxyLogger.error('Failed to update sys proxy UI', err);
+    }
+}
+
+/** @type {Promise<void>} Serializes concurrent sys-proxy transitions. */
+let _sysProxyChain = Promise.resolve();
+
+/**
+ * Queue an async operation inside the serialization chain.
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+function _enqueueSysProxy(fn) {
+    /** @type {(value?: any) => void} */ let resolve = () => {};
+    /** @type {(err: unknown) => void} */ let reject = () => {};
+    const gate = new Promise((res, rej) => { resolve = res; reject = rej; });
+
+    _sysProxyChain = _sysProxyChain.then(async () => {
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        }
+    });
+
+    return gate;
+}
+
+/**
+ * Apply sys-proxy enable/disable to the backend and sync appStore.
+ * Extracted from the toggle change handler so console-home can call it
+ * directly without relying on DOM event dispatching.
+ *
+ * Concurrent calls are serialized via a promise chain to prevent
+ * ENABLE/DISABLE commands from executing out of order.
+ *
+ * @param {boolean} enabled
+ * @throws {unknown} Re-throws the backend error so callers can handle
+ *   notification and UI rollback.
+ */
+export function setSysProxyEnabled(enabled) {
+    return _enqueueSysProxy(() => _doSetSysProxyEnabled(enabled));
+}
+
+/**
+ * Toggle the system proxy: read the current state inside the serialization
+ * chain and flip it. Prevents the read-then-write race that occurs when
+ * GET_SYS_PROXY is called outside the chain.
+ *
+ * @returns {Promise<boolean>} The new state.
+ * @throws {unknown} Re-throws the backend error.
+ */
+export function toggleSysProxy() {
+    return _enqueueSysProxy(async () => {
+        const current = await invoke(COMMANDS.GET_SYS_PROXY);
+        await _doSetSysProxyEnabled(!current);
+        return !current;
+    });
+}
+
+/** @param {boolean} enabled */
+async function _doSetSysProxyEnabled(enabled) {
+    if (enabled) {
+        /** @type {Record<string, any>} */
+        const currentConfig = await getConfig();
+        // Only `mixed-port` / `port`: the system HTTP and HTTPS settings need an
+        // HTTP listener. Falling back to `socks-port` — or to a hardcoded 7890 —
+        // would hand the OS an address it cannot use as an HTTP proxy, breaking
+        // HTTP traffic in every other application. This mirrors the guard the
+        // tray's System Proxy action applies.
+        const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port;
+        if (!currentPort) {
+            const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
+            throw new Error(
+                t.sysProxyNoHttpPortError ||
+                    'System proxy not enabled: the core exposes no HTTP proxy port. Enable a mixed or HTTP port in the profile.'
+            );
+        }
+        await invoke(COMMANDS.ENABLE_SYSPROXY, {
+            server: `127.0.0.1:${currentPort}`,
+            bypass: null,
+        });
+    } else {
+        await invoke(COMMANDS.DISABLE_SYSPROXY);
+    }
+
+    appStore.set('isSysProxyEnabled', enabled);
+    // Await UI refresh inside the serialized chain so a stale GET_SYS_PROXY
+    // response from an earlier transition cannot overwrite a newer state.
+    await updateSysProxyUI();
+}
+
+/**
+ * Refresh sys-proxy UI status inside the serialization chain.
+ * Ensures status reads do not race with proxy transitions.
+ * @returns {Promise<void>}
+ */
+export function refreshSysProxyStatus() {
+    return _enqueueSysProxy(() => updateSysProxyUI());
+}
+
+/**
+ * Restore the system proxy from the ownership marker, serialized through
+ * the same queue as setSysProxyEnabled/toggleSysProxy.
+ *
+ * This prevents a TOCTOU race where a user-initiated disable (which removes
+ * ownership) could be interleaved with a tray.js recovery restore that reads
+ * stale ownership state.  By routing through the queue, either:
+ *  - the disable executes first (ownership removed → restore is a no-op error), or
+ *  - the restore executes first (proxy re-enabled → disable then properly turns it off).
+ *
+ * @returns {Promise<void>}
+ */
+export function restoreSysProxy() {
+    return _enqueueSysProxy(async () => {
+        await invoke(COMMANDS.RESTORE_SYS_PROXY);
+        appStore.set('isSysProxyEnabled', true);
+        await updateSysProxyUI();
+    });
+}
+
+export async function initProxyToggle() {
+    const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('sys-proxy-toggle'));
+    const statusText = document.getElementById('proxy-status-text');
+
+    if (!toggle || !statusText) return;
+
+    // Fetch initial status via the serialization chain to avoid a
+    // duplicate GET_SYS_PROXY call (updateSysProxyUI reads it internally).
+    try {
+        await refreshSysProxyStatus();
+        await updateTrayStatus();
+    } catch (err) {
+        sysproxyLogger.error('Failed to get initial sys proxy status', err);
+    }
+
+    toggle.addEventListener('change', async (e) => {
+        const target = /** @type {HTMLInputElement} */ (e.target);
+        const enabled = target.checked;
+        // Hold the switch while the OS applies it (Windows can take a second) so a
+        // second click can't queue a contradicting change.
+        target.disabled = true;
+        target.setAttribute('aria-busy', 'true');
+
+        try {
+            await setSysProxyEnabled(enabled);
+        } catch (err) {
+            sysproxyLogger.error('Failed to set sys proxy', err);
+            const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
+            showNotification(`${t.errorPrefix || 'Error'}: ${err}`, 'error');
+            // Refresh the actual backend state instead of assuming !enabled,
+            // since another queued transition may have changed it.
+            await refreshSysProxyStatus();
+            // Ensure checkbox reflects the store even if GET_SYS_PROXY also
+            // failed (updateSysProxyUI swallows read errors internally).
+            target.checked = !!appStore.get('isSysProxyEnabled');
+        } finally {
+            target.disabled = false;
+            target.removeAttribute('aria-busy');
+        }
+    });
+}
