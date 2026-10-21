@@ -115,6 +115,8 @@ export const UPDATER = Object.freeze({
     UPDATE_GEO_DATA: "update_geo_data",
     GET_LATEST_CLIENT_VERSION: "get_latest_client_version",
     UPDATE_CLIENT: "update_client",
+    END_UPDATE_HOLD: "end_update_hold",
+    SET_PAGE_BUSY: "set_page_busy",
     GET_LATEST_CLIENT_VERSIONS: "get_latest_client_versions",
 });
 

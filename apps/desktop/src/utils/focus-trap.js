@@ -82,6 +82,21 @@ export function focusRespectingModality(el) {
  */
 
 /**
+ * Hidden by class, attribute or style (display:none is also set inline):
+ * focusing such an element is a silent no-op, and a dialog hidden that way
+ * is not the one still open.
+ * @param {Element} el
+ */
+function shown(el) {
+    if (el.closest('.hidden, [hidden]')) return false;
+    for (let n = /** @type {Element | null} */ (el); n; n = n.parentElement) {
+        const style = getComputedStyle(n);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+}
+
+/**
  * Create a focus trap on the given container.
  *
  * @param {HTMLElement} container
@@ -159,10 +174,31 @@ export function createFocusTrap(container, options = {}) {
         active = false;
         document.removeEventListener('keydown', onKeyDown, true);
 
-        if (previousFocus && previousFocus.isConnected) {
-            focusRespectingModality(previousFocus);
+        if (previousFocus) {
+            // Still there but hidden or disabled (the dialog underneath hid
+            // or disabled it) counts as gone: focusing it would be a silent no-op.
+            const usable = previousFocus.isConnected && shown(previousFocus)
+                && !previousFocus.matches(':disabled');
+            const back = usable ? previousFocus : focusFallback();
+            if (back) focusRespectingModality(back);
         }
         previousFocus = null;
+    }
+
+    /**
+     * The element focus came from is gone (a dialog underneath re-rendered
+     * its buttons): land in the dialog that is still open instead of leaving
+     * focus on the one closing.
+     * @returns {HTMLElement | null}
+     */
+    function focusFallback() {
+        const open = Array.from(document.querySelectorAll('[aria-modal="true"]')).filter((d) =>
+            !container.contains(d) && !d.contains(container) && shown(d));
+        const top = open.at(-1);
+        if (!top) return null;
+        const primary = Array.from(top.querySelectorAll('.btn-primary:not([disabled])')).find(shown);
+        const any = Array.from(top.querySelectorAll(FOCUSABLE)).find(shown);
+        return /** @type {HTMLElement | null} */ (primary || any || null);
     }
 
     function destroy() {

@@ -13,7 +13,7 @@ import {
     restartCore,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery, restartedProfile } from '../lifecycle.js';
 import { currentProfile, noteProfileRenamed } from '../active-profile.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
@@ -54,6 +54,34 @@ async function acquireNetworkLock() {
         }
         if (Date.now() >= until) return false;
         await new Promise((r) => setTimeout(r, 200));
+    }
+}
+
+/**
+ * Restart the core on a profile whose file just changed, then run recovery,
+ * holding isNetworkUpdating like every other restart: a download that ends
+ * during a core update or a profile switch waits for it instead of
+ * restarting the core underneath it. Whether the profile is still the
+ * current one, and its launch arguments, are read once the lock is held, so
+ * a switch that finished while this waited is not undone.
+ * @param {string} name
+ * @returns {Promise<boolean>} whether the core was restarted
+ */
+async function restartUpdatedProfile(name) {
+    while (!(await acquireNetworkLock())) { /* keep waiting */ }
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        if (normalizeConfigName(currentProfile(settings, 'config.yaml')) !== normalizeConfigName(name)) return false;
+        abortLatencyTests();
+        const coreResult = await restartCore(name, settings?.custom_args || []);
+        const recovery = await postRestartRecovery(restartedProfile(coreResult, name));
+        if (recovery?.failed) {
+            showNotification(tr('restartRecoveryWarn') || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        }
+        return true;
+    } finally {
+        appStore.set('isNetworkUpdating', false);
     }
 }
 
@@ -248,6 +276,48 @@ function recordBatchResults(results) {
 }
 
 /**
+ * After a batch update: restart the core when the running profile was one of
+ * the updated files. The files are saved, so a failed restart is its own
+ * warning and the batch result is still reported.
+ * @param {Array<{name: string, success: boolean}>} results
+ */
+async function restartIfCurrentUpdated(results) {
+    try {
+        // Inside the try too: a failed settings read is a missed restart,
+        // not a failed batch.
+        /** @type {any} */
+        const subSettings = await invoke(COMMANDS.GET_SETTINGS);
+        const currentConfig = currentProfile(subSettings, 'config.yaml');
+        const updated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
+        if (!updated) return;
+        await restartUpdatedProfile(currentConfig);
+    } catch (restartErr) {
+        rulesLogger.warn('[settings] Core restart after updating all subscriptions failed:', restartErr);
+        showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+    }
+}
+
+/**
+ * The batch update's result toast.
+ * @param {Array<{name: string, success: boolean, error?: string}>} results
+ * @param {number} successCount
+ * @param {number} failCount
+ * @param {string[]} failedNames
+ */
+function notifyBatchOutcome(results, successCount, failCount, failedNames) {
+    const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
+    if (failCount === 0) {
+        showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
+    } else if (failedNames.length === 1) {
+        // Say which one failed and why (the reason used to go only to the log).
+        const only = results.find(r => !r.success);
+        showNotification(tr('subUpdateFailedOne', { name: failedNames[0], error: String(only?.error || '') }), 'error');
+    } else {
+        showNotification(tr('subUpdateFailedMany', { count: String(failedNames.length), names: new Intl.ListFormat(appStore.get('currentLang') || 'en').format(failedNames) }), 'error');
+    }
+}
+
+/**
  * A download of `name` ended: it is no longer busy, and a link saved meanwhile
  * is downloaded now (still shown busy until that ends).
  * @param {string} name
@@ -330,12 +400,10 @@ async function downloadSubscription(name, userAgent = '') {
     const settings = await getSettingsCached();
     // No last_config means the core runs the default config.yaml.
     if (normalizeConfigName(currentProfile(settings, 'config.yaml')) === normalizeConfigName(name)) {
-        abortLatencyTests();
         // The file is updated at this point: a failed restart is its own warning,
         // not a failed download (the card would otherwise keep "Update failed").
         try {
-            await restartCore(name, settings.custom_args || []);
-            await postRestartRecovery(name);
+            await restartUpdatedProfile(name);
         } catch (restartErr) {
             rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
             showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
@@ -833,10 +901,13 @@ export function initSubscriptionSettings({
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = currentProfile(subSettings, 'config.yaml');
                 if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
-                    abortLatencyTests();
-                    const customArgs = subSettings.custom_args || [];
-                    await restartCore(savedConfigName, customArgs);
-                    await postRestartRecovery(savedConfigName);
+                    // The download succeeded: report it now and restart once the
+                    // network lock is free (a core update can hold it for minutes).
+                    // A failed restart is a warning, not a failed add.
+                    void restartUpdatedProfile(savedConfigName).catch((restartErr) => {
+                        rulesLogger.warn('[settings] Core restart after adding the current profile failed:', restartErr);
+                        showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+                    });
                 } else if (appStore.get('noSubscription')) {
                     // The first subscription: nothing is loaded yet, so start using it
                     // (otherwise the empty state stays up after adding it). It is saved
@@ -944,27 +1015,8 @@ export function initSubscriptionSettings({
 
                 invalidateConfigsCache();
 
-                /** @type {any} */
-                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = currentProfile(subSettings, 'config.yaml');
-                const customArgs = subSettings.custom_args || [];
-                const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
-
-                if (isCurrentConfigUpdated) {
-                    abortLatencyTests();
-                    await restartCore(currentConfig, customArgs);
-                    await postRestartRecovery(currentConfig);
-                }
-
-                if (failCount === 0) {
-                    showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
-                } else if (failedNames.length === 1) {
-                    // Say which one failed and why (the reason used to go only to the log).
-                    const only = results.find(r => !r.success);
-                    showNotification(tr('subUpdateFailedOne', { name: failedNames[0], error: String(only?.error || '') }), 'error');
-                } else {
-                    showNotification(tr('subUpdateFailedMany', { count: String(failedNames.length), names: new Intl.ListFormat(appStore.get('currentLang') || 'en').format(failedNames) }), 'error');
-                }
+                await restartIfCurrentUpdated(results);
+                notifyBatchOutcome(results, successCount, failCount, failedNames);
             } catch (err) {
                 const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                 showNotification(error.toString(), 'error');
