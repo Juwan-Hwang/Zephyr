@@ -26,6 +26,7 @@ dependencies = [
  "minisign",
  "mockall",
  "pbkdf2 0.12.2",
+ "plist",
  "rand 0.10.1",
  "regex",
  "reqwest",

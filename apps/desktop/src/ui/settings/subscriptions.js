@@ -14,6 +14,7 @@ import {
     abortLatencyTests,
 } from '../../api.js';
 import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
+import { currentProfile, noteProfileRenamed } from '../active-profile.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -328,7 +329,7 @@ async function downloadSubscription(name, userAgent = '') {
     invalidateConfigsCache();
     const settings = await getSettingsCached();
     // No last_config means the core runs the default config.yaml.
-    if (normalizeConfigName(settings?.last_config || 'config.yaml') === normalizeConfigName(name)) {
+    if (normalizeConfigName(currentProfile(settings, 'config.yaml')) === normalizeConfigName(name)) {
         abortLatencyTests();
         // The file is updated at this point: a failed restart is its own warning,
         // not a failed download (the card would otherwise keep "Update failed").
@@ -651,6 +652,7 @@ async function showEditPanel(configInfo) {
                 const renamed = await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
                 finalName = typeof renamed === 'string' && renamed ? renamed : finalName;
                 _subUpdating.delete(configInfo.name);
+                noteProfileRenamed(configInfo.name, finalName);
                 invalidateSettingsCache();
                 // An "update failed" mark follows the subscription to its new name.
                 const failure = _subUpdateErrors.get(configInfo.name);
@@ -829,7 +831,7 @@ export function initSubscriptionSettings({
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = subSettings.last_config || 'config.yaml';
+                const currentConfig = currentProfile(subSettings, 'config.yaml');
                 if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
                     abortLatencyTests();
                     const customArgs = subSettings.custom_args || [];
@@ -944,7 +946,7 @@ export function initSubscriptionSettings({
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = subSettings.last_config || 'config.yaml';
+                const currentConfig = currentProfile(subSettings, 'config.yaml');
                 const customArgs = subSettings.custom_args || [];
                 const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
 
@@ -1561,7 +1563,7 @@ export function initSubscriptionSettings({
         // A newer render or destroy() has superseded this call — bail out.
         if (rev !== _renderRev) return;
 
-        const currentConfig = cfgSettings.last_config || 'config.yaml';
+        const currentConfig = currentProfile(cfgSettings, 'config.yaml');
         const customArgs = cfgSettings.custom_args || [];
         // A move still being saved wins over the order on disk.
         const configOrder = _pendingOrder || cfgSettings.config_order || [];

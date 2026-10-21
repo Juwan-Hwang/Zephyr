@@ -6,6 +6,7 @@
 
 import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
 import { switchToConfig } from './lifecycle.js';
+import { currentProfile } from './active-profile.js';
 import { t as tFunc } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
@@ -148,7 +149,7 @@ export async function updateTrayMenu(forceRefresh = false) {
         currentMode = cfg?.mode || 'rule';
 
         try {
-            const activeConfig = settings.last_config || 'config.yaml';
+            const activeConfig = currentProfile(settings, 'config.yaml');
             /** @type {Array<any>} */
             const cl = configsList;
             configs = cl.map(/** @param {any} c */ (c) => ({
