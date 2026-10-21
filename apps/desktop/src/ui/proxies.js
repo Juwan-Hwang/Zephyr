@@ -3111,7 +3111,11 @@ async function syncSmartUiVisibility() {
         enabled = localStorage.getItem('smartEnabled') === 'true';
     }
 
+    const wasEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
     document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+    // Scoring just came on (say its config was unreadable at startup): scheduled
+    // tests left on had no timer, since they only run with scoring.
+    if (enabled && !wasEnabled && localStorage.getItem('smartAutoTest') === 'true') _autoTest.start();
 
     // Reset sort mode to default if smart is disabled but current mode is smart
     if (!enabled && appStore.get('currentSortMode') === 'smart') {
