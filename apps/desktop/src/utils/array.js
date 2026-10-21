@@ -18,25 +18,43 @@
  * const queue = buildLatencyPriorityQueue(proxyData, ['proxy-a', 'proxy-b', 'proxy-c']);
  */
 export function buildLatencyPriorityQueue(data, candidates) {
-    const withScore = candidates.map((name, idx) => {
-        const proxy = data?.proxies?.[name];
-        const lastDelay =
-            proxy?.history && proxy.history.length > 0
-                ? proxy.history[proxy.history.length - 1].delay
-                : 0;
-        const score = lastDelay > 0 && lastDelay < 999999 ? lastDelay : 1000000;
-        return { name, score, idx };
+    const len = candidates ? candidates.length : 0;
+    if (len === 0) return [];
+    if (len === 1) return [candidates[0]];
+
+    const proxies = data?.proxies;
+    // Performance optimization: Use flat typed arrays for scores and candidate indices
+    // to eliminate object literal allocations ({ name, score, idx }) per proxy candidate
+    // during high-frequency latency test queue construction.
+    const scores = new Float64Array(len);
+    const indices = new Int32Array(len);
+
+    for (let i = 0; i < len; i++) {
+        indices[i] = i;
+        const proxy = proxies?.[candidates[i]];
+        const history = proxy?.history;
+        const lastDelay = history && history.length > 0 ? history[history.length - 1].delay : 0;
+        scores[i] = lastDelay > 0 && lastDelay < 999999 ? lastDelay : 1000000;
+    }
+
+    // Sort indices by score ascending, using original candidate index for tie-breaking
+    indices.sort((a, b) => {
+        const sa = scores[a];
+        const sb = scores[b];
+        return sa !== sb ? sa - sb : a - b;
     });
 
-    withScore.sort((a, b) => (a.score !== b.score ? a.score - b.score : a.idx - b.idx));
-
-    const queue = [];
+    // Interleave low-high sequence directly into a pre-allocated result array
+    const queue = new Array(len);
     let left = 0;
-    let right = withScore.length - 1;
+    let right = len - 1;
+    let outIdx = 0;
 
     while (left <= right) {
-        queue.push(withScore[left].name);
-        if (left !== right) queue.push(withScore[right].name);
+        queue[outIdx++] = candidates[indices[left]];
+        if (left !== right) {
+            queue[outIdx++] = candidates[indices[right]];
+        }
         left++;
         right--;
     }
