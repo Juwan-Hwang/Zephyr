@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createSequential } from './sequential.js';
+import { createSequential, createSerialQueue } from './sequential.js';
 
 describe('createSequential', () => {
     it('single run returns result', async () => {
@@ -37,5 +37,46 @@ describe('createSequential', () => {
         seq.destroy();
         const result = await seq.run('key', () => Promise.resolve('after-destroy'));
         expect(result).toBe('after-destroy');
+    });
+});
+
+describe('createSerialQueue', () => {
+    it('runs tasks in call order, each after the previous one settles', async () => {
+        const q = createSerialQueue();
+        /** @type {string[]} */
+        const log = [];
+        /** @type {(v?: unknown) => void} */
+        let releaseFirst = () => {};
+        const first = q.run(async () => {
+            log.push('start 1');
+            await new Promise((r) => { releaseFirst = r; });
+            log.push('end 1');
+            return 1;
+        });
+        const second = q.run(async () => { log.push('start 2'); return 2; });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(log).toEqual(['start 1']);
+        releaseFirst();
+        await expect(first).resolves.toBe(1);
+        await expect(second).resolves.toBe(2);
+        expect(log).toEqual(['start 1', 'end 1', 'start 2']);
+    });
+
+    it('a failed task rejects on its own and does not block later ones', async () => {
+        const q = createSerialQueue();
+        const applied = /** @type {number[]} */ ([]);
+        /** @type {(e: Error) => void} */
+        let failFirst = () => {};
+        const failing = q.run(() => new Promise((_r, rej) => { failFirst = rej; }));
+        const next = q.run(async () => { applied.push(1.25); });
+        await Promise.resolve();
+        await Promise.resolve();
+        // The second task waits for the first to settle, even when it fails.
+        expect(applied).toEqual([]);
+        failFirst(new Error('save failed'));
+        await expect(failing).rejects.toThrow('save failed');
+        await expect(next).resolves.toBeUndefined();
+        expect(applied).toEqual([1.25]);
     });
 });
