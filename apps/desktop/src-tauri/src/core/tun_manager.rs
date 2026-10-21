@@ -762,6 +762,21 @@ mod tests {
     use serde_yaml::Value as YamlValue;
     use zephyr_core::config::tun::ensure_dns_hijack_entries;
 
+    #[test]
+    fn saved_tun_pref_reads_only_a_set_preference() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        assert_eq!(saved_tun_pref(&file), None);
+        std::fs::write(&file, r#"{"tun_enabled": true, "mode": "rule"}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), Some(true));
+        std::fs::write(&file, r#"{"tun_enabled": false}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), Some(false));
+        std::fs::write(&file, r#"{"tun_enabled": null}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), None);
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(saved_tun_pref(&file), None);
+    }
+
     /// Assert that every `"` inside an `AppleScript` `do shell script "..."`
     /// literal is escaped as `\"` (a bare `"` would end the literal early and
     /// make `osascript` fail with a syntax error).
@@ -1672,15 +1687,22 @@ pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
 /// `save_settings` / `patch_settings` use: a concurrent writer cannot land in
 /// between, and a failed write leaves memory unchanged.
 pub fn sync_tun_settings(app: &AppHandle, enable: bool) -> Result<(), String> {
-    let result = crate::commit_settings(app, |s| s.tun_enabled = Some(enable));
-    if result.is_ok() {
-        // The preference a TUN flow just recorded is the state the core
-        // is in (or is about to be restarted into) on the user's own
-        // behalf, so a live override an override script left behind must
-        // not shadow it.
-        clear_live_tun_override();
-    }
-    result
+    sync_tun_settings_with_epoch(app, enable).map(|_| ())
+}
+
+/// [`sync_tun_settings`], returning the live-state generation its drop of
+/// the override produced, read under the same lock as the drop: a
+/// reconciliation that publishes right after cannot be mistaken for it.
+pub fn sync_tun_settings_with_epoch(app: &AppHandle, enable: bool) -> Result<u64, String> {
+    crate::commit_settings(app, |s| s.tun_enabled = Some(enable))?;
+    // The preference a TUN flow just recorded is the state the core
+    // is in (or is about to be restarted into) on the user's own
+    // behalf, so a live override an override script left behind must
+    // not shadow it.
+    let mut guard = lock_live_tun_override();
+    guard.0 = None;
+    guard.1 = guard.1.wrapping_add(1);
+    Ok(guard.1)
 }
 
 /// Record TUN as off after the root core is already gone.
@@ -1990,6 +2012,14 @@ fn record_tun_reconciled(
     published
 }
 
+/// The `tun_enabled` preference saved in `settings.json`, when it has one.
+#[cfg(any(target_os = "windows", test))]
+fn saved_tun_pref(settings_file: &std::path::Path) -> Option<bool> {
+    let text = std::fs::read_to_string(settings_file).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("tun_enabled")?.as_bool()
+}
+
 /// Initialize TUN mode flag from config file (call at app startup)
 pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
@@ -2002,8 +2032,18 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let content =
         std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
-    // Check if TUN is enabled in config
-    let tun_enabled = extract_tun_enabled_from_yaml(&content);
+    // Check if TUN is enabled in config. On Windows an elevated session leaves
+    // `tun: enable: true` behind, but a normal launch starts the core without
+    // TUN (see `Settings::to_global_prefs`): the flag must say so too. The
+    // other way round, the normal instance that relaunched as administrator
+    // wrote `tun: false`, and the elevated core starts with the saved
+    // preference instead: follow that preference when there is one.
+    let in_config = extract_tun_enabled_from_yaml(&content);
+    #[cfg(target_os = "windows")]
+    let tun_enabled = crate::elevation::is_elevated()
+        && saved_tun_pref(&paths.app_data_dir.join("settings.json")).unwrap_or(in_config);
+    #[cfg(not(target_os = "windows"))]
+    let tun_enabled = in_config;
 
     set_tun_mode(tun_enabled);
     emit_info!(
