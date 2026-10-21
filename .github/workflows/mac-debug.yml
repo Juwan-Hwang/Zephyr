@@ -1,0 +1,175 @@
+name: Mac Debug Session
+
+# Manually started interactive macOS session for hands-on testing.
+# Builds Zephyr from the ref this workflow is run on, puts the app on the
+# runner's desktop, enables screen sharing, and opens an SSH session
+# restricted to the repo owner — so unreleased code can be clicked
+# through on a real Mac before it ships. If the build fails, the session
+# still opens so the failure can be inspected on the machine.
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "How long the session stays open after the build, in minutes (max 240)"
+        type: number
+        default: 60
+
+permissions:
+  contents: read
+
+jobs:
+  mac-debug:
+    # The interactive session only makes sense for the repo owner, and
+    # action-tmate additionally restricts SSH access to their GitHub keys.
+    if: github.actor == 'Juwan-Hwang'
+    runs-on: macos-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Fail fast on a bad session length instead of after the build:
+      # a number input accepts 0, fractions and values past the stated max.
+      - name: Validate session length
+        id: validate
+        env:
+          SESSION_MINUTES: ${{ inputs.session_minutes }}
+        run: |
+          set -euo pipefail
+          case "$SESSION_MINUTES" in
+            ''|*[!0-9]*)
+              echo "session_minutes must be a whole number of minutes." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$SESSION_MINUTES" -lt 1 ] || [ "$SESSION_MINUTES" -gt 240 ]; then
+            echo "session_minutes must be between 1 and 240." >&2
+            exit 1
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+
+      - name: Add Rust target for Apple Silicon
+        run: rustup target add aarch64-apple-darwin
+
+      # This workflow never touches signing secrets, so a build cache is
+      # safe here (unlike the release job) and keeps rebuilds fast.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            . -> target
+
+      - name: Install dependencies (macOS)
+        run: |
+          brew install pkg-config glib
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+          echo "PKG_CONFIG_SYSROOT_DIR=${SDK_PATH}" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: pnpm install --ignore-scripts && pnpm rebuild esbuild @parcel/watcher
+
+      - name: Download bundled resources (mihomo core and geo data)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BUNDLED="apps/desktop/src-tauri/bundled"
+          mkdir -p "$BUNDLED"
+          MIHOMO_VERSION=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq .tag_name)
+          echo "mihomo version: $MIHOMO_VERSION"
+          gh release download "$MIHOMO_VERSION" --repo MetaCubeX/mihomo \
+            --pattern "mihomo-darwin-arm64-${MIHOMO_VERSION}.gz" --dir "$RUNNER_TEMP/mihomo"
+          MIHOMO_ASSET="mihomo-darwin-arm64-${MIHOMO_VERSION}.gz"
+          MIHOMO_DIGEST=$(gh api "repos/MetaCubeX/mihomo/releases/tags/${MIHOMO_VERSION}" \
+            --jq ".assets[] | select(.name == \"${MIHOMO_ASSET}\") | .digest // empty")
+          if [ -z "$MIHOMO_DIGEST" ]; then
+            echo "SHA256 digest not available for $MIHOMO_ASSET" >&2
+            exit 1
+          fi
+          EXPECTED_MIHOMO=$(echo "$MIHOMO_DIGEST" | sed 's/^sha256://')
+          ACTUAL_MIHOMO=$(shasum -a 256 "$RUNNER_TEMP/mihomo/$MIHOMO_ASSET" | cut -d' ' -f1)
+          if [ "$EXPECTED_MIHOMO" != "$ACTUAL_MIHOMO" ]; then
+            echo "SHA256 mismatch for $MIHOMO_ASSET" >&2
+            exit 1
+          fi
+          gunzip -c "$RUNNER_TEMP/mihomo/mihomo-darwin-arm64-${MIHOMO_VERSION}.gz" > "$BUNDLED/zephyr-mihomo"
+          chmod +x "$BUNDLED/zephyr-mihomo"
+          for file in geoip.dat geosite.dat Country.mmdb; do
+            curl -fsSL --proto =https -o "$BUNDLED/$file" \
+              "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/$file"
+            curl -fsSL --proto =https -o "$RUNNER_TEMP/$file.sha256sum" \
+              "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/$file.sha256sum"
+            EXPECTED=$(cut -d' ' -f1 "$RUNNER_TEMP/$file.sha256sum")
+            ACTUAL=$(shasum -a 256 "$BUNDLED/$file" | cut -d' ' -f1)
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "SHA256 mismatch for $file" >&2
+              exit 1
+            fi
+          done
+          ls -la "$BUNDLED"
+
+      - name: Build Zephyr (app bundle only)
+        run: pnpm --filter @zephyr/desktop tauri build --target aarch64-apple-darwin --bundles app
+
+      - name: Put the built app on the desktop
+        run: |
+          set -euo pipefail
+          cp -R "target/aarch64-apple-darwin/release/bundle/macos/Zephyr.app" "$HOME/Desktop/"
+          echo "App ready at: $HOME/Desktop/Zephyr.app"
+          sw_vers
+          uname -m
+
+      - name: Enable screen sharing (VNC)
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          vnc_pw=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 10)
+          echo "::add-mask::$vnc_pw"
+          echo "VNC_PASSWORD=$vnc_pw" >> "$GITHUB_ENV"
+          printf '%s' "$vnc_pw" > "$HOME/vnc-password.txt"
+          chmod 600 "$HOME/vnc-password.txt"
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw "$vnc_pw" \
+            -restart -agent -privs -all
+          echo "Screen sharing enabled."
+
+      - name: Write connection instructions
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' }}
+        run: |
+          {
+            echo "## Mac debug session"
+            echo ""
+            echo "This run built Zephyr from ref \`${GITHUB_REF_NAME}\`. If the build succeeded, Zephyr.app is on the runner's desktop."
+            echo ""
+            echo "1. Take the SSH command printed by the tmate step in this run's log and insert the VNC port forward right after its ssh, then connect with that command:"
+            echo ""
+            echo '        ssh -L 5900:localhost:5900 <the rest of the tmate ssh command>'
+            echo ""
+            echo "2. Open a VNC client at vnc://localhost:5900. The password is not printed in the log: inside the SSH session, read it with \`cat ~/vnc-password.txt\` (the port is only reachable through the SSH tunnel, and SSH itself is restricted to the repo owner's GitHub keys)."
+            echo "3. Double-click Zephyr.app on the desktop to run it."
+            echo "4. To end the session, cancel this workflow run. The run is marked failed when the session times out — that is expected."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open the interactive session
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' }}
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
+        timeout-minutes: ${{ inputs.session_minutes }}
+        with:
+          limit-access-to-actor: true
