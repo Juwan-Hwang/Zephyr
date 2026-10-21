@@ -11,6 +11,7 @@ import { fetchProxyGroups } from './proxy-groups.js';
 import { sortProxiesByLatency, syncCoreConfig, renderProxies, notifySwitchFailed, resolveLeafNode } from './proxies.js';
 import { appStore } from './state.js';
 import { invalidateProxiesCache, getSettingsCached } from './cache.js';
+import { activeProfile } from './active-profile.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { resetObservedGroup } from './observed-group.js';
 import { getDelayColorClass } from '../utils/format.js';
@@ -207,7 +208,7 @@ async function afterWheelSwitch(targetGroup, name, currentSession) {
         // node. Only a newer switch the core also accepted makes it stale.
         if (_acceptedSession !== currentSession) return;
         const settings = await getSettingsCached();
-        const profileName = settings?.last_config;
+        const profileName = activeProfile(settings, 'config.yaml');
         if (profileName && _acceptedSession === currentSession) {
             await saveProxySelection(profileName, { node: name, group: targetGroup });
         }
