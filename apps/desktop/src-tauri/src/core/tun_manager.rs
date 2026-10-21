@@ -1625,8 +1625,14 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let content =
         std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
-    // Check if TUN is enabled in config
-    let tun_enabled = extract_tun_enabled_from_yaml(&content);
+    // Check if TUN is enabled in config. On Windows an elevated session leaves
+    // `tun: enable: true` behind, but a normal launch starts the core without
+    // TUN (see `Settings::to_global_prefs`): the flag must say so too.
+    let in_config = extract_tun_enabled_from_yaml(&content);
+    #[cfg(target_os = "windows")]
+    let tun_enabled = in_config && crate::elevation::is_elevated();
+    #[cfg(not(target_os = "windows"))]
+    let tun_enabled = in_config;
 
     set_tun_mode(tun_enabled);
     emit_info!(

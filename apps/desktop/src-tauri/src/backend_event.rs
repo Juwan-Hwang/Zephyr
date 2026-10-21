@@ -332,6 +332,8 @@ pub mod codes {
     pub const SYS_NETWORK_COORDINATOR_APPLIED: u16 = 6023;
     /// Error during network coordinator auto-apply.
     pub const SYS_NETWORK_COORDINATOR_ERROR: u16 = 6024;
+    /// The previous instance overran its shutdown during an elevated relaunch (Windows).
+    pub const SYS_INSTANCE_REPLACED: u16 = 6025;
 
     // Updater: 7000-7999
     pub const UPDATE_CHECK_FAILED: u16 = 7001;
