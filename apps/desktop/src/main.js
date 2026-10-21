@@ -669,6 +669,33 @@ async function initApp() {
     }
   });
 
+  // 9c. The backend restarted an unresponsive core after sleep: follow it like
+  //     any restart made here (new secret, overrides, remembered delays).
+  listen('core-restarted-after-resume', async (/** @type {any} */ event) => {
+    const r = event?.payload;
+    if (r?.port) {
+      setBaseUrl(`http://127.0.0.1:${r.port}`);
+      setWsBaseUrl(`ws://127.0.0.1:${r.port}`);
+    }
+    if (typeof r?.secret === 'string') {
+      setSecret(r.secret);
+      setWsSecret(r.secret);
+    }
+    Bus.emit(Events.CORE_RESTARTED, {});
+    try {
+      const { postRestartRecovery } = await import('./ui/lifecycle.js');
+      /** @type {any} */
+      const settings = await invoke(COMMANDS.GET_SETTINGS);
+      await postRestartRecovery(r?.active_config || settings?.last_config || 'config.yaml');
+    } catch (err) {
+      apiLogger.warn('Recovery after the resume restart failed', err);
+    }
+  }).then((unlisten) => {
+    registerCleanup(unlisten);
+  }).catch((err) => {
+    apiLogger.warn('Failed to listen for core restarts after resume', err);
+  });
+
   // 10b. Apply home page mode changes immediately when the user toggles
   //      the setting, so the visible page switches without requiring a
   //      manual navigation away and back.

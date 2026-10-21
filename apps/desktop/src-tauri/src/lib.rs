@@ -24,6 +24,7 @@ pub mod minisign_verify;
 pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
+pub mod process_icon;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -1995,6 +1996,7 @@ invalidate_heartbeat(window.app_handle());
             get_core_version,
             get_core_uptime,
             exempt_uwp_apps,
+            process_icon::get_process_icon,
             read_config_file,
             write_config_file,
             open_config_folder,
@@ -2378,7 +2380,7 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
     let state = app.state::<MihomoState>();
     // On success, start_core_inner already notifies the coordinator with a
     // Manual event, so no duplicate notification is needed here.
-    if let Err(e) = core_manager::core::core_process::start_core_inner(
+    match core_manager::core::core_process::start_core_inner(
         app.clone(),
         state,
         config,
@@ -2388,11 +2390,22 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
     )
     .await
     {
-        crate::emit_error!(
+        // The page follows it like any restart it made itself: the new
+        // secret, overrides re-applied, delays of the old instance dropped.
+        Ok(result) => crate::backend_event::emit_to_main(
+            app,
+            "core-restarted-after-resume",
+            serde_json::json!({
+                "port": result.port,
+                "secret": result.secret,
+                "active_config": result.active_config,
+            }),
+        ),
+        Err(e) => crate::emit_error!(
             System,
             SYS_RESUMED_CORE_RESTART,
             "Failed to restart core after resume: {e}"
-        );
+        ),
     }
 }
 
