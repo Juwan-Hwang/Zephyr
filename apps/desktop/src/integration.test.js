@@ -15,6 +15,9 @@
 // A failure here means a "silent" integration bug that unit tests cannot catch.
 
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { COMMANDS, PRISM, RULE } from '@zephyr/shared';
 import { translations } from './i18n.js';
 
@@ -443,7 +446,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'tray-tun-changed',      // tray.rs:302
         'tray-proxy-changed',    // tray.rs:252
         'global-shortcut',       // global_shortcut.rs:82
-        'core-download-status',  // updater.rs:95
+        'core-download-status',  // updater.rs:562
         'backend-event',         // backend_event.rs:136 (infrastructure event)
         'network-state-changed', // network_coordinator.rs:108
     ];
@@ -460,7 +463,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'global-shortcut',           // ui/global-shortcut.js:474
         'profiles-imported',         // ui/settings.js:1035
         'prism-event',               // ui/logs.js:371
-        'core-download-status',      // ui/client-updater.js:48
+        'core-download-status',      // ui/update-dialog.js
         'backend-event',             // ui/logs.js:445 (prism logs via backend_event.rs)
         'network-state-changed',      // main.js (network coordinator UI updates)
     ];
@@ -475,6 +478,35 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
                 ? `Backend emits these events but no frontend listens:\n  ${orphanEmits.join('\n  ')}`
                 : 'all backend events have frontend listeners'
         ).toEqual([]);
+    });
+
+    // The lists above are kept by hand: check each entry against the code, so
+    // a listener or emitter that is removed or renamed fails here.
+    const sourceFiles = (/** @type {string} */ dir, /** @type {RegExp} */ ext) => {
+        /** @type {string[]} */
+        const out = [];
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name !== 'node_modules' && entry.name !== 'src-tauri') out.push(...sourceFiles(full, ext));
+            } else if (ext.test(entry.name) && !/\.test\.js$/.test(entry.name)) {
+                out.push(readFileSync(full, 'utf8'));
+            }
+        }
+        return out;
+    };
+    const srcDir = dirname(fileURLToPath(import.meta.url));
+
+    it('every listed frontend event is still listened to in the frontend code', () => {
+        const code = sourceFiles(srcDir, /\.js$/).join('\n');
+        const missing = frontendListenedEvents.filter((e) => !new RegExp(`listen\\(\\s*['"\`]${e}['"\`]`).test(code));
+        expect(missing).toEqual([]);
+    });
+
+    it('every listed backend event is still emitted by the backend code', () => {
+        const code = sourceFiles(join(srcDir, '..', 'src-tauri', 'src'), /\.rs$/).join('\n');
+        const missing = backendEmittedEvents.filter((e) => !code.includes(`"${e}"`));
+        expect(missing).toEqual([]);
     });
 
     it('every frontend-listened event has a backend emitter', () => {

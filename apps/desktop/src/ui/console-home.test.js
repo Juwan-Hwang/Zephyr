@@ -307,6 +307,22 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             expect(showNotification).not.toHaveBeenCalledWith(t('consoleWidthTip'), 'info', null, { log: false });
         });
 
+        it('saves the mode only after a settings write already queued', async () => {
+            const { queueSmartConfigWrite } = await import('./settings/auto-switch.js');
+            appStore.set('homePageMode', 'minimal');
+            let release;
+            const earlier = queueSmartConfigWrite(() => new Promise((resolve) => { release = resolve; }));
+            invoke.mockClear();
+            const p = switchHomePageMode('console', vi.fn());
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(invoke).not.toHaveBeenCalledWith('patch_settings', { patch: { home_page_mode: 'console' } });
+            release();
+            await earlier;
+            await p;
+            expect(invoke).toHaveBeenCalledWith('patch_settings', { patch: { home_page_mode: 'console' } });
+        });
+
         it('prevents concurrent mode switches — second call is a no-op while first is in flight', async () => {
             appStore.set('homePageMode', 'minimal');
             const setHomeModeUIMock = vi.fn();
