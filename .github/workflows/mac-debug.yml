@@ -3,10 +3,36 @@ name: Mac Debug Session
 # Manually started interactive macOS session for hands-on testing.
 # Builds Zephyr from the ref this workflow is run on, puts the app on the
 # runner's desktop, joins the runner to the repo owner's Tailscale
-# network, and enables SSH and screen sharing at the runner's tailnet
+# network, and enables SSH and a VNC desktop at the runner's tailnet
 # address — so unreleased code can be clicked through on a real Mac
 # before it ships. If the build fails, the session still opens so the
 # failure can be inspected on the machine.
+#
+# The job runs on macos-26: debug sessions should use the newest
+# macOS (26), not an older image. macos-26 is a family label, so the
+# exact image still refreshes within macOS 26 over time — that is
+# intended here; what matters is the session is never held back on
+# an older macOS release.
+#
+# The desktop is not served by Apple's screen sharing. That service
+# was falsified on the hosted images in four end-to-end trial runs:
+# with the legacy VNC password (security type 2) and with account
+# authentication (Apple's DH scheme, security type 30) alike, on
+# macos-14 and macos-15, it completed logins and delivered
+# full-size frames that were 100% black — its capture path does
+# not see the console display there — while a console screenshot
+# taken in the same jobs showed a healthy desktop. So the VNC step
+# below instead runs Vine Server (OSXvnc) 5.3.2 as an ordinary
+# process inside the console session: it captures the console
+# display itself (CGDisplayCreateImage, the same capture family
+# the healthy screenshot comes from) and serves it with standard
+# VNC authentication (type 2). Before the session opens, the
+# self-check proves the picture with a real VNC login over
+# loopback and a pixel census of the frame, and proves port 5900
+# also answers on the runner's Tailscale address — the address
+# the connection instructions advertise. If the check fails,
+# the session does not open; the screenshot from the self-check is
+# kept as a run artifact either way.
 on:
   workflow_dispatch:
     inputs:
@@ -26,7 +52,8 @@ jobs:
     # the user who started (or re-ran) this run; actor would still name
     # the original starter on a re-run.
     if: github.triggering_actor == 'Juwan-Hwang'
-    runs-on: macos-latest
+    # Newest macOS (26): see the note at the top of this file.
+    runs-on: macos-26
     timeout-minutes: 360
     steps:
       - name: Checkout repository
@@ -194,29 +221,518 @@ jobs:
           sudo systemsetup -setremotelogin on
           echo "SSH enabled for ${SESSION_USER}'s GitHub keys."
 
-      - name: Enable screen sharing (VNC)
+      - name: Start the VNC server (Vine Server in the console session)
         id: vnc
         if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' }}
         run: |
           set -euo pipefail
-          # Legacy VNC authentication only uses the first eight
-          # characters, so generate exactly eight: the password in the
-          # file is then the password that actually takes effect.
-          vnc_pw=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 8)
+          # One generated password for the session: the file copy is
+          # what the user types into the VNC client; standard VNC
+          # authentication uses its first eight characters (the
+          # client truncates the password itself).
+          vnc_pw=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
           echo "::add-mask::$vnc_pw"
           echo "VNC_PASSWORD=$vnc_pw" >> "$GITHUB_ENV"
           printf '%s' "$vnc_pw" > "$HOME/vnc-password.txt"
           chmod 600 "$HOME/vnc-password.txt"
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
-            -clientopts -setvncpw -vncpw "$vnc_pw" \
-            -restart -agent -privs -all
-          echo "Screen sharing enabled."
 
+          # Vine Server (OSXvnc), pinned by version and checksum.
+          VINE_VERSION="5.3.2"
+          VINE_DMG="$RUNNER_TEMP/VineServer-${VINE_VERSION}.dmg"
+          VINE_SHA256="9cbea2f972b235029c9d68b15004e3d401668c3a24e86d60719eed26f2cc5a71"
+          curl -fsSL --proto =https -o "$VINE_DMG" \
+            "https://github.com/stweil/OSXvnc/releases/download/V${VINE_VERSION}/VineServer-${VINE_VERSION}.dmg"
+          ACTUAL_SHA256=$(shasum -a 256 "$VINE_DMG" | cut -d' ' -f1)
+          if [ "$ACTUAL_SHA256" != "$VINE_SHA256" ]; then
+            echo "SHA256 mismatch for VineServer-${VINE_VERSION}.dmg" >&2
+            exit 1
+          fi
+          VINE_MOUNT=$(hdiutil attach -nobrowse -readonly "$VINE_DMG" | awk -F'\t' '/\/Volumes\//{gsub(/^ +| +$/, "", $NF); print $NF; exit}')
+          if [ -z "$VINE_MOUNT" ]; then
+            echo "Could not mount VineServer-${VINE_VERSION}.dmg." >&2
+            exit 1
+          fi
+          VINE_APP_SRC=$(find "$VINE_MOUNT" -maxdepth 3 -name 'Vine Server.app' -type d | head -n 1)
+          if [ -z "$VINE_APP_SRC" ]; then
+            echo "VineServer-${VINE_VERSION}.dmg does not contain Vine Server.app." >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/vine-server"
+          ditto "$VINE_APP_SRC" "$HOME/vine-server/Vine Server.app"
+          hdiutil detach "$VINE_MOUNT" -quiet
+          VINE_APP="$HOME/vine-server/Vine Server.app"
+          OSXvnc_BIN=$(find "$VINE_APP" -name 'OSXvnc-server' -type f | head -n 1)
+          STOREPASSWD_BIN=$(find "$VINE_APP" -name 'storepasswd' -type f | head -n 1)
+          if [ -z "$OSXvnc_BIN" ] || [ -z "$STOREPASSWD_BIN" ]; then
+            echo "Vine Server.app does not contain the expected server binaries." >&2
+            exit 1
+          fi
+          chmod +x "$OSXvnc_BIN" "$STOREPASSWD_BIN"
+          # OSXvnc-server lowercases its command-line arguments, so
+          # the password file has to live at an all-lowercase path.
+          "$STOREPASSWD_BIN" "$vnc_pw" "$HOME/vnc-passwd"
+          chmod 600 "$HOME/vnc-passwd"
+          nohup "$OSXvnc_BIN" -rfbport 5900 -rfbauth "$HOME/vnc-passwd" > "$RUNNER_TEMP/osxvnc.log" 2>&1 &
+          VINE_PID=$!
+          LISTENING=""
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$VINE_PID" 2>/dev/null; then
+              echo "OSXvnc-server exited during startup." >&2
+              cat "$RUNNER_TEMP/osxvnc.log" >&2
+              exit 1
+            fi
+            if nc -z 127.0.0.1 5900 2>/dev/null; then
+              LISTENING=1
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$LISTENING" ]; then
+            echo "OSXvnc-server is not listening on port 5900." >&2
+            cat "$RUNNER_TEMP/osxvnc.log" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/osxvnc.log"
+          echo "Vine Server (OSXvnc) is listening on port 5900."
+
+      # "Listening" is not proof: Apple's sharing service listened
+      # and authenticated yet served an all-black picture, and the
+      # user only found out after connecting by hand. So before the
+      # session opens, prove the desktop end to end from the runner
+      # itself: capture a screenshot (kept as a run artifact below)
+      # and complete a real VNC login over loopback, then check that
+      # the frame the server sends is not all black.
+      - name: Verify screen sharing end to end
+        id: verify
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' && steps.ssh.outcome == 'success' && steps.vnc.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          screencapture -x "$RUNNER_TEMP/desktop.png"
+          if [ ! -s "$RUNNER_TEMP/desktop.png" ]; then
+            echo "screencapture produced no screenshot." >&2
+            exit 1
+          fi
+          echo "Screenshot captured: $RUNNER_TEMP/desktop.png"
+          echo "---- OSXvnc server log ----"
+          cat "$RUNNER_TEMP/osxvnc.log" || true
+          echo "---- end of server log ----"
+          cat > "$RUNNER_TEMP/rfb_probe.py" <<'PYEOF'
+          #!/usr/bin/env python3
+          """End-to-end VNC probe: handshake, authentication, one full
+          framebuffer update, and a non-black pixel census.
+
+          The authentication scheme follows what the server offers: Apple DH
+          authentication (security type 30, account credentials) when offered,
+          otherwise standard VNC authentication (security type 2, DES
+          challenge-response; the effective password is the first eight
+          characters of VNC_PASSWORD).
+
+          Exit 0 only if every stage succeeds and the frame is not (near-)black.
+          Credentials come from the environment: VNC_USER (default "runner",
+          only used by type 30) and VNC_PASSWORD. Host/port default to
+          127.0.0.1:5900 (VNC_PORT overrides).
+          """
+          import hashlib
+          import os
+          import socket
+          import struct
+          import sys
+
+          # ---------------- AES-128 (encryption only, for ARD credentials) ----------------
+
+          def _gf_mul(a, b):
+              r = 0
+              while b:
+                  if b & 1:
+                      r ^= a
+                  a = ((a << 1) ^ (0x1B if a & 0x80 else 0)) & 0xFF
+                  b >>= 1
+              return r
+
+
+          def _gf_pow(a, e):
+              r = 1
+              while e:
+                  if e & 1:
+                      r = _gf_mul(r, a)
+                  a = _gf_mul(a, a)
+                  e >>= 1
+              return r
+
+
+          def _make_sbox():
+              box = []
+              for i in range(256):
+                  inv = 0 if i == 0 else _gf_pow(i, 254)
+                  s = inv
+                  for rot in (1, 2, 3, 4):
+                      s ^= ((inv << rot) | (inv >> (8 - rot))) & 0xFF
+                  box.append((s ^ 0x63) & 0xFF)
+              return box
+
+
+          _SBOX = _make_sbox()
+          _RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
+
+
+          def _expand_key(key):
+              # Returns 11 round keys of 16 bytes (column-major, like the state).
+              w = list(key)
+              for i in range(4, 44):
+                  temp = w[4 * (i - 1):4 * i]
+                  if i % 4 == 0:
+                      temp = [_SBOX[temp[1]] ^ _RCON[i // 4 - 1],
+                              _SBOX[temp[2]], _SBOX[temp[3]], _SBOX[temp[0]]]
+                  w.extend(w[4 * (i - 4) + j] ^ temp[j] for j in range(4))
+              return [w[16 * r:16 * r + 16] for r in range(11)]
+
+
+          def _shift_rows(state):
+              out = [0] * 16
+              for c in range(4):
+                  for r in range(4):
+                      out[4 * c + r] = state[4 * ((c + r) % 4) + r]
+              return out
+
+
+          def _mix_columns(state):
+              out = [0] * 16
+              for c in range(4):
+                  a = state[4 * c:4 * c + 4]
+                  out[4 * c + 0] = _gf_mul(a[0], 2) ^ _gf_mul(a[1], 3) ^ a[2] ^ a[3]
+                  out[4 * c + 1] = a[0] ^ _gf_mul(a[1], 2) ^ _gf_mul(a[2], 3) ^ a[3]
+                  out[4 * c + 2] = a[0] ^ a[1] ^ _gf_mul(a[2], 2) ^ _gf_mul(a[3], 3)
+                  out[4 * c + 3] = _gf_mul(a[0], 3) ^ a[1] ^ a[2] ^ _gf_mul(a[3], 2)
+              return out
+
+
+          def aes128_encrypt_block(key, block):
+              round_keys = _expand_key(key)
+              state = [b ^ k for b, k in zip(block, round_keys[0])]
+              for rnd in range(1, 10):
+                  state = [_SBOX[b] for b in state]
+                  state = _shift_rows(state)
+                  state = _mix_columns(state)
+                  state = [b ^ k for b, k in zip(state, round_keys[rnd])]
+              state = [_SBOX[b] for b in state]
+              state = _shift_rows(state)
+              state = [b ^ k for b, k in zip(state, round_keys[10])]
+              return bytes(state)
+
+
+          def aes128_ecb_encrypt(key, data):
+              return b"".join(aes128_encrypt_block(key, data[i:i + 16])
+                              for i in range(0, len(data), 16))
+
+
+          # ---------------- DES (encryption only, for VNC authentication) ----------------
+
+          _IP = (58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4,
+                 62, 54, 46, 38, 30, 22, 14, 6, 64, 56, 48, 40, 32, 24, 16, 8,
+                 57, 49, 41, 33, 25, 17, 9, 1, 59, 51, 43, 35, 27, 19, 11, 3,
+                 61, 53, 45, 37, 29, 21, 13, 5, 63, 55, 47, 39, 31, 23, 15, 7)
+          _FP = (40, 8, 48, 16, 56, 24, 64, 32, 39, 7, 47, 15, 55, 23, 63, 31,
+                 38, 6, 46, 14, 54, 22, 62, 30, 37, 5, 45, 13, 53, 21, 61, 29,
+                 36, 4, 44, 12, 52, 20, 60, 28, 35, 3, 43, 11, 51, 19, 59, 27,
+                 34, 2, 42, 10, 50, 18, 58, 26, 33, 1, 41, 9, 49, 17, 57, 25)
+          _E = (32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9, 8, 9, 10, 11, 12, 13,
+                12, 13, 14, 15, 16, 17, 16, 17, 18, 19, 20, 21, 20, 21, 22, 23,
+                24, 25, 24, 25, 26, 27, 28, 29, 28, 29, 30, 31, 32, 1)
+          _P = (16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10,
+                2, 8, 24, 14, 32, 27, 3, 9, 19, 13, 30, 6, 22, 11, 4, 25)
+          _PC1 = (57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18,
+                  10, 2, 59, 51, 43, 35, 27, 19, 11, 3, 60, 52, 44, 36,
+                  63, 55, 47, 39, 31, 23, 15, 7, 62, 54, 46, 38, 30, 22,
+                  14, 6, 61, 53, 45, 37, 29, 21, 13, 5, 28, 20, 12, 4)
+          _PC2 = (14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10,
+                  23, 19, 12, 4, 26, 8, 16, 7, 27, 20, 13, 2,
+                  41, 52, 31, 37, 47, 55, 30, 40, 51, 45, 33, 48,
+                  44, 49, 39, 56, 34, 53, 46, 42, 50, 36, 29, 32)
+          _ROT = (1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1)
+          _DES_SBOX = (
+              (14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7,
+               0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12, 11, 9, 5, 3, 8,
+               4, 1, 14, 8, 13, 6, 2, 11, 15, 12, 9, 7, 3, 10, 5, 0,
+               15, 12, 8, 2, 4, 9, 1, 7, 5, 11, 3, 14, 10, 0, 6, 13),
+              (15, 1, 8, 14, 6, 11, 3, 4, 9, 7, 2, 13, 12, 0, 5, 10,
+               3, 13, 4, 7, 15, 2, 8, 14, 12, 0, 1, 10, 6, 9, 11, 5,
+               0, 14, 7, 11, 10, 4, 13, 1, 5, 8, 12, 6, 9, 3, 2, 15,
+               13, 8, 10, 1, 3, 15, 4, 2, 11, 6, 7, 12, 0, 5, 14, 9),
+              (10, 0, 9, 14, 6, 3, 15, 5, 1, 13, 12, 7, 11, 4, 2, 8,
+               13, 7, 0, 9, 3, 4, 6, 10, 2, 8, 5, 14, 12, 11, 15, 1,
+               13, 6, 4, 9, 8, 15, 3, 0, 11, 1, 2, 12, 5, 10, 14, 7,
+               1, 10, 13, 0, 6, 9, 8, 7, 4, 15, 14, 3, 11, 5, 2, 12),
+              (7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15,
+               13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2, 12, 1, 10, 14, 9,
+               10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4,
+               3, 15, 0, 6, 10, 1, 13, 8, 9, 4, 5, 11, 12, 7, 2, 14),
+              (2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9,
+               14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15, 10, 3, 9, 8, 6,
+               4, 2, 1, 11, 10, 13, 7, 8, 15, 9, 12, 5, 6, 3, 0, 14,
+               11, 8, 12, 7, 1, 14, 2, 13, 6, 15, 0, 9, 10, 4, 5, 3),
+              (12, 1, 10, 15, 9, 2, 6, 8, 0, 13, 3, 4, 14, 7, 5, 11,
+               10, 15, 4, 2, 7, 12, 9, 5, 6, 1, 13, 14, 0, 11, 3, 8,
+               9, 14, 15, 5, 2, 8, 12, 3, 7, 0, 4, 10, 1, 13, 11, 6,
+               4, 3, 2, 12, 9, 5, 15, 10, 11, 14, 1, 7, 6, 0, 8, 13),
+              (4, 11, 2, 14, 15, 0, 8, 13, 3, 12, 9, 7, 5, 10, 6, 1,
+               13, 0, 11, 7, 4, 9, 1, 10, 14, 3, 5, 12, 2, 15, 8, 6,
+               1, 4, 11, 13, 12, 3, 7, 14, 10, 15, 6, 8, 0, 5, 9, 2,
+               6, 11, 13, 8, 1, 4, 10, 7, 9, 5, 0, 15, 14, 2, 3, 12),
+              (13, 2, 8, 4, 6, 15, 11, 1, 10, 9, 3, 14, 5, 0, 12, 7,
+               1, 15, 13, 8, 10, 3, 7, 4, 12, 5, 6, 11, 0, 14, 9, 2,
+               7, 11, 4, 1, 9, 12, 14, 2, 0, 6, 10, 13, 15, 3, 5, 8,
+               2, 1, 14, 7, 4, 10, 8, 13, 15, 12, 9, 0, 3, 5, 6, 11),
+          )
+
+
+          def _permute(value, table, inbits):
+              out = 0
+              for pos in table:
+                  out = (out << 1) | ((value >> (inbits - pos)) & 1)
+              return out
+
+
+          def _des_f(r, k):
+              x = _permute(r, _E, 32) ^ k
+              out = 0
+              for i in range(8):
+                  six = (x >> (42 - 6 * i)) & 0x3F
+                  row = ((six & 0x20) >> 4) | (six & 0x01)
+                  col = (six >> 1) & 0x0F
+                  out = (out << 4) | _DES_SBOX[i][row * 16 + col]
+              return _permute(out, _P, 32)
+
+
+          def des_encrypt_block(key_bytes, block):
+              key = _permute(int.from_bytes(key_bytes, "big"), _PC1, 64)
+              c = (key >> 28) & 0x0FFFFFFF
+              d = key & 0x0FFFFFFF
+              v = _permute(int.from_bytes(block, "big"), _IP, 64)
+              l = (v >> 32) & 0xFFFFFFFF
+              r = v & 0xFFFFFFFF
+              for rot in _ROT:
+                  c = ((c << rot) | (c >> (28 - rot))) & 0x0FFFFFFF
+                  d = ((d << rot) | (d >> (28 - rot))) & 0x0FFFFFFF
+                  subkey = _permute((c << 28) | d, _PC2, 56)
+                  l, r = r, l ^ _des_f(r, subkey)
+              return _permute((r << 32) | l, _FP, 64).to_bytes(8, "big")
+
+
+          def _reverse_bits(byte):
+              return int(f"{byte:08b}"[::-1], 2)
+
+
+          def vnc_des_response(password, challenge):
+              # Standard VNC authentication: DES under the password's first eight
+              # bytes, with each key byte's bits reversed — a quirk of the
+              # original implementation that every VNC implementation has kept.
+              raw = password.encode("utf-8")[:8].ljust(8, b"\x00")
+              key = bytes(_reverse_bits(b) for b in raw)
+              return (des_encrypt_block(key, challenge[:8])
+                      + des_encrypt_block(key, challenge[8:16]))
+
+
+          # ---------------- RFB probe ----------------
+
+          def recv_exact(sock, n):
+              data = b""
+              while len(data) < n:
+                  chunk = sock.recv(n - len(data))
+                  if not chunk:
+                      raise ConnectionError("server closed the connection")
+                  data += chunk
+              return data
+
+
+          def main():
+              # FIPS-197 known-answer tests for the embedded AES.
+              if aes128_encrypt_block(bytes.fromhex("000102030405060708090a0b0c0d0e0f"),
+                                      bytes.fromhex("00112233445566778899aabbccddeeff")
+                                      ).hex() != "69c4e0d86a7b0430d8cdb78070b4c55a":
+                  print("FAIL: internal AES self-test did not match the FIPS-197 test vector.")
+                  return 1
+              if aes128_encrypt_block(b"\x00" * 16, b"\x00" * 16
+                                      ).hex() != "66e94bd4ef8a2c3b884cfa59ca342b2e":
+                  print("FAIL: internal AES self-test did not match the all-zero test vector.")
+                  return 1
+
+              # FIPS-46 known-answer tests for the embedded DES.
+              if des_encrypt_block(bytes.fromhex("0123456789abcdef"),
+                                   bytes.fromhex("4e6f772069732074")
+                                   ).hex() != "3fa40e8a984d4815":
+                  print("FAIL: internal DES self-test did not match the FIPS-46 test vector.")
+                  return 1
+              if des_encrypt_block(b"\x00" * 8, b"\x00" * 8
+                                   ).hex() != "8ca64de9c1b123a7":
+                  print("FAIL: internal DES self-test did not match the all-zero test vector.")
+                  return 1
+
+              username = os.environ.get("VNC_USER", "runner")
+              password = os.environ.get("VNC_PASSWORD", "")
+              if not password:
+                  print("FAIL: VNC_PASSWORD is not set in this step's environment.")
+                  return 1
+              port = int(os.environ.get("VNC_PORT", "5900"))
+
+              sock = socket.create_connection(("127.0.0.1", port), timeout=30)
+              sock.settimeout(30)
+              banner = recv_exact(sock, 12)
+              if not banner.startswith(b"RFB "):
+                  print(f"FAIL: unexpected RFB banner: {banner!r}")
+                  return 1
+              print(f"RFB banner: {banner.decode('ascii', 'replace').strip()}")
+              sock.sendall(b"RFB 003.008\n")
+
+              ntypes = recv_exact(sock, 1)[0]
+              if ntypes == 0:
+                  reason_len = struct.unpack(">I", recv_exact(sock, 4))[0]
+                  reason = recv_exact(sock, reason_len).decode("utf-8", "replace")
+                  print(f"FAIL: server refused the connection: {reason}")
+                  return 1
+              types = list(recv_exact(sock, ntypes))
+              print(f"Security types offered: {types}")
+              if 30 in types:
+                  sock.sendall(bytes([30]))
+
+                  # ARD authentication: Diffie-Hellman exchange, then the credentials
+                  # (username[64] + password[64], random filler) encrypted with
+                  # AES-128-ECB under MD5(shared secret). Wire format follows
+                  # libvncclient's HandleARDAuth.
+                  gen = int.from_bytes(recv_exact(sock, 2), "big")
+                  keylen = int.from_bytes(recv_exact(sock, 2), "big")
+                  prime = int.from_bytes(recv_exact(sock, keylen), "big")
+                  peer_pub = int.from_bytes(recv_exact(sock, keylen), "big")
+                  priv = int.from_bytes(os.urandom(keylen), "big") % (prime - 3) + 2
+                  pub = pow(gen, priv, prime)
+                  shared = pow(peer_pub, priv, prime).to_bytes(keylen, "big")
+                  aes_key = hashlib.md5(shared).digest()
+
+                  userpass = bytearray(os.urandom(128))
+                  user_field = username.encode("utf-8")[:63] + b"\x00"
+                  pass_field = password.encode("utf-8")[:63] + b"\x00"
+                  userpass[0:len(user_field)] = user_field
+                  userpass[64:64 + len(pass_field)] = pass_field
+                  sock.sendall(aes128_ecb_encrypt(aes_key, bytes(userpass)))
+                  sock.sendall(pub.to_bytes(keylen, "big"))
+
+                  result = struct.unpack(">I", recv_exact(sock, 4))[0]
+                  if result != 0:
+                      print(f"FAIL: ARD authentication rejected (security result {result}).")
+                      return 1
+                  print(f"ARD authentication succeeded as user '{username}'.")
+              elif 2 in types:
+                  sock.sendall(bytes([2]))
+                  challenge = recv_exact(sock, 16)
+                  sock.sendall(vnc_des_response(password, challenge))
+                  result = struct.unpack(">I", recv_exact(sock, 4))[0]
+                  if result != 0:
+                      print(f"FAIL: VNC authentication rejected (security result {result}).")
+                      return 1
+                  print("VNC authentication succeeded.")
+              else:
+                  print("FAIL: neither Apple DH (type 30) nor standard VNC (type 2) authentication is offered.")
+                  return 1
+
+              # Session setup on the server can take a while after a successful
+              # login (the first trial run authenticated instantly but saw no
+              # ServerInit within the 30 s handshake timeout), so wait longer
+              # for the framebuffer parameters than for the handshake itself.
+              sock.settimeout(120)
+              sock.sendall(b"\x01")  # ClientInit: shared session
+              init = recv_exact(sock, 24)
+              width, height = struct.unpack(">HH", init[:4])
+              name_len = struct.unpack(">I", init[20:24])[0]
+              name = recv_exact(sock, name_len).decode("utf-8", "replace")
+              bpp = init[4] // 8
+              print(f"Framebuffer: {width}x{height}, {init[4]} bpp, desktop '{name}'")
+              if bpp not in (2, 4):
+                  print(f"FAIL: unexpected bytes-per-pixel {bpp}.")
+                  return 1
+
+              # SetEncodings: Raw only. FramebufferUpdateRequest: full frame, not incremental.
+              sock.sendall(struct.pack(">BxH", 2, 1) + struct.pack(">i", 0))
+              sock.sendall(struct.pack(">BBHHHH", 3, 0, 0, 0, width, height))
+
+              total = width * height
+              seen = 0
+              covered = bytearray(total)
+              latest = bytearray(total)
+              while seen < total:
+                  mtype = recv_exact(sock, 1)[0]
+                  if mtype == 1:  # SetColourMapEntries: skip header + entries
+                      hdr = recv_exact(sock, 5)
+                      ncols = struct.unpack(">H", hdr[3:5])[0]
+                      recv_exact(sock, ncols * 6)
+                      continue
+                  if mtype == 2:  # Bell: no payload
+                      continue
+                  if mtype == 3:  # ServerCutText: skip padding + length + text
+                      recv_exact(sock, 3)
+                      tlen = struct.unpack(">I", recv_exact(sock, 4))[0]
+                      recv_exact(sock, tlen)
+                      continue
+                  if mtype != 0:
+                      print(f"FAIL: unexpected server message type {mtype}.")
+                      return 1
+                  recv_exact(sock, 1)  # padding
+                  nrects = struct.unpack(">H", recv_exact(sock, 2))[0]
+                  for _ in range(nrects):
+                      hdr = recv_exact(sock, 12)
+                      rx, ry, rw, rh, enc = struct.unpack(">HHHH i", hdr)
+                      if enc != 0:
+                          print(f"FAIL: server used non-Raw encoding {enc}; cannot census pixels.")
+                          return 1
+                      if rw == 0 or rh == 0:
+                          continue
+                      if rx + rw > width or ry + rh > height:
+                          print(f"FAIL: rectangle at ({rx}, {ry}) sized {rw}x{rh} exceeds the {width}x{height} framebuffer.")
+                          return 1
+                      nbytes = rw * rh * bpp
+                      buf = recv_exact(sock, nbytes)
+                      # Count each framebuffer pixel once for coverage,
+                      # wherever it arrives: repeated or overlapping
+                      # rectangles must not inflate the covered count or
+                      # finish the census early. Rectangles paint in
+                      # order, though, so a later rectangle overwrites an
+                      # earlier one — record every pixel's latest value
+                      # and take the census from those, otherwise a frame
+                      # painted non-black and then painted black again
+                      # would still pass.
+                      for row in range(rh):
+                          for col in range(rw):
+                              idx = (ry + row) * width + (rx + col)
+                              if not covered[idx]:
+                                  covered[idx] = 1
+                                  seen += 1
+                              off = (row * rw + col) * bpp
+                              latest[idx] = 1 if any(c > 8 for c in buf[off:off + min(3, bpp)]) else 0
+              nonblack = sum(latest)
+              frac = nonblack / total if total else 0
+              print(f"Pixel census: {nonblack}/{total} non-black ({frac:.2%}).")
+              if frac < 0.005:
+                  print("FAIL: framebuffer is effectively all black — the VNC picture is not real.")
+                  return 1
+              print("PASS: VNC serves a real, non-black desktop frame.")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          PYEOF
+          TS_IP=$(tailscale ip -4 | head -n 1)
+          if [ -z "$TS_IP" ] || ! nc -z "$TS_IP" 5900; then
+            echo "VNC port 5900 does not answer on the runner's Tailscale address (${TS_IP:-none}) — the address in the connection instructions would not work." >&2
+            exit 1
+          fi
+          echo "VNC port 5900 answers on the Tailscale address ${TS_IP}."
+          python3 -u "$RUNNER_TEMP/rfb_probe.py"
+
+      # Written only after the self-check above has passed, so the
+      # run summary never advertises a session that is not open.
       - name: Write connection instructions
         id: instructions
-        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' && steps.ssh.outcome == 'success' && steps.vnc.outcome == 'success' && steps.verify.outcome == 'success' }}
         run: |
           set -euo pipefail
           TS_IP=$(tailscale ip -4 | head -n 1)
@@ -233,16 +749,29 @@ jobs:
             echo "        ssh runner@${TS_IP}"
             echo ""
             echo "2. For the desktop, open a VNC client at \`vnc://${TS_IP}:5900\`. The password is not printed in the log: inside the SSH session, read it with \`cat ~/vnc-password.txt\`."
+            echo ""
+            echo "   TigerVNC users: in Options -> Security -> Authentication, keep only **Standard VNC** ticked, and enter that password. That is the login scheme this session is verified with."
             echo "3. Double-click Zephyr.app on the desktop to run it."
             echo "4. To end the session, cancel this workflow run. The run is marked failed when the session times out — that is expected."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Session address: ${TS_NAME:-zephyr-mac-debug} (${TS_IP})"
 
+      # The screenshot from the self-check, kept as evidence of what the
+      # desktop actually looked like before the session opened.
+      - name: Upload desktop screenshot
+        if: ${{ !cancelled() && steps.vnc.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-debug-desktop
+          path: ${{ runner.temp }}/desktop.png
+          retention-days: 1
+          if-no-files-found: warn
+
       # Nothing serves the session from this step — SSH and screen
       # sharing are already listening — it only keeps the runner alive
       # for the requested length of time.
       - name: Hold the session open
-        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' && steps.ssh.outcome == 'success' && steps.vnc.outcome == 'success' && steps.instructions.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' && steps.tskey.outcome == 'success' && steps.tailscale.outcome == 'success' && steps.ssh.outcome == 'success' && steps.vnc.outcome == 'success' && steps.instructions.outcome == 'success' && steps.verify.outcome == 'success' }}
         timeout-minutes: ${{ inputs.session_minutes }}
         env:
           SESSION_MINUTES: ${{ inputs.session_minutes }}
