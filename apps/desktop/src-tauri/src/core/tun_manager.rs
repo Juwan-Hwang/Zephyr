@@ -621,6 +621,21 @@ mod tests {
     use serde_yaml::Value as YamlValue;
     use zephyr_core::config::tun::ensure_dns_hijack_entries;
 
+    #[test]
+    fn saved_tun_pref_reads_only_a_set_preference() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        assert_eq!(saved_tun_pref(&file), None);
+        std::fs::write(&file, r#"{"tun_enabled": true, "mode": "rule"}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), Some(true));
+        std::fs::write(&file, r#"{"tun_enabled": false}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), Some(false));
+        std::fs::write(&file, r#"{"tun_enabled": null}"#).unwrap();
+        assert_eq!(saved_tun_pref(&file), None);
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(saved_tun_pref(&file), None);
+    }
+
     /// Assert that every `"` inside an `AppleScript` `do shell script "..."`
     /// literal is escaped as `\"` (a bare `"` would end the literal early and
     /// make `osascript` fail with a syntax error).
@@ -1613,6 +1628,14 @@ pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), Str
     sync_tun_settings(&app, true)
 }
 
+/// The `tun_enabled` preference saved in `settings.json`, when it has one.
+#[cfg(any(target_os = "windows", test))]
+fn saved_tun_pref(settings_file: &std::path::Path) -> Option<bool> {
+    let text = std::fs::read_to_string(settings_file).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("tun_enabled")?.as_bool()
+}
+
 /// Initialize TUN mode flag from config file (call at app startup)
 pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let paths = resolve_app_paths(app)?;
@@ -1625,8 +1648,18 @@ pub fn init_tun_mode_from_config(app: &AppHandle) -> Result<(), String> {
     let content =
         std::fs::read_to_string(&config_file).map_err(|e| format!("Failed to read config: {e}"))?;
 
-    // Check if TUN is enabled in config
-    let tun_enabled = extract_tun_enabled_from_yaml(&content);
+    // Check if TUN is enabled in config. On Windows an elevated session leaves
+    // `tun: enable: true` behind, but a normal launch starts the core without
+    // TUN (see `Settings::to_global_prefs`): the flag must say so too. The
+    // other way round, the normal instance that relaunched as administrator
+    // wrote `tun: false`, and the elevated core starts with the saved
+    // preference instead: follow that preference when there is one.
+    let in_config = extract_tun_enabled_from_yaml(&content);
+    #[cfg(target_os = "windows")]
+    let tun_enabled = crate::elevation::is_elevated()
+        && saved_tun_pref(&paths.app_data_dir.join("settings.json")).unwrap_or(in_config);
+    #[cfg(not(target_os = "windows"))]
+    let tun_enabled = in_config;
 
     set_tun_mode(tun_enabled);
     emit_info!(
