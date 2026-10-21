@@ -95,6 +95,7 @@ import { appStore } from './ui/state.js';
 import { Bus, Events } from './ui/events.js';
 import { normalizeVersion, isRemoteNewer } from './utils/version-utils.js';
 import { initInputModality } from './ui/input-modality.js';
+import { invalidateSettingsCache } from './ui/cache.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
@@ -669,6 +670,48 @@ async function initApp() {
     }
   });
 
+  // 9c. The backend restarted an unresponsive core after sleep: follow it like
+  //     any restart made here (new secret, overrides, remembered delays).
+  const countRestart = () => { coreRestarts++; };
+  Bus.on(Events.CORE_RESTARTED, countRestart);
+  registerCleanup(() => Bus.off(Events.CORE_RESTARTED, countRestart));
+  listen('core-restarted-after-resume', async (/** @type {any} */ event) => {
+    const r = event?.payload;
+    if (r?.port) {
+      setBaseUrl(`http://127.0.0.1:${r.port}`);
+      setWsBaseUrl(`ws://127.0.0.1:${r.port}`);
+    }
+    if (typeof r?.secret === 'string') {
+      setSecret(r.secret);
+      setWsSecret(r.secret);
+    }
+    // A new core answers: polling that slowed down while it was unreachable
+    // (refused requests during sleep) goes back to its normal pace, as after restartCore().
+    setCoreReachable(true);
+    // With the loaded profile (null: none, the minimal config), as restartCore()
+    // reports it, so the no-subscription state follows.
+    Bus.emit(Events.CORE_RESTARTED, { activeConfig: r?.active_config });
+    const restart = coreRestarts;
+    // Recover under the same lock as a profile switch, so one can't start
+    // halfway and get this profile's node applied to it. One already running
+    // restarts the core again and recovers itself: then this is moot.
+    await networkIdle();
+    if (restart !== coreRestarts) return;
+    appStore.set('isNetworkUpdating', true);
+    try {
+      const { postRestartRecovery } = await import('./ui/lifecycle.js');
+      await postRestartRecovery(await resumeRecoveryConfig(r?.active_config));
+    } catch (err) {
+      apiLogger.warn('Recovery after the resume restart failed', err);
+    } finally {
+      appStore.set('isNetworkUpdating', false);
+    }
+  }).then((unlisten) => {
+    registerCleanup(unlisten);
+  }).catch((err) => {
+    apiLogger.warn('Failed to listen for core restarts after resume', err);
+  });
+
   // 10b. Apply home page mode changes immediately when the user toggles
   //      the setting, so the visible page switches without requiring a
   //      manual navigation away and back.
@@ -769,3 +812,51 @@ window.addEventListener('DOMContentLoaded', () => {
     apiLogger.error('Fatal: initApp threw an unhandled error', err);
   });
 });
+
+/** Core restarts seen (CORE_RESTARTED), to tell whether another one came after a given one. */
+let coreRestarts = 0;
+
+/** Resolves once no network change (profile switch, TUN, mode…) holds the lock. */
+function networkIdle() {
+  return new Promise((resolve) => {
+    if (!appStore.get('isNetworkUpdating')) {
+      resolve(undefined);
+      return;
+    }
+    const off = appStore.subscribe('isNetworkUpdating', (/** @type {unknown} */ busy) => {
+      if (busy) return;
+      off();
+      resolve(undefined);
+    });
+  });
+}
+
+/**
+ * The profile to recover after the backend restarted the core on resume.
+ * The profile it loaded wins; when it fell back to another one, that becomes
+ * the saved profile, as at startup. Null (the minimal config) has no saved
+ * selection to restore.
+ * @param {string | null | undefined} active
+ * @returns {Promise<string>}
+ */
+async function resumeRecoveryConfig(active) {
+  if (active === null) return '';
+  /** @type {any} */
+  let settings = null;
+  try {
+    settings = await invoke(COMMANDS.GET_SETTINGS);
+  } catch (err) {
+    apiLogger.warn('Could not read settings after the resume restart', err);
+  }
+  if (typeof active !== 'string' || !active) return settings?.last_config || 'config.yaml';
+  if (settings && settings.last_config !== active) {
+    try {
+      await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: active });
+      // The refresh that follows must not mark the old profile active from the cache.
+      invalidateSettingsCache();
+    } catch (err) {
+      apiLogger.warn(`Failed to update last_config after the resume fallback: ${err}`);
+    }
+  }
+  return active;
+}

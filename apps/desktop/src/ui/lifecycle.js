@@ -16,6 +16,20 @@ import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
 
 /**
+ * Save the active profile. Resolves to the error instead of throwing it.
+ * @param {string} configName
+ * @returns {Promise<unknown>} null when saved
+ */
+async function persistActiveConfig(configName) {
+  try {
+    await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName });
+    return null;
+  } catch (err) {
+    return err;
+  }
+}
+
+/**
  * 切换到指定配置（订阅）
  * @param {string} configName - 目标配置文件名
  * @param {string[]} [customArgs=[]] - 自定义核心参数
@@ -106,11 +120,15 @@ export async function switchToConfig(configName, customArgs = []) {
   // 持久化实际活动配置（原子更新，避免 RMW 竞态）
   // 如果发生了回退，使用实际加载的配置名
   const configToPersist = actualConfig || configName;
-  await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: configToPersist });
+  // The core already runs this profile: a failed save must not skip the
+  // recovery below (overrides, proxy selection), which nothing else would run.
+  // It is still reported once the recovery is done.
+  const persistError = await persistActiveConfig(configToPersist);
   invalidateSettingsCache();
 
   // Post-restart recovery: rebuild prism, reapply overrides, restore proxy, refresh UI
   await postRestartRecovery(configToPersist);
+  if (persistError) throw persistError;
 
   return {
     ...coreResult,
