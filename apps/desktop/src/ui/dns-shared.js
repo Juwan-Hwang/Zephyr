@@ -450,8 +450,10 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
         }
     });
 
-    // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle)
-    Bus.on(Events.CORE_RESTARTED, async () => {
+    // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle),
+    // and again once the restart recovery has reloaded the config: its Prism
+    // and override reloads replace the running config, rewrite included.
+    const reapplySaved = async () => {
         if (!(await isDnsRewriteSavedEnabled())) return;
 
         for (let i = 0; i < 5; i++) {
@@ -467,5 +469,7 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
         }
 
         if (toggle) toggle.checked = false;
-    });
+    };
+    Bus.on(Events.CORE_RESTARTED, reapplySaved);
+    Bus.on(Events.CONFIG_UPDATED, reapplySaved);
 }
