@@ -221,12 +221,7 @@ impl PrismState {
             // derives hot_reload_success from the HTTP status code.  We use that
             // directly because ApplyResult (returned by ext.apply) does not contain
             // the ApplyStatus struct — only output_config, stats, trace, and annotations.
-            let http_status = guard.take();
-            // Map http_status to hot_reload_success:
-            // - Some(2xx) → Some(true)  (core acknowledged the reload)
-            // - Some(non-2xx) → Some(false)  (core rejected the reload)
-            // - None → None  (no response, unknown — not a negative ack)
-            let hot_reload_success = http_status.map(crate::network_coordinator::is_http_success);
+            let (http_status, hot_reload_success) = reload_outcome(guard.take());
 
             let core_result = crate::network_coordinator::CoreApplyResult {
                 http_status,
@@ -299,6 +294,21 @@ impl PrismState {
             .check(key)
             .map_err(|d| format!("Rate limited: retry after {:.1}s", d.as_secs_f64()))
     }
+}
+
+/// Split the status `ZephyrPrismHost::apply_config` recorded into the HTTP
+/// status and whether the core took the reload:
+/// - `Some(2xx)` → `(Some(2xx), Some(true))`: the core acknowledged it.
+/// - `Some(non-2xx)` → `(Some(code), Some(false))`: the core rejected it.
+/// - `Some(0)` → `(None, Some(false))`: attempted, but no HTTP answer came
+///   (the connection or the write failed, or the core never replied).
+///   0 is the host's marker for that case, not an HTTP status, so no status is reported.
+/// - `None` → `(None, None)`: no reload was attempted.
+fn reload_outcome(recorded: Option<u16>) -> (Option<u16>, Option<bool>) {
+    (
+        recorded.filter(|&code| code != 0),
+        recorded.map(crate::network_coordinator::is_http_success),
+    )
 }
 
 #[cfg(test)]
