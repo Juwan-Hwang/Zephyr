@@ -9,6 +9,8 @@ vi.mock('../api.js', () => ({
     getConnections: vi.fn().mockResolvedValue({ connections: [] }),
     getProxies: vi.fn().mockResolvedValue({ proxies: {} }),
     testProxy: vi.fn().mockResolvedValue({ delay: 100 }),
+    getLatencyTestSignal: vi.fn(() => new AbortController().signal),
+    resetLatencyTestController: vi.fn(),
     switchProxy: vi.fn().mockResolvedValue(true),
     switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
     getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
@@ -50,7 +52,9 @@ import {
     isConsoleFullyExpanded,
     checkConsoleWidthNotification
 } from './console-width.js';
-import { activateConsole, deactivateConsole } from './console-home.js';
+import { activateConsole, deactivateConsole, measureLatency, scheduleLatencyRetry } from './console-home.js';
+import { testProxy, getLatencyTestSignal, resetLatencyTestController } from '../api.js';
+import { appStore } from './state.js';
 import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
 
@@ -330,6 +334,87 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             expect(setHomeModeUIMock).toHaveBeenCalledWith('console');
             // invoke should have been called only once
             expect(invoke).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('measureLatency()', () => {
+        it('tells a stopped test apart from a failed one', async () => {
+            const stop = new AbortController();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                stop.abort();
+                return -1;
+            });
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: true });
+
+            // A controller stopped before the test is replaced first, so a later
+            // stop is still told apart and a plain failure stays a failure.
+            const fresh = new AbortController();
+            vi.mocked(resetLatencyTestController).mockImplementationOnce(() => {
+                vi.mocked(getLatencyTestSignal).mockReturnValue(fresh.signal);
+            });
+            vi.mocked(testProxy).mockResolvedValueOnce(-1);
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: false });
+            expect(resetLatencyTestController).toHaveBeenCalledTimes(1);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                fresh.abort();
+                return -1;
+            });
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: true });
+        });
+
+        it('leaves a stopped full test winding down alone', async () => {
+            const stop = new AbortController();
+            stop.abort();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            vi.mocked(resetLatencyTestController).mockClear();
+            appStore.set('isTestingLatency', true);
+            vi.mocked(testProxy).mockClear();
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: true });
+            expect(resetLatencyTestController).not.toHaveBeenCalled();
+            expect(testProxy).not.toHaveBeenCalled();
+            appStore.set('isTestingLatency', false);
+        });
+
+        it('retries a cancelled probe only after a stopped full test has finished', async () => {
+            const stop = new AbortController();
+            stop.abort();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            appStore.set('isTestingLatency', true);
+            const run = vi.fn();
+            scheduleLatencyRetry(run);
+            await new Promise((r) => setTimeout(r, 300));
+            expect(run).not.toHaveBeenCalled();
+            appStore.set('isTestingLatency', false);
+            await new Promise((r) => setTimeout(r, 0));
+            expect(run).toHaveBeenCalledTimes(1);
+        });
+
+        it('never retries in the same tick, and can be cancelled', async () => {
+            vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
+            const run = vi.fn();
+            scheduleLatencyRetry(run);
+            await Promise.resolve();
+            expect(run).not.toHaveBeenCalled();
+            await new Promise((r) => setTimeout(r, 300));
+            expect(run).toHaveBeenCalledTimes(1);
+            const cancelled = vi.fn();
+            scheduleLatencyRetry(cancelled)();
+            await new Promise((r) => setTimeout(r, 300));
+            expect(cancelled).not.toHaveBeenCalled();
+        });
+
+        it('keeps a usable delay even if a stop lands right after it', async () => {
+            const stop = new AbortController();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                stop.abort();
+                return 87;
+            });
+            expect(await measureLatency('JP')).toEqual({ delay: 87, cancelled: false });
+            vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
+            vi.mocked(testProxy).mockResolvedValueOnce(999999);
+            expect(await measureLatency('JP')).toEqual({ delay: -1, cancelled: false });
         });
     });
 });

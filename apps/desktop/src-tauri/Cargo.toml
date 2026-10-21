@@ -85,7 +85,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
     "Win32_System_JobObjects",
     "Win32_Foundation",
-    "Win32_UI_Shell"
+    "Win32_UI_Shell",
+    # process_icon: icon extraction (SHDefExtractIconW) and pixel readback
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi"
 ] }
 winreg = "0.52"
 # webview2-com: direct dependency for ProcessFailed crash recovery.
@@ -101,8 +104,9 @@ winreg = "0.52"
 webview2-com = "=0.39.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS specific dependencies will be added as needed
-# Currently using only std::process::Command for networksetup
+# process_icon: reads CFBundleIconFile from XML and binary Info.plist files
+# (already in the tree via tauri, so no new crate).
+plist = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Enable Wayland clipboard support via wlr-data-control protocol
@@ -115,6 +119,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 mockall = "0.15"
 tempfile = "3.14"
 insta = { version = "1", features = ["filters"] }
+plist = "1"
 
 # 继承 workspace 根 Cargo.toml 的 [workspace.lints] 统一配置，
 # 确保 desktop crate 与 core/core-ffi 使用同一套 lint 规则。
