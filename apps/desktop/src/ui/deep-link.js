@@ -6,7 +6,7 @@
  * and routes them to the appropriate UI actions.
  */
 
-import { listen, invoke } from '../api.js';
+import { listen, invoke, getCurrentWindow } from '../api.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { translations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -62,15 +62,47 @@ async function activateIfFirst(configName) {
  * @returns {Promise<() => Promise<void>>} Unlisten function
  */
 export async function initDeepLink() {
-    return listen('deep-link', async (/** @type {{ payload: DeepLinkPayload }} */ event) => {
-        const { action, url, name } = event.payload;
+    const unlisten = await listen('deep-link', (/** @type {{ payload: DeepLinkPayload }} */ event) => handleDeepLink(event.payload));
+    // Links that arrived while this page was loading (a launch with a link,
+    // or one forwarded while the window was being recreated) were held by
+    // the backend until now; from here on they come as events.
+    void handlePendingDeepLinks();
+    return unlisten;
+}
 
-        if (action === 'install-config') {
-            await handleInstallConfig(url, name);
-        } else {
-            apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+async function handlePendingDeepLinks() {
+    try {
+        /** @type {DeepLinkPayload[]} */
+        const pending = await invoke(COMMANDS.TAKE_PENDING_DEEP_LINKS);
+        const links = Array.isArray(pending) ? pending : [];
+        // A silent start leaves the window hidden: show it, or the import
+        // prompt waits where nobody sees it.
+        if (links.length > 0) await revealWindow();
+        for (const payload of links) {
+            await handleDeepLink(payload);
         }
-    });
+    } catch (err) {
+        apiLogger.warn('[DeepLink] Could not handle links that arrived during startup', err);
+    }
+}
+
+async function revealWindow() {
+    try {
+        const win = getCurrentWindow();
+        await win.show();
+        await win.setFocus();
+    } catch (err) {
+        apiLogger.warn('[DeepLink] Could not show the window for a held link', err);
+    }
+}
+
+/** @param {DeepLinkPayload} payload */
+async function handleDeepLink({ action, url, name }) {
+    if (action === 'install-config') {
+        await handleInstallConfig(url, name);
+    } else {
+        apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+    }
 }
 
 /**
