@@ -6,7 +6,7 @@
  * @module ui/proxy-memory
  */
 
-import { invoke, switchProxy } from '../api.js';
+import { getConfig, invoke, switchProxy } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups, isWritableGroupType } from './proxy-groups.js';
 import { invalidateSettingsCache } from './cache.js';
@@ -223,18 +223,34 @@ async function waitForProvidersLoaded(preferredGroupName, savedNode) {
  * Find the first writable (selector) group that contains `node`.
  * @param {Record<string, any>|undefined|null} proxyMap - `/proxies` response map
  * @param {string} node - Node name to find
+ * @param {string|null} [skip] - Group to leave out (already tried)
  * @returns {string|null} Group name, or null if not found
  */
-function findWritableGroupWithNode(proxyMap, node) {
-    if (!proxyMap) return null;
-    for (const groupName of Object.keys(proxyMap)) {
+function findWritableGroupWithNode(proxyMap, node, skip = null) {
+    return findWritableGroupsWithNode(proxyMap, node, skip)[0] ?? null;
+}
+
+/**
+ * Every visible writable group that lists the node, in the order the core
+ * lists them (/proxies does not keep config order), with the built-in
+ * GLOBAL group last: it lists every node but only routes traffic in global
+ * mode, so in rule mode switching it would restore nothing and point the
+ * UI at a group no rule uses. It stays as the last resort, for global mode
+ * (switchToSaved drops it in any other mode).
+ * @param {Record<string, any>|null|undefined} proxyMap
+ * @param {string} node
+ * @param {string|null} [skip]
+ * @returns {string[]}
+ */
+function findWritableGroupsWithNode(proxyMap, node, skip = null) {
+    if (!proxyMap) return [];
+    const found = Object.keys(proxyMap).filter((groupName) => {
+        if (groupName === skip) return false;
         const group = proxyMap[groupName];
-        if (isWritableGroupType(group?.type) && !group.hidden
-            && Array.isArray(group.all) && group.all.includes(node)) {
-            return groupName;
-        }
-    }
-    return null;
+        return isWritableGroupType(group?.type) && !group.hidden
+            && Array.isArray(group.all) && group.all.includes(node);
+    });
+    return [...found.filter((g) => g !== 'GLOBAL'), ...found.filter((g) => g === 'GLOBAL')];
 }
 
 /**
@@ -260,6 +276,17 @@ function nodeInWritableGroup(result, node) {
  * @returns {Promise<boolean>} Whether restoration succeeded
  */
 export async function restoreProxySelection(profileName) {
+    return (await restoreProxySelectionResult(profileName)) === 'restored';
+}
+
+/**
+ * Like restoreProxySelection, but tells "nothing to restore" (no saved node,
+ * or the saved node is no longer in the profile) apart from a restore that
+ * failed (core not ready, providers never loaded, the switch was refused).
+ * @param {string} profileName - Profile filename
+ * @returns {Promise<'restored' | 'nothing' | 'failed'>}
+ */
+export async function restoreProxySelectionResult(profileName) {
     try {
         // Read directly from backend to avoid stale cache
         const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -272,10 +299,10 @@ export async function restoreProxySelection(profileName) {
         const ready = await waitForMihomoReady();
         if (!ready) {
             proxyMemoryLogger.warn('Mihomo not ready after retries');
-            return false;
+            return 'failed';
         }
 
-        if (!saved.node) return false;
+        if (!saved.node) return 'nothing';
 
         // Defensive: if saved.node === saved.group, the node was saved
         // incorrectly by a previous version of switchToConfig (which fetched
@@ -296,83 +323,148 @@ export async function restoreProxySelection(profileName) {
             try {
                 await saveProxySelection(profileName, { node: '', group: '' });
             } catch { /* ignore cleanup errors */ }
-            return false;
+            return 'nothing';
         }
 
         // Resolve preferred group: primary preference > saved group > current UI group
         const primaryGroup = settings.primary_group_preference?.[profileName] || null;
         const preferredGroupName = primaryGroup || saved.group || appStore.get('uiGroupName') || null;
 
-        let proxyGroupsResult = await fetchProxyGroups({
-            preferredGroupName,
-        });
-        if (!proxyGroupsResult) return false;
-
-        // If proxy-providers are still downloading (e.g., substore configs),
-        // wait for nodes to arrive before attempting restoration.
-        // Also wait if the config HAS proxy-providers but the saved node
-        // isn't found yet — `providerLoading` only signals an empty UI
-        // group, but other providers may still be downloading even after
-        // the UI group has some nodes.
-        const needsProviderWait = proxyGroupsResult.providerLoading
-            || (proxyGroupsResult.hasProxyProviders
-                && !nodeInWritableGroup(proxyGroupsResult, saved.node));
-        if (needsProviderWait) {
-            proxyMemoryLogger.info(
-                '[restoreProxySelection] proxy-providers still loading, waiting…',
-            );
-            proxyGroupsResult = await waitForProvidersLoaded(
-                preferredGroupName,
-                saved.node,
-            );
-            // If providers never finished loading (timeout), abort — unless
-            // the saved node was already found in another writable group
-            // (providerLoading only reflects the resolved UI group's all[]).
-            // In that case, the fallback search below will still locate and
-            // switch to the correct group.
-            if (!proxyGroupsResult
-                || (proxyGroupsResult.providerLoading
-                    && !nodeInWritableGroup(proxyGroupsResult, saved.node))) {
-                proxyMemoryLogger.warn(
-                    '[restoreProxySelection] providers still loading after timeout, aborting restoration',
-                );
-                return false;
-            }
-        }
-
-        // Use the resolved uiGroupName (from resolver) instead of the old
-        // keyword-guessed mainGroup.  This fixes the core bug where the
-        // restored selection was applied to the wrong group.
-        const uiGroupName = proxyGroupsResult.uiGroupName
-            || proxyGroupsResult.mainGroup || '';
-
-        // Try the resolved uiGroupName first
-        if (uiGroupName && proxyGroupsResult.proxies && proxyGroupsResult.proxies.includes(saved.node)) {
-            const success = await switchProxy(uiGroupName, saved.node);
-            if (success) {
-                appStore.set('uiGroupName', uiGroupName);
-            }
-            return success;
-        }
-
-        // Fallback: search all writable groups for the saved node.
-        // After profile/core switches, the saved node may belong to a different
-        // selector group than the resolved primary.
-        const proxyMap = /** @type {any} */ (proxyGroupsResult.data)?.proxies;
-        const fallbackGroup = findWritableGroupWithNode(proxyMap, saved.node);
-        if (fallbackGroup) {
-            const success = await switchProxy(fallbackGroup, saved.node);
-            if (success) {
-                appStore.set('uiGroupName', fallbackGroup);
-                return true;
-            }
-        }
-
-        return false;
+        const proxyGroupsResult = await loadGroupsForRestore(preferredGroupName, saved.node);
+        if (!proxyGroupsResult) return 'failed';
+        return await switchToSaved(proxyGroupsResult, saved.node);
     } catch (e) {
         proxyMemoryLogger.warn('Failed to restore proxy selection:', e);
-        return false;
+        return 'failed';
     }
+}
+
+/**
+ * Proxy groups to restore `node` into, once proxy-providers that may hold it
+ * have loaded; null when the core gave none or providers never finished.
+ * @param {string | null} preferredGroupName
+ * @param {string} node
+ */
+async function loadGroupsForRestore(preferredGroupName, node) {
+    let proxyGroupsResult = await fetchProxyGroups({
+        preferredGroupName: /** @type {any} */ (preferredGroupName),
+    });
+    if (!proxyGroupsResult) return null;
+
+    // If proxy-providers are still downloading (e.g., substore configs),
+    // wait for nodes to arrive before attempting restoration.
+    // Also wait if the config HAS proxy-providers but the saved node
+    // isn't found yet — `providerLoading` only signals an empty UI
+    // group, but other providers may still be downloading even after
+    // the UI group has some nodes.
+    const needsProviderWait = proxyGroupsResult.providerLoading
+        || (proxyGroupsResult.hasProxyProviders
+            && !nodeInWritableGroup(proxyGroupsResult, node));
+    if (!needsProviderWait) return proxyGroupsResult;
+    proxyMemoryLogger.info(
+        '[restoreProxySelection] proxy-providers still loading, waiting…',
+    );
+    proxyGroupsResult = await waitForProvidersLoaded(preferredGroupName, node);
+    // If providers never finished loading (timeout), abort — unless
+    // the saved node was already found in another writable group
+    // (providerLoading only reflects the resolved UI group's all[]).
+    // In that case, the fallback search will still locate and
+    // switch to the correct group.
+    if (!proxyGroupsResult
+        || (proxyGroupsResult.providerLoading
+            && !nodeInWritableGroup(proxyGroupsResult, node))) {
+        proxyMemoryLogger.warn(
+            '[restoreProxySelection] providers still loading after timeout, aborting restoration',
+        );
+        return null;
+    }
+    return proxyGroupsResult;
+}
+
+/**
+ * Whether the core runs in global mode; null when the mode can't be read.
+ * @returns {Promise<boolean | null>}
+ */
+async function inGlobalMode() {
+    try {
+        const config = /** @type {any} */ (await getConfig());
+        return String(config?.mode ?? '').toLowerCase() === 'global';
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * The groups to switch, in order: the resolved group, then the other
+ * writable groups listing the node.
+ * GLOBAL routes traffic only in global mode: in rule mode a switch there
+ * succeeds yet changes nothing, so it must not count as restored. With
+ * the mode unread, a node listed only there may still be restorable:
+ * that is a failure (`modeUnknown`), not a node gone from the profile.
+ * In global mode it is the other way round: GLOBAL alone routes, so it is
+ * the only group tried (also when the resolver picked another group listing
+ * the node), and a refused GLOBAL switch is not made good by another group.
+ * The resolver may have picked GLOBAL while the core was in global mode
+ * and the mode changed since: the mode read here decides for it too, and
+ * when it cannot be read, a GLOBAL pick is not restorable elsewhere.
+ * @param {string | null} preferred
+ * @param {string[]} fallback
+ * @returns {Promise<{ groups: string[], modeUnknown: boolean }>}
+ */
+async function groupsToTry(preferred, fallback) {
+    if (preferred !== 'GLOBAL' && !fallback.includes('GLOBAL')) {
+        return { groups: /** @type {string[]} */ ([preferred, ...fallback].filter(Boolean)), modeUnknown: false };
+    }
+    const globalMode = await inGlobalMode();
+    // Global mode: GLOBAL alone routes, so it is the only group whose switch
+    // counts, even when the resolver picked another group listing the node.
+    if (globalMode === true) return { groups: ['GLOBAL'], modeUnknown: false };
+    // GLOBAL resolved, mode unread: the core may still be in global mode,
+    // where switching another group changes no routing, so none counts.
+    if (globalMode === null && preferred === 'GLOBAL') return { groups: [], modeUnknown: true };
+    const groups = [preferred, ...fallback].filter((g) => g && g !== 'GLOBAL');
+    return { groups: /** @type {string[]} */ (groups), modeUnknown: globalMode === null };
+}
+
+/**
+ * Switch to the saved node: in the resolved UI group when it lists the node,
+ * otherwise in any writable group that does.
+ * @param {any} proxyGroupsResult
+ * @param {string} node
+ * @returns {Promise<'restored' | 'nothing' | 'failed'>}
+ */
+async function switchToSaved(proxyGroupsResult, node) {
+    // Use the resolved uiGroupName (from resolver) instead of the old
+    // keyword-guessed mainGroup.  This fixes the core bug where the
+    // restored selection was applied to the wrong group.
+    const uiGroupName = proxyGroupsResult.uiGroupName
+        || proxyGroupsResult.mainGroup || '';
+    // Fallback: search all writable groups for the saved node.
+    // After profile/core switches, the saved node may belong to a different
+    // selector group than the resolved primary.
+    const preferred = uiGroupName && proxyGroupsResult.proxies?.includes(node) ? uiGroupName : null;
+    const proxyMap = /** @type {any} */ (proxyGroupsResult.data)?.proxies;
+    // Try the resolved group first; if the core refuses that switch, every
+    // other writable group that lists the node is still worth a try.
+    const fallback = findWritableGroupsWithNode(proxyMap, node, preferred);
+    const { groups, modeUnknown } = await groupsToTry(preferred, fallback);
+    // The saved node is no longer in this profile.
+    if (groups.length === 0) return modeUnknown ? 'failed' : 'nothing';
+    for (const group of groups) {
+        // switchProxy throws when the core answers with an error; that is a
+        // refusal of this group, so the next one still gets its try.
+        let switched = false;
+        try {
+            switched = await switchProxy(group, node);
+        } catch (err) {
+            proxyMemoryLogger.warn(`Restoring ${node} in ${group} failed:`, err);
+        }
+        if (switched) {
+            appStore.set('uiGroupName', group);
+            return 'restored';
+        }
+    }
+    return 'failed';
 }
 
 /**

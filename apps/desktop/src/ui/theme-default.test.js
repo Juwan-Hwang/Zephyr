@@ -103,7 +103,6 @@ describe('default theme', () => {
             opacitySlider: null,
             opacityValText: null,
             themeModeContainer: null,
-            themeModeSlider: null,
             themeModeButtons: [],
             save,
         });
@@ -128,7 +127,6 @@ describe('default theme', () => {
             opacitySlider: null,
             opacityValText: null,
             themeModeContainer: null,
-            themeModeSlider: null,
             themeModeButtons: [],
             save,
         });
