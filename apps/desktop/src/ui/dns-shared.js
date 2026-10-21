@@ -19,6 +19,7 @@ import { Bus, Events } from './events.js';
 import { getSetting, saveSetting } from './settings-helpers.js';
 import { pasteWithFeedback } from '../utils/clipboard.js';
 import { queueSmartConfigWrite } from './settings/auto-switch.js';
+import { createSerialQueue } from '../utils/sequential.js';
 
 // ---------------------------------------------------------------------------
 //  DNS bootstrap constants
@@ -73,6 +74,78 @@ async function isDnsRewriteSavedEnabled() {
     return true; // Default
 }
 
+/**
+ * Re-applies the saved DNS rewrite after the running config was replaced.
+ * Runs and user toggles share one queue, so their patches never interleave,
+ * and a toggle cancels a re-apply that has not finished: it never turns the
+ * rewrite back on, or saves it as on, after the user turned it off.
+ * @param {{
+ *   isSaved: () => Promise<boolean>,
+ *   apply: () => Promise<unknown>,
+ *   persist: () => Promise<unknown>,
+ *   setChecked: (checked: boolean) => void,
+ *   onError?: (err: unknown) => void,
+ *   wait?: (ms: number) => Promise<unknown>,
+ * }} deps
+ */
+export function createDnsReapply({ isSaved, apply, persist, setChecked, onError = () => {}, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+    const queue = createSerialQueue();
+    let generation = 0;
+    return {
+        /**
+         * Run a user toggle: cancels pending re-applies, then waits its turn.
+         * `fn` gets `isLatest`, false once a newer toggle has been queued, so
+         * a failed older toggle does not overwrite the newer choice.
+         * @template T
+         * @param {(isLatest: () => boolean) => Promise<T>} fn
+         * @returns {Promise<T>}
+         */
+        userChange(fn) {
+            generation += 1;
+            const gen = generation;
+            return /** @type {Promise<T>} */ (queue.run(() => fn(() => gen === generation)));
+        },
+        /** @returns {Promise<unknown>} */
+        run() {
+            const gen = generation;
+            const current = () => gen === generation;
+            return queue.run(async () => {
+                if (!current()) return;
+                let saved;
+                try {
+                    saved = await isSaved();
+                } catch (err) {
+                    // Without the saved choice there is nothing to re-apply;
+                    // the next restart or reload tries again.
+                    onError(err);
+                    return;
+                }
+                if (!saved || !current()) return;
+                for (let i = 0; i < 5; i++) {
+                    try {
+                        await apply();
+                    } catch {
+                        await wait(500);
+                        if (!current()) return;
+                        continue;
+                    }
+                    if (!current()) return;
+                    setChecked(true);
+                    // Persist the decision so future checks won't hit null. The
+                    // rewrite is already live, so a failed save is only logged.
+                    try {
+                        await persist();
+                    } catch (err) {
+                        onError(err);
+                    }
+                    return;
+                }
+                setChecked(false);
+            });
+        },
+    };
+}
+
 // ---------------------------------------------------------------------------
 //  Default DNS configuration
 // ---------------------------------------------------------------------------
@@ -91,6 +164,17 @@ export const DEFAULT_DNS_CONFIG = {
 // ---------------------------------------------------------------------------
 //  DNS config helpers
 // ---------------------------------------------------------------------------
+
+// The DNS change is already live; connections opened before it just
+// keep the old resolver until they end, so a failure here is logged
+// instead of rolling the switch back over a change the core runs.
+async function closeConnectionsAfterDnsChange() {
+    try {
+        await closeAllConnections();
+    } catch (err) {
+        dnsLogger.warn('Closing connections after the DNS change failed', err);
+    }
+}
 
 /**
  * Fetch the current DNS configuration from the backend,
@@ -415,7 +499,7 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
 
                 if (toggle.checked) {
                     await applyDnsRewrite();
-                    await closeAllConnections();
+                    await closeConnectionsAfterDnsChange();
                 }
             } catch (err) {
                 dnsLogger.error('Failed to save DNS config', err);
@@ -424,53 +508,65 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
         });
     }
 
-    toggle.addEventListener('change', async (e) => {
-        const target = /** @type {HTMLInputElement} */ (e.target);
-        const enabled = target.checked;
+    // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle),
+    // and again once the restart recovery has reloaded the config: its Prism
+    // and override reloads replace the running config, rewrite included.
+    // Other CONFIG_UPDATED emits (settings changes) leave the config alone.
+    const reapply = createDnsReapply({
+        isSaved: isDnsRewriteSavedEnabled,
+        apply: applyDnsRewrite,
+        persist: () => saveSetting('dns_rewrite_enabled', true),
+        setChecked: (checked) => { toggle.checked = checked; },
+        onError: (/** @type {unknown} */ err) => dnsLogger.warn('DNS rewrite re-apply could not finish', err),
+    });
+    Bus.on(Events.CORE_RESTARTED, () => { void reapply.run(); });
+    Bus.on(Events.CONFIG_UPDATED, (/** @type {any} */ data) => {
+        if (!data?.reloaded) return;
+        const done = reapply.run();
+        if (typeof data.waitFor === 'function') data.waitFor(done);
+        else void done;
+    });
+
+    toggle.addEventListener('change', (e) => {
+        // The choice is the one this click made, read now: by the time the
+        // queue reaches it, an earlier toggle's rollback may have changed
+        // the checkbox.
+        const enabled = /** @type {HTMLInputElement} */ (e.target).checked;
+        void reapply.userChange((isLatest) => setDnsRewrite(enabled, isLatest));
+    });
+
+    /**
+     * @param {boolean} enabled
+     * @param {() => boolean} isLatest
+     */
+    async function setDnsRewrite(enabled, isLatest) {
+        const box = /** @type {HTMLInputElement} */ (toggle);
         /** @type {Record<string, string>} */
         const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
 
         if (enabled) {
             try {
                 await applyDnsRewrite();
-                await closeAllConnections();
+                await closeConnectionsAfterDnsChange();
                 await saveSetting('dns_rewrite_enabled', true);
                 showNotification(t.notifDnsEnabled, 'success');
             } catch {
                 showNotification(t.dnsEnableFailed || 'Failed to enable DNS Rewrite', 'error');
-                toggle.checked = false;
+                if (isLatest()) box.checked = false;
             }
         } else {
             try {
                 const payload = { dns: { enable: false }, sniffing: false };
                 await patchConfig(payload);
-                await closeAllConnections();
+                await closeConnectionsAfterDnsChange();
                 await saveSetting('dns_rewrite_enabled', false);
                 showNotification(t.notifDnsDisabled, 'info');
             } catch (err) {
                 dnsLogger.error('Failed to disable DNS rewrite', err);
                 showNotification(t.dnsDisableFailed || 'Failed to disable DNS Rewrite', 'error');
-                toggle.checked = true;
+                if (isLatest()) box.checked = true;
             }
         }
-    });
+    }
 
-    // Re-apply DNS rewrite after core restart (e.g. config switch, TUN toggle)
-    Bus.on(Events.CORE_RESTARTED, async () => {
-        if (!(await isDnsRewriteSavedEnabled())) return;
-
-        for (let i = 0; i < 5; i++) {
-            try {
-                await applyDnsRewrite();
-                if (toggle) toggle.checked = true;
-                // Persist the decision so future checks won't hit null
-                await saveSetting('dns_rewrite_enabled', true);
-                return;
-            } catch {
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-        }
-
-        if (toggle) toggle.checked = false;
-    });
 }
