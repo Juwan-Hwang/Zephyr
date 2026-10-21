@@ -22,9 +22,16 @@ vi.mock('./notifications.js', () => ({
     showNotification: vi.fn(),
     showConfirmModal: vi.fn(),
 }));
-vi.mock('./lifecycle.js', () => ({ postRestartRecovery: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('./lifecycle.js', () => ({
+    postRestartRecovery: vi.fn().mockResolvedValue(undefined),
+    restartedProfile: vi.fn((/** @type {any} */ r, /** @type {string} */ req) =>
+        r && 'active_config' in r ? r.active_config ?? '' : req),
+}));
+vi.mock('./settings/subscriptions.js', () => ({ keepFallbackProfile: vi.fn().mockResolvedValue(true) }));
 
-import { invoke, getConfig } from '../api.js';
+import { invoke, getConfig, restartCore } from '../api.js';
+import { postRestartRecovery } from './lifecycle.js';
+import { keepFallbackProfile } from './settings/subscriptions.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { appStore } from './state.js';
 import { translations } from '../i18n.js';
@@ -313,5 +320,27 @@ describe('Windows: TUN without administrator rights', () => {
         expect(mConfirm).not.toHaveBeenCalled();
         expect(mNotify).toHaveBeenCalledWith(t.tunFailedElevated, 'error');
         expect(mNotify).not.toHaveBeenCalledWith(t.tunFailed, 'error');
+    });
+});
+
+describe('recovery restart after a failed root TUN start', () => {
+    it('keeps the fallback profile and recovers the one the core loaded', async () => {
+        setPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', 'MacIntel');
+        const mRestart = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (restartCore));
+        const coreResult = { active_config: 'b.yaml' };
+        mRestart.mockResolvedValueOnce(coreResult);
+        mInvoke.mockImplementation(async (/** @type {string} */ cmd) => {
+            if (cmd === 'restart_core_as_root_cmd') throw 'root_start_failed: exit 1';
+            if (cmd === 'get_settings') return { last_config: 'a.yaml', custom_args: ['-x'] };
+            return null;
+        });
+        const { home } = mount();
+
+        click(home);
+        await settle();
+
+        expect(mRestart).toHaveBeenCalledWith('a.yaml', ['-x']);
+        expect(keepFallbackProfile).toHaveBeenCalledWith(coreResult, 'a.yaml');
+        expect(postRestartRecovery).toHaveBeenCalledWith('b.yaml');
     });
 });

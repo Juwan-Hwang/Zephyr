@@ -11,7 +11,8 @@ import { showNotification, showConfirmModal } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
-import { postRestartRecovery } from './lifecycle.js';
+import { postRestartRecovery, restartedProfile } from './lifecycle.js';
+import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
 
 // Records the TUN preference only, for callers that
@@ -160,6 +161,25 @@ async function offerWindowsAdminRelaunch(t) {
     return true;
 }
 
+/**
+ * Restart the core on the profile it is running, as the other restarts do:
+ * when that file fails to load and the core falls back to another profile
+ * (or the minimal config), keep and report the fallback, and run recovery
+ * for the profile that actually loaded rather than the requested one.
+ * @returns {Promise<any>} what restartCore returned
+ */
+async function restartOnCurrentProfile() {
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
+    const requested = currentProfile(settings, 'config.yaml');
+    const coreResult = await restartCore(requested, settings.custom_args || []);
+    // Imported lazily, as the proxies page restart does, so loading this
+    // module does not load the subscription settings with it.
+    const { keepFallbackProfile } = await import('./settings/subscriptions.js');
+    await keepFallbackProfile(coreResult, requested);
+    await postRestartRecovery(restartedProfile(coreResult, requested));
+    return coreResult;
+}
+
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
     const statusText = document.getElementById('tun-status-text');
@@ -171,11 +191,7 @@ export function initTunToggle() {
      */
     async function recoverFromRootStartFailure() {
         try {
-            const settings = await invoke(COMMANDS.GET_SETTINGS);
-            const currentConfig = settings.last_config || 'config.yaml';
-            const customArgs = settings.custom_args || [];
-            await restartCore(currentConfig, customArgs);
-            await postRestartRecovery(currentConfig);
+            await restartOnCurrentProfile();
         } catch (recoverErr) {
             tunLogger.error('recovery failed', recoverErr);
         }
@@ -284,12 +300,8 @@ export function initTunToggle() {
                         }
                         await new Promise(r => setTimeout(r, 1500));
 
-                        const settings = await invoke(COMMANDS.GET_SETTINGS);
-                        const currentConfig = settings.last_config || 'config.yaml';
-                        const customArgs = settings.custom_args || [];
                         await new Promise(r => setTimeout(r, 1000));
-                        await restartCore(currentConfig, customArgs);
-                        await postRestartRecovery(currentConfig);
+                        await restartOnCurrentProfile();
                     } catch (restartErr) {
                         tunLogger.error('failed to disable TUN', restartErr);
                         if (disableCommitted) {
@@ -426,11 +438,7 @@ export function initTunToggle() {
                         showNotification(t.tunLinuxPermissionGranted || 'Permission granted. Restarting core...', 'success');
                         try {
                             try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
-                            const settings = await invoke(COMMANDS.GET_SETTINGS);
-                            const currentConfig = settings.last_config || 'config.yaml';
-                            const customArgs = settings.custom_args || [];
-                            const coreResult = await restartCore(currentConfig, customArgs);
-                            await postRestartRecovery(currentConfig);
+                            const coreResult = await restartOnCurrentProfile();
                             if (coreResult?.secret) {
                                 setSecret(coreResult.secret);
                                 setWsSecret(coreResult.secret);
@@ -463,11 +471,7 @@ export function initTunToggle() {
                                 tunLogger.error('failed to record tun_enabled=false after retry failure', recordErr);
                             }
                             try {
-                                const settings = await invoke(COMMANDS.GET_SETTINGS);
-                                const currentConfig = settings.last_config || 'config.yaml';
-                                const customArgs = settings.custom_args || [];
-                                await restartCore(currentConfig, customArgs);
-                                await postRestartRecovery(currentConfig);
+                                await restartOnCurrentProfile();
                             } catch (restartErr) {
                                 tunLogger.error('Core restart without TUN also failed', restartErr);
                             }
