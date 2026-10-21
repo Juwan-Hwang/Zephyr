@@ -483,7 +483,7 @@ function buildFileCard(file, _fileMap) {
                 <span class="rl-file-name text-sm text-[var(--text-primary)] font-medium truncate">${escapeHtml(displayName)}</span>
                 <span class="text-xs text-[var(--text-muted)]">${escapeHtml(countText)}${enabled ? '' : ` · ${escapeHtml(t.ruleLibraryOff || 'Off')}`}</span>
             </div>
-            <span class="text-2xs font-medium px-2 py-0.5 rounded-full shrink-0 ${sourceBadge.cls}">${escapeHtml(sourceBadge.label)}</span>
+            <span class="rl-pill text-2xs font-medium px-2 py-0.5 rounded-full shrink-0 ${sourceBadge.cls}">${escapeHtml(sourceBadge.label)}</span>
         </div>
         <div class="rl-file-actions">
             <label class="ios-switch" for="${switchId}" title="${escapeAttr(enabled ? (t.ruleLibraryOn || 'On') : (t.ruleLibraryOff || 'Off'))}">
@@ -751,7 +751,7 @@ function renderActiveRules(container) {
                 header.innerHTML = `
                     <div class="flex items-center gap-3">
                         <svg class="w-3 h-3 text-[var(--text-muted)] collapse-arrow transition-transform duration-[var(--zephyr-time-micro)] ${isCollapsed ? 'rotate-[-90deg]' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-                        <span class="text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
+                        <span class="rl-pill text-xs px-2 py-0.5 rounded-full ${badgeColor}">${escapeHtml(label)}</span>
                         <span class="text-2xs tabular-nums text-[var(--text-muted)]">${ruleCount} ${escapeHtml(t.ruleLibraryRules || 'rules')}</span>
                     </div>
                     <div class="flex items-center gap-2">
