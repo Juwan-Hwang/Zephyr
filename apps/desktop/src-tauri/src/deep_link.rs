@@ -113,25 +113,83 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
     })
 }
 
+/// Links waiting for the main page. The queue keeps every link until the
+/// page takes it: an event dispatched into a page that is loading, reloading
+/// or tearing down its listener would otherwise be dropped, and an event
+/// carries no acknowledgement. The event only tells the page to come and
+/// take what is waiting; a new page takes it once its listener is up.
+#[derive(Debug, Default)]
+struct DeepLinkQueue {
+    pending: Vec<DeepLinkPayload>,
+}
+
+/// At most this many links wait for the page; older ones are dropped first.
+const MAX_PENDING: usize = 8;
+
+impl DeepLinkQueue {
+    fn push(&mut self, payload: DeepLinkPayload) {
+        if self.pending.len() >= MAX_PENDING {
+            self.pending.remove(0);
+        }
+        self.pending.push(payload);
+    }
+
+    /// Hands out the oldest link only: the rest stay here while the page
+    /// asks about this one, so a page that closes or reloads mid-prompt
+    /// leaves them for the next page. The link being asked about is not
+    /// offered again after such a reload; the user opens it once more.
+    fn take(&mut self) -> Vec<DeepLinkPayload> {
+        if self.pending.is_empty() {
+            Vec::new()
+        } else {
+            vec![self.pending.remove(0)]
+        }
+    }
+}
+
+static QUEUE: std::sync::Mutex<DeepLinkQueue> = std::sync::Mutex::new(DeepLinkQueue {
+    pending: Vec::new(),
+});
+
+fn queue() -> std::sync::MutexGuard<'static, DeepLinkQueue> {
+    QUEUE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Called by the page when its `deep-link` listener is registered, on every
+/// `deep-link` event, and after handling each link; returns the oldest link
+/// waiting (at most one), or nothing once the queue is empty.
+#[tauri::command]
+#[must_use]
+pub fn take_pending_deep_links() -> Vec<DeepLinkPayload> {
+    queue().take()
+}
+
+fn deliver(app: &tauri::AppHandle, payload: DeepLinkPayload) {
+    queue().push(payload);
+    crate::backend_event::emit_to_main(app, "deep-link", ());
+}
+
 /// Check command-line arguments for deep link URLs.
 /// On Windows, protocol associations pass the URL as a CLI argument.
 /// On macOS/Linux, they may also arrive via argv.
 pub fn handle_cli_deep_links(app: &tauri::AppHandle) {
-    let args: Vec<String> = std::env::args().collect();
-    for arg in &args {
+    // `args_os`: `args` panics on an argument that is not valid Unicode.
+    for arg in std::env::args_os().filter_map(|arg| arg.into_string().ok()) {
         if arg.starts_with("clash://") {
-            if let Some(payload) = parse_deep_link(arg) {
-                crate::backend_event::emit_to_main(app, "deep-link", payload);
+            if let Some(payload) = parse_deep_link(&arg) {
+                deliver(app, payload);
             }
         }
     }
 }
 
-/// Emit a deep link event to the main window.
+/// Queue a deep link for the main page and tell the page to take it.
 /// Can be called from any context where we have an `AppHandle`.
 pub fn emit_deep_link(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(payload) = parse_deep_link(raw_url) {
-        crate::backend_event::emit_to_main(app, "deep-link", payload);
+        deliver(app, payload);
     }
 }
 
@@ -139,6 +197,39 @@ pub fn emit_deep_link(app: &tauri::AppHandle, raw_url: &str) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn link(name: &str) -> DeepLinkPayload {
+        DeepLinkPayload {
+            action: "install-config".to_owned(),
+            url: "https://example.com/sub".to_owned(),
+            name: name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn links_wait_until_taken_and_come_out_in_order() {
+        let mut q = DeepLinkQueue::default();
+        q.push(link("a"));
+        q.push(link("b"));
+        let first: Vec<String> = q.take().into_iter().map(|p| p.name).collect();
+        assert_eq!(first, ["a"]);
+        let second: Vec<String> = q.take().into_iter().map(|p| p.name).collect();
+        assert_eq!(second, ["b"]);
+        assert!(q.take().is_empty());
+        q.push(link("c"));
+        assert_eq!(q.take().len(), 1);
+    }
+
+    #[test]
+    fn only_the_newest_links_are_kept() {
+        let mut q = DeepLinkQueue::default();
+        for i in 0..(MAX_PENDING + 2) {
+            q.push(link(&i.to_string()));
+        }
+        assert_eq!(q.pending.len(), MAX_PENDING);
+        assert_eq!(q.take().first().map(|p| p.name.as_str()), Some("2"));
+        assert_eq!(q.pending.len(), MAX_PENDING - 1);
+    }
 
     #[test]
     fn test_parse_valid_deep_link() {

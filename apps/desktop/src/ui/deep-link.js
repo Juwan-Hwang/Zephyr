@@ -6,7 +6,7 @@
  * and routes them to the appropriate UI actions.
  */
 
-import { listen, invoke } from '../api.js';
+import { listen, invoke, getCurrentWindow } from '../api.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { translations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
@@ -62,15 +62,78 @@ async function activateIfFirst(configName) {
  * @returns {Promise<() => Promise<void>>} Unlisten function
  */
 export async function initDeepLink() {
-    return listen('deep-link', async (/** @type {{ payload: DeepLinkPayload }} */ event) => {
-        const { action, url, name } = event.payload;
+    // The backend keeps every link until the page takes it; the event only
+    // says that one is waiting. Links that arrived before this listener (a
+    // launch with a link, or one forwarded while the page was loading or
+    // reloading) are taken right after it is registered.
+    const unlisten = await listen('deep-link', () => { void takePendingDeepLinks(); });
+    void takePendingDeepLinks();
+    return unlisten;
+}
 
-        if (action === 'install-config') {
-            await handleInstallConfig(url, name);
-        } else {
-            apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+/** @type {Promise<void>} */
+let draining = Promise.resolve();
+
+/**
+ * Take the waiting links and handle them one at a time, oldest first. Runs
+ * are chained so a link that arrives while an earlier prompt is open waits
+ * behind it.
+ * @returns {Promise<void>}
+ */
+function takePendingDeepLinks() {
+    draining = draining.then(handlePendingDeepLinks);
+    return draining;
+}
+
+/** At most this many links are handled per run (the backend holds 8). */
+const MAX_LINKS_PER_RUN = 16;
+
+/**
+ * The backend hands out one link per call and keeps the rest, so links
+ * behind an open prompt survive the page closing or reloading; a link
+ * that fails is logged and the next one is still handled.
+ */
+async function handlePendingDeepLinks() {
+    for (let i = 0; i < MAX_LINKS_PER_RUN; i++) {
+        /** @type {DeepLinkPayload | undefined} */
+        let payload;
+        try {
+            const pending = await invoke(COMMANDS.TAKE_PENDING_DEEP_LINKS);
+            payload = Array.isArray(pending) ? pending[0] : undefined;
+        } catch (err) {
+            apiLogger.warn('[DeepLink] Could not read waiting links', err);
+            return;
         }
-    });
+        if (!payload) return;
+        // A silent start, or closing to the tray while an earlier import
+        // ran, leaves the window hidden: show it before each prompt, or the
+        // prompt waits where nobody sees it.
+        await revealWindow();
+        try {
+            await handleDeepLink(payload);
+        } catch (err) {
+            apiLogger.warn('[DeepLink] Could not handle a waiting link', err);
+        }
+    }
+}
+
+async function revealWindow() {
+    try {
+        const win = getCurrentWindow();
+        await win.show();
+        await win.setFocus();
+    } catch (err) {
+        apiLogger.warn('[DeepLink] Could not show the window for a held link', err);
+    }
+}
+
+/** @param {DeepLinkPayload} payload */
+async function handleDeepLink({ action, url, name }) {
+    if (action === 'install-config') {
+        await handleInstallConfig(url, name);
+    } else {
+        apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+    }
 }
 
 /**
