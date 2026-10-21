@@ -1033,6 +1033,16 @@ fn patch_settings_blocking(
     *lock_guard = snapshot.clone();
     drop(lock_guard);
 
+    // An explicit `tun_enabled: null` reset is durably stored now: the
+    // live TUN override an override script recorded described the
+    // preference being reset, so it is dropped with it.
+    if patch
+        .get("tun_enabled")
+        .is_some_and(serde_json::Value::is_null)
+    {
+        core_manager::core::tun_manager::clear_live_tun_override();
+    }
+
     // Side effects run only after the new value is durably stored, and outside
     // the settings lock (the profile transforms touch files and can take a
     // while).
@@ -1362,34 +1372,20 @@ pub(crate) fn recreate_main_window(
 
 /// Get current system proxy and core status for tray state determination
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn get_tray_status(app: tauri::AppHandle) -> String {
-    // TUN-aware: a macOS root TUN core has no `Child` handle.
-    if !core_manager::core::subscription::is_core_running(&app) {
-        // Core not running, return default state
-        return "default".to_owned();
-    }
-
-    // Check system proxy status using existing function
-    let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
-
-    // Check TUN status from tray state
-    let tun_enabled = app
-        .state::<TrayState>()
-        .0
-        .lock()
-        .map(|guard| guard.tun_enabled)
-        .unwrap_or(false);
-
-    if tun_enabled {
-        return "tun".to_owned();
-    }
-
-    if sys_proxy_enabled {
-        return "sysproxy".to_owned();
-    }
-
-    "default".to_owned()
+async fn get_tray_status(app: tauri::AppHandle) -> Result<String, String> {
+    // The same live read `get_tray_proxy_status` makes, mapped onto
+    // this command's older vocabulary: that command distinguishes a
+    // stopped core from a running one, while this one answers
+    // "default" for both, for callers that only need the mode. Going
+    // through it also means a failed system-proxy read propagates
+    // instead of being reported as off, and the read itself runs off
+    // the main thread.
+    let status = crate::tray::get_tray_proxy_status(app).await?;
+    Ok(match status.as_str() {
+        "tun" => "tun".to_owned(),
+        "sysproxy" => "sysproxy".to_owned(),
+        _ => "default".to_owned(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1846,6 +1842,14 @@ pub fn run() {
             // Init Tray using the new tray module
             init_tray(app.handle())?;
 
+            // Keep the tray icon's idle glyph in step with the Windows
+            // taskbar colour mode even while the main window is hidden
+            // or destroyed, when no window event can fire for it. Started
+            // only now, because the refresh reads SettingsState and the
+            // tray, and neither exists before this point.
+            #[cfg(target_os = "windows")]
+            crate::tray::watch_windows_taskbar_theme(app.handle().clone());
+
             // Handle deep link URLs from command-line arguments
             // (protocol associations on Windows/macOS pass URLs via argv)
             deep_link::handle_cli_deep_links(app.handle());
@@ -1908,6 +1912,31 @@ if window.app_handle().get_webview_window("main").is_none() {
 invalidate_heartbeat(window.app_handle());
 }
 }
+                // Only Windows picks the idle tray glyph by colour mode
+                // (macOS uses a template image the system re-tints itself,
+                // Linux does not depend on the theme). The status lookup
+                // can shell out to system tools, so it runs off the main
+                // thread.
+                #[cfg(target_os = "windows")]
+                tauri::WindowEvent::ThemeChanged(_) if window.label() == "main" => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        crate::tray::refresh_tray_icon(&app);
+                    });
+                }
+                // Changing only the taskbar colour mode in Windows
+                // Settings updates `SystemUsesLightTheme` without changing
+                // the app colour mode the window reports, so no
+                // ThemeChanged fires for it. That Settings visit takes
+                // focus away from the main window; re-check the glyph when
+                // the window regains focus.
+                #[cfg(target_os = "windows")]
+                tauri::WindowEvent::Focused(true) if window.label() == "main" => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        crate::tray::refresh_tray_icon(&app);
+                    });
+                }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
                     // profile-transform lock, which an encryption batch holds
@@ -2026,6 +2055,7 @@ invalidate_heartbeat(window.app_handle());
             tray::get_tray_menu_state,
             tray::set_tray_menu_state,
             tray::get_tray_proxy_status,
+            tray::get_tray_icon_mode,
             tray::update_tray_toggle_states,
             // Core commands — full path required for generate_handler! macro (__cmd_ symbol resolution)
             core_manager::core::crypto::is_machine_key_persisted,
