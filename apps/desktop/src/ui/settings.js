@@ -31,7 +31,7 @@ import { translations, setLanguage } from '../i18n.js';
 import { escapeHtml } from '../utils/sanitize.js';
 import { debounce } from '../utils/debounce.js';
 import { settingsLogger } from '../utils/logger.js';
-import { showNotification, showConfirmModal, showUpdateNotesModal } from './notifications.js';
+import { showNotification, showConfirmModal } from './notifications.js';
 import { applyTheme, DEFAULT_THEME } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
@@ -66,7 +66,6 @@ function dropOpenModal(id) {
     el.remove();
 }
 import { initSettingsNav } from './settings-nav.js';
-import { normalizeVersion, isRemoteNewer } from '../utils/version-utils.js';
 import { createStatusRing } from './status-ring.js';
 import * as prism from './prism.js';
 
@@ -84,6 +83,8 @@ import { initThemeSettings } from './settings/theme.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { applyAutoSwitch, restoreAutoSwitch, alignAutoSwitch, deriveAutoSwitch, readAutoSwitchState, queueSmartConfigWrite, smartEnabledOf, shownAutoSwitch } from './settings/auto-switch.js';
 import { initSubscriptionSettings } from './settings/subscriptions.js';
+import { selectSegment } from './seg-control.js';
+import { openUpdateDialog } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
 let __langDropdown = null;
@@ -1058,7 +1059,6 @@ export async function initSettings() {
     const openConfigFolderBtn = document.getElementById('open-config-folder-btn');
     const appMainContainer = document.getElementById('app-main-container');
     const themeModeContainer = document.getElementById('setting-theme-mode-container');
-    const themeModeSlider = document.getElementById('setting-theme-mode-slider');
     /** @type {HTMLElement[]} */
     const themeModeButtons = Array.from(document.querySelectorAll('[data-theme-mode]'));
     const appTitleIcon = /** @type {HTMLImageElement} */ (document.getElementById('app-title-icon'));
@@ -1163,14 +1163,12 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     }
 
     // ---- UI Scale buttons ----
+    const UI_SCALES = [1, 1.1, 1.25, 1.5];
+    const uiScaleContainer = document.getElementById('setting-ui-scale-container');
     const uiScaleButtons = document.querySelectorAll('.ui-scale-btn');
     const applyUiScale = (/** @type {number} */ scale) => {
-        // Update button states
-        // Same raised-grey selected state as the theme / home-mode segmented controls
-        const activeId = `ui-scale-${Math.round(scale * 100)}`;
-        uiScaleButtons.forEach(btn => {
-            btn.setAttribute('aria-pressed', btn.id === activeId ? 'true' : 'false');
-        });
+        // Same sliding thumb as the theme / home-mode controls (ui/seg-control.js)
+        selectSegment(uiScaleContainer, UI_SCALES.findIndex((s) => Math.abs(s - scale) < 0.001));
         // Apply scale via CSS custom property --ui-scale
         // The actual transform/size is handled by CSS on #app-main-container.
         // This avoids inline style conflicts with Tailwind classes and ensures
@@ -1178,11 +1176,18 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         document.documentElement.style.setProperty('--ui-scale', String(scale));
     };
 
+    // Saves run one after another in click order and each one that succeeds is
+    // applied in that order, so the UI always ends on the value that was saved
+    // last (a failed newer click leaves the last saved scale showing).
+    /** @type {Promise<unknown>} */
+    let uiScaleChain = Promise.resolve();
     uiScaleButtons.forEach(btn => {
         btn.addEventListener('click', async () => {
             const scaleValue = parseInt(btn.id.replace('ui-scale-', '')) / 100;
+            const save = uiScaleChain.then(() => invoke(COMMANDS.SET_UI_SCALE, { scale: scaleValue }));
+            uiScaleChain = save.catch(() => {});
             try {
-                await invoke(COMMANDS.SET_UI_SCALE, { scale: scaleValue });
+                await save;
                 applyUiScale(scaleValue);
             } catch (_e) {
                 // silently ignore — non-critical
@@ -1224,31 +1229,15 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     appStore.set('logMaxFileMb', settings.log_max_file_mb ?? 50);
     if (customArgsInput) customArgsInput.value = (settings.custom_args || []).join('\n');
 
-    // Apply saved UI scale
-    if (settings.ui_scale && settings.ui_scale > 0) {
-        applyUiScale(settings.ui_scale);
-    }
+    // Apply saved UI scale (unset means the default 100%)
+    applyUiScale(settings.ui_scale > 0 ? settings.ui_scale : 1);
 
     // ---- Home page mode ----
-    const homeModeSlider = document.getElementById('setting-home-mode-slider');
+    const homeModeContainer = document.getElementById('setting-home-mode-container');
     const homeModeButtons = document.querySelectorAll('[data-home-mode]');
+    const HOME_MODES = ['minimal', 'console'];
     /** @param {string} mode */
-    const setHomeModeUI = (mode) => {
-        const isConsole = mode === 'console';
-        if (homeModeSlider) homeModeSlider.style.transform = isConsole ? 'translateX(calc(var(--rtl-sign, 1) * 100%))' : '';
-        homeModeButtons.forEach((btn) => {
-            const btnMode = /** @type {HTMLElement} */ (btn).dataset.homeMode;
-            const isSelected = btnMode === mode;
-            btn.setAttribute('aria-pressed', String(isSelected));
-            if (isSelected) {
-                btn.classList.remove('text-[var(--text-secondary)]');
-                btn.classList.add('text-[var(--text-primary)]');
-            } else {
-                btn.classList.add('text-[var(--text-secondary)]');
-                btn.classList.remove('text-[var(--text-primary)]');
-            }
-        });
-    };
+    const setHomeModeUI = (mode) => selectSegment(homeModeContainer, HOME_MODES.indexOf(mode));
     const savedHomePageMode = settings.home_page_mode === 'console' ? 'console' : 'minimal';
     setHomeModeUI(savedHomePageMode);
     appStore.set('homePageMode', savedHomePageMode);
@@ -1276,7 +1265,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         opacitySlider,
         opacityValText,
         themeModeContainer,
-        themeModeSlider,
         themeModeButtons,
         save: () => save(),
     });
@@ -2240,152 +2228,31 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
     void loadSettingsFromCore();
 
-    // ---- Auto-update check ----
-    /**
-     * @param {string} latestVersion
-     * @param {string} downloadUrl
-     */
-    const performCoreUpdate = async (latestVersion, downloadUrl) => {
-        if (!checkUpdateBtn) return;
-        /** @type {any} */
-        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        const confirmed = await showConfirmModal(t.notifUpdateFound, latestVersion);
-        if (!confirmed) return;
-
-        const ring = createStatusRing(checkUpdateBtn);
-        ring.show();
-        /** @type {(() => Promise<void>) | undefined} */
-        let unlisten;
-
-        try {
-            unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
-                if (event.payload.component === 'core') {
-                    ring.setProgress(event.payload.progress);
-                }
-            });
-            showNotification(t.notifUpdating);
-            /** @type {any} */
-            const coreResult = await invoke(COMMANDS.UPDATE_CORE, {
-                url: downloadUrl,
-            });
+    // ---- Check for updates (one dialog for every state: ui/update-dialog.js) ----
+    /** After an in-app core update: point the API and traffic stream at the new core. */
+    const onCoreUpdated = async (/** @type {any} */ coreResult) => {
+        if (coreResult?.port) {
             setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
             setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
+        }
+        if (coreResult?.secret !== undefined) {
             setSecret(coreResult.secret);
             setWsSecret(coreResult.secret);
-
-            // Reconnect traffic WebSocket to the new core instance.
-            // Use forceReconnect() instead of connectTraffic() to preserve
-            // the original callback (which emits TRAFFIC_UPDATE for the
-            // console dashboard). Store the returned handle so callers can
-            // close the new connection during teardown.
-            const newHandle = forceReconnect();
-            if (newHandle) {
-                // Dispatch a CORE_RESTARTED event so main.js updates _trafficWsHandle
-                Bus.emit(Events.CORE_RESTARTED, { handle: newHandle });
-            } else {
-                settingsLogger.warn('forceReconnect() returned null — traffic stream may be stalled after core update');
-            }
-
-            showNotification(t.notifUpdateSuccess, 'success');
-            await loadCoreVersion();
-            await syncCoreConfig();
-            ring.setSuccess();
-        } catch (err) {
-            ring.setError();
-            const error = toError(err);
-            showNotification(error.toString(), 'error');
-        } finally {
-            if (unlisten) dropListener(unlisten);
-            setTimeout(() => ring.destroy(), 3500);
         }
-    };
-
-    /**
-     * @param {string} version
-     */
-    const performClientUpdate = async (version) => {
-        if (!checkUpdateBtn) return;
-        /** @type {any} */
-        const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-        const ring = createStatusRing(checkUpdateBtn);
-        ring.show();
-        /** @type {(() => Promise<void>) | undefined} */
-        let unlisten;
-        try {
-            unlisten = await listen('core-download-status', (/** @type {{ payload: { component?: string, progress: number } }} */ event) => {
-                if (event.payload.component === 'client') {
-                    ring.setProgress(event.payload.progress);
-                }
-            });
-            await invoke(COMMANDS.UPDATE_CLIENT);
-            ring.setSuccess();
-            showNotification(`${t.clientUpdateSuccess || 'Update downloaded'} (${version})`, 'success');
-        } catch (e) {
-            ring.setError();
-            showNotification(`${t.clientUpdateFailed || 'Update failed'}: ${e}`, 'error');
-        } finally {
-            if (unlisten) dropListener(unlisten);
-            setTimeout(() => ring.destroy(), 3500);
+        // forceReconnect() keeps the original callback (TRAFFIC_UPDATE for the console
+        // dashboard); main.js picks up the new handle from CORE_RESTARTED.
+        const newHandle = forceReconnect();
+        if (newHandle) {
+            Bus.emit(Events.CORE_RESTARTED, { handle: newHandle });
+        } else {
+            settingsLogger.warn('forceReconnect() returned null — traffic stream may be stalled after core update');
         }
+        await loadCoreVersion();
+        await syncCoreConfig();
     };
 
     if (checkUpdateBtn) {
-        checkUpdateBtn.onclick = async () => {
-            if (checkUpdateBtn.disabled) return;
-            checkUpdateBtn.disabled = true;
-
-            try {
-                const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
-
-                showNotification(t.notifUpdateCheck);
-
-                // Check both core and client updates in parallel
-                const [latest, clientInfo, currentAppVersion] = await Promise.all([
-                    invoke(COMMANDS.GET_LATEST_VERSION),
-                    invoke(COMMANDS.GET_LATEST_CLIENT_VERSION),
-                    invoke(COMMANDS.GET_APP_VERSION),
-                ]);
-
-            const coreVer = latest?.version ? normalizeVersion(latest.version) : '';
-            const localCoreVer = currentCoreVersion ? normalizeVersion(currentCoreVersion) : '';
-            const coreHasUpdate = coreVer && localCoreVer && isRemoteNewer(coreVer, localCoreVer);
-            const clientVer = clientInfo?.version ? normalizeVersion(clientInfo.version) : '';
-            const localAppVer = currentAppVersion ? normalizeVersion(currentAppVersion) : '';
-            const clientHasUpdate = clientVer && localAppVer && isRemoteNewer(clientVer, localAppVer);
-
-                if (!coreHasUpdate && !clientHasUpdate) {
-                    showNotification(t.notifNoUpdate, 'success');
-                    return;
-                }
-
-                if (coreHasUpdate && clientHasUpdate) {
-                    // Both have updates — download Full version (includes core + client)
-                    const confirmed = await showConfirmModal(
-                        t.bothUpdateAvailable || 'Both core and client have updates',
-                        `${t.coreUpdate || 'Core'}: ${currentCoreVersion} → ${latest.version}\n${t.clientUpdate || 'Client'}: ${currentAppVersion} → ${clientInfo.version}\n\n${t.recommendFullVersion || 'Recommend installing Full version'}`
-                    );
-                    if (confirmed) {
-                        await performClientUpdate(clientInfo.version);
-                    }
-                } else if (coreHasUpdate) {
-                    await performCoreUpdate(latest.version, latest.download_url);
-                } else {
-                    // Only client update
-                    const confirmed = await showUpdateNotesModal(
-                        `${t.clientUpdateAvailable || 'Client Update Available'}: v${clientInfo.version}`,
-                        clientInfo.release_notes || ''
-                    );
-                    if (confirmed) {
-                        await performClientUpdate(clientInfo.version);
-                    }
-                }
-            } catch (err) {
-                const error = toError(err);
-                showNotification(error.toString(), 'error');
-            } finally {
-                checkUpdateBtn.disabled = false;
-            }
-        };
+        checkUpdateBtn.onclick = () => openUpdateDialog({ onCoreUpdated });
     }
 
     // ---- Extension Rules: Auto Apply toggle ----
