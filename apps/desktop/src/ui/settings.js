@@ -760,6 +760,94 @@ function initLogSettingsModal() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Third-party licenses viewer (About section). The texts are embedded in the
+// backend (get_third_party_licenses) from the same file that ships as a
+// package resource, so what the user reads here is byte-identical to the
+// THIRD-PARTY-LICENSES.txt installed with the app.
+// ---------------------------------------------------------------------------
+function initLicensesModal() {
+    const viewBtn = document.getElementById('view-licenses-btn');
+    if (!viewBtn) return;
+
+    viewBtn.addEventListener('click', async () => {
+        dropOpenModal('licenses-modal');
+
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+
+        const modal = document.createElement('div');
+        modal.id = 'licenses-modal';
+        modal.className = 'fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md p-4';
+        // eslint-disable-next-line no-unsanitized/property -- title/close labels escaped via escapeHtml(); the license body is set via textContent, never innerHTML // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
+        modal.innerHTML = `
+            <div class="glass-card flex max-h-full w-[min(760px,92vw)] flex-col gap-4 p-6" role="dialog" aria-modal="true" aria-labelledby="licenses-modal-title">
+                <div class="flex shrink-0 items-center justify-between">
+                    <h3 id="licenses-modal-title" class="dialog-title">${escapeHtml(t.thirdPartyLicenses || 'Third-party Licenses')}</h3>
+                    <button type="button" id="licenses-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.close || 'Close')}">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <pre id="licenses-modal-body" tabindex="0" aria-labelledby="licenses-modal-title" class="max-h-[65vh] min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[var(--text-secondary)]"></pre>
+                <div class="flex shrink-0 justify-end pt-1">
+                    <button type="button" id="licenses-modal-done" class="btn-primary">${escapeHtml(t.done || 'Done')}</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        document.body.style.overflow = 'hidden';
+
+        // Animate in (same pattern as the log settings dialog)
+        requestAnimationFrame(() => {
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                requestAnimationFrame(() => {
+                    panel.style.transition = 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                    panel.style.transform = 'scale(1)';
+                    panel.style.opacity = '1';
+                });
+            }
+        });
+
+        const closeModal = () => {
+            trap.deactivate();
+            document.body.style.overflow = '';
+            const panel = modal.querySelector('.glass-card');
+            if (panel instanceof HTMLElement) {
+                panel.style.transition = 'all 0.15s ease-in';
+                panel.style.transform = 'scale(0.96)';
+                panel.style.opacity = '0';
+                setTimeout(() => modal.remove(), 150);
+            } else {
+                modal.remove();
+            }
+        };
+
+        const trap = createFocusTrap(modal, { onEscape: () => closeModal() });
+        _modalTraps.set(modal, trap);
+        trap.activate();
+        document.getElementById('licenses-modal-close')?.addEventListener('click', closeModal);
+        // Only a press that starts on the backdrop counts as a backdrop
+        // click: dragging a text selection out of the panel and releasing
+        // over the backdrop must not dismiss the viewer.
+        let pressStartedOnBackdrop = false;
+        modal.addEventListener('pointerdown', (e) => { pressStartedOnBackdrop = e.target === modal; });
+        modal.addEventListener('click', (e) => { if (e.target === modal && pressStartedOnBackdrop) closeModal(); });
+        document.getElementById('licenses-modal-done')?.addEventListener('click', closeModal);
+
+        const body = modal.querySelector('#licenses-modal-body');
+        try {
+            const text = await invoke(COMMANDS.GET_THIRD_PARTY_LICENSES);
+            if (body) body.textContent = typeof text === 'string' ? text : String(text ?? '');
+        } catch (err) {
+            settingsLogger.error('[licenses] Failed to load license texts:', err);
+            if (body) body.textContent = t.thirdPartyLicensesLoadFailed || 'Failed to load the license texts.';
+        }
+    });
+}
+
 //  initFakeClient
 // ---------------------------------------------------------------------------
 function initFakeClient() {
@@ -2710,6 +2798,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
     // Initialize log settings modal
     initLogSettingsModal();
+
+    // Initialize third-party licenses viewer
+    initLicensesModal();
 
     initCopyEnvSettings();
 
