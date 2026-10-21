@@ -305,7 +305,9 @@ pub fn rule_extract_from_profile(
     if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
-    write_file_secure(&path, &content)?;
+    // Strip dangerous keys from YAML input to prevent injection
+    let safe_content = sanitize_rule_yaml(&content)?;
+    write_file_secure(&path, &safe_content)?;
     Ok(filename)
 }
 
@@ -538,5 +540,13 @@ mod tests {
     fn sanitize_preserves_clean_root_sequence_verbatim() {
         let content = "# my rules\n- DOMAIN,example.com,DIRECT\n";
         assert_eq!(sanitize_rule_yaml(content).unwrap(), content);
+    }
+
+    #[test]
+    fn sanitize_rule_yaml_cleans_extracted_profile_rules() {
+        let content = "__when__:\n  enabled: false\n\nrules:\n  $append:\n    - DOMAIN,example.com,{{proxy}}\n";
+        let out = sanitize_rule_yaml(content).expect("extracted rule DSL should sanitize cleanly");
+        assert!(out.contains("rules"));
+        assert!(out.contains("$append"));
     }
 }
