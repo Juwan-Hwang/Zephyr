@@ -52,68 +52,77 @@ pub struct PatchInfo {
     pub path: String,
 }
 
+/// Where a hot reload goes: the core's API port, its secret and the
+/// `run_config.yaml` it reloads from.
+fn hot_reload_target(state: &PrismState) -> Result<(u16, String, String), String> {
+    let mihomo_state = state.app.state::<MihomoState>();
+    let lock = mihomo_state
+        .0
+        .lock()
+        .map_err(|e| format!("Lock failed: {e}"))?;
+    let port = lock.last_port().unwrap_or(9090);
+    let secret = lock.last_secret().to_owned();
+    drop(lock);
+
+    let paths = ensure_app_storage(&state.app)?;
+    let run_config_path = paths.core_dir.join("run_config.yaml");
+    Ok((port, secret, run_config_path.to_string_lossy().to_string()))
+}
+
+/// Send `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so that
+/// Mihomo reloads the config from disk. Blocks until the core answers.
+fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{port}/configs?force=true");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+    // Mihomo PUT /configs expects {"path": "..."} to reload from file
+    let body = serde_json::json!({ "path": run_config_path });
+    let resp = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {secret}"))
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Request failed: {e}"))?;
+    if resp.status().is_success() {
+        log_info!("[hot-reload] Success: {}", resp.status());
+        Ok(())
+    } else {
+        Err(format!(
+            "Failed: {} - {}",
+            resp.status(),
+            resp.text().unwrap_or_default()
+        ))
+    }
+}
+
 /// Trigger a hot-reload request to Mihomo via its REST API.
 ///
-/// Spawns a background thread to avoid blocking the caller. The request sends
-/// `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so that
-/// Mihomo reloads the config from disk.
+/// Spawns a background thread to avoid blocking the caller; failures are
+/// only logged. Use [`hot_reload_and_wait`] when the caller acts on the
+/// reloaded config.
 pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
-    let (port, secret, run_config_path) = {
-        let mihomo_state = state.app.state::<MihomoState>();
-        let lock = mihomo_state
-            .0
-            .lock()
-            .map_err(|e| format!("Lock failed: {e}"))?;
-        let port = lock.last_port().unwrap_or(9090);
-        let secret = lock.last_secret().to_owned();
-        drop(lock);
-
-        let paths = ensure_app_storage(&state.app)?;
-        let run_config_path = paths.core_dir.join("run_config.yaml");
-        (port, secret, run_config_path)
-    };
-
-    let run_config_path_str = run_config_path.to_string_lossy().to_string();
-
+    let (port, secret, run_config_path) = hot_reload_target(state)?;
     thread::spawn(move || {
-        let url = format!("http://127.0.0.1:{port}/configs?force=true");
-        let client = match reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .no_proxy()
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                log_error!("[hot-reload] HTTP client error: {e}");
-                return;
-            }
-        };
-        // Mihomo PUT /configs expects {"path": "..."} to reload from file
-        let body = serde_json::json!({ "path": run_config_path_str });
-        match client
-            .put(&url)
-            .header("Authorization", format!("Bearer {secret}"))
-            .json(&body)
-            .send()
-        {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    log_info!("[hot-reload] Success: {}", resp.status());
-                } else {
-                    log_error!(
-                        "[hot-reload] Failed: {} - {}",
-                        resp.status(),
-                        resp.text().unwrap_or_default()
-                    );
-                }
-            }
-            Err(e) => {
-                log_error!("[hot-reload] Request failed: {e}");
-            }
+        if let Err(e) = send_hot_reload(port, &secret, &run_config_path) {
+            log_error!("[hot-reload] {e}");
         }
     });
-
     Ok(())
+}
+
+/// Hot-reload the core and wait for it to apply the new config, so that what
+/// the caller does next (restoring a proxy selection) sees the reloaded groups.
+pub async fn hot_reload_and_wait(state: &PrismState) -> Result<(), String> {
+    let (port, secret, run_config_path) = hot_reload_target(state)?;
+    tokio::task::spawn_blocking(move || send_hot_reload(port, &secret, &run_config_path))
+        .await
+        .map_err(|e| format!("Hot reload task failed: {e}"))?
+        .inspect_err(|e| {
+            log_error!("[hot-reload] {e}");
+        })
 }
 
 /// Read the current running config from `run_config.yaml` and parse as JSON.

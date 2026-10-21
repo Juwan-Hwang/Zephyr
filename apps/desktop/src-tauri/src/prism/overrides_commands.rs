@@ -957,11 +957,14 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
     let mut all_logs = pre_logs;
     let mut prism_success = false;
+    let mut js_modified = false;
 
     // Phase 1: Apply Prism YAML overrides (batch: write all patches → single compile → single write)
     // Prism DSL runs first so JS overrides can read and modify Prism's output.
     if !prism_patches.is_empty() {
-        let prism_logs = execute_prism_yaml_batch(&state, &prism_patches, js_scripts.is_empty())?;
+        // The reload happens once at the end, awaited: the caller restores
+        // the proxy selection right after and must see the reloaded groups.
+        let prism_logs = execute_prism_yaml_batch(&state, &prism_patches, false)?;
         if let Some(first_log) = prism_logs.first() {
             prism_success = first_log.success;
         }
@@ -1023,13 +1026,14 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
             })
             .collect();
 
-        // Trigger hot-reload if any JS script modified the config or Prism YAML patches succeeded
-        let js_modified = results.iter().any(|r| r.success && r.config_modified);
-        if js_modified || prism_success {
-            crate::prism::pipeline::trigger_hot_reload(&state)?;
-        }
-
+        js_modified = results.iter().any(|r| r.success && r.config_modified);
         all_logs.extend(exec_logs);
+    }
+
+    // Hot-reload if any JS script modified the config or Prism YAML patches
+    // succeeded, and only return once the core has the new config.
+    if js_modified || prism_success {
+        crate::prism::pipeline::hot_reload_and_wait(&state).await?;
     }
 
     Ok(all_logs)

@@ -129,9 +129,14 @@ export async function switchToConfig(configName, customArgs = []) {
  * rewrites `run_config.yaml` from the raw profile, so all previously-applied
  * overrides (JS proxy-groups, Prism YAML patches, etc.) are lost.
  *
+ * Each step's failure is logged and the remaining steps still run.
+ *
  * @param {string} configName - The active profile name (used for restoreProxySelection).
+ * @returns {Promise<{ failed: number }>} How many steps did not complete,
+ *   counting each override script that failed to apply.
  */
 export async function postRestartRecovery(configName) {
+  let failed = 0;
   invalidateRunConfigCache();
 
   // 1. Rebuild prism patches (__when__.profile conditions need re-evaluation)
@@ -140,6 +145,7 @@ export async function postRestartRecovery(configName) {
     await rebuild();
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] prism.rebuild failed:', e);
+    failed += 1;
   }
 
   // 2. Re-apply all enabled override scripts
@@ -154,8 +160,10 @@ export async function postRestartRecovery(configName) {
     if (overrideLogs.length > 0) {
       apiLogger.info(`[postRestartRecovery] override_apply_all: ${successCount} succeeded, ${failCount} failed`);
     }
+    failed += failCount;
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] override_apply_all failed:', e);
+    failed += 1;
   }
 
   // 3. Restore last proxy selection for this profile
@@ -164,10 +172,12 @@ export async function postRestartRecovery(configName) {
   //    data (GH#603 race condition).
   invalidateRunConfigCache();
   try {
-    const { restoreProxySelection } = await import('./proxy-memory.js');
-    await restoreProxySelection(configName);
+    const { restoreProxySelectionResult } = await import('./proxy-memory.js');
+    // It reports its own errors instead of throwing.
+    if (await restoreProxySelectionResult(configName) === 'failed') failed += 1;
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] restoreProxySelection failed:', e);
+    failed += 1;
   }
 
   // 4. Refresh frontend proxy display (overrides may have modified proxy-groups)
@@ -193,5 +203,7 @@ export async function postRestartRecovery(configName) {
     startSmartAutoTest();
   } catch (e) {
     apiLogger.warn('[postRestartRecovery] refresh proxies failed:', e);
+    failed += 1;
   }
+  return { failed };
 }

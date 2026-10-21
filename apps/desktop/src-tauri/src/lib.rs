@@ -60,8 +60,8 @@ use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tauri_plugin_window_state::WindowExt as _;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
 use updater::{
-    get_latest_client_version, get_latest_client_versions, get_latest_version, update_client,
-    update_core, update_geo_data,
+    end_update_hold, get_latest_client_version, get_latest_client_versions, get_latest_version,
+    set_page_busy, update_client, update_core, update_geo_data,
 };
 use uwp_loopback::exempt_uwp_apps;
 
@@ -1881,7 +1881,8 @@ pub fn run() {
 
                     if close_to_tray {
                         api.prevent_close();
-                        if lightweight_mode {
+                        // An update still running in the page keeps it alive.
+                        if lightweight_mode && !updater::keep_webview_on_close() {
                             // Lightweight mode: destroy the WebView to free memory.
                             // The app stays alive in the tray because we prevent
                             // exit on ExitRequested. Tray click recreates the window.
@@ -1980,6 +1981,8 @@ invalidate_heartbeat(window.app_handle());
             rename_config,
             get_latest_version,
             update_core,
+            end_update_hold,
+            set_page_busy,
             enable_sysproxy,
             disable_sysproxy,
             get_sys_proxy,
