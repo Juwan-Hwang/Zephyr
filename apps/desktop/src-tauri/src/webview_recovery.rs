@@ -295,6 +295,7 @@ fn recreate_window(app: &AppHandle) {
                 if was_visible {
                     let _ = window.show();
                     let _ = window.set_focus();
+                    crate::updater::window_reopened();
                 }
             }
             Err(e) => {
