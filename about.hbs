@@ -1,0 +1,33 @@
+THIRD-PARTY LICENSES — RUST COMPONENTS
+
+The following Rust crates make up Zephyr's workspace dependency
+graph (desktop and mobile, all platforms), generated with cargo about
+from the workspace lockfile. The graph as resolved from the lockfile
+also includes test-only crates; their license texts are reproduced
+here for completeness. Part A reproduces each distinct
+license text gathered from the crates, including the copyright notices
+it carries; several crates can share one text. Part B maps each crate to
+its license(s).
+
+======================================================================
+PART A — FULL LICENSE TEXTS
+======================================================================
+{{#each licenses}}
+
+----------------------------------------------------------------------
+{{{name}}} (SPDX: {{id}})
+----------------------------------------------------------------------
+
+{{{text}}}
+{{/each}}
+
+======================================================================
+PART B — COMPONENT INDEX
+======================================================================
+{{#each licenses}}
+
+{{{name}}} (SPDX: {{id}}):
+{{#each used_by}}
+  * {{crate.name}} {{crate.version}}{{#if crate.repository}} — {{crate.repository}}{{/if}}
+{{/each}}
+{{/each}}

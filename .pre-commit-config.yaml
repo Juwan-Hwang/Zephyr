@@ -8,14 +8,20 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # THIRD-PARTY-LICENSES.txt is generated verbatim from upstream
+      # license files (scripts/generate-licenses.sh); trimming it here
+      # would make it differ from the generator output that CI checks.
       - id: trailing-whitespace
-        exclude: '\.(snap|md)$'
+        exclude: '\.(snap|md)$|THIRD-PARTY-LICENSES\.txt$'
       - id: end-of-file-fixer
-        exclude: '\.snap$'
+        exclude: '\.snap$|THIRD-PARTY-LICENSES\.txt$'
       - id: check-yaml
       - id: check-toml
       - id: check-json
+      # The generated license file is ~670 KB of verbatim upstream
+      # license texts; it cannot fit the 500 KB default limit.
       - id: check-added-large-files
+        exclude: 'THIRD-PARTY-LICENSES\.txt$'
 
 ci:
   autofix_prs: true
