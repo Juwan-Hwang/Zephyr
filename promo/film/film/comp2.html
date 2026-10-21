@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>Zephyr — film v2</title>
+<style>
+@font-face{font-family:"PingFang SF";src:url("fonts/PingFangSF.ttf") format("truetype");font-weight:100 900;font-display:block}
+@font-face{font-family:"JetBrains Mono";src:url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");font-weight:400}
+:root{--sans:"PingFang SF",sans-serif;--mono:"JetBrains Mono","PingFang SF",monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#05070c}
+body{font-family:var(--sans);-webkit-font-smoothing:antialiased}
+#stage{position:absolute;inset:0;overflow:hidden}
+#groundL{position:absolute;inset:0;background:radial-gradient(120% 95% at 62% 48%,#F8F9FB 0%,#EEF1F5 46%,#DCE2EB 100%)}
+#groundD{position:absolute;inset:0;background:radial-gradient(120% 95% at 62% 48%,#1A1F2B 0%,#11151E 50%,#07090E 100%);opacity:0}
+#groundI{position:absolute;inset:0;background:#05070c}
+#z3d{position:absolute;left:0;top:0;width:1920px;height:1080px}
+#winwrap{position:absolute;left:0;top:0;width:1082px;height:691px;transform-origin:0 0}
+#winshadow{position:absolute;inset:8px 12px;border-radius:26px;box-shadow:0 60px 140px rgba(18,28,52,.26),0 20px 44px rgba(18,28,52,.14)}
+#winimg{position:absolute;left:0;top:0;width:1082px;height:691px}
+#winwrap0{position:absolute;left:0;top:0;width:1082px;height:691px;transform-origin:0 0}
+#winimg0{position:absolute;left:0;top:0;width:1082px;height:691px}
+#logoOv{position:absolute;left:0;top:0;transform-origin:0 0}
+#cursor{position:absolute;left:0;top:0;width:24px;height:36px;transform-origin:3px 2px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+#bar{position:absolute;left:0;top:0;background:#fff;transform-origin:0 0}
+#tray{position:absolute;left:0;top:0;height:64px;border-radius:20px;padding:0 26px;display:flex;align-items:center;gap:26px;
+  background:rgba(250,251,253,.86);box-shadow:0 18px 50px rgba(18,28,52,.18),inset 0 0 0 1px rgba(255,255,255,.7);
+  font-size:25px;font-weight:500;color:#111;letter-spacing:.2px;white-space:nowrap;transform-origin:50% 50%}
+#tray.dark{background:rgba(30,34,44,.9);color:#F2F4F8;box-shadow:0 18px 50px rgba(0,0,0,.45),inset 0 0 0 1px rgba(255,255,255,.08)}
+#tray .ic{width:38px;height:38px;position:relative}
+#tray .ic img{position:absolute;inset:0;width:38px;height:38px}
+.cap{position:absolute;left:0;top:0;color:#0B0F19;white-space:nowrap}
+.cap .ln{display:block;overflow:hidden;padding-bottom:.1em}
+.cap .ln>span{display:inline-block}
+.h1{font-size:64px;font-weight:600;letter-spacing:-.6px;line-height:1.16}
+.h2{font-size:25px;font-weight:450;color:#5B6576;line-height:1.5;margin-top:16px;letter-spacing:.4px}
+.dark .h1{color:#F3F5F9}.dark .h2{color:#9AA4B5}
+#thesis{color:#F3F5F9}
+#thesis .h1{font-size:62px;font-weight:500;letter-spacing:-.3px;line-height:1.32}
+#thesis .h1 b{font-weight:650}
+#burst{position:absolute;inset:0;opacity:0}
+#bw{position:absolute;left:0;top:0;width:1920px;text-align:center;color:#F3F5F9}
+#bw .k{font-family:var(--mono);font-size:22px;color:#7D8798;letter-spacing:3px}
+#bw .w{font-size:150px;font-weight:650;letter-spacing:-1px;line-height:1.15;margin-top:18px}
+#bw .d{font-size:26px;color:#8D97A8;margin-top:22px;letter-spacing:.6px}
+#plat{position:absolute;inset:0;opacity:0;color:#F3F5F9}
+#plat .row{position:absolute;left:0;width:1920px;text-align:center;overflow:hidden}
+#plat .row>span{display:inline-block}
+#plat .big{font-size:96px;font-weight:600;letter-spacing:-.5px}
+#plat .mid{font-size:34px;font-weight:450;color:#9AA4B5;letter-spacing:1px}
+#iris{position:absolute;left:0;top:0;border-radius:50%;background:#05070c}
+#lock{position:absolute;left:510px;top:378.9px;width:900px;height:322.2px}
+#lock img{position:absolute;left:0;top:0;width:900px;height:322.2px}
+#wordwrap{position:absolute;left:0;top:0;width:900px;height:322.2px}
+#tagline{position:absolute;left:0;top:742px;width:1920px;text-align:center;color:#C9D0DC;font-size:30px;font-weight:450;letter-spacing:8px}
+#url{position:absolute;left:0;top:806px;width:1920px;text-align:center;color:#6E7889;font-family:var(--mono);font-size:22px;letter-spacing:1.5px}
+#fade{position:absolute;inset:0;background:#000;opacity:0}
+#scrim{position:absolute;inset:0;opacity:0;background:linear-gradient(90deg,rgba(238,241,245,.96) 0,rgba(238,241,245,.9) 30%,rgba(238,241,245,0) 50%)}
+#scrim.dark{background:linear-gradient(90deg,rgba(14,17,24,.96) 0,rgba(14,17,24,.88) 30%,rgba(14,17,24,0) 50%)}
+#hud{position:absolute;left:12px;bottom:10px;font:14px var(--mono);color:#f0f;display:none}
+</style>
+<script src="mspring.js"></script>
+</head><body>
+<div id="stage">
+  <div id="groundL"></div><div id="groundD"></div><div id="groundI"></div>
+  <div id="winwrap0" class="ww"><img id="winimg0" alt=""></div>
+  <div id="winwrap"><div id="winshadow"></div><img id="winimg" alt=""></div>
+  <img id="logoOv" src="lockup.svg" alt="">
+  <img id="z3d" alt="">
+  <div id="scrim"></div>
+  <div id="cap" class="cap"></div>
+  <div id="tray">
+    <div class="ic"><img id="ti0" src="tray-idle-template.png"><img id="ti1" src="tray-proxy.png"><img id="ti2" src="tray-tun.png"></div>
+    <svg width="30" height="24" viewBox="0 0 30 24"><path d="M15 21.5l3.4-3.9a4.6 4.6 0 0 0-6.8 0zM15 3C9.4 3 4.4 5.2.9 8.8l2.6 3A15.8 15.8 0 0 1 15 7c4.5 0 8.6 1.8 11.5 4.8l2.6-3C25.6 5.2 20.6 3 15 3zm0 7.3a10 10 0 0 0-7.7 3.4l2.6 3a6.6 6.6 0 0 1 10.2 0l2.6-3A10 10 0 0 0 15 10.3z" fill="currentColor"/></svg>
+    <svg width="44" height="22" viewBox="0 0 44 22"><rect x="1" y="2" width="37" height="18" rx="5.5" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="2"/><rect x="4" y="5" width="28" height="12" rx="3" fill="currentColor"/><rect x="40" y="8" width="2.6" height="6" rx="1.3" fill="currentColor" fill-opacity=".45"/></svg>
+    <span>10月21日 周三 10:24</span>
+  </div>
+  <svg id="cursor" viewBox="0 0 22 33"><path d="M2.2 1.6v25.2l6.1-5.9 4 9.6 4.3-1.8-4-9.4h8.5z" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  <div id="iris"></div>
+  <div id="thesis" class="cap"></div>
+  <div id="burst"><div id="bw"><div class="k" id="bk"></div><div class="w" id="bww"></div><div class="d" id="bd"></div></div></div>
+  <div id="bar"></div>
+  <div id="plat">
+    <div class="row" id="r1" style="top:350px"><span class="big" id="p1">Windows · macOS · Linux</span></div>
+    <div class="row" id="r2" style="top:498px"><span class="mid" id="p2">x64 与 ARM64 · 便携版即解即用</span></div>
+    <div class="row" id="r3" style="top:600px"><span class="mid" id="p3">Rust × Tauri 2 · 内置 Mihomo 内核管理</span></div>
+  </div>
+  <div id="lock"><img id="lsym" src="symbol-white.svg"><div id="wordwrap"><img id="lword" src="wordmark-white.svg"></div></div>
+  <div id="tagline">安全至上 · 极简美学 · 轻量高效</div>
+  <div id="url">github.com/Juwan-Hwang/Zephyr</div>
+  <div id="fade"></div>
+  <div id="hud"></div>
+</div>
+<script>
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const E = {
+  linear: (u) => u, appleOut: MO.appleOut, appleInOut: MO.appleInOut, whip: MO.whip, circIn: MO.circIn, circOut: MO.circOut,
+  backOut: MO.backOut, anticipate: MO.anticipate, easeIn: MO.easeIn, easeOut: MO.easeOut,
+  expoIn: (u) => (u <= 0 ? 0 : u >= 1 ? 1 : (Math.pow(2, 10 * u) - 1) / 1023),
+  expoOut: (u) => (u >= 1 ? 1 : 1 - Math.pow(2, -10 * u)),
+};
+const SPRINGS = {};
+function springE(vd, b) { const k = vd + ':' + b; return SPRINGS[k] || (SPRINGS[k] = MO.spring(vd, b)); }
+const BAR = 60 / 124 * 4, BT = BAR / 4;
+const T = { home: 3 * BAR, lang: 7 * BAR, min: 8.75 * BAR, prox: 10.5 * BAR, prism: 12 * BAR, sec: 14.25 * BAR, theme: 16.25 * BAR, close: 18 * BAR, plat: 19.5 * BAR, end: 21 * BAR };
+T.dur = T.end + 6.5;
+const OPEN_N = 175, END_N = 198;
+const WW = 1082, WH = 691;
+const $ = (id) => document.getElementById(id);
+const pending = [];
+function setSrc(img, src) { if (img.dataset.src === src) return; img.dataset.src = src; img.src = src; pending.push(img.decode().catch(() => {})); }
+const pad4 = (n) => String(n).padStart(4, '0');
+function op(el, v) { el.style.opacity = (+v).toFixed(4); el.style.visibility = v <= 0.001 ? 'hidden' : 'visible'; }
+
+// ── footage ──
+const F = {};
+async function loadInfo(n) { F[n] = await (await fetch(`footage2/${n}/info.json`)).json(); }
+let M = {};
+// [film t0, t1, name, offset]  footage t = local + offset
+const SHOTS = [
+  [T.home, T.lang, 'console', -0.15],
+  [T.lang, T.min, 'lang', 0.33],
+  [T.min, T.prox, 'minimal', 0.4],
+  [T.prox, T.prism, 'proxies', 0.25],
+  [T.prism, T.sec, 'prism', 0.15],
+  [T.theme, T.close, 'theme', -0.2],
+  [T.close, T.plat, 'close', 0.0],
+];
+function footAt(t) {
+  for (const s of SHOTS) if (t >= s[0] - (s[2] === 'console' ? 0.4 : 0) && t < s[1]) {
+    const f = F[s[2]], ft = t - s[0] + s[3];
+    return { name: s[2], f, ft, i: clamp(Math.round(ft * 30), 0, f.n - 1), local: t - s[0], s };
+  }
+  return null;
+}
+const filmT = (name, ft) => { const s = SHOTS.find((x) => x[2] === name); return s[0] + ft - s[3]; };
+const mouseAt = (name, ft) => { const f = F[name]; return f.mouse[clamp(Math.round(ft * 30), 0, f.n - 1)]; };
+
+// ── camera: keys {t, f:[x,y] window px, s:[x,y] screen px, z, e:ease for the segment arriving at this key}
+let CAM = [];
+const WIDE_Z = 1.1, WIDE_L = 660, WIDE_T = (1080 - WH * WIDE_Z) / 2;
+const wideS = (p) => [WIDE_L + p[0] * WIDE_Z, WIDE_T + p[1] * WIDE_Z];
+const CEN_Z = 1.22, CEN_L = (1920 - WW * CEN_Z) / 2;
+function K(t, f, s, z, e = 'appleInOut') { CAM.push({ t, f, s, z, e }); }
+function hold(t, prev) { const p = CAM[CAM.length - 1]; K(t, p.f, p.s, p.z, 'linear'); }
+function wide(t, p, e) { K(t, p, wideS(p), WIDE_Z, e); }
+function accent(t, p, z, e) { K(t, p, wideS(p), z, e); }    // pivot zoom on a point of the wide frame
+function camAt(t) {
+  if (!CAM.length) return { f: [541, 345], s: [960, 540], z: 1 };
+  if (t <= CAM[0].t) return CAM[0];
+  for (let i = 0; i < CAM.length - 1; i++) {
+    const a = CAM[i], b = CAM[i + 1];
+    if (t >= a.t && t < b.t) {
+      let u;
+      if (b.e.startsWith('spring')) { const [, vd, bo] = b.e.split(':'); u = springE(+vd, +bo)(t - a.t); }
+      else u = E[b.e]((t - a.t) / (b.t - a.t));
+      return { f: [lerp(a.f[0], b.f[0], u), lerp(a.f[1], b.f[1], u)], s: [lerp(a.s[0], b.s[0], u), lerp(a.s[1], b.s[1], u)], z: Math.exp(lerp(Math.log(a.z), Math.log(b.z), u)) };
+    }
+  }
+  return CAM[CAM.length - 1];
+}
+const toScreen = (c, p) => [c.s[0] + (p[0] - c.f[0]) * c.z, c.s[1] + (p[1] - c.f[1]) * c.z];
+
+// 3D symbol on screen at the end of the open: front face ppu (fov 30°, d=560, face at +15.2)
+const PPU3D = 1080 / (2 * Math.tan(Math.PI / 12) * (560 - 15.2));
+let TITLE = null, TITLE_SYM = null, Z0 = 50;
+
+function buildCam() {
+  CAM = [];
+  const tr = M.title;                                   // app-title-icon rect in window px (lockup 715×256)
+  const k = tr[2] / 715;
+  TITLE = tr; TITLE_SYM = [tr[0] + (4.89 + 128 * 0.8856) * k, tr[1] + (14.65 + 128 * 0.8856) * (tr[3] / 256)];
+  Z0 = PPU3D / (0.8856 * k);
+  const H = T.home, ft2 = (ft) => filmT('console', ft);
+  const sys = M.sys, test = M.test, glob = M.glob, rule = M.rule, tun = M.tun, node = M.node;
+  const modes = [(glob[0] + rule[0]) / 2, glob[1]];
+  // carry 1: the 3D Z is the app's title symbol; pull back out of it
+  K(H - 0.4, TITLE_SYM, [960, 540], Z0, 'linear');
+  K(H, TITLE_SYM, [960, 540], Z0, 'linear');
+  K(H + 1.0, TITLE_SYM, wideS(TITLE_SYM), WIDE_Z, 'appleOut');
+  wide(H + 1.15, [541, 345], 'linear');
+  hold(ft2(1.3));
+  accent(ft2(1.55), sys, 1.62, 'spring:0.45:0.18');
+  hold(ft2(2.2));
+  wide(ft2(2.45), [541, 345], 'appleInOut');
+  accent(ft2(2.75), test, 1.55, 'spring:0.4:0.2');
+  hold(ft2(3.35));
+  accent(ft2(3.8), modes, 1.68, 'appleInOut');
+  hold(ft2(4.95));
+  wide(ft2(5.3), [541, 345], 'appleInOut');
+  accent(ft2(5.7), tun, 1.75, 'spring:0.45:0.18');
+  hold(ft2(6.55));
+  // languages: same window, the language flips on every eighth note; a slow, steady push
+  wide(T.lang + 0.35, [541, 345], 'appleInOut');
+  K(T.min - 0.002, [541, 345], wideS([541, 345]), 1.2, 'easeOut');
+  // carry: the window itself — a layout morph from the console (1082×691) to the minimal home (930×680)
+  const MC = [465, 340];
+  K(T.min + 0.002, MC, wideS([541, 345]), 1.2, 'linear');
+  K(T.min + 0.55, MC, wideS(MC), 1.2, 'spring:0.5:0.1');
+  hold(T.prox - 1.0);
+  // carry 2: push into the node name; it becomes the card on the proxies page
+  const chip = F.minimal.probe.chip;
+  K(T.prox - 0.42, [chip[0], chip[1]], wideS(MC).map((v, i) => v + ([chip[0], chip[1]][i] - MC[i]) * 1.2), 1.5, 'appleInOut');
+  K(T.prox - 0.0001, [chip[0], chip[1]], [960, 540], 6.0, 'expoIn');
+  const hk = [888, 135], jp = F.proxies.probe.jp;
+  K(T.prox + 0.0001, hk, [960, 540], 6.0, 'linear');
+  wide(T.prox + 0.6, [541, 345], 'expoOut');
+  hold(filmT('proxies', 1.35));
+  accent(filmT('proxies', 1.6), jp, 1.6, 'spring:0.4:0.22');
+  hold(T.prism - 0.48);
+  // carry 3: the cursor holds still while the window breathes out and the next one breathes in
+  CAM.sort((a, b) => a.t - b.t);
+  const cP = mouseAt('proxies', T.prism - 0.48 - T.prox + 0.25), cS = toScreen(camAt(T.prism - 0.481), cP);
+  CAM.pop(); K(T.prism - 0.48, cP, cS, CAM[CAM.length - 1].z, 'linear');
+  K(T.prism - 0.0001, mouseAt('proxies', T.prism - T.prox + 0.25), cS, 0.5, 'expoIn');
+  const pm = F.prism.mouse[0];
+  K(T.prism + 0.0001, pm, cS, 0.5, 'linear');
+  // prism: arrive wide, push into the typing line, ride the completion popup, dive into the line
+  const lines = F.prism.probe.lines, last = lines[4];
+  const pt = (ft) => filmT('prism', ft);
+  wide(T.prism + 0.55, [541, 345], 'spring:0.5:0.12');
+  K(pt(1.0), [last[1] + 40, last[2] + 60], [1220, 600], 1.85, 'appleInOut');
+  hold(pt(3.3));
+  K(pt(3.55), [last[1] + 60, last[2] + 8], [1180, 600], 2.2, 'appleInOut');
+  // carry 4: dive into the line being typed — it stretches into the burst's light line
+  K(T.sec, [last[1] + 120, last[2] + last[4] / 2], [960, 760], 7.0, 'expoIn');
+  // theme: the window rises out of the line
+  K(T.theme, [541, 345], [960, 1500], CEN_Z, 'linear');
+  K(T.theme + 0.75, [541, 345], [WIDE_L + 541 * WIDE_Z, 540], WIDE_Z, 'appleOut');
+  hold(T.close);
+  // carry 6: the window stays where it is while the page changes; close → collapse into the tray icon
+  hold(filmT('close', 1.4));
+  K(filmT('close', 2.1), [541, 345], [TRAY_ICON[0], TRAY_ICON[1]], 0.02, 'expoIn');
+  CAM.sort((a, b) => a.t - b.t);
+}
+
+// ── captions ──
+const CAPS = [
+  [T.home + 1.3, filmT('console', 3.45), [['一键，', 'h1'], ['接管系统代理', 'h1'], ['实时速率 · 连接 · 节点延迟，一屏尽览', 'h2']]],
+  [filmT('console', 3.65), filmT('console', 5.4), [['规则 · 全局 · 直连', 'h1'], ['三种模式，随手切换', 'h2']]],
+  [filmT('console', 5.55), T.lang - 0.3, [['TUN 模式，', 'h1'], ['系统级接管', 'h1'], ['自动注入 dns-hijack，DNS 不泄漏', 'h2']]],
+  [T.lang + 0.2, T.min - 0.25, [['14 种语言，', 'h1'], ['RTL 原生镜像', 'h1'], ['English · 日本語 · 한국어 · Русский · العربية', 'h2']]],
+  [T.min + 0.45, T.prox - 0.5, [['简洁首页，', 'h1'], ['一眼即懂', 'h1'], ['控制台与简洁视图，设置里一键切换', 'h2']]],
+  [T.prox + 0.55, T.prism - 0.5, [['一眼测速，', 'h1'], ['一点即切', 'h1']]],
+  [T.prism + 0.35, filmT('prism', 1.95), [['Prism Engine', 'h1'], ['声明式规则补丁', 'h1']]],
+  [filmT('prism', 2.05), T.sec - 0.35, [['边写，', 'h1'], ['边补全', 'h1'], ['上下文感知的智能补全', 'h2']]],
+  [T.theme + 1.6, T.close - 0.1, [['深色模式，', 'h1'], ['同样考究', 'h1']], true],
+  [T.close + 0.15, T.close + 1.35, [['关窗，', 'h1'], ['即释放 WebView', 'h1'], ['轻量模式：只留托盘', 'h2']], true],
+];
+let capKey = -1;
+function drawCaps(t) {
+  const el = $('cap');
+  let idx = -1; for (let i = 0; i < CAPS.length; i++) if (t >= CAPS[i][0] - 0.01 && t < CAPS[i][1] + 0.36) idx = i;
+  if (idx !== capKey) { capKey = idx; if (idx >= 0) el.innerHTML = CAPS[idx][2].map(([s, c]) => `<span class="ln ${c}"><span>${s}</span></span>`).join(''); }
+  const sc = $('scrim');
+  if (idx < 0) { op(el, 0); op(sc, 0); return; }
+  const [t0, t1, , dark] = CAPS[idx];
+  el.classList.toggle('dark', !!dark); sc.classList.toggle('dark', !!dark);
+  const c = camAt(t); const leftEdge = c.s[0] - c.f[0] * c.z;
+  op(sc, clamp((640 - leftEdge) / 220) * (1 - seg(t, t1, t1 + 0.34)) * clamp((t - t0 + 0.15) / 0.3));
+  el.style.transform = 'translate(112px,380px)';
+  const out = seg(t, t1, t1 + 0.34);
+  op(el, 1 - E.easeIn(out));
+  const sp = springE(0.55, 0.0);
+  [...el.children].forEach((ln, i) => {
+    const u = t - (t0 + i * 0.07);
+    const y = u <= 0 ? 110 : (1 - Math.min(1, sp(u))) * 110;
+    ln.firstChild.style.transform = (y < 0.01 && out === 0) ? 'none' : `translateY(${(y - E.expoIn(out) * 30).toFixed(2)}%)`;
+  });
+}
+const THESIS = [['一个代理客户端，', 2.2], ['应当是<b>设计</b>出来的。', 2.62]];
+function drawThesis(t) {
+  const el = $('thesis');
+  if (!el.dataset.b) { el.dataset.b = 1; el.innerHTML = THESIS.map(([s]) => `<span class="ln h1"><span>${s}</span></span>`).join(''); }
+  if (t < 2.1 || t > 4.6) { op(el, 0); return; }
+  el.style.transform = 'translate(150px,410px)';
+  const out = seg(t, 4.0, 4.45);
+  op(el, 1 - E.easeIn(out));
+  const sp = springE(0.6, 0.0);
+  [...el.children].forEach((ln, i) => {
+    const u = t - THESIS[i][1]; const y = u <= 0 ? 106 : (1 - Math.min(1, sp(u))) * 106;
+    ln.firstChild.style.transform = y < 0.01 && out === 0 ? 'none' : `translateY(${y.toFixed(2)}%) translateX(${(-E.expoIn(out) * 60).toFixed(1)}px)`;
+  });
+}
+
+// ── security burst ──
+const SEC = [
+  ['加密', '机器绑定加密', '硬件指纹派生密钥，加密订阅元数据'], ['网络', 'SSRF 防护', '下载前 DNS 验证，拦截内网重定向'],
+  ['网络', 'DNS 防泄漏', 'TUN 模式自动注入 dns-hijack'], ['配置', '配置清洗', '递归移除危险 YAML 字段'],
+  ['脚本', '权限控制', '资源限制与权限限制双重约束'], ['输入', '输入验证', 'IPC 入口长度、格式、UTF-8 校验'],
+  ['限流', '双重限流', '固定冷却 + 滑动窗口'], ['文件', '文件安全', '路径遍历、符号链接、压缩炸弹'],
+  ['更新', '签名校验', 'SHA256 + Minisign Ed25519'], ['深链', '深链安全', '限制 clash:// 入口与 URL scheme'], ['构建', 'CSP 与加固', 'LTO · strip · panic=abort'],
+];
+const SEC_DT = BT / 2, SEC0 = T.sec + 0.12;
+function drawBurst(t) {
+  const el = $('burst');
+  if (t < T.sec || t >= T.theme) { op(el, 0); return; }
+  op(el, 1 - seg(t, T.theme - 0.2, T.theme));
+  const k = Math.floor((t - SEC0) / SEC_DT);
+  let sc = 1;
+  if (t < SEC0) { $('bk').textContent = ''; $('bww').textContent = ''; $('bd').textContent = ''; }
+  else if (k < SEC.length) {
+    const [key, w, d] = SEC[k];
+    $('bk').textContent = `${String(k + 1).padStart(2, '0')} / 11 · ${key}`; $('bww').textContent = w; $('bd').textContent = d; $('bww').style.fontSize = '150px';
+    sc = 1.07 - 0.07 * E.expoOut(clamp((t - SEC0 - k * SEC_DT) / SEC_DT * 2.2));
+  } else {
+    $('bk').textContent = 'DEFENSE IN DEPTH'; $('bww').textContent = '十一层，纵深设防'; $('bd').textContent = '每一处入口，都有明确的约束'; $('bww').style.fontSize = '132px';
+    sc = 1 + 0.1 * (1 - springE(0.5, 0.25)(t - SEC0 - SEC.length * SEC_DT));
+  }
+  $('bw').style.transform = `translateY(${(540 - 210).toFixed(1)}px) scale(${sc.toFixed(4)})`;
+}
+
+// ── the white bar / light line: carry 4 and carry 5 ──
+function drawBar(t) {
+  const bar = $('bar');
+  const lines = F.prism.probe.lines, last = lines[4];
+  if (t >= T.sec - 0.45 && t < T.sec) {
+    // the active line of the editor, measured from the DOM, lit up as the camera dives
+    const c = camAt(t);
+    const p0 = toScreen(c, [last[1], last[2]]);
+    const w = last[3] * c.z, h = last[4] * c.z;
+    const a = E.easeIn(seg(t, T.sec - 0.45, T.sec - 0.05));
+    bar.style.transform = `translate(${p0[0].toFixed(1)}px,${p0[1].toFixed(1)}px)`;
+    bar.style.width = w + 'px'; bar.style.height = h + 'px'; bar.style.borderRadius = '0';
+    op(bar, 0.85 * a);
+    return;
+  }
+  if (t >= T.sec && t < T.theme + 0.9) {
+    // collapses to a 2-px line across the frame, then the window rises out of it
+    const u = springE(0.45, 0.0)(t - T.sec);
+    const h = lerp(last[4] * 7.0, 2, Math.min(1, u));
+    const w = lerp(last[3] * 7.0, 2400, Math.min(1, u));
+    bar.style.width = w + 'px'; bar.style.height = h + 'px';
+    bar.style.transform = `translate(${(960 - w / 2).toFixed(1)}px,${(760 - h / 2).toFixed(1)}px)`;
+    bar.style.background = 'linear-gradient(90deg,rgba(255,255,255,0),#fff 30%,#fff 70%,rgba(255,255,255,0))';
+    op(bar, t < T.theme ? 0.9 : 0.9 * (1 - seg(t, T.theme + 0.3, T.theme + 0.9)));
+    return;
+  }
+  bar.style.background = '#fff';
+  op(bar, 0);
+}
+
+// ── tray ──
+const TRAY_X = 1418, TRAY_Y = 38, TRAY_ICON = [TRAY_X + 26 + 19, TRAY_Y + 32];
+function trayState(t) {
+  if (t < filmT('console', 1.4 + 0.5)) return 0;
+  if (t < filmT('console', 5.55 + 0.5)) return 1;
+  if (t < T.sec) return 2;
+  return 1;
+}
+function drawTray(t) {
+  const el = $('tray');
+  const wins = [[filmT('console', 1.75), T.prox - 0.3], [T.close + 0.4, T.plat + 0.05]];
+  let o = 0, s = 1;
+  for (const [a, b] of wins) if (t >= a - 0.01 && t < b + 0.35) {
+    o = E.easeOut(seg(t, a, a + 0.3)) * (1 - seg(t, b, b + 0.3));
+    const sp = springE(0.5, 0.3)(t - a); s = t - a > 1.2 ? 1 : 0.9 + 0.1 * sp;
+  }
+  const st = trayState(t);
+  [0, 1, 2].forEach((k) => { $('ti' + k).style.opacity = k === st ? 1 : 0; });
+  let pop = 1;
+  for (const sw of [filmT('console', 1.9), filmT('console', 6.05)]) { const d = t - sw; if (d > 0 && d < 1.0) pop = 1 + 0.35 * (1 - springE(0.4, 0.45)(d)) * Math.exp(-d * 3); }
+  el.querySelector('.ic').style.transform = pop === 1 ? 'none' : `scale(${pop.toFixed(4)})`;
+  el.classList.toggle('dark', t > T.theme);
+  el.style.transform = s === 1 ? `translate(${TRAY_X}px,${TRAY_Y}px)` : `translate(${TRAY_X}px,${TRAY_Y}px) scale(${s.toFixed(4)})`;
+  op(el, o);
+  const iris = $('iris');
+  const ir = seg(t, T.plat - 0.3, T.plat + 0.06);
+  if (ir > 0 && t < T.plat + 0.4) {
+    const r = lerp(8, 2300, E.expoIn(ir));
+    iris.style.width = iris.style.height = (2 * r) + 'px';
+    iris.style.transform = `translate(${TRAY_ICON[0] - r}px,${TRAY_ICON[1] - r}px)`;
+    op(iris, 1);
+  } else op(iris, 0);
+}
+
+function grounds(t) {
+  const ink = (t < T.home - 0.3) || (t >= T.sec && t < T.theme) || t >= T.plat;
+  $('groundI').style.opacity = ink ? 1 : 0;
+  // the theme shot: light ground opens out of the line; the app flips dark inside it
+  if (t >= T.theme && t < T.theme + 0.7) {
+    const u = E.appleOut(seg(t, T.theme, T.theme + 0.6));
+    $('groundL').style.clipPath = `inset(${(760 * (1 - u)).toFixed(1)}px 0 ${(320 * (1 - u)).toFixed(1)}px 0)`;
+    $('groundI').style.opacity = 1;
+    $('groundI').style.clipPath = `polygon(0 0,100% 0,100% ${(760 * (1 - u)).toFixed(1)}px,0 ${(760 * (1 - u)).toFixed(1)}px,0 ${(1080 - 320 * (1 - u)).toFixed(1)}px,100% ${(1080 - 320 * (1 - u)).toFixed(1)}px,100% 100%,0 100%)`;
+  } else { $('groundL').style.clipPath = 'none'; $('groundI').style.clipPath = 'none'; }
+  const flip = E.appleInOut(seg(t, filmT('theme', 1.25), filmT('theme', 1.8)));
+  $('groundD').style.opacity = t >= T.theme ? (t >= T.close ? 1 : flip) : 0;
+}
+
+function draw3D(t) {
+  const img = $('z3d');
+  if (t < T.home + 0.32) {
+    setSrc(img, `frames/open/${pad4(clamp(Math.round(t * 30), 0, OPEN_N - 1))}.jpg`);
+    // carry 1: the paper opens from the centre of the Z outward; the Z stays, as ink
+    const r = t < T.home - 0.3 ? 0 : 1300 * E.appleInOut(seg(t, T.home - 0.3, T.home + 0.25));
+    img.style.webkitMaskImage = r > 0 ? `radial-gradient(circle at 960px 540px, transparent ${r.toFixed(1)}px, #000 ${(r + 2).toFixed(1)}px)` : 'none';
+    op(img, 1);
+  } else if (t >= T.end) {
+    img.style.webkitMaskImage = 'none';
+    setSrc(img, `frames/end/${pad4(clamp(Math.round((t - T.end) * 30), 0, END_N - 1))}.jpg`);
+    op(img, 1);
+  } else op(img, 0);
+}
+
+function drawWindow(t) {
+  const ww = $('winwrap'), lo = $('logoOv'), cur = $('cursor');
+  const fo = footAt(t);
+  if (!fo) { op(ww, 0); op(lo, 0); op(cur, 0); return; }
+  op(ww, 1);
+  setSrc($('winimg'), `footage2/${fo.name}/${pad4(fo.i)}.webp`);
+  const fw = fo.f.w || 1082, fh = fo.f.h || 691;
+  for (const el of [ww, $('winimg')]) { el.style.width = fw + 'px'; el.style.height = fh + 'px'; }
+  const c = camAt(t);
+  const w0 = $('winwrap0');
+  if (fo.name === 'minimal' && t < T.min + 0.5) {
+    // layout morph (motion-style): the window's rect springs from the console's to the minimal home's
+    const cO = camAt(T.min - 0.003), F0 = F.lang;
+    const o = [cO.s[0] - cO.f[0] * cO.z, cO.s[1] - cO.f[1] * cO.z, 1082 * cO.z, 691 * cO.z];
+    const n = [c.s[0] - c.f[0] * c.z, c.s[1] - c.f[1] * c.z, 930 * c.z, 680 * c.z];
+    const u = Math.min(1.04, springE(0.42, 0.12)(t - T.min));
+    const r = o.map((v, i) => lerp(v, n[i], u));
+    ww.style.transform = `translate(${r[0].toFixed(2)}px,${r[1].toFixed(2)}px) scale(${(r[2] / 930).toFixed(5)},${(r[3] / 680).toFixed(5)})`;
+    setSrc($('winimg0'), `footage2/lang/${pad4(F0.n - 1)}.webp`);
+    w0.style.transform = `translate(${r[0].toFixed(2)}px,${r[1].toFixed(2)}px) scale(${(r[2] / 1082).toFixed(5)},${(r[3] / 691).toFixed(5)})`;
+    const fade = E.appleInOut(seg(t, T.min + 0.02, T.min + 0.26));
+    op(w0, 1 - fade); $('winimg').style.opacity = fade.toFixed(4);
+  } else { op(w0, 0); $('winimg').style.opacity = 1; }
+  const morphing = fo.name === 'minimal' && t < T.min + 0.5;
+  if (fo.name === 'theme' && t < T.theme + 0.06) op(ww, seg(t, T.theme, T.theme + 0.06));
+  if (!morphing) ww.style.transform = `translate(${c.s[0].toFixed(2)}px,${c.s[1].toFixed(2)}px) scale(${c.z.toFixed(5)}) translate(${(-c.f[0]).toFixed(3)}px,${(-c.f[1]).toFixed(3)}px)`;
+  $('winshadow').style.boxShadow = t >= T.theme + 1.3 ? '0 60px 140px rgba(0,0,0,.55),0 20px 44px rgba(0,0,0,.35)' : '';
+  if (fo.name === 'close') { const cc = seg(t, filmT('close', 1.85), filmT('close', 2.1)); ww.style.opacity = (1 - cc).toFixed(3); }
+  // the crisp title lockup laid over the raster while the camera is far inside it
+  if (fo.name === 'console' && c.z > 2.0) {
+    const p = toScreen(c, [TITLE[0], TITLE[1]]);
+    lo.style.width = (TITLE[2] * c.z) + 'px'; lo.style.height = (TITLE[3] * c.z) + 'px';
+    lo.style.transform = `translate(${p[0].toFixed(2)}px,${p[1].toFixed(2)}px)`;
+    const wipe = E.appleOut(seg(t, T.home + 0.05, T.home + 0.7));
+    lo.style.clipPath = `inset(0 ${((1 - wipe) * 73.3).toFixed(2)}% 0 0)`;
+    op(lo, seg(c.z, 2.0, 3.2));
+  } else op(lo, 0);
+  // the cursor, drawn at stage level from the recorded path so it can survive a cut
+  const m = fo.f.mouse[fo.i] || [0, 0];
+  let press = 0; for (const ck of fo.f.clicks) { const d = fo.ft - ck; if (d > -0.02 && d < 0.2) press = Math.max(press, Math.sin(Math.PI * clamp((d + 0.02) / 0.2))); }
+  const cp = toScreen(c, m);
+  const show = ['console', 'proxies', 'prism', 'close'].includes(fo.name) && !(fo.name === 'console' && (fo.local < 0.9 || fo.ft > 6.9)) && !(fo.name === 'prism' && fo.local > 3.7) && !(fo.name === 'close' && fo.ft > 1.6);
+  const cz = clamp(Math.sqrt(c.z), 0.85, 1.5) * (1 - 0.14 * press);
+  cur.style.transform = `translate(${(cp[0] - 3).toFixed(2)}px,${(cp[1] - 2).toFixed(2)}px) scale(${cz.toFixed(4)})`;
+  op(cur, show ? 1 : 0);
+}
+
+function drawPlat(t) {
+  const el = $('plat');
+  if (t < T.plat - 0.3 || t >= T.end) { op(el, 0); return; }
+  op(el, 1);
+  const push = 1 + 0.045 * E.appleInOut(seg(t, T.plat, T.end - 0.38));
+  el.style.transform = `scale(${push.toFixed(4)})`; el.style.transformOrigin = '960px 540px';
+  const rows = [['p1', 'r1', T.plat + 0.0], ['p2', 'r2', T.plat + BT * 1.5], ['p3', 'r3', T.plat + BT * 2.5]];
+  const col = E.whip(seg(t, T.end - 0.38, T.end));
+  for (const [id, rid, t0] of rows) {
+    const u = t - t0, y = u <= 0 ? 110 : (1 - Math.min(1, springE(0.55, 0)(u))) * 110;
+    $(id).style.transform = y < 0.01 ? 'none' : `translateY(${y.toFixed(2)}%)`;
+    $(id).style.opacity = u > 0 ? 1 : 0;
+    // carry 8: the rows fold into one level hairline at the centre — the line the 3D reprise turns
+    const r = $(rid), top = parseFloat(r.style.top), hgt = r.offsetHeight;
+    r.style.transform = col > 0 ? `translateY(${((540 - top - hgt / 2) * col).toFixed(1)}px) scaleY(${(1 - 0.985 * col).toFixed(4)})` : 'none';
+  }
+  const hl = $('bar');
+  if (col > 0.6 && t < T.end) {
+    const w = 2400; hl.style.background = 'linear-gradient(90deg,rgba(255,255,255,0),#fff 30%,#fff 70%,rgba(255,255,255,0))';
+    hl.style.width = w + 'px'; hl.style.height = '2px'; hl.style.transform = `translate(${960 - w / 2}px,539px)`; op(hl, seg(col, 0.6, 1));
+  }
+}
+
+function drawEnd(t) {
+  const L = T.end, lk = $('lock');
+  op($('fade'), seg(t, T.dur - 0.6, T.dur));
+  if (t < L + 2.55) { op(lk, 0); op($('tagline'), 0); op($('url'), 0); return; }
+  op(lk, 1);
+  const fill = E.appleInOut(seg(t, L + 2.55, L + 3.05));
+  op($('lsym'), fill);
+  const w = E.appleOut(seg(t, L + 2.95, L + 3.75));
+  $('wordwrap').style.clipPath = `inset(0 ${((1 - w) * 72).toFixed(2)}% 0 0)`;
+  $('lword').style.transform = w >= 1 ? 'none' : `translateX(${((1 - w) * -40).toFixed(2)}px)`;
+  $('lword').style.opacity = w > 0 ? 1 : 0;
+  const tg = E.appleOut(seg(t, L + 3.8, L + 4.6));
+  op($('tagline'), tg); $('tagline').style.transform = tg >= 1 ? 'none' : `translateY(${((1 - tg) * 18).toFixed(2)}px)`;
+  op($('url'), 0.95 * E.easeOut(seg(t, L + 4.3, L + 5.0)));
+  if (fill >= 1) op($('z3d'), 0);
+}
+
+const Q = new URLSearchParams(location.search);
+window.__seek = async (t) => {
+  pending.length = 0;
+  grounds(t); draw3D(t); drawThesis(t); drawWindow(t); drawCaps(t); drawTray(t); drawBurst(t); drawBar(t); drawPlat(t); drawEnd(t);
+  if (Q.has('hud')) { $('hud').style.display = 'block'; $('hud').textContent = t.toFixed(3); }
+  await Promise.all(pending);
+  return true;
+};
+window.__meta = { dur: T.dur, fps: 30 };
+window.__events = () => {
+  const ev = []; const add = (t, kind, x = {}) => ev.push({ t, kind, ...x });
+  add(BAR, 'land'); add(T.home, 'carry'); add(T.prox, 'carry'); add(T.min, 'morph');
+  for (let i = 0; i < 14; i++) add(T.lang + 0.45 - 0.33 + i * BT / 2, 'lang', { k: i }); add(T.prism, 'carry'); add(T.sec, 'carry'); add(T.theme, 'rise');
+  for (const s of SHOTS) { const f = F[s[2]]; for (const c of f.clicks) { const tt = s[0] + c - s[3]; if (tt >= s[0] && tt < s[1]) add(tt, 'click'); } }
+  const pk = [1.0, 1.2, 1.4, 1.75, 1.95, 2.75, 3.1]; for (const k of pk) add(filmT('prism', k), 'key');
+  add(filmT('console', 1.9), 'tray'); add(filmT('console', 6.05), 'tray');
+  for (let k = 0; k < 12; k++) add(SEC0 + k * SEC_DT, 'hit', { k });
+  add(filmT('close', 1.85), 'collapse'); add(T.plat - 0.3, 'iris'); add(T.end - 0.38, 'fold');
+  return ev;
+};
+window.__motion = (t0, t1) => {
+  let m = 0;
+  for (let k = 0; k < 4; k++) {
+    const a = camAt(t0 + (t1 - t0) * k / 4), b = camAt(t0 + (t1 - t0) * (k + 1) / 4);
+    for (const p of [[0, 0], [WW, 0], [0, WH], [WW, WH], [541, 345]]) {
+      const pa = toScreen(a, p), pb = toScreen(b, p);
+      const onA = pa[0] > -200 && pa[0] < 2120 && pa[1] > -200 && pa[1] < 1280;
+      if (onA) m = Math.max(m, Math.hypot(pb[0] - pa[0], pb[1] - pa[1]));
+    }
+  }
+  return m;
+};
+window.__ready = (async () => {
+  await Promise.all(['console', 'lang', 'minimal', 'proxies', 'prism', 'theme', 'close'].map(loadInfo));
+  M = await (await fetch('footage2/console/measure.json')).json();
+  buildCam();
+  await document.fonts.load('600 60px "PingFang SF"'); await document.fonts.load('400 20px "JetBrains Mono"');
+  await document.fonts.ready;
+  await window.__seek(Number(Q.get('t') || 0));
+  return true;
+})();
+</script>
+</body></html>

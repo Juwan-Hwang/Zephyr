@@ -1,0 +1,14 @@
+# generated / heavy — rebuilt by the scripts
+repos/
+footage/
+footage2/
+app/
+film/frames/
+film/out*/
+film/audio/
+film/node_modules/
+film/fonts/PingFangSF.ttf
+film/fonts/film-subset.ttf
+shots/
+*.log
+__pycache__/

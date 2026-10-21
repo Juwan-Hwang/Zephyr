@@ -1,0 +1,184 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#05070c;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const Q = new URLSearchParams(location.search);
+const W = +(Q.get('w') || 1920), H = +(Q.get('h') || 1080);
+const SHOT = Q.get('shot') || 'open';
+
+const D = await (await fetch('symbol_d.txt')).text();
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#05070c');
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTex = pmrem.fromScene(new RoomEnvironment(), 0.02).texture;
+scene.environment = envTex;
+scene.environmentIntensity = 0.55;
+
+// ── the real symbol geometry: two wedges from the brand-branch lockup path ──
+const svg = new SVGLoader().parse(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${D}"/></svg>`);
+const shapes = SVGLoader.createShapes(svg.paths[0]);
+const DEPTH = 26;
+const mat = new THREE.MeshPhysicalMaterial({
+  color: new THREE.Color('#0B0F19'), metalness: 0.35, roughness: 0.22,
+  clearcoat: 1.0, clearcoatRoughness: 0.06, reflectivity: 0.6, ior: 1.5,
+});
+const wedges = shapes.map((sh) => {
+  const g = new THREE.ExtrudeGeometry(sh, { depth: DEPTH, bevelEnabled: true, bevelThickness: 2.2, bevelSize: 1.6, bevelSegments: 6, curveSegments: 96 });
+  g.translate(-128, -128, -DEPTH / 2);
+  g.scale(1, -1, 1);            // svg y-down → three y-up
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat);
+  const grp = new THREE.Group(); grp.add(m); scene.add(grp);
+  return grp;
+});
+// shape 0 is the top wedge (y≈57 edge), shape 1 the bottom wedge
+// channel direction: along the diagonal edges, rising 30° to the right (in three's y-up)
+const DIR = new THREE.Vector3(Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), 0);
+
+// ── lights ──
+const key = new THREE.SpotLight('#ffffff', 0, 0, Math.PI / 7, 0.9, 0); key.position.set(-300, 260, 420); scene.add(key); scene.add(key.target);
+const rim = new THREE.DirectionalLight('#dfe6ff', 0); rim.position.set(260, -120, -300); scene.add(rim);
+const fill = new THREE.AmbientLight('#8fa0c8', 0.0); scene.add(fill);
+const sweep = new THREE.PointLight('#ffffff', 0, 0, 0); scene.add(sweep);
+
+// ── the light line through the channel ──
+const lineGeo = new THREE.CylinderGeometry(0.55, 0.55, 1, 12, 1, true); lineGeo.rotateZ(-Math.PI / 2); lineGeo.translate(0.5, 0, 0);
+const lineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 3.2, 3.4), transparent: true, opacity: 1, toneMapped: false, depthWrite: false });
+const line = new THREE.Mesh(lineGeo, lineMat); scene.add(line);
+const glowCanvas = document.createElement('canvas'); glowCanvas.width = glowCanvas.height = 128;
+{ const c = glowCanvas.getContext('2d'); const g = c.createRadialGradient(64, 64, 0, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.18, 'rgba(220,230,255,0.55)'); g.addColorStop(1, 'rgba(160,180,255,0)'); c.fillStyle = g; c.fillRect(0, 0, 128, 128); }
+const glowTex = new THREE.CanvasTexture(glowCanvas);
+const head = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+scene.add(head);
+const halo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.35 }));
+scene.add(halo);
+
+const camera = new THREE.PerspectiveCamera(30, W / H, 1, 6000);
+
+// ── time helpers ──
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const expoOut = (x) => (x >= 1 ? 1 : 1 - Math.pow(2, -10 * x));
+const expoInOut = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x < 0.5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2);
+const sineInOut = (x) => -(Math.cos(Math.PI * x) - 1) / 2;
+const cubicOut = (x) => 1 - Math.pow(1 - x, 3);
+const quintIn = (x) => x * x * x * x * x;
+// damped spring settling to 1 (closed form, ζ=0.55)
+function spring(x, w = 9, z = 0.55) { if (x <= 0) return 0; const wd = w * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x)); }
+
+function setLine(x0, x1, op, thick = 1) {
+  // a segment of the channel's centre line from s=x0 to s=x1 (units along DIR), through the origin
+  const a = Math.min(x0, x1), b = Math.max(x0, x1);
+  line.visible = b - a > 0.01 && op > 0.001;
+  line.position.copy(DIR.clone().multiplyScalar(a));
+  line.rotation.set(0, 0, Math.PI / 6);
+  line.scale.set(Math.max(0.01, b - a), thick, thick);
+  lineMat.opacity = op;
+}
+
+const BEAT = 60 / 124, BAR = BEAT * 4;
+function frontCam(d, tx, yaw, pitch, roll, kick) {
+  const tgt = new THREE.Vector3(tx, 0, 0);
+  camera.position.set(tx + Math.sin(yaw) * Math.cos(pitch) * d, Math.sin(pitch) * d, Math.cos(yaw) * Math.cos(pitch) * d + kick);
+  camera.up.set(Math.sin(roll), Math.cos(roll), 0);
+  camera.lookAt(tgt); camera.updateProjectionMatrix();
+}
+function placeWedges(kk, ang) {
+  const dir = new THREE.Vector3(Math.cos(ang), Math.sin(ang), 0);
+  const off = (1 - kk) * 640, zoff = (1 - kk) * 220, tilt = (1 - kk) * 0.5;
+  wedges[0].position.copy(dir.clone().multiplyScalar(off)); wedges[0].position.z = zoff;
+  wedges[1].position.copy(dir.clone().multiplyScalar(-off)); wedges[1].position.z = zoff;
+  wedges[0].rotation.set(tilt * 0.6, -tilt, 0); wedges[1].rotation.set(-tilt * 0.6, tilt, 0);
+}
+function lineAt(ang, x0, x1, op, thick) {
+  const a = Math.min(x0, x1), b = Math.max(x0, x1);
+  const dir = new THREE.Vector3(Math.cos(ang), Math.sin(ang), 0);
+  line.visible = b - a > 0.01 && op > 0.001;
+  line.position.copy(dir.clone().multiplyScalar(a)); line.rotation.set(0, 0, ang);
+  line.scale.set(Math.max(0.01, b - a), thick, thick); lineMat.opacity = op;
+}
+function lights(li, t, s0, s1) {
+  key.intensity = 5.0 * li; key.position.set(-420, 300, 520); key.target.position.set(0, 0, 0);
+  rim.intensity = 2.2 * li; fill.intensity = 0.04 * li; scene.environmentIntensity = 1.0 * li + 0.02;
+  const sw = seg(t, s0, s1);
+  sweep.position.set(lerp(-380, 380, sineInOut(sw)), lerp(220, -160, sineInOut(sw)), 150);
+  sweep.intensity = 16 * Math.sin(Math.PI * sw) * li;
+}
+const A30 = Math.PI / 6;
+// ── OPEN: line draws → wedges lock on bar 1 → fast operated orbit → turn square-on, centred, d=560 by bar 3
+function shotOpen(t) {
+  const L = BAR;                                   // 1.935 s
+  const draw = expoOut(seg(t, 0.15, 1.45));
+  const headS = lerp(-900, 900, draw);
+  const k = spring(seg(t, L - 0.05, L + 0.9) * 1.9, 9.5, 0.62);
+  const kk = clamp(t < L ? expoOut(seg(t, 0.95, L)) * 0.985 : 0.985 + 0.015 * k);
+  placeWedges(kk, A30);
+  const hit = Math.max(0, t - L); const kick = t > L ? Math.exp(-hit * 9) * Math.sin(hit * 38) * 6 : 0;
+  // camera: drift during the draw, accelerate around the Z after the lock, decelerate square-on by 2·BAR+…
+  const tTurn0 = L + 0.15, tTurn1 = 2.6 * BAR;
+  const orbit = sineInOut(seg(t, 0, tTurn0));
+  let yaw = lerp(-0.5, -0.36, orbit), pitch = lerp(0.2, 0.15, orbit);
+  const u = seg(t, tTurn0, tTurn1);
+  // accelerate → swing past → settle (expo in-out on a path that overshoots a little)
+  const e = expoInOut(u);
+  yaw = lerp(yaw, 0, e) + Math.sin(Math.PI * e) * 0.32;
+  pitch = lerp(pitch, 0, e) - Math.sin(Math.PI * e) * 0.07;
+  const settle = seg(t, tTurn1, 3 * BAR);
+  yaw *= 1 - settle; pitch *= 1 - settle;
+  let d = lerp(820, 640, cubicOut(seg(t, 0, L))); d = lerp(d, 560, expoInOut(seg(t, tTurn0, tTurn1)));
+  const roll = Math.sin(Math.PI * e) * -0.06;
+  const hx = (1 - seg(t, tTurn1 - 0.3, tTurn1)) * (Math.sin(t * 0.9) * 2.4), hy = (1 - seg(t, tTurn1 - 0.3, tTurn1)) * Math.cos(t * 0.7) * 1.8;
+  frontCam(d, 0, yaw + hx * 0.001, pitch + hy * 0.001, roll * (1 - settle), kick);
+  const li = cubicOut(seg(t, 1.2, 2.3));
+  lights(li, t, 2.2, 4.6);
+  const flare = t > L ? Math.exp(-(t - L) * 3.4) : 0;
+  lineAt(A30, -900, headS, 1.0 - 0.7 * seg(t, 2 * BAR, 2.7 * BAR), 1 + flare * 2.2 + (t < 1.5 ? 0.6 : 0));
+  const hp = new THREE.Vector3(Math.cos(A30), Math.sin(A30), 0).multiplyScalar(headS);
+  head.position.copy(hp); const hs = 60 * (1 - seg(t, 1.2, 1.5)); head.scale.set(hs, hs, 1); head.visible = hs > 0.5;
+  halo.position.set(0, 0, 0); halo.rotation.set(0, 0, A30); halo.scale.set(1800, 60 + flare * 220, 1);
+  halo.material.opacity = (0.18 + flare * 0.6) * (1 - 0.8 * seg(t, 2 * BAR, 2.7 * BAR));
+  renderer.toneMappingExposure = 1.0;
+}
+// ── END (reprise): a level hairline at screen centre turns to 30°, the wedges slam onto it, Z lands square-on at the lockup spot
+function shotEnd(t) {
+  const TX = 270.2, D = 1823.2;
+  const turn = expoInOut(seg(t, 0.0, 0.55));
+  const ang = lerp(0, A30, turn);
+  const kk = clamp(expoOut(seg(t, 0.32, 0.86)) * 0.985 + 0.015 * spring(seg(t, 0.86, 2.0) * 1.9, 9.5, 0.62) * (t > 0.86 ? 1 : 0));
+  placeWedges(kk, ang);
+  const hit = Math.max(0, t - 0.86); const kick = t > 0.86 ? Math.exp(-hit * 9) * Math.sin(hit * 38) * 14 : 0;
+  const sp = spring(seg(t, 0.5, 2.6) * 1.6, 6.5, 0.72);
+  const yaw = lerp(0.22, 0, sp) * (t > 0.5 ? 1 : 1), pitch = lerp(-0.08, 0, sp);
+  const d = lerp(D * 0.86, D, expoOut(seg(t, 0.3, 2.2)));
+  frontCam(d, TX, yaw * (1 - seg(t, 2.2, 2.6)), pitch * (1 - seg(t, 2.2, 2.6)), 0, kick);
+  lights(1, t, 0.9, 2.6);
+  const flare = t > 0.86 ? Math.exp(-(t - 0.86) * 3.2) : 0;
+  lineAt(ang, -2600, 2600, 1 - seg(t, 1.0, 1.6), 1.6 + flare * 3.0);
+  head.visible = false;
+  halo.position.set(0, 0, 0); halo.rotation.set(0, 0, ang); halo.scale.set(3600, 90 + flare * 400, 1);
+  halo.material.opacity = (0.2 + flare * 0.7) * (1 - seg(t, 1.2, 2.0));
+  renderer.toneMappingExposure = 1.0;
+}
+
+window.__seek = (t) => {
+  if (SHOT === 'open') shotOpen(t); else shotEnd(t);
+  renderer.render(scene, camera);
+  return true;
+};
+window.__ready = true;
+</script></body></html>
