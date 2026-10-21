@@ -1475,6 +1475,21 @@ async fn notify_core_started(app: &AppHandle) {
     }
 }
 
+/// Repaint the tray icon now that a core start has succeeded.
+///
+/// A start that replaces a running core goes through `stop_core_inner`,
+/// which paints the idle icon once the old core is gone. Nothing else
+/// on the backend's start path repaints it afterwards, and in
+/// lightweight mode there is no frontend sync to do it either, so a
+/// backend-driven restart (for example the resume-from-sleep health
+/// restart) would leave the idle icon up while the new core already
+/// runs the system proxy or TUN. The status lookup behind the refresh
+/// can shell out, so it runs on a blocking task, not the async worker.
+async fn refresh_tray_icon_after_start(app: &AppHandle) {
+    let app_icon = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::tray::refresh_tray_icon(&app_icon)).await;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn store_child_in_core_state(
     state: &MihomoState,
@@ -1906,6 +1921,22 @@ pub async fn start_core_inner(
         global_prefs.as_ref(),
     )?;
 
+    // A fresh running config is about to replace the previous core: a
+    // live TUN override described that core, while this start derives
+    // TUN from the saved preference and the profile instead. Enabled
+    // overrides re-apply after the start and record a fresh override.
+    // The override is dropped once preflight has passed (below) only
+    // when the previous core is already stopped: a macOS TUN-active
+    // start deliberately keeps the previous root core running through
+    // preflight and authorization, so its override stays in place —
+    // the tray would otherwise fall back to a saved preference that
+    // can disagree with the still-running core — and it is dropped
+    // once the privileged script actually replaces that core. The
+    // snapshot lets the authorization-failure path put the override
+    // back if anything dropped it in between after all.
+    let (mut previous_live_tun_override, mut previous_live_tun_epoch) =
+        super::tun_manager::live_tun_snapshot();
+
     let run_config_path = paths.core_dir.join("run_config.yaml");
     #[cfg(target_os = "macos")]
     let prev_run_config = match std::fs::read(&run_config_path) {
@@ -1992,6 +2023,35 @@ pub async fn start_core_inner(
         }
     }
 
+    // Preflight passed, so the replacement core is going ahead: the
+    // previous core's live TUN override ends here (see the snapshot
+    // above) — unless this is the macOS TUN path, where the previous
+    // root core keeps running until the privileged script replaces it:
+    // there the override still describes the running core all the way
+    // through the authorization dialog, and it is only dropped once
+    // the script has run (the TUN branch below) or by the paths that
+    // record a new state of their own (cleanup after a failed start,
+    // adopting a surviving core). A failure that leaves the previous
+    // core in place before the script runs — authorization never
+    // reaching the script — therefore needs no restore at all. A hot
+    // reload that confirmed a newer state for the still-running
+    // previous core during preflight refreshes the snapshot first, so
+    // the authorization-failure restore brings back the latest word on
+    // that core, not the stale one.
+    if super::tun_manager::live_tun_state_epoch() != previous_live_tun_epoch {
+        (previous_live_tun_override, previous_live_tun_epoch) =
+            super::tun_manager::live_tun_snapshot();
+    }
+    if !tun_active {
+        super::tun_manager::clear_live_tun_override();
+        previous_live_tun_epoch = super::tun_manager::live_tun_state_epoch();
+    }
+    // Only the macOS authorization-failure path below reads the snapshot;
+    // on other platforms this read keeps the snapshot's assignments from
+    // counting as unused under `-D warnings`.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (previous_live_tun_override, previous_live_tun_epoch);
+
     // Debug: show mihomo processes before spawn
     #[cfg(target_os = "macos")]
     {
@@ -2056,13 +2116,10 @@ pub async fn start_core_inner(
     ) {
         record_running_root_core_exe(app);
         set_tun_mode(true);
-        if let Err(err) = super::tun_manager::sync_tun_settings(app, true) {
-            emit_warn!(
-                Config,
-                CONFIG_PERSIST_FAILED,
-                "Failed to record tun_enabled after adopting root TUN core: {err}"
-            );
-        }
+        // The adopted core is running TUN, so record it in memory even
+        // if the preference write fails; `record_tun_started` warns
+        // about the failed write itself.
+        let _ = super::tun_manager::record_tun_started(app);
         // The script already terminated any tracked child; reap it before
         // replacing the tracked state so it does not linger as a zombie.
         reap_tracked_child(app).await;
@@ -2076,6 +2133,14 @@ pub async fn start_core_inner(
                 proxy_endpoint,
             );
         }
+        // The recorded state changed to a running TUN core, but the icon
+        // still shows whatever the failed start painted last (the stop
+        // inside it paints idle), and both callers return an error right
+        // after this, so nothing else repaints it — in lightweight mode
+        // there is no frontend sync to do it either. Repaint from the
+        // recorded state here, once the state lock is released.
+        refresh_tray_icon_after_start(app).await;
+        crate::tray::rebuild_tray_menu_from_state_if_lightweight(app);
     }
 
     /// Remember which binary the root core we are tracking actually runs.
@@ -2168,6 +2233,18 @@ pub async fn start_core_inner(
             // `reap_tracked_child`.
             let _ = tokio::task::spawn_blocking(move || terminate_child_process(child)).await;
         }
+        // The core this cleanup ran for is stopped, and every caller
+        // returns the start error right after: repaint the tray here so
+        // no caller can leave the stopped core's TUN state up — in
+        // lightweight mode no frontend sync runs to correct it, and
+        // this path does not go through `stop_core_inner`'s refresh.
+        // The menu rebuild matters as much as the icon: the TUN item
+        // still reads "on" without it, while `toggle_tun` already
+        // decides from the recorded-off state, so a click on that item
+        // would run the enable flow it claims is already running. No
+        // locks are held at this point.
+        refresh_tray_icon_after_start(app).await;
+        crate::tray::rebuild_tray_menu_from_state_if_lightweight(app);
     }
 
     // Check if TUN mode is active via flag captured at start of startup
@@ -2181,7 +2258,27 @@ pub async fn start_core_inner(
                     // nothing was killed: no root core and no tracked child
                     // were touched. Preserve the tracked child (the user's
                     // still-running core) and its state, restore the previous
-                    // run config via the guard, and surface the error.
+                    // run config via the guard, and surface the error. The
+                    // live TUN override was kept for that still-running
+                    // core; put the snapshot back in case anything dropped
+                    // it in between — but only while nothing newer was
+                    // recorded while the authorization dialog was open: a
+                    // hot reload of the still-running core can confirm a
+                    // newer state in that window, and the snapshot must
+                    // not overwrite it. The conditional restore checks the
+                    // generation and writes under one lock, so a newer
+                    // result landing in between wins as well. A tray
+                    // action taken during the dialog may have repainted
+                    // the icon or menu from whatever state was current
+                    // then, so repaint both after a restore.
+                    if super::tun_manager::restore_live_tun_override_if_current(
+                        &app,
+                        previous_live_tun_override,
+                        previous_live_tun_epoch,
+                    ) {
+                        refresh_tray_icon_after_start(&app).await;
+                        crate::tray::rebuild_tray_menu_from_state_if_lightweight(&app);
+                    }
                     return Err(tun_start_error(&e));
                 }
                 // The script ran and the root core writes to the TUN log, so that is the
@@ -2213,6 +2310,12 @@ pub async fn start_core_inner(
                     // The script already terminated any tracked child; reap it before
                     // replacing the tracked state.
                     reap_tracked_child(&app).await;
+                    // The script replaced the previous core, so its live
+                    // TUN override (kept while it was still running) ends
+                    // here; the icon refresh below then reads the new
+                    // core's state from the preference it was started
+                    // with.
+                    super::tun_manager::clear_live_tun_override();
                     run_config_guard.disarm();
                     // This root core is being tracked even though
                     // `restart_core_as_root` reported failure, so remember its
@@ -2231,6 +2334,13 @@ pub async fn start_core_inner(
                         );
                     }
                     notify_core_started(&app).await;
+                    refresh_tray_icon_after_start(&app).await;
+                    // Clearing the override above changed the state the
+                    // tray's TUN item displays; the icon refresh alone
+                    // leaves the lightweight menu on the previous state,
+                    // so rebuild it alongside, as the other paths that
+                    // change the displayed state do.
+                    crate::tray::rebuild_tray_menu_from_state_if_lightweight(&app);
                     let app_reconcile = app.clone();
                     tokio::spawn(async move {
                         let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile)
@@ -2287,6 +2397,10 @@ pub async fn start_core_inner(
         // including any tracked unprivileged child. Reap it so its resources
         // are released and `MihomoState` no longer references a dead process.
         reap_tracked_child(&app).await;
+        // The script replaced the previous core, so its live TUN
+        // override (kept while it was still running) ends here; the
+        // starts below derive TUN from the preference instead.
+        super::tun_manager::clear_live_tun_override();
 
         if config_port > 0 {
             if let Err(e) = authenticated_health_check(config_port, &secret).await {
@@ -2354,6 +2468,12 @@ pub async fn start_core_inner(
             );
         }
         notify_core_started(&app).await;
+        refresh_tray_icon_after_start(&app).await;
+        // Clearing the override above changed the state the tray's TUN
+        // item displays; the icon refresh alone leaves the lightweight
+        // menu on the previous state, so rebuild it alongside, as the
+        // other paths that change the displayed state do.
+        crate::tray::rebuild_tray_menu_from_state_if_lightweight(&app);
         let app_reconcile = app.clone();
         tokio::spawn(async move {
             let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
@@ -2434,6 +2554,7 @@ pub async fn start_core_inner(
     }
 
     notify_core_started(&app).await;
+    refresh_tray_icon_after_start(&app).await;
     let app_reconcile = app.clone();
     tokio::spawn(async move {
         let _ = super::subscription::reconcile_global_mode_restore(&app_reconcile).await;
@@ -2614,7 +2735,29 @@ pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), Strin
     }
 
     if !still_running_root {
+        // The core a live TUN override could describe is gone.
+        super::tun_manager::clear_live_tun_override();
         cleanup_run_config(app);
+        // The state the tray's TUN item displays changes with the stop:
+        // while the core ran it answered the live state, now it answers
+        // the saved preference, and the two differ exactly when an
+        // override hot-reload flipped TUN without touching the
+        // preference. Rebuild the reduced menu alongside the icon
+        // refresh below, or lightweight mode keeps showing the running
+        // core's state for a core that is no longer there. This runs
+        // after the core-state lock above was released, like the other
+        // stop/start paths that rebuild it.
+        crate::tray::rebuild_tray_menu_from_state_if_lightweight(app);
+        // The tray icon is backend-owned in lightweight mode, where no
+        // frontend sync runs: repaint it now, or the stopped core keeps
+        // showing the TUN / system-proxy icon it had while running. On a
+        // detached thread: the repaint's status read can shell out to the
+        // system proxy tools, and the tray quit path calls this function
+        // directly on the main thread — quitting must not block on that
+        // lookup. A stop that a restart follows is safe too: the start's
+        // own refresh reads later and wins the icon claim.
+        let app_for_icon = app.clone();
+        std::thread::spawn(move || crate::tray::refresh_tray_icon(&app_for_icon));
     }
 
     #[cfg(target_os = "macos")]
