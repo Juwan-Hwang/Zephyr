@@ -701,14 +701,14 @@
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunModeShort">TUN Mode</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunModeDesc">Route all system traffic through the core</p>
+                                        <p id="setting-tun-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunModeShort">TUN Mode</p>
+                                        <p id="setting-tun-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="tunModeDesc">Route all system traffic through the core</p>
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0">
                                     <button type="button" id="settings-tun-config-btn" class="row-action" data-i18n-title="tunConfigOpen" title="TUN settings"><span data-i18n="tunConfigBtn">Settings</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
                                     <label class="ios-switch">
-                                        <input type="checkbox" id="settings-tun-toggle" aria-label="TUN Mode" data-i18n-aria-label="tunModeShort">
+                                        <input type="checkbox" id="settings-tun-toggle" aria-labelledby="setting-tun-title" aria-describedby="setting-tun-desc">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
@@ -901,14 +901,14 @@
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Leak Protection</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="dnsRewriteDesc">Take over system DNS</p>
+                                        <p id="setting-dns-rewrite-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Leak Protection</p>
+                                        <p id="setting-dns-rewrite-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="dnsRewriteDesc">Take over system DNS</p>
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0">
                                     <button type="button" id="dns-config-btn" class="row-action"><span data-i18n="dnsServersBtn">Servers</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
                                     <label class="ios-switch">
-                                        <input type="checkbox" id="dns-rewrite-toggle" aria-label="DNS Leak Protection" data-i18n-aria-label="dnsRewrite">
+                                        <input type="checkbox" id="dns-rewrite-toggle" aria-labelledby="setting-dns-rewrite-title" aria-describedby="setting-dns-rewrite-desc">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
