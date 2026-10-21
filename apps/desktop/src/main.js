@@ -96,6 +96,13 @@ import { Bus, Events } from './ui/events.js';
 import { normalizeVersion, isRemoteNewer } from './utils/version-utils.js';
 import { initInputModality } from './ui/input-modality.js';
 
+// Tag <html> with the platform (same mechanism as the is-maximized class
+// synced by ui/window-controls.js) so styles.css can scope macOS-only
+// optical corrections — see the "macOS optical centring" block there.
+if (navigator.platform.toLowerCase().includes('mac')) {
+  document.documentElement.classList.add('is-mac');
+}
+
 /** @type {any} */
 const _win = /** @type {any} */ (window);
 
