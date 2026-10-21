@@ -43,7 +43,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "bundled/*"
+      "bundled/*",
+      "THIRD-PARTY-LICENSES.txt"
     ],
     "macOS": {
       "minimumSystemVersion": "10.13",

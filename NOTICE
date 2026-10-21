@@ -2,6 +2,12 @@
 
 Zephyr uses the following open source components. We are grateful to all contributors.
 
+This file is a summary. The complete license texts of every component —
+as required for binary distribution — ship with the app in
+`apps/desktop/src-tauri/THIRD-PARTY-LICENSES.txt` (also readable in the app
+under Settings > About > Third-party Licenses) and are generated from the
+lockfiles by `scripts/generate-licenses.sh`.
+
 ## Rust Dependencies (Runtime)
 
 | Crate | Version | License | Homepage |
@@ -45,15 +51,18 @@ Zephyr uses the following open source components. We are grateful to all contrib
 
 | Package | Version | License | Homepage |
 |---------|---------|---------|----------|
-| tailwindcss | 4.2.2 | MIT | https://tailwindcss.com |
-| @tailwindcss/cli | 4.2.2 | MIT | https://tailwindcss.com |
-| @tauri-apps/plugin-autostart | 2.5.1 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
-| js-yaml | 4.x | MIT | https://github.com/nodeca/js-yaml |
+| @codemirror/* and @lezer/* (editor) | 6.x | MIT | https://codemirror.net |
+| @tauri-apps/api | 2.12.4 | MIT / Apache-2.0 | https://github.com/tauri-apps/tauri |
+| @tauri-apps/plugin-autostart | 2.7.0 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
+| js-yaml (vendored file) | 4.1.0 | MIT | https://github.com/nodeca/js-yaml |
+| UnoCSS (build-time; generated CSS ships) | 66.11.0 | MIT | https://unocss.dev |
 
 ## Bundled Assets
 
 | Asset | Version | License | Homepage |
 |-------|---------|---------|----------|
+| mihomo proxy core binary (bundled unmodified; latest upstream release at build time) | — | GPL-3.0 (per upstream repository) | https://github.com/MetaCubeX/mihomo |
+| Geo data files `geoip.dat`, `geosite.dat`, `Country.mmdb` (MetaCubeX/meta-rules-dat, bundled unmodified) | — | GPL-3.0 (per upstream repository) | https://github.com/MetaCubeX/meta-rules-dat |
 | Zephyr Country Flags font (`apps/desktop/src/fonts/ZephyrCountryFlags.woff2`), subset of Catrinity Flags | 1.110 | SIL OFL 1.1 | https://catrinity-font.de |
 
 Flag artwork from Catrinity Flags by Alexander Lange (https://catrinity-font.de).
