@@ -507,7 +507,8 @@ describe('Tauri plugin permission contract', () => {
         'plugin:event|listen',
         'plugin:event|unlisten',
         'plugin:opener|open_url',
-        'plugin:window|set_visible',
+        'plugin:window|show',
+        'plugin:window|hide',
         'plugin:window|close',
         'plugin:window|minimize',
         'plugin:window|maximize',
@@ -554,7 +555,7 @@ describe('Tauri plugin permission contract', () => {
      * Convert a plugin command like "plugin:window|set_title" to the
      * corresponding permission like "core:window:allow-set-title".
      * Note: Tauri v2 permission names use hyphens, but command names use
-     * underscores (e.g., set_visible → allow-set-visible).
+     * underscores (e.g., set_title → allow-set-title).
      */
     function commandToPermission(cmd) {
         const [pluginPart, action] = cmd.split('|');
@@ -576,8 +577,6 @@ describe('Tauri plugin permission contract', () => {
     // simple "allow-{action}" pattern.
     const permissionOverrides = {
         'plugin:opener|open_url': 'opener:default',
-        // set_visible is covered by allow-hide + allow-show (no single allow-set-visible)
-        'plugin:window|set_visible': 'core:window:allow-hide+core:window:allow-show',
     };
 
     it('every used plugin command has a declared permission', () => {

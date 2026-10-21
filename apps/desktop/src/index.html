@@ -692,30 +692,8 @@
                     <!-- 3. Proxy -->
                     <section id="settings-sec-proxy">
                         <h3 class="settings-section-title" data-i18n="settingsProxyBehavior">Proxy</h3>
-                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">TUN, node switching and latency tests</p>
+                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">Node switching and latency tests</p>
                         <div class="glass-card p-5 space-y-4">
-                            <!-- TUN (mirrors the home card) -->
-                            <div id="row-settings-tun" class="flex items-center justify-between gap-4">
-                                <div class="flex items-center gap-4 min-w-0">
-                                    <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
-                                    </div>
-                                    <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunModeShort">TUN Mode</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunModeDesc">Route all system traffic through the core</p>
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-2 shrink-0">
-                                    <button type="button" id="settings-tun-config-btn" class="row-action" data-i18n-title="tunConfigOpen" title="TUN settings"><span data-i18n="tunConfigBtn">Settings</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
-                                    <label class="ios-switch">
-                                        <input type="checkbox" id="settings-tun-toggle" aria-label="TUN Mode" data-i18n-aria-label="tunModeShort">
-                                        <span class="switch-slider"></span>
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
-
                             <!-- Auto switch nodes (failover + node scoring + scheduled tests) -->
                             <div id="row-auto-switch" class="flex items-center justify-between gap-4">
                                 <div class="flex items-center gap-4 min-w-0">

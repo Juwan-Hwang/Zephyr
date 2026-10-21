@@ -117,10 +117,10 @@ pub fn parse_deep_link(raw: &str) -> Option<DeepLinkPayload> {
 /// On Windows, protocol associations pass the URL as a CLI argument.
 /// On macOS/Linux, they may also arrive via argv.
 pub fn handle_cli_deep_links(app: &tauri::AppHandle) {
-    let args: Vec<String> = std::env::args().collect();
-    for arg in &args {
+    // `args_os`: `args` panics on an argument that is not valid Unicode.
+    for arg in std::env::args_os().filter_map(|arg| arg.into_string().ok()) {
         if arg.starts_with("clash://") {
-            if let Some(payload) = parse_deep_link(arg) {
+            if let Some(payload) = parse_deep_link(&arg) {
                 crate::backend_event::emit_to_main(app, "deep-link", payload);
             }
         }
