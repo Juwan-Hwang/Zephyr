@@ -97,6 +97,7 @@ export const TRAY = Object.freeze({
     UPDATE_TRAY_TOGGLE_STATES: "update_tray_toggle_states",
     GET_TRAY_STATUS: "get_tray_status",
     GET_TRAY_PROXY_STATUS: "get_tray_proxy_status",
+    GET_TRAY_ICON_MODE: "get_tray_icon_mode",
 });
 
 // ---------------------------------------------------------------------------
