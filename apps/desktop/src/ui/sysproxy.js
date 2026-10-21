@@ -141,7 +141,7 @@ export function refreshSysProxyStatus() {
 }
 
 /**
- * Restore the system proxy from the ownership marker, serialized through
+ * Restore the system proxy Zephyr owns (ownership marker present), serialized through
  * the same queue as setSysProxyEnabled/toggleSysProxy.
  *
  * This prevents a TOCTOU race where a user-initiated disable (which removes
@@ -154,7 +154,19 @@ export function refreshSysProxyStatus() {
  */
 export function restoreSysProxy() {
     return _enqueueSysProxy(async () => {
-        await invoke(COMMANDS.RESTORE_SYS_PROXY);
+        // Point the restore at the port the running core listens on: the marker
+        // keeps the address of the core that set the proxy, and a later core
+        // (a profile edited on disk before an administrator relaunch or a
+        // restart) can listen elsewhere. A core with no HTTP listener gets no
+        // system proxy, the same rule enabling it follows.
+        /** @type {Record<string, any>} */
+        const currentConfig = await getConfig();
+        const currentPort = currentConfig?.['mixed-port'] || currentConfig?.port;
+        if (!currentPort) {
+            sysproxyLogger.warn('System proxy not restored: the core exposes no HTTP proxy port');
+            return;
+        }
+        await invoke(COMMANDS.RESTORE_SYS_PROXY, { server: `127.0.0.1:${currentPort}` });
         appStore.set('isSysProxyEnabled', true);
         await updateSysProxyUI();
     });

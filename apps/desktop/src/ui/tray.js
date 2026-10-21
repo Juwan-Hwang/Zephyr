@@ -425,6 +425,14 @@ async function alignStoreWithStoppedTunPreference() {
     const settings = await invoke(COMMANDS.GET_SETTINGS).catch(() => null);
     if (!settings) return;
     let shown = settings.tun_enabled;
+    // Windows: an unelevated process starts the core without TUN whatever the
+    // preference says, and the backend reports TUN off (see
+    // `applicable_tun_preference`): show the same, so the switch offers the
+    // administrator relaunch instead of claiming TUN is on.
+    if (navigator.userAgent.toLowerCase().includes('windows')
+        && await invoke(COMMANDS.IS_PROCESS_ELEVATED).catch(() => null) === false) {
+        shown = false;
+    }
     if (shown === null || shown === undefined) {
         // Read the config directly, not through the cache: the cache
         // answers a failed read with its stale entry, while the backend
@@ -505,6 +513,21 @@ async function alignTunStoreWithBackend(proxyStatus) {
     return freshProxyStatus;
 }
 
+/**
+ * Whether the core answers. The system proxy is only put back while it does:
+ * pointing it at a port nobody listens on (the core is still starting, or
+ * stopped) would cut the connection; the periodic check tries again.
+ * @returns {Promise<boolean>}
+ */
+async function coreAnswers() {
+    try {
+        await getConfig();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export function startUnifiedSync() {
     if (_unifiedSyncInterval) {
         clearInterval(_unifiedSyncInterval);
@@ -523,7 +546,7 @@ export function startUnifiedSync() {
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
-            if (!sysProxyOn && hasOwnership) {
+            if (!sysProxyOn && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
@@ -547,7 +570,7 @@ export function startUnifiedSync() {
             }
 
             // Guard: if we own the proxy but it was disabled externally, restore it
-            if (!realSysProxyState && hasOwnership) {
+            if (!realSysProxyState && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
