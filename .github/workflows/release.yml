@@ -236,6 +236,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --ignore-scripts && pnpm rebuild esbuild @parcel/watcher
 
+      - name: Install cargo-about
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-about@0.9.2
+
+      # The bundled license file must match this build's lockfiles exactly,
+      # regardless of whether the committed copy was regenerated beforehand.
+      - name: Regenerate third-party licenses
+        run: ./scripts/generate-licenses.sh
+        shell: bash
+
       # Get latest mihomo release version
       - name: Get latest mihomo version
         id: mihomo_version
@@ -420,6 +431,7 @@ jobs:
           # Restore bundled resources (were removed before Lite build)
           /tmp/download-bundled.sh "$PLATFORM" "$MIHOMO_VERSION" "$ARCH"
           cp apps/desktop/src-tauri/bundled/* portable/core/
+          cp apps/desktop/src-tauri/THIRD-PARTY-LICENSES.txt portable/
           touch portable/.portable
           ARCH_SUFFIX="$ARCH"
           cd portable && tar czf ../dist-artifacts/Zephyr-linux-${ARCH_SUFFIX}-portable.tar.gz . && cd ..
@@ -530,6 +542,7 @@ jobs:
           # Restore bundled resources (were removed before Lite build)
           /tmp/download-bundled.sh "$PLATFORM" "$MIHOMO_VERSION" "$ARCH"
           cp apps/desktop/src-tauri/bundled/* portable/core/
+          cp apps/desktop/src-tauri/THIRD-PARTY-LICENSES.txt portable/
           touch portable/.portable
           cd portable && 7z a -mx=9 ../dist-artifacts/Zephyr_${ARCH}-portable.zip . && cd ..
           # Remove the standalone portable exe (now inside the ZIP)

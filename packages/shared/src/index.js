@@ -140,6 +140,7 @@ export const SETTINGS = Object.freeze({
     SAVE_SETTINGS: "save_settings",
     PATCH_SETTINGS: "patch_settings",
     SET_UI_SCALE: "set_ui_scale",
+    GET_THIRD_PARTY_LICENSES: "get_third_party_licenses",
 });
 
 // ---------------------------------------------------------------------------
