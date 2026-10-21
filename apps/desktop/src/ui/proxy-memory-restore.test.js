@@ -1,0 +1,55 @@
+// @ts-nocheck
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const api = { invoke: vi.fn(), switchProxy: vi.fn() };
+const groups = { fetchProxyGroups: vi.fn(), isWritableGroupType: (type) => type === 'Selector' };
+const store = { set: vi.fn(), get: vi.fn(() => null) };
+
+vi.mock('../api.js', () => api);
+vi.mock('@zephyr/shared', () => ({ COMMANDS: { GET_SETTINGS: 'get_settings' } }));
+vi.mock('./proxy-groups.js', () => groups);
+vi.mock('./cache.js', () => ({ invalidateSettingsCache: vi.fn() }));
+vi.mock('../utils/logger.js', () => ({ proxyMemoryLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('./state.js', () => ({ appStore: store }));
+
+const { restoreProxySelectionResult } = await import('./proxy-memory.js');
+
+const result = {
+    uiGroupName: 'Main',
+    proxies: ['HK'],
+    data: {
+        proxies: {
+            Main: { type: 'Selector', all: ['HK'] },
+            Auto: { type: 'URLTest', all: ['HK'] },
+            Backup: { type: 'Selector', all: ['HK'] },
+        },
+    },
+};
+
+describe('restoreProxySelectionResult', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.invoke.mockResolvedValue({ last_proxy_selection: { 'a.yaml': JSON.stringify({ group: 'Main', node: 'HK' }) } });
+        groups.fetchProxyGroups.mockResolvedValue(result);
+    });
+
+    it('falls back to another writable group when the core refuses the resolved one', async () => {
+        api.switchProxy.mockImplementation(async (group) => group === 'Backup');
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(api.switchProxy.mock.calls).toEqual([['Main', 'HK'], ['Backup', 'HK']]);
+        expect(store.set).toHaveBeenCalledWith('uiGroupName', 'Backup');
+    });
+
+    it('reports a failure only once every group refused the switch', async () => {
+        api.switchProxy.mockResolvedValue(false);
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('failed');
+        expect(api.switchProxy).toHaveBeenCalledTimes(2);
+        expect(store.set).not.toHaveBeenCalled();
+    });
+
+    it('tries the resolved group first and stops there when it works', async () => {
+        api.switchProxy.mockResolvedValue(true);
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(api.switchProxy.mock.calls).toEqual([['Main', 'HK']]);
+    });
+});

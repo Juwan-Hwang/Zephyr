@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG } from './dns-shared.js';
+import { describe, it, expect, vi } from 'vitest';
+import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG, createDnsReapply } from './dns-shared.js';
 
 describe('isValidIPv6', () => {
     it('full address', () => expect(isValidIPv6('2001:0db8:85a3:0000:0000:8a2e:0370:7334')).toBe(true));
@@ -94,5 +94,72 @@ describe('DEFAULT_DNS_CONFIG', () => {
         for (const fb of DEFAULT_DNS_CONFIG.fallback) {
             expect(isValidDns(fb)).toBe(true);
         }
+    });
+});
+
+describe('createDnsReapply', () => {
+    const deferred = () => {
+        /** @type {(v?: any) => void} */ let resolve = () => {};
+        /** @type {(e?: any) => void} */ let reject = () => {};
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+    };
+
+    it('re-applies and saves the saved choice', async () => {
+        const apply = vi.fn(async () => {});
+        const persist = vi.fn(async () => {});
+        const setChecked = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist, setChecked });
+        await r.run();
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(setChecked).toHaveBeenCalledWith(true);
+        expect(persist).toHaveBeenCalledTimes(1);
+    });
+
+    it('a user turning DNS off mid re-apply wins: no check, no save, and the disable runs after', async () => {
+        const pending = deferred();
+        const order = /** @type {string[]} */ ([]);
+        const persist = vi.fn(async () => {});
+        const setChecked = vi.fn();
+        const r = createDnsReapply({
+            isSaved: async () => true,
+            apply: async () => { order.push('apply'); await pending.promise; order.push('applied'); },
+            persist,
+            setChecked,
+        });
+        const run = r.run();
+        await new Promise((res) => setTimeout(res, 0));
+        const off = r.userChange(async () => { order.push('disable'); });
+        pending.resolve();
+        await run; await off;
+        expect(order).toEqual(['apply', 'applied', 'disable']);
+        expect(setChecked).not.toHaveBeenCalled();
+        expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('stops retrying once the user changes the toggle', async () => {
+        const apply = vi.fn(async () => { throw new Error('core down'); });
+        const setChecked = vi.fn();
+        /** @type {() => void} */ let tick = () => {};
+        const wait = () => new Promise((res) => { tick = () => res(undefined); });
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: async () => {}, setChecked, wait });
+        const run = r.run();
+        await new Promise((res) => setTimeout(res, 0));
+        const change = r.userChange(async () => {});
+        tick();
+        await run; await change;
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(setChecked).not.toHaveBeenCalled();
+    });
+
+    it('tells a toggle whether a newer one has been queued since', async () => {
+        const r = createDnsReapply({ isSaved: async () => false, apply: async () => {}, persist: async () => {}, setChecked: vi.fn() });
+        const first = deferred();
+        /** @type {boolean[]} */ const seen = [];
+        const a = r.userChange(async (isLatest) => { await first.promise; seen.push(isLatest()); });
+        const b = r.userChange(async (isLatest) => { seen.push(isLatest()); });
+        first.resolve();
+        await a; await b;
+        expect(seen).toEqual([false, true]);
     });
 });
