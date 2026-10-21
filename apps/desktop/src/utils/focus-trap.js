@@ -82,6 +82,23 @@ export function focusRespectingModality(el) {
  */
 
 /**
+ * Hidden by class, attribute or style (display:none is also set inline):
+ * focusing such an element is a silent no-op, and a dialog hidden that way
+ * is not the one still open.
+ * @param {Element} el
+ */
+function shown(el) {
+    if (el.closest('.hidden, [hidden]')) return false;
+    // visibility is inherited and a descendant can override it, so only the
+    // element's own computed value counts; display:none on any ancestor hides it.
+    if (getComputedStyle(el).visibility === 'hidden') return false;
+    for (let n = /** @type {Element | null} */ (el); n; n = n.parentElement) {
+        if (getComputedStyle(n).display === 'none') return false;
+    }
+    return true;
+}
+
+/**
  * Stack of currently active traps, most recently activated last. Only the
  * topmost trap answers keys: a dialog opened over another trapped panel has
  * its own trap, and the outer one must not pull focus out of the dialog.
@@ -210,10 +227,35 @@ export function createFocusTrap(container, options = {}) {
         if (at >= 0) activeTraps.splice(at, 1);
         document.removeEventListener('keydown', onKeyDown, true);
 
-        if (previousFocus && previousFocus.isConnected) {
-            focusRespectingModality(previousFocus);
+        if (previousFocus) {
+            // Still there but hidden or disabled (the dialog underneath hid
+            // or disabled it) counts as gone: focusing it would be a silent no-op.
+            const usable = previousFocus.isConnected && shown(previousFocus)
+                && !previousFocus.matches(':disabled');
+            const back = usable ? previousFocus : focusFallback();
+            if (back) focusRespectingModality(back);
         }
         previousFocus = null;
+    }
+
+    /**
+     * The element focus came from is gone (a dialog underneath re-rendered
+     * its buttons): land in the dialog that is still open instead of leaving
+     * focus on the one closing.
+     * @returns {HTMLElement | null}
+     */
+    function focusFallback() {
+        const open = Array.from(document.querySelectorAll('[aria-modal="true"]')).filter((d) =>
+            !container.contains(d) && !d.contains(container) && shown(d));
+        const top = open.at(-1);
+        if (!top) return null;
+        // A control inside a disabled <fieldset> is disabled too (checked
+        // directly as well: not every engine applies :disabled to it).
+        const usable = (/** @type {Element} */ el) => shown(el) && !el.matches(':disabled')
+            && !el.closest('fieldset[disabled]');
+        const primary = Array.from(top.querySelectorAll('.btn-primary')).find(usable);
+        const any = Array.from(top.querySelectorAll(FOCUSABLE)).find(usable);
+        return /** @type {HTMLElement | null} */ (primary || any || null);
     }
 
     function destroy() {

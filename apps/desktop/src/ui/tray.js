@@ -6,7 +6,8 @@
 
 import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
 import { switchToConfig } from './lifecycle.js';
-import { currentProfile } from './active-profile.js';
+import { activeProfile, currentProfile } from './active-profile.js';
+import { saveProxySelection } from './proxy-memory.js';
 import { t as tFunc } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
@@ -231,6 +232,40 @@ export async function updateTrayMenu(forceRefresh = false) {
 
 // --- Tray event listeners ---
 
+/**
+ * Remember a node picked in the tray for the running profile, as a pick on
+ * the proxies page is: a later core restart restores this choice instead of
+ * an older one. Skipped while the minimal config runs (no profile).
+ * @param {string} profile - the profile from trayPickProfile
+ * @param {string | null | undefined} group
+ * @param {string} proxy
+ */
+async function rememberTraySelection(profile, group, proxy) {
+    if (!profile) return;
+    try {
+        await saveProxySelection(profile, { node: proxy, group: group || undefined });
+    } catch (err) {
+        trayLogger.warn('Failed to remember the tray proxy choice', err);
+    }
+}
+
+/**
+ * The profile the core runs when a tray pick starts: read before the switch,
+ * so a profile switch finishing meanwhile does not get this pick saved under
+ * the new profile. '' when it cannot be read or the minimal config runs.
+ * @returns {Promise<string>}
+ */
+async function trayPickProfile() {
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        return activeProfile(settings, 'config.yaml') || '';
+    } catch (err) {
+        trayLogger.warn('Failed to read the profile for the tray proxy choice', err);
+        return '';
+    }
+}
+
 export async function initTrayEventListeners() {
     if (_trayEventUnlisteners.length > 0) return;
 
@@ -312,6 +347,14 @@ export async function initTrayEventListeners() {
         const ev = event;
         const subName = ev.payload;
 
+        // A core update or another switch is restarting the core: starting a
+        // second restart now would race it.
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+            await updateTrayMenu().catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+            return;
+        }
+        appStore.set('isNetworkUpdating', true);
         try {
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -324,13 +367,23 @@ export async function initTrayEventListeners() {
                 showNotification(`${tr('notifSwitchTo', 'Switched to')} ${subName}`, 'info');
             }
 
-            // Sync core config first (updates appStore including TUN state), then update tray
-            const { syncCoreConfig } = await import('./proxies.js');
-            await syncCoreConfig();
-            await updateTrayMenu();
+            // Sync core config first (updates appStore including TUN state), then update tray.
+            // The switch already succeeded: a failed refresh is logged, not
+            // reported as a failed switch.
+            try {
+                const { syncCoreConfig } = await import('./proxies.js');
+                await syncCoreConfig();
+            } catch (refreshErr) {
+                trayLogger.warn('Refreshing after the tray subscription switch failed', refreshErr);
+            }
+            // Forced, and even when the sync failed: a refresh during the
+            // switch cached the old profile's check mark.
+            await updateTrayMenu(true).catch((/** @type {unknown} */ trayErr) => trayLogger.warn('Refreshing the tray after the subscription switch failed', trayErr));
         } catch (err) {
             trayLogger.error('Failed to switch subscription from tray', err);
             showNotification(toError(err).toString(), 'error');
+        } finally {
+            appStore.set('isNetworkUpdating', false);
         }
     });
 
@@ -342,7 +395,24 @@ export async function initTrayEventListeners() {
         const ev = event;
         const { group, proxy } = ev.payload;
 
+        // A switch, mode change or core update holds this guard: the running
+        // profile may change between reading it and switching the node, and
+        // the pick would be saved under the old one (the node cards refuse too).
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+            await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+            return;
+        }
+
         try {
+            const profile = await trayPickProfile();
+            // A change may have taken the guard while the profile was read:
+            // check again right before switching, as the node cards do.
+            if (appStore.get('isNetworkUpdating')) {
+                showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+                await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+                return;
+            }
             const success = await switchProxy(group, proxy);
             if (success) {
                 invalidateProxiesCache();
@@ -352,6 +422,7 @@ export async function initTrayEventListeners() {
                 if (group) {
                     appStore.set('uiGroupName', group);
                 }
+                await rememberTraySelection(profile, group, proxy);
 
                 await closeAllConnections();
                 // Let syncCoreConfig() handle the display update with leaf node resolution
