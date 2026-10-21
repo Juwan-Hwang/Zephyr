@@ -49,3 +49,31 @@ describe('focus trap modality', () => {
         expect(field.classList.contains('focus-quiet')).toBe(false);
     });
 });
+
+describe('focus trap restore', () => {
+    beforeEach(() => { document.body.innerHTML = ''; });
+
+    it('falls back to the dialog underneath when the element it came from was replaced', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old" class="btn-ghost">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        // The dialog underneath re-renders its footer while the top one is open.
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<button id="done" class="btn-primary">Done</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('still returns focus to the original element when it is there', async () => {
+        document.body.innerHTML = '<div role="dialog" aria-modal="true"><button id="old">Close</button><button class="btn-primary">Done</button></div><div id="top"><button>OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('old');
+    });
+});

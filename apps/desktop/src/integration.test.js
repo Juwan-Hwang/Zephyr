@@ -460,7 +460,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'global-shortcut',           // ui/global-shortcut.js:474
         'profiles-imported',         // ui/settings.js:1035
         'prism-event',               // ui/logs.js:371
-        'core-download-status',      // ui/client-updater.js:48
+        'core-download-status',      // ui/update-dialog.js
         'backend-event',             // ui/logs.js:445 (prism logs via backend_event.rs)
         'network-state-changed',      // main.js (network coordinator UI updates)
     ];

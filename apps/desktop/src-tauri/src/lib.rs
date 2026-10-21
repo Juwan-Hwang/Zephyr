@@ -1881,7 +1881,8 @@ pub fn run() {
 
                     if close_to_tray {
                         api.prevent_close();
-                        if lightweight_mode {
+                        // An update still running in the page keeps it alive.
+                        if lightweight_mode && !updater::keep_webview_on_close() {
                             // Lightweight mode: destroy the WebView to free memory.
                             // The app stays alive in the tray because we prevent
                             // exit on ExitRequested. Tray click recreates the window.

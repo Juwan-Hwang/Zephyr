@@ -5,7 +5,8 @@ use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{command, Manager as _, State, Window};
 
 // ── Pure helper functions ────────────────────────────────────────────────
@@ -1561,17 +1562,139 @@ async fn update_core_inner(
     }
 }
 
+/// Until when (seconds on a monotonic clock, see `now_secs`) closing the main
+/// window hides it instead of destroying the `WebView` in lightweight mode. An
+/// update runs from the page: it holds the network lock, runs the app
+/// installer after a core update and reports the outcome; destroying the page
+/// meanwhile would drop all of that. 0 means not held.
+static KEEP_WEBVIEW_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+/// Update steps running now; the hold stays unbounded until the last ends.
+static ACTIVE_UPDATE_STEPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A lightweight-mode close was turned into a hide by the hold; the page is
+/// destroyed once the hold lapses (see `release_hidden_webview`).
+static HIDDEN_FOR_UPDATE: AtomicBool = AtomicBool::new(false);
+
+/// After a core update that the app installer follows, the page refreshes its
+/// state and then starts the installer; the hold lapses on its own if it never
+/// does.
+const KEEP_WEBVIEW_BEFORE_CLIENT_SECS: u64 = 600;
+
+/// After an update step ends, time for the page to report the outcome.
+const KEEP_WEBVIEW_AFTER_SECS: u64 = 30;
+
+/// Seconds since the first call, on a clock that system time changes do not
+/// move, so a clock change cannot end or extend the hold.
+fn now_secs() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs()
+}
+
+/// Keeps the page alive while an update step runs, including when the step
+/// panics or its future is dropped. When the last running step ends, the
+/// hold lasts `after_secs` more and a hidden page is then released.
+struct WebviewHold {
+    app: tauri::AppHandle,
+    after_secs: u64,
+}
+
+impl WebviewHold {
+    fn new(app: tauri::AppHandle) -> Self {
+        ACTIVE_UPDATE_STEPS.fetch_add(1, Ordering::SeqCst);
+        KEEP_WEBVIEW_UNTIL.store(u64::MAX, Ordering::SeqCst);
+        Self {
+            app,
+            after_secs: KEEP_WEBVIEW_AFTER_SECS,
+        }
+    }
+}
+
+impl Drop for WebviewHold {
+    fn drop(&mut self) {
+        if end_update_step(self.after_secs) {
+            let app = self.app.clone();
+            let wait = Duration::from_secs(self.after_secs.saturating_add(1));
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(wait).await;
+                release_hidden_webview(&app);
+            });
+        }
+    }
+}
+
+/// One update step ended. Returns whether it was the last one running, in
+/// which case the hold now lasts `after_secs` more.
+fn end_update_step(after_secs: u64) -> bool {
+    let last = ACTIVE_UPDATE_STEPS
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            Some(n.saturating_sub(1))
+        })
+        .unwrap_or_else(|n| n)
+        <= 1;
+    if last {
+        KEEP_WEBVIEW_UNTIL.store(now_secs().saturating_add(after_secs), Ordering::SeqCst);
+    }
+    last
+}
+
+/// Whether a close in lightweight mode should hide the window rather than
+/// destroy its `WebView`, because an update step still runs in the page.
+/// A `true` answer marks the page for release once the hold lapses.
+pub fn keep_webview_on_close() -> bool {
+    let keep = now_secs() < KEEP_WEBVIEW_UNTIL.load(Ordering::SeqCst);
+    if keep {
+        HIDDEN_FOR_UPDATE.store(true, Ordering::SeqCst);
+    }
+    keep
+}
+
+/// Whether a page hidden by the hold should now be destroyed: the hold has
+/// lapsed and a close was turned into a hide. Clears the mark either way once
+/// the hold has lapsed.
+fn take_release_due() -> bool {
+    now_secs() >= KEEP_WEBVIEW_UNTIL.load(Ordering::SeqCst)
+        && HIDDEN_FOR_UPDATE.swap(false, Ordering::SeqCst)
+}
+
+/// The hold lapsed: destroy the page a lightweight-mode close only hid, as
+/// that close would have done. A window the user reopened stays.
+fn release_hidden_webview(app: &tauri::AppHandle) {
+    if !take_release_due() {
+        return;
+    }
+    let lightweight = app
+        .state::<crate::SettingsState>()
+        .0
+        .lock()
+        .map(|s| s.close_to_tray && s.lightweight_mode)
+        .unwrap_or(false);
+    if !lightweight {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            let _ = window.destroy();
+        }
+    }
+}
+
 /// Tauri command wrapper for `update_core_inner` with `catch_unwind` guard.
+///
+/// `then_client`: the app installer follows this update; keep the page alive
+/// until it starts. Every core update keeps the page alive while it runs.
 #[command]
 pub async fn update_core(
     window: Window,
     state: State<'_, MihomoState>,
     url: String,
+    then_client: Option<bool>,
 ) -> Result<core_manager::CoreStartResult, String> {
     use futures_util::future::FutureExt as _;
     use std::panic::AssertUnwindSafe;
 
-    AssertUnwindSafe(update_core_inner(window, state, url))
+    let mut hold = WebviewHold::new(window.app_handle().clone());
+    let result = AssertUnwindSafe(update_core_inner(window, state, url))
         .catch_unwind()
         .await
         .map_err(|payload| {
@@ -1579,7 +1702,12 @@ pub async fn update_core(
             crate::emit_error!(Updater, UPDATE_PANIC_GUARD, "Panic in update_core: {msg}");
             format!("Internal error in update_core: {msg}")
         })
-        .and_then(std::convert::identity)
+        .and_then(std::convert::identity);
+    if result.is_ok() && then_client.unwrap_or(false) {
+        hold.after_secs = KEEP_WEBVIEW_BEFORE_CLIENT_SECS;
+    }
+    drop(hold);
+    result
 }
 
 /// Removes the listed files when dropped; missing files are ignored.
@@ -1873,13 +2001,19 @@ pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUp
 /// Download and open the Zephyr client installer.
 #[command]
 pub async fn update_client(window: Window) -> Result<String, String> {
+    // The page awaits this step to report its outcome.
+    let _hold = WebviewHold::new(window.app_handle().clone());
+    update_client_inner(&window).await
+}
+
+async fn update_client_inner(window: &Window) -> Result<String, String> {
     // Portable mode: cannot self-update (exe is locked while running)
     if crate::core_manager::core::core_process::is_portable_mode() {
         return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Checking for Zephyr updates...",
         5,
@@ -1894,7 +2028,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading Zephyr update...",
         10,
@@ -1914,7 +2048,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Download the installer
     download_release_asset(
-        &window,
+        window,
         &info.download_url,
         &dest_path,
         UpdateComponent::Client,
@@ -1935,7 +2069,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         );
     };
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying installer integrity...",
         93,
@@ -1948,7 +2082,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     // Verify Minisign Ed25519 signature
     let minisig_url = format!("{}.minisig", info.download_url);
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading signature...",
         94,
@@ -1976,7 +2110,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         })?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying signature...",
         95,
@@ -1989,7 +2123,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     )?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Opening installer...",
         96,
@@ -2000,7 +2134,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         .map_err(|e| format!("Failed to open installer: {e}"))?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Installer launched",
         100,
@@ -2050,6 +2184,31 @@ mod tests {
     #[test]
     fn test_lowercase_v_priority_over_uppercase() {
         assert_eq!(strip_version_prefix("vV1.0"), "V1.0");
+    }
+
+    #[test]
+    fn test_keep_webview_hold_expires() {
+        ACTIVE_UPDATE_STEPS.store(2, Ordering::SeqCst);
+        KEEP_WEBVIEW_UNTIL.store(u64::MAX, Ordering::SeqCst);
+        HIDDEN_FOR_UPDATE.store(false, Ordering::SeqCst);
+        // A step ending while another runs keeps the hold unbounded.
+        assert!(!end_update_step(KEEP_WEBVIEW_AFTER_SECS));
+        assert_eq!(KEEP_WEBVIEW_UNTIL.load(Ordering::SeqCst), u64::MAX);
+        assert!(keep_webview_on_close());
+        assert!(!take_release_due());
+        assert!(end_update_step(KEEP_WEBVIEW_BEFORE_CLIENT_SECS));
+        assert!(keep_webview_on_close());
+        assert!(!take_release_due());
+        // Lapsed: the hidden page is due for release once.
+        KEEP_WEBVIEW_UNTIL.store(0, Ordering::SeqCst);
+        assert!(take_release_due());
+        assert!(!take_release_due());
+        assert!(!keep_webview_on_close());
+        assert!(!take_release_due());
+        // An unbalanced end never underflows.
+        assert!(end_update_step(KEEP_WEBVIEW_AFTER_SECS));
+        assert_eq!(ACTIVE_UPDATE_STEPS.load(Ordering::SeqCst), 0);
+        KEEP_WEBVIEW_UNTIL.store(0, Ordering::SeqCst);
     }
 
     // ── select_release_asset_inner tests ──
