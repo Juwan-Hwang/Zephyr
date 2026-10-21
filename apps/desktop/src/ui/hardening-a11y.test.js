@@ -20,12 +20,17 @@ afterEach(() => {
     invokeMock.mockClear();
 });
 
-describe('home page switches and theme swatches accessibility', () => {
-    it('home page toggles have valid aria-labelledby and aria-describedby references', () => {
+describe('home and settings page switches and theme swatches accessibility', () => {
+    it('app toggles have valid aria-labelledby and aria-describedby references', () => {
         const doc = parseIndex();
         const switches = [
             { toggleId: 'sys-proxy-toggle', titleId: 'sys-proxy-title', descId: 'proxy-status-text' },
             { toggleId: 'tun-proxy-toggle', titleId: 'home-tun-title', descId: 'tun-status-text' },
+            { toggleId: 'settings-tun-toggle', titleId: 'setting-tun-title', descId: 'setting-tun-desc' },
+            { toggleId: 'setting-failover', titleId: 'setting-failover-title', descId: 'setting-failover-desc' },
+            { toggleId: 'smart-toggle', titleId: 'smart-toggle-title', descId: 'smart-toggle-desc' },
+            { toggleId: 'smart-auto-test-toggle', titleId: 'smart-auto-test-title', descId: 'smart-auto-test-desc' },
+            { toggleId: 'dns-rewrite-toggle', titleId: 'setting-dns-rewrite-title', descId: 'setting-dns-rewrite-desc' },
         ];
         for (const { toggleId, titleId, descId } of switches) {
             const toggle = doc.getElementById(toggleId);
