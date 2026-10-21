@@ -12,6 +12,7 @@ import { translations, currentLang } from '../i18n.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery } from './lifecycle.js';
+import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
 
 // Records the TUN preference only, for callers that
@@ -172,7 +173,7 @@ export function initTunToggle() {
     async function recoverFromRootStartFailure() {
         try {
             const settings = await invoke(COMMANDS.GET_SETTINGS);
-            const currentConfig = settings.last_config || 'config.yaml';
+            const currentConfig = currentProfile(settings, 'config.yaml');
             const customArgs = settings.custom_args || [];
             await restartCore(currentConfig, customArgs);
             await postRestartRecovery(currentConfig);
@@ -285,7 +286,7 @@ export function initTunToggle() {
                         await new Promise(r => setTimeout(r, 1500));
 
                         const settings = await invoke(COMMANDS.GET_SETTINGS);
-                        const currentConfig = settings.last_config || 'config.yaml';
+                        const currentConfig = currentProfile(settings, 'config.yaml');
                         const customArgs = settings.custom_args || [];
                         await new Promise(r => setTimeout(r, 1000));
                         await restartCore(currentConfig, customArgs);
@@ -427,7 +428,7 @@ export function initTunToggle() {
                         try {
                             try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
                             const settings = await invoke(COMMANDS.GET_SETTINGS);
-                            const currentConfig = settings.last_config || 'config.yaml';
+                            const currentConfig = currentProfile(settings, 'config.yaml');
                             const customArgs = settings.custom_args || [];
                             const coreResult = await restartCore(currentConfig, customArgs);
                             await postRestartRecovery(currentConfig);
@@ -464,7 +465,7 @@ export function initTunToggle() {
                             }
                             try {
                                 const settings = await invoke(COMMANDS.GET_SETTINGS);
-                                const currentConfig = settings.last_config || 'config.yaml';
+                                const currentConfig = currentProfile(settings, 'config.yaml');
                                 const customArgs = settings.custom_args || [];
                                 await restartCore(currentConfig, customArgs);
                                 await postRestartRecovery(currentConfig);
