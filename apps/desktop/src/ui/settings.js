@@ -1239,7 +1239,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 abortLatencyTests();
                 await restartCore(configPath, customArgs);
                 await postRestartRecovery(configPath);
-                showNotification(t.notifRestartSuccess || "Core restarted successfully", 'success');
+                showNotification(t.notifRestartSuccess || "Core restarted", 'success');
             } catch (err) {
                 const error = toError(err);
                 showNotification(error.toString(), 'error');
@@ -2201,7 +2201,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             await postRestartRecovery(configPath);
             ring.setSuccess();
             // Only after the restart actually worked.
-            showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted!", 'success');
+            showNotification(t2.notifGeoUpdateSuccess || "Geo databases updated and core restarted", 'success');
         } catch (err) {
             ring.setError();
             const error = toError(err);
