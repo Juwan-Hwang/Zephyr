@@ -293,6 +293,53 @@ function t(key) {
     return typeof val === 'string' && val ? val : key;
 }
 
+/**
+ * Level steps shared by both panels. Filtering is inclusive (the selected level
+ * and above), so "Debug" would equal "All" and "Error" already covers fatal.
+ */
+const LEVEL_STEPS = /** @type {const} */ ([
+    ['all', 'logLevelAll'],
+    ['info', 'logLevelInfoUp'],
+    ['warn', 'logLevelWarnUp'],
+    ['error', 'logLevelErrorOnly'],
+]);
+
+/**
+ * Filter bar for one log panel: level steps, line count and search. Core and
+ * app logs use this same markup so they look and behave alike.
+ * @param {string} searchId
+ * @param {string} countId
+ */
+function filterBarHTML(searchId, countId) {
+    const steps = LEVEL_STEPS.map(([level, key], i) => `<button type="button" aria-pressed="${i === 0}" class="log-level-seg seg-tab${i === 0 ? ' active' : ''}" data-level="${level}" data-i18n="${key}">${t(key)}</button>`).join('');
+    return `<div class="log-filter-bar flex items-center gap-2 flex-wrap relative z-10">
+                <div class="seg-tabs" role="group" aria-label="${t('logFilterLevel')}" data-i18n-aria-label="logFilterLevel">${steps}</div>
+                <span id="${countId}" class="ms-2 text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
+                <div class="flex-1"></div>
+                <div class="relative group flex items-center">
+                    <div class="absolute inset-y-0 start-0 ps-4 flex items-center pointer-events-none">
+                        <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-standard)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input id="${searchId}" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" aria-label="${t('searchLogs')}" data-i18n-aria-label="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
+                </div>
+            </div>`;
+}
+
+/**
+ * Mark `level` as the selected step in one panel's filter bar.
+ * @param {string} panelSel - '#log-panel-core' or '#log-panel-ext'
+ * @param {string} level
+ */
+function setLevelStep(panelSel, level) {
+    _container?.querySelectorAll(`${panelSel} .log-level-seg`).forEach((b) => {
+        const on = /** @type {HTMLElement} */ (b).dataset.level === level;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+}
+
 function buildPageHTML() {
     return `
         <header class="flex items-center justify-between relative z-10 shrink-0">
@@ -324,27 +371,7 @@ function buildPageHTML() {
 
         <!-- Core Logs Panel -->
         <div id="log-panel-core" class="flex-1 min-h-0 flex flex-col gap-4 relative z-10">
-            <!-- Filter bar -->
-            <div class="flex items-center gap-2 flex-wrap relative z-10">
-                <!-- "Debug" was identical to "All" (filter = level and above): four honest steps instead. -->
-                <div class="seg-tabs" role="radiogroup" aria-label="${t('logLevelAll')}">
-                    <button type="button" class="log-level-seg seg-tab active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
-                    <button type="button" class="log-level-seg seg-tab" data-level="info" data-i18n="logLevelInfoUp">${t('logLevelInfoUp')}</button>
-                    <button type="button" class="log-level-seg seg-tab" data-level="warn" data-i18n="logLevelWarnUp">${t('logLevelWarnUp')}</button>
-                    <button type="button" class="log-level-seg seg-tab" data-level="error" data-i18n="logLevelErrorOnly">${t('logLevelErrorOnly')}</button>
-                </div>
-                <span id="log-line-count" class="ms-2 text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
-                <div class="flex-1"></div>
-                <!-- Search Box -->
-                <div class="relative group flex items-center">
-                    <div class="absolute inset-y-0 start-0 ps-4 flex items-center pointer-events-none">
-                        <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-standard)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </div>
-                    <input id="log-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
-                </div>
-            </div>
+            ${filterBarHTML('log-search', 'log-line-count')}
 
             <!-- Virtual scroll container -->
             <div id="log-content" class="flex-1 min-h-0 overflow-y-auto glass-card log-pane px-4 py-3 font-mono text-xs leading-relaxed tabular-nums relative z-10 custom-scrollbar">
@@ -361,25 +388,7 @@ function buildPageHTML() {
 
         <!-- App Logs Panel -->
         <div id="log-panel-ext" class="hidden flex-1 min-h-0 flex flex-col gap-4 relative z-10">
-            <!-- Filter bar (no Debug — app logs have no debug level) -->
-            <div class="flex items-center gap-2 flex-wrap relative z-10">
-                <button class="log-level-btn active" data-level="all" data-i18n="logLevelAll">${t('logLevelAll')}</button>
-                <button class="log-level-btn" data-level="info" data-i18n="logLevelInfo">${t('logLevelInfo')}</button>
-                <button class="log-level-btn" data-level="warn" data-i18n="logLevelWarn">${t('logLevelWarn')}</button>
-                <button class="log-level-btn" data-level="error" data-i18n="logLevelError">${t('logLevelError')}</button>
-                <button class="log-level-btn" data-level="fatal" data-i18n="logLevelFatal">${t('logLevelFatal')}</button>
-                <span id="log-ext-line-count" class="ms-2 text-xs text-[var(--text-muted)] tabular-nums">0 ${t('logLines')}</span>
-                <div class="flex-1"></div>
-                <!-- Search Box -->
-                <div class="relative group flex items-center">
-                    <div class="absolute inset-y-0 start-0 ps-4 flex items-center pointer-events-none">
-                        <svg class="h-4 w-4 text-[var(--text-secondary)] group-focus-within:text-[var(--text-primary)] transition-colors duration-[var(--zephyr-time-standard)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </div>
-                    <input id="log-ext-search" type="text" placeholder="${t('searchLogs')}" data-i18n-placeholder="searchLogs" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner">
-                </div>
-            </div>
+            ${filterBarHTML('log-ext-search', 'log-ext-line-count')}
             <div id="log-ext-content" class="flex-1 min-h-0 overflow-y-auto glass-card log-pane px-4 py-3 font-mono text-xs leading-relaxed tabular-nums custom-scrollbar">
                 <div id="log-ext-empty" class="empty-state font-sans text-[var(--text-muted)]">
                     <svg class="w-10 h-10 text-[var(--text-tertiary)] opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -520,13 +529,11 @@ function bindEvents() {
         }
     });
 
-    // Level filter buttons (core panel)
+    // Level filter steps (core panel)
     _container.querySelectorAll('#log-panel-core .log-level-seg').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (!_container) return;
-            _container.querySelectorAll('#log-panel-core .log-level-seg').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            _levelFilter = /** @type {'all'|'debug'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
+            _levelFilter = /** @type {'all'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
+            setLevelStep('#log-panel-core', _levelFilter);
             invalidateFilter();
             updateLineCount();
             resetNewLineCount();
@@ -548,13 +555,11 @@ function bindEvents() {
         }, DEBOUNCE_MS);
     });
 
-    // App logs: Level filter buttons (ext panel)
-    _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach(btn => {
+    // App logs: the same level steps (ext panel)
+    _container.querySelectorAll('#log-panel-ext .log-level-seg').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (!_container) return;
-            _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
             _extLevelFilter = /** @type {'all'|'info'|'warn'|'error'} */ (/** @type {HTMLElement} */ (btn).dataset.level) || 'all';
+            setLevelStep('#log-panel-ext', _extLevelFilter);
             rebuildExtLogDOM();
         });
     });
@@ -575,12 +580,8 @@ function bindEvents() {
 /** Reflect the kept filter state in a freshly built page (re-entry). */
 function restoreFilterUI() {
     if (!_container) return;
-    _container.querySelectorAll('#log-panel-core .log-level-seg').forEach((b) => {
-        b.classList.toggle('active', /** @type {HTMLElement} */ (b).dataset.level === _levelFilter);
-    });
-    _container.querySelectorAll('#log-panel-ext .log-level-btn').forEach((b) => {
-        b.classList.toggle('active', /** @type {HTMLElement} */ (b).dataset.level === _extLevelFilter);
-    });
+    setLevelStep('#log-panel-core', _levelFilter);
+    setLevelStep('#log-panel-ext', _extLevelFilter);
     const search = /** @type {HTMLInputElement|null} */ (_container.querySelector('#log-search'));
     if (search) search.value = _searchQuery;
     const extSearch = /** @type {HTMLInputElement|null} */ (_container.querySelector('#log-ext-search'));

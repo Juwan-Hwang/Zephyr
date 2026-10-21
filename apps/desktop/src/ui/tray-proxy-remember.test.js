@@ -1,0 +1,58 @@
+// @ts-nocheck
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const handlers = {};
+const api = {
+    getConfig: vi.fn(async () => ({})),
+    invoke: vi.fn(),
+    getProxies: vi.fn(async () => ({ proxies: {} })),
+    switchProxy: vi.fn(async () => true),
+    closeAllConnections: vi.fn(async () => {}),
+    listen: vi.fn(async (name, fn) => { handlers[name] = fn; return () => {}; }),
+};
+const memory = { saveProxySelection: vi.fn(async () => {}) };
+
+vi.mock('../api.js', () => api);
+vi.mock('./proxy-memory.js', () => memory);
+vi.mock('./lifecycle.js', () => ({ switchToConfig: vi.fn() }));
+vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
+vi.mock('./proxies.js', () => ({ syncCoreConfig: vi.fn(async () => {}), refreshProxies: vi.fn(async () => {}) }));
+vi.mock('../utils/logger.js', () => {
+    const log = () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+    return { trayLogger: log(), createLogger: log, apiLogger: log(), settingsLogger: log() };
+});
+vi.mock('./cache.js', () => ({ trayMenuCache: {}, TRAY_CACHE_TTL: 0, invalidateProxiesCache: vi.fn() }));
+vi.mock('./run-config-cache.js', () => ({ invalidateRunConfigCache: vi.fn() }));
+vi.mock('@zephyr/shared', () => ({ COMMANDS: { GET_SETTINGS: 'get_settings', UPDATE_TRAY_MENU: 'update_tray_menu' } }));
+
+const { initTrayEventListeners } = await import('./tray.js');
+await initTrayEventListeners();
+
+describe('a node picked in the tray', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.switchProxy.mockResolvedValue(true);
+    });
+
+    it('is remembered for the running profile, so a later restart restores it', async () => {
+        api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
+        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        expect(memory.saveProxySelection).toHaveBeenCalledWith('sub.yaml', { node: 'Tokyo', group: 'Proxy' });
+    });
+
+    it('is remembered for the profile running when it was picked, even if a profile switch lands meanwhile', async () => {
+        let profile = 'old.yaml';
+        api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: profile } : null));
+        api.switchProxy.mockImplementation(async () => { profile = 'new.yaml'; return true; });
+        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        expect(memory.saveProxySelection).toHaveBeenCalledWith('old.yaml', { node: 'Tokyo', group: 'Proxy' });
+    });
+
+    it('is not remembered when the switch was refused', async () => {
+        api.switchProxy.mockResolvedValue(false);
+        api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
+        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        expect(memory.saveProxySelection).not.toHaveBeenCalled();
+    });
+});
