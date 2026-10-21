@@ -82,7 +82,7 @@ import { updateModeUI } from './modes.js';
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
 import { initTunnelSettings } from './settings/tunnels.js';
-import { applyAutoSwitch, restoreAutoSwitch, alignAutoSwitch, deriveAutoSwitch, readAutoSwitchState, queueSmartConfigWrite, smartEnabledOf, shownAutoSwitch } from './settings/auto-switch.js';
+import { applyFailover, applySmart, applyAutoTest, readSmartState, readAutoTestEnabled, shownFailover, queueSmartConfigWrite, smartEnabledOf } from './settings/auto-switch.js';
 import { initSubscriptionSettings } from './settings/subscriptions.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
@@ -955,7 +955,7 @@ export async function switchHomePageMode(mode, setHomeModeUI) {
 // ---------------------------------------------------------------------------
 //  initSettings -- main entry point
 // ---------------------------------------------------------------------------
-/** Dependencies for the merged "auto-switch nodes" switch. */
+/** Dependencies for the auto-switch, node scoring and scheduled test switches. */
 function autoSwitchDeps() {
     return {
         getSmartConfig: () => prism.smartConfig(),
@@ -963,11 +963,13 @@ function autoSwitchDeps() {
         // Must reject on failure so the switch can report it and go back.
         saveSetting: saveSettingChecked,
         setStore: (/** @type {string} */ k, /** @type {any} */ v) => appStore.set(k, v),
+        getStore: (/** @type {string} */ k) => appStore.get(k),
         startAutoTest: startSmartAutoTest,
         stopAutoTest: stopSmartAutoTest,
         onChanged: () => Bus.emit(Events.CONFIG_UPDATED),
         getFailoverPolicy: () => prism.failoverGetPolicy(),
         setFailoverPolicy: (/** @type {any} */ policy) => prism.failoverSetPolicy(policy),
+        onRollbackFailed: (/** @type {unknown} */ err) => settingsLogger.error('[failover] Failed to undo the setting:', err),
     };
 }
 
@@ -1041,7 +1043,9 @@ export async function initSettings() {
     // The swatches are native <button>s, so Enter / Space already click them.
     const checkUpdateBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('check-update-btn'));
     const hideTimeoutToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-hide-timeout'));
-    const autoSwitchToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('setting-auto-switch'));
+    const failoverToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('setting-failover'));
+    const smartToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-toggle'));
+    const autoTestToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('smart-auto-test-toggle'));
     const encryptConfigsToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-encrypt-configs'));
     const portConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('port-config-btn'));
     const portDisplay = /** @type {HTMLElement|null} */ (document.getElementById('current-port-display'));
@@ -1067,10 +1071,22 @@ export async function initSettings() {
     /** @type {any[]} */
     let currentTunnels = [];
     /**
-     * Bumped by every auto-switch change (the switch, Restore Defaults): a pending
-     * alignment, rollback or policy re-read started before it must not undo it.
+     * Bumped by every change of that switch (the switch itself, Restore Defaults): a
+     * pending rollback or policy re-read started before it must not undo it.
      */
-    let autoSwitchSeq = 0;
+    const switchSeq = { failover: 0, smart: 0, autoTest: 0 };
+    /** Whether the scoring switch's first value came from the engine (not a localStorage guess). */
+    let smartKnown = false;
+    /** Scoring changes clicked but not yet saved: an engine re-read must not undo them on screen. */
+    let smartPending = 0;
+    /** Scheduled tests need scoring: the switch is unavailable (and off) while scoring is off. */
+    const syncAutoTestAvailability = () => {
+        if (!autoTestToggle) return;
+        const smartOn = smartToggle?.checked ?? false;
+        autoTestToggle.disabled = !smartOn;
+        document.getElementById('row-smart-auto-test')?.classList.toggle('opacity-50', !smartOn);
+        if (!smartOn) autoTestToggle.checked = false;
+    };
 
     // ---- Subscription & Config management (delegated to settings/subscriptions.js) ----
     // Initialized early so renderConfigs is available for language dropdown and drag-drop listeners.
@@ -1357,11 +1373,45 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         hideTimeoutToggle.dispatchEvent(new Event('change'));
                     }
                 }
-                if (autoSwitchToggle) {
-                    autoSwitchToggle.checked = false;
+                if (failoverToggle) {
+                    failoverToggle.checked = false;
                     settings.failover_enabled = false;
-                    autoSwitchSeq++;
-                    await trackResult('autoSwitch', () => applyAutoSwitch(false, autoSwitchDeps()));
+                    const seq = ++switchSeq.failover;
+                    if (!await trackResult('failover', () => applyFailover(false, autoSwitchDeps()))) {
+                        // Not saved: applyFailover put the store back. Show and keep that
+                        // (the settings save below writes this snapshot).
+                        const stored = !!appStore.get('failoverEnabled');
+                        settings.failover_enabled = stored;
+                        // Shown as the normal path does: off while the Prism page has the policy off.
+                        /** @type {any} */
+                        let policy = null;
+                        if (stored) {
+                            try { policy = await prism.failoverGetPolicy(); } catch { /* unknown: follow the setting */ }
+                        }
+                        if (seq === switchSeq.failover) failoverToggle.checked = shownFailover(stored, policy);
+                    }
+                }
+                if (smartToggle) {
+                    // Scoring off also stops scheduled tests.
+                    smartToggle.checked = false;
+                    const seq = ++switchSeq.smart;
+                    switchSeq.autoTest++;
+                    syncAutoTestAvailability();
+                    if (!await trackResult('smartScoring', () => applySmart(false, autoSwitchDeps()))) {
+                        // Not saved: applySmart put scoring (and the scheduled tests it
+                        // stopped) back. Show what is in effect now.
+                        // If the engine can't be read now, what applySmart put back on
+                        // screen is the best answer (localStorage may hold an old guess).
+                        const restored = await queueSmartConfigWrite(async () => {
+                            const read = await readSmartState({ getSmartConfig: () => prism.smartConfig() });
+                            return read.known ? read.enabled : document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
+                        });
+                        if (seq === switchSeq.smart) {
+                            smartToggle.checked = restored;
+                            syncAutoTestAvailability();
+                            if (autoTestToggle && restored) autoTestToggle.checked = readAutoTestEnabled();
+                        }
+                    }
                 }
                 if (silentStartToggle) {
                     silentStartToggle.checked = false;
@@ -1500,7 +1550,15 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     delete settings.copy_env_format;   // missing → backend default for this platform
                     settings.log_retention_days = 3;
                     settings.log_max_file_mb = 50;
-                    await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                    // In the switches' queue: a pending auto-switch change settles first
+                    // (its store value may be a click that is about to roll back), and the
+                    // value saved here is the one that switch ends on.
+                    await queueSmartConfigWrite(async () => {
+                        // Owned by the auto-switch switch: if it was turned on while the
+                        // reset ran, this snapshot must not save it back off.
+                        if (failoverToggle) settings.failover_enabled = !!appStore.get('failoverEnabled');
+                        await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                    });
                     // The running log writers take a new size limit only through a patch.
                     await invoke(COMMANDS.PATCH_SETTINGS, { patch: { log_max_file_mb: 50 } });
                     applyUiScale(1);
@@ -1646,8 +1704,8 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     // Theme color/mode/circles are handled by initThemeSettings above
 
     // ---- Settings persistence ----
-    // Saves a full settings snapshot: run it in the auto-switch queue, so an older
-    // snapshot can never land after (and undo) a queued auto-switch write.
+    // Saves a full settings snapshot: run it in the switches' write queue, so an older
+    // snapshot can never land after (and undo) a queued failover write.
     function save() {
         return queueSmartConfigWrite(saveNow);
     }
@@ -1662,9 +1720,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             if (autoUpdateClientToggle) currentSettings.auto_update_client = autoUpdateClientToggle.checked;
             if (autostartToggle) currentSettings.autostart = autostartToggle.checked;
             if (hideTimeoutToggle) currentSettings.hide_timeout_nodes = hideTimeoutToggle.checked;
-            // Owned by the auto-switch switch (applyAutoSwitch keeps the store current);
-            // a legacy partial state must not be turned into failover by an unrelated save.
-            if (autoSwitchToggle) currentSettings.failover_enabled = !!appStore.get('failoverEnabled');
+            // Owned by the auto-switch switch (applyFailover keeps the store current; the
+            // switch may show off only because the Prism page turned the policy off).
+            if (failoverToggle) currentSettings.failover_enabled = !!appStore.get('failoverEnabled');
             currentSettings.theme = appStore.get('currentTheme');
             if (customArgsInput) currentSettings.custom_args = customArgsInput.value.split('\n').map(a => a.trim()).filter(Boolean);
             await invoke(COMMANDS.SAVE_SETTINGS, { settings: currentSettings });
@@ -2439,80 +2497,126 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         });
     }
 
-    // --- Auto-switch nodes (failover + node scoring + scheduled tests in one switch) ---
-    if (autoSwitchToggle) {
-        /** What the stored keys say, and what the switch shows given the failover policy. */
-        const readAutoSwitchView = async () => {
-            const state = await readAutoSwitchState({
-                failoverEnabled: !!appStore.get('failoverEnabled'),
-                getSmartConfig: () => prism.smartConfig(),
-            });
-            const derived = deriveAutoSwitch(state);
+    // --- Auto-switch nodes (failover), node scoring and scheduled tests: three switches ---
+    /**
+     * Wire one switch: apply its change in the shared queue; a failed save is reported
+     * and the switch shows what is in effect after the rollback (two queued changes can
+     * both fail, so "the opposite of this click" may be wrong), unless a later change
+     * of the same switch took over.
+     * @param {HTMLInputElement} toggle
+     * @param {'failover'|'smart'|'autoTest'} key
+     * @param {(on: boolean) => Promise<void>} apply
+     * @param {() => boolean | Promise<boolean>} effective  what the setting is now
+     * @param {() => void} [after]  runs after the switch changes or goes back
+     */
+    const wireSwitch = (toggle, key, apply, effective, after) => {
+        toggle.addEventListener('change', async () => {
+            const on = toggle.checked;
+            const seq = ++switchSeq[key];
+            after?.();
+            try {
+                await apply(on);
+            } catch (err) {
+                settingsLogger.error(`[${key}] Failed to save:`, err);
+                const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+                showNotification(t.saveFailed || 'Failed to save', 'error');
+                if (seq !== switchSeq[key]) return;
+                /** @type {boolean} */
+                let now = !on;
+                try { now = await effective(); } catch { /* keep the pre-click state */ }
+                if (seq !== switchSeq[key]) return;
+                toggle.checked = now;
+                after?.();
+            }
+        });
+    };
+
+    if (failoverToggle) {
+        /** What the switch shows: the setting, unless the Prism page turned the policy off. */
+        const readFailoverShown = async () => {
+            const stored = !!appStore.get('failoverEnabled');
             /** @type {any} */
             let policy = null;
-            if (derived) {
-                try { policy = await prism.failoverGetPolicy(); } catch { /* unknown: keep what the keys say */ }
+            if (stored) {
+                try { policy = await prism.failoverGetPolicy(); } catch { /* unknown: keep what the setting says */ }
             }
-            return { state, derived, shown: shownAutoSwitch(derived, policy) };
+            return shownFailover(stored, policy);
         };
-        const { state, derived, shown } = await readAutoSwitchView();
-        autoSwitchToggle.checked = shown;
-        document.documentElement.style.setProperty('--smart-enabled', state.smart ? '1' : '0');
-        // An older build may have left only some of the three on: make them match
-        // what the switch shows, so "on" really switches and "off" really stops scoring.
-        // Not when the smart config could not be read: its real state is unknown. Not
-        // while the policy turned off on the Prism page is what shows the switch off:
-        // that is a choice for this session, and the stored keys stay as they are.
-        // A failed alignment puts the keys back as they were found, unless the switch
-        // or Restore Defaults has changed them since.
-        const alignSeq = autoSwitchSeq;
-        if (!state.smartUnknown && shown === derived
-            && (state.failover !== derived || state.smart !== derived || state.autoTest !== derived)) {
-            alignAutoSwitch(state, autoSwitchDeps(), () => autoSwitchSeq === alignSeq)
-                .catch((err) => settingsLogger.warn('[auto-switch] Failed to align legacy state:', err));
-        }
+        failoverToggle.checked = !!appStore.get('failoverEnabled');
+        const initSeq = switchSeq.failover;
+        void readFailoverShown().then((shown) => {
+            if (initSeq === switchSeq.failover) failoverToggle.checked = shown;
+        });
         // The Prism page can turn the failover policy off or on later: follow it. The read
-        // waits in the switch's write queue, so it sees a change in progress finished, and
-        // it is dropped if the switch was used meanwhile or a newer read started.
+        // waits in the write queue, so it sees a change in progress finished, and it is
+        // dropped if the switch was used meanwhile or a newer read started.
         let viewSeq = 0;
         Bus.on(Events.FAILOVER_POLICY_CHANGED, () => {
             const seq = ++viewSeq;
-            const changeSeq = autoSwitchSeq;
-            void queueSmartConfigWrite(readAutoSwitchView).then((view) => {
-                if (seq === viewSeq && changeSeq === autoSwitchSeq) autoSwitchToggle.checked = view.shown;
-            }, (err) => settingsLogger.warn('[auto-switch] Failed to re-read state:', err));
+            const changeSeq = switchSeq.failover;
+            void queueSmartConfigWrite(readFailoverShown).then((shown) => {
+                if (seq === viewSeq && changeSeq === switchSeq.failover) failoverToggle.checked = shown;
+            }, (err) => settingsLogger.warn('[failover] Failed to re-read state:', err));
         });
-        autoSwitchToggle.addEventListener('change', async () => {
-            const on = autoSwitchToggle.checked;
-            const seq = ++autoSwitchSeq;
-            const deps = autoSwitchDeps();
-            // The three keys as they are right before this change (a legacy file may have
-            // only some on), read in the same queue so earlier changes have landed: a
-            // failed change puts exactly these back.
-            const beforeRead = queueSmartConfigWrite(() => readAutoSwitchState({
-                failoverEnabled: !!appStore.get('failoverEnabled'),
-                getSmartConfig: deps.getSmartConfig,
-            }));
-            beforeRead.catch(() => {});
-            try {
-                await applyAutoSwitch(on, deps);
-            } catch (err) {
-                settingsLogger.error('[auto-switch] Failed to save:', err);
-                const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
-                showNotification(t.saveFailed || 'Failed to save', 'error');
-                const before = await beforeRead.catch(() => null);
-                // A later choice supersedes this one: never roll back over it.
-                if (seq !== autoSwitchSeq) return;
-                // Put the switch and the three settings back as they were (a smart config
-                // that could not be read beforehand is left as it is: its value is unknown).
-                autoSwitchToggle.checked = !on;
-                (before ? restoreAutoSwitch(before, deps) : applyAutoSwitch(!on, deps))
-                    .catch((e) => settingsLogger.warn('[auto-switch] Failed to roll back:', e));
-            }
-        });
+        wireSwitch(failoverToggle, 'failover', (on) => applyFailover(on, autoSwitchDeps()),
+            () => queueSmartConfigWrite(readFailoverShown));
     }
 
-    // Auto-switch parameters (scoring weights, test interval)
+    if (smartToggle) {
+        // The engine's config first, localStorage as the fallback.
+        const smartState = await readSmartState({ getSmartConfig: () => prism.smartConfig() });
+        smartKnown = smartState.known;
+        smartToggle.checked = smartState.enabled;
+        document.documentElement.style.setProperty('--smart-enabled', smartToggle.checked ? '1' : '0');
+        wireSwitch(smartToggle, 'smart', async (on) => {
+            // Scoring off also stops scheduled tests: a pending rollback of that switch must not restart them.
+            if (!on) switchSeq.autoTest++;
+            const autoTestSeq = switchSeq.autoTest;
+            smartPending++;
+            try {
+                await applySmart(on, autoSwitchDeps());
+            } finally {
+                smartPending--;
+            }
+            // The change may have waited behind others (an earlier "off" stops the
+            // scheduled tests only when it runs): show what was actually saved,
+            // unless that switch was used since.
+            if (autoTestToggle && autoTestSeq === switchSeq.autoTest) {
+                autoTestToggle.checked = readAutoTestEnabled();
+                syncAutoTestAvailability();
+            }
+        }, () => document.documentElement.style.getPropertyValue('--smart-enabled') === '1', () => {
+            syncAutoTestAvailability();
+            // A failed "off" puts scheduled tests back as they were.
+            if (autoTestToggle && smartToggle.checked) autoTestToggle.checked = readAutoTestEnabled();
+        });
+        // A config reload re-read scoring from the engine (say it was unreadable here
+        // at startup): show it, unless the switch was used since.
+        const onSmartSynced = (/** @type {any} */ data) => {
+            if (typeof data?.enabled !== 'boolean') return;
+            smartKnown = true;
+            if (smartPending > 0) return;
+            smartToggle.checked = data.enabled;
+            // Scheduled tests may have been turned off with it (engine says scoring is off).
+            if (autoTestToggle) autoTestToggle.checked = readAutoTestEnabled();
+            syncAutoTestAvailability();
+        };
+        Bus.on(Events.SMART_ENABLED_SYNCED, onSmartSynced);
+        registerCleanup(() => Bus.off(Events.SMART_ENABLED_SYNCED, onSmartSynced));
+    }
+
+    if (autoTestToggle) {
+        autoTestToggle.checked = readAutoTestEnabled();
+        // Left on by an older build while scoring is off: it never ran, so it goes off.
+        // Only when scoring was really read: a localStorage guess must not turn it off for good.
+        if (smartToggle && smartKnown && !smartToggle.checked && autoTestToggle.checked) {
+            void applyAutoTest(false, autoSwitchDeps());
+        }
+        syncAutoTestAvailability();
+        wireSwitch(autoTestToggle, 'autoTest', (on) => applyAutoTest(on, autoSwitchDeps()), () => readAutoTestEnabled());
+    }
+
+    // Node scoring parameters (scoring weights, test interval)
     const smartConfigBtn = document.getElementById('smart-config-btn');
     if (smartConfigBtn) {
         smartConfigBtn.onclick = async () => {
@@ -2557,7 +2661,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             modal.innerHTML = `
                 <div class="glass-card w-[460px] p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="smart-modal-title">
                     <div class="flex items-center justify-between">
-                        <h3 id="smart-modal-title" class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Auto-Switch Parameters')}</h3>
+                        <h3 id="smart-modal-title" class="dialog-title">${escapeHtml(t.smartProxyConfigTitle || 'Node Scoring Parameters')}</h3>
                         <button type="button" id="smart-modal-close" class="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" aria-label="${escapeHtml(t.close || 'Close')}">
                             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                         </button>
@@ -2664,7 +2768,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
                     const minI = Math.round(clamp(num('smart-min-interval'), SMART_MIN_TEST_INTERVAL_SECS, 86400, 60));
                     const maxI = Math.round(clamp(num('smart-max-interval'), minI, 86400, Math.max(600, minI)));
-                    // Read and write in the auto-switch queue: neither can overwrite the
+                    // Read and write in the switches' queue: neither can overwrite the
                     // other's change, and `enabled` stays whatever the switch last saved.
                     await queueSmartConfigWrite(async () => {
                         // A failed read must not save a config without `enabled`: let the error surface.
@@ -2723,7 +2827,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     if (shouldStartAutoTest) {
         // Delay to ensure smart toggle state is initialized first
         setTimeout(() => {
-            // Auto-switch alignment may have turned scheduled tests off meanwhile.
+            // Scoring may have been turned off (stopping scheduled tests) meanwhile.
             if (localStorage.getItem('smartAutoTest') === 'true') startSmartAutoTest();
         }, 2000);
     }

@@ -555,7 +555,7 @@ async function loadSmartConfig() {
 
 async function saveSmartConfig() {
     try {
-        // Read-modify-write in the auto-switch queue, so neither overwrites the other's enabled state.
+        // Read-modify-write in the switches' queue, so neither overwrites the other's enabled state.
         await queueSmartConfigWrite(async () => {
             // Fetch current config to preserve the enabled state. A failed read aborts the
             // save (and is reported) instead of writing enabled = false.
@@ -615,13 +615,16 @@ async function loadFailoverPolicy() {
 
 async function saveFailoverPolicy() {
     try {
-        await prism.failoverSetPolicy({
+        const policy = {
             enabled: getCheckboxValue('failover-enabled-toggle'),
             threshold: getNumberInput('failover-threshold', 3),
             cooldownSecs: getNumberInput('failover-cooldown', 60),
             fallbackGroup: getStringInput('failover-fallback-group') || undefined,
-        });
-        // The settings page's auto-switch shows off while this policy is off.
+        };
+        // Same queue as the settings switch, which reads the policy and writes it
+        // back: neither may land between the other's read and write.
+        await queueSmartConfigWrite(() => prism.failoverSetPolicy(policy));
+        // The settings page's auto-switch (failover) shows off while this policy is off.
         Bus.emit(Events.FAILOVER_POLICY_CHANGED);
         showNotification('Failover policy saved', 'success');
     } catch (e) { showNotification(String(e), 'error'); }
