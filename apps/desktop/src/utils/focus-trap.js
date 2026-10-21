@@ -159,10 +159,28 @@ export function createFocusTrap(container, options = {}) {
         active = false;
         document.removeEventListener('keydown', onKeyDown, true);
 
-        if (previousFocus && previousFocus.isConnected) {
-            focusRespectingModality(previousFocus);
+        if (previousFocus) {
+            const back = previousFocus.isConnected ? previousFocus : focusFallback();
+            if (back) focusRespectingModality(back);
         }
         previousFocus = null;
+    }
+
+    /**
+     * The element focus came from is gone (a dialog underneath re-rendered
+     * its buttons): land in the dialog that is still open instead of leaving
+     * focus on the one closing.
+     * @returns {HTMLElement | null}
+     */
+    function focusFallback() {
+        const open = Array.from(document.querySelectorAll('[aria-modal="true"]')).filter((d) =>
+            !container.contains(d) && !d.contains(container) && !d.closest('.hidden, [hidden]'));
+        const top = open.at(-1);
+        if (!top) return null;
+        const shown = (/** @type {Element} */ el) => !el.closest('.hidden, [hidden]');
+        const primary = Array.from(top.querySelectorAll('.btn-primary:not([disabled])')).find(shown);
+        const any = Array.from(top.querySelectorAll(FOCUSABLE)).find(shown);
+        return /** @type {HTMLElement | null} */ (primary || any || null);
     }
 
     function destroy() {

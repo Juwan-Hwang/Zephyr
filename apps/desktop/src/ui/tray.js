@@ -272,6 +272,14 @@ export async function initTrayEventListeners() {
         const ev = event;
         const subName = ev.payload;
 
+        // A core update or another switch is restarting the core: starting a
+        // second restart now would race it.
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+            await updateTrayMenu().catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+            return;
+        }
+        appStore.set('isNetworkUpdating', true);
         try {
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -291,6 +299,8 @@ export async function initTrayEventListeners() {
         } catch (err) {
             trayLogger.error('Failed to switch subscription from tray', err);
             showNotification(toError(err).toString(), 'error');
+        } finally {
+            appStore.set('isNetworkUpdating', false);
         }
     });
 

@@ -5,7 +5,7 @@ use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{command, Manager as _, State, Window};
 
 // ── Pure helper functions ────────────────────────────────────────────────
@@ -388,7 +388,8 @@ async fn stream_asset_to_file(
                 return Err(format!("Failed to write chunk: {e}"));
             }
             let progress = if total_size > 0 {
-                // Integer-only progress: ratio ∈ [0, 1000] maps to font size [24, 80]
+                // Integer-only progress: ratio ∈ [0, 1000] maps to the download's share
+                // [24, 80] of the whole step's progress
                 let ratio_x1000 = downloaded
                     .checked_mul(1000)
                     .unwrap_or(0)
@@ -1561,17 +1562,166 @@ async fn update_core_inner(
     }
 }
 
+/// The page hold. While it lasts, closing the main window hides it instead of
+/// destroying the `WebView` in lightweight mode. An update runs from the page:
+/// it holds the network lock, runs the app installer after a core update and
+/// reports the outcome; destroying the page meanwhile would drop all of that.
+/// One lock covers every field, so a step starting while another ends, or a
+/// close arriving meanwhile, always sees a consistent hold.
+struct HoldState {
+    /// Update steps running now; the hold stays unbounded until the last ends.
+    steps: usize,
+    /// Until when (seconds on a monotonic clock, see `now_secs`) the hold
+    /// lasts. 0 means not held.
+    until: u64,
+    /// A lightweight-mode close was turned into a hide by the hold; the page
+    /// is destroyed once the hold lapses (see `release_hidden_webview`).
+    hidden: bool,
+}
+
+static HOLD: std::sync::Mutex<HoldState> = std::sync::Mutex::new(HoldState {
+    steps: 0,
+    until: 0,
+    hidden: false,
+});
+
+fn hold_state() -> std::sync::MutexGuard<'static, HoldState> {
+    HOLD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// After a core update that the app installer follows, the page refreshes its
+/// state and then starts the installer; the hold lapses on its own if it never
+/// does.
+const KEEP_WEBVIEW_BEFORE_CLIENT_SECS: u64 = 600;
+
+/// After an update step ends, time for the page to report the outcome.
+const KEEP_WEBVIEW_AFTER_SECS: u64 = 30;
+
+/// After a core update, the page re-applies patches and overrides and restores
+/// the proxy selection (waiting up to about 35 s for providers) before it
+/// reports the outcome.
+const KEEP_WEBVIEW_AFTER_CORE_SECS: u64 = 120;
+
+/// Seconds since the first call, on a clock that system time changes do not
+/// move, so a clock change cannot end or extend the hold.
+fn now_secs() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs()
+}
+
+/// Keeps the page alive while an update step runs, including when the step
+/// panics or its future is dropped. When the last running step ends, the
+/// hold lasts `after_secs` more and a hidden page is then released.
+struct WebviewHold {
+    app: tauri::AppHandle,
+    after_secs: u64,
+}
+
+impl WebviewHold {
+    fn new(app: tauri::AppHandle) -> Self {
+        let mut hold = hold_state();
+        hold.steps = hold.steps.saturating_add(1);
+        hold.until = u64::MAX;
+        drop(hold);
+        Self {
+            app,
+            after_secs: KEEP_WEBVIEW_AFTER_SECS,
+        }
+    }
+}
+
+impl Drop for WebviewHold {
+    fn drop(&mut self) {
+        if end_update_step(self.after_secs) {
+            let app = self.app.clone();
+            let wait = Duration::from_secs(self.after_secs.saturating_add(1));
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(wait).await;
+                // On the main thread, where the tray and single-instance
+                // handlers show the window: a reopen cannot land between the
+                // visibility check and the destroy.
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || release_hidden_webview(&handle));
+            });
+        }
+    }
+}
+
+/// One update step ended. Returns whether it was the last one running, in
+/// which case the hold now lasts `after_secs` more.
+fn end_update_step(after_secs: u64) -> bool {
+    let mut hold = hold_state();
+    hold.steps = hold.steps.saturating_sub(1);
+    let last = hold.steps == 0;
+    if last {
+        hold.until = now_secs().saturating_add(after_secs);
+    }
+    last
+}
+
+/// Whether a close in lightweight mode should hide the window rather than
+/// destroy its `WebView`, because an update step still runs in the page.
+/// A `true` answer marks the page for release once the hold lapses.
+#[must_use]
+pub fn keep_webview_on_close() -> bool {
+    let mut hold = hold_state();
+    let keep = now_secs() < hold.until;
+    if keep {
+        hold.hidden = true;
+    }
+    keep
+}
+
+/// Whether a page hidden by the hold should now be destroyed: the hold has
+/// lapsed and a close was turned into a hide. Clears the mark either way once
+/// the hold has lapsed.
+fn take_release_due() -> bool {
+    let mut hold = hold_state();
+    if now_secs() < hold.until {
+        return false;
+    }
+    std::mem::take(&mut hold.hidden)
+}
+
+/// The hold lapsed: destroy the page a lightweight-mode close only hid, as
+/// that close would have done. A window the user reopened stays.
+fn release_hidden_webview(app: &tauri::AppHandle) {
+    if !take_release_due() {
+        return;
+    }
+    let lightweight = app
+        .state::<crate::SettingsState>()
+        .0
+        .lock()
+        .map(|s| s.close_to_tray && s.lightweight_mode)
+        .unwrap_or(false);
+    if !lightweight {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            let _ = window.destroy();
+        }
+    }
+}
+
 /// Tauri command wrapper for `update_core_inner` with `catch_unwind` guard.
+///
+/// `then_client`: the app installer follows this update; keep the page alive
+/// until it starts. Every core update keeps the page alive while it runs.
 #[command]
 pub async fn update_core(
     window: Window,
     state: State<'_, MihomoState>,
     url: String,
+    then_client: Option<bool>,
 ) -> Result<core_manager::CoreStartResult, String> {
     use futures_util::future::FutureExt as _;
     use std::panic::AssertUnwindSafe;
 
-    AssertUnwindSafe(update_core_inner(window, state, url))
+    let mut hold = WebviewHold::new(window.app_handle().clone());
+    let result = AssertUnwindSafe(update_core_inner(window, state, url))
         .catch_unwind()
         .await
         .map_err(|payload| {
@@ -1579,7 +1729,16 @@ pub async fn update_core(
             crate::emit_error!(Updater, UPDATE_PANIC_GUARD, "Panic in update_core: {msg}");
             format!("Internal error in update_core: {msg}")
         })
-        .and_then(std::convert::identity)
+        .and_then(std::convert::identity);
+    if result.is_ok() {
+        hold.after_secs = if then_client.unwrap_or(false) {
+            KEEP_WEBVIEW_BEFORE_CLIENT_SECS
+        } else {
+            KEEP_WEBVIEW_AFTER_CORE_SECS
+        };
+    }
+    drop(hold);
+    result
 }
 
 /// Removes the listed files when dropped; missing files are ignored.
@@ -1873,13 +2032,19 @@ pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUp
 /// Download and open the Zephyr client installer.
 #[command]
 pub async fn update_client(window: Window) -> Result<String, String> {
+    // The page awaits this step to report its outcome.
+    let _hold = WebviewHold::new(window.app_handle().clone());
+    update_client_inner(&window).await
+}
+
+async fn update_client_inner(window: &Window) -> Result<String, String> {
     // Portable mode: cannot self-update (exe is locked while running)
     if crate::core_manager::core::core_process::is_portable_mode() {
         return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Checking for Zephyr updates...",
         5,
@@ -1894,7 +2059,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading Zephyr update...",
         10,
@@ -1914,7 +2079,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Download the installer
     download_release_asset(
-        &window,
+        window,
         &info.download_url,
         &dest_path,
         UpdateComponent::Client,
@@ -1935,7 +2100,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         );
     };
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying installer integrity...",
         93,
@@ -1948,7 +2113,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     // Verify Minisign Ed25519 signature
     let minisig_url = format!("{}.minisig", info.download_url);
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading signature...",
         94,
@@ -1976,7 +2141,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         })?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying signature...",
         95,
@@ -1989,7 +2154,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     )?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Opening installer...",
         96,
@@ -2000,7 +2165,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         .map_err(|e| format!("Failed to open installer: {e}"))?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Installer launched",
         100,
@@ -2050,6 +2215,35 @@ mod tests {
     #[test]
     fn test_lowercase_v_priority_over_uppercase() {
         assert_eq!(strip_version_prefix("vV1.0"), "V1.0");
+    }
+
+    #[test]
+    fn test_keep_webview_hold_expires() {
+        fn set(steps: usize, until: u64, hidden: bool) {
+            let mut hold = hold_state();
+            hold.steps = steps;
+            hold.until = until;
+            hold.hidden = hidden;
+        }
+        set(2, u64::MAX, false);
+        // A step ending while another runs keeps the hold unbounded.
+        assert!(!end_update_step(KEEP_WEBVIEW_AFTER_SECS));
+        assert_eq!(hold_state().until, u64::MAX);
+        assert!(keep_webview_on_close());
+        assert!(!take_release_due());
+        assert!(end_update_step(KEEP_WEBVIEW_BEFORE_CLIENT_SECS));
+        assert!(keep_webview_on_close());
+        assert!(!take_release_due());
+        // Lapsed: the hidden page is due for release once.
+        hold_state().until = 0;
+        assert!(take_release_due());
+        assert!(!take_release_due());
+        assert!(!keep_webview_on_close());
+        assert!(!take_release_due());
+        // An unbalanced end never underflows.
+        assert!(end_update_step(KEEP_WEBVIEW_AFTER_SECS));
+        assert_eq!(hold_state().steps, 0);
+        set(0, 0, false);
     }
 
     // ── select_release_asset_inner tests ──
