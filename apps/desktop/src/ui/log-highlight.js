@@ -154,6 +154,9 @@ export function renderLogLineHtml(line, query, levelColors, fallbackColor) {
 /** mihomo logfmt line: time="…" level=info msg="…" (msg may contain escaped quotes). */
 const CORE_LINE_RE = /^time="([^"]*)"\s+level=(\w+)\s+msg="((?:[^"\\]|\\.)*)"\s*$/;
 
+/** Set of valid core log levels to avoid allocating a new array on every line parse. */
+const VALID_CORE_LEVELS = new Set(['debug', 'info', 'warn', 'error', 'fatal']);
+
 /**
  * Split a mihomo core log line into its parts.
  * @param {string} line
@@ -166,8 +169,9 @@ export function parseCoreLogLine(line) {
     if (!m) return null;
     const raw = m[2].toLowerCase();
     const level = raw === 'warning' ? 'warn' : raw;
-    if (!['debug', 'info', 'warn', 'error', 'fatal'].includes(level)) return null;
-    const msg = m[3].replace(/\\(["\\])/g, '$1');
+    if (!VALID_CORE_LEVELS.has(level)) return null;
+    const rawMsg = m[3];
+    const msg = rawMsg.includes('\\') ? rawMsg.replace(/\\(["\\])/g, '$1') : rawMsg;
     return { time: m[1], level: /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (level), msg };
 }
 

@@ -11,6 +11,9 @@
 // HTML entity escaping
 // ---------------------------------------------------------------------------
 
+/** Fast test regex to skip string replacement when no HTML-significant characters are present. */
+const HTML_ESCAPE_TEST_RE = /[&<>"']/;
+
 /** Characters that are significant in HTML text and quoted attribute contexts. */
 const HTML_ESCAPE_RE = /[&<>"']/g;
 
@@ -30,6 +33,9 @@ const HTML_ESCAPE_MAP = {
  * text and inside single- or double-quoted attribute values. Implemented as a
  * pure string replacement (no DOM allocation), so it is cheap on hot paths.
  *
+ * Performance optimization: Fast regex test (`HTML_ESCAPE_TEST_RE.test`) skips
+ * regex replacement and string object allocation when no special characters are present.
+ *
  * The input is not Unicode-normalized: what is displayed is exactly the value
  * that was passed in (e.g. full-width characters in node or subscription
  * names are preserved). Normalization adds no safety here because only the
@@ -40,6 +46,7 @@ const HTML_ESCAPE_MAP = {
  */
 export function escapeHtml(str) {
     if (typeof str !== 'string') return '';
+    if (!HTML_ESCAPE_TEST_RE.test(str)) return str;
     return str.replace(HTML_ESCAPE_RE, (ch) => HTML_ESCAPE_MAP[ch]);
 }
 
