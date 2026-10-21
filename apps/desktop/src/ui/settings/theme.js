@@ -13,6 +13,7 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
 import { saveSetting } from '../settings-helpers.js';
+import { selectSegment } from '../seg-control.js';
 import { t } from '../../i18n.js';
 
 /** i18n keys naming each preset accent. */
@@ -53,7 +54,6 @@ let languageListenerBound = false;
  * @param {HTMLInputElement|null} opts.opacitySlider - The opacity slider input.
  * @param {HTMLElement|null} opts.opacityValText - The opacity value display text.
  * @param {HTMLElement|null} opts.themeModeContainer - The theme mode toggle container.
- * @param {HTMLElement|null} opts.themeModeSlider - The theme mode slider indicator.
  * @param {HTMLElement[]} opts.themeModeButtons - The [data-theme-mode] button elements.
  * @param {() => Promise<void>} opts.save - Callback to persist settings to backend.
  */
@@ -68,7 +68,6 @@ export function initThemeSettings({
     opacitySlider,
     opacityValText,
     themeModeContainer,
-    themeModeSlider,
     themeModeButtons,
     save,
 }) {
@@ -144,20 +143,7 @@ export function initThemeSettings({
      * @param {string} mode
      */
     const updateThemeModeUI = (mode) => {
-        const idx = themeModeMap.indexOf(mode);
-        if (themeModeSlider && idx !== -1) {
-            themeModeSlider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-        }
-        themeModeButtons.forEach((btn, btnIdx) => {
-            btn.setAttribute('aria-pressed', String(btnIdx === idx));
-            if (btnIdx === idx) {
-                btn.classList.add('text-[var(--text-primary)]');
-                btn.classList.remove('text-[var(--text-secondary)]');
-            } else {
-                btn.classList.remove('text-[var(--text-primary)]');
-                btn.classList.add('text-[var(--text-secondary)]');
-            }
-        });
+        selectSegment(themeModeContainer, themeModeMap.indexOf(mode));
     };
 
     /**

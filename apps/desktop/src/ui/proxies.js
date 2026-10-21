@@ -26,7 +26,7 @@ import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
-import { postRestartRecovery } from './lifecycle.js';
+import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
@@ -2178,11 +2178,17 @@ async function handleCoreRestart(btn, context) {
         const settings = await getSettingsCached();
         const configPath = settings?.last_config || 'config.yaml';
         const customArgs = settings?.custom_args || [];
-        await restartCore(configPath, customArgs);
-        await postRestartRecovery(configPath);
+        const recovery = await withPageBusy(async () => {
+            const coreResult = await restartCore(configPath, customArgs);
+            return postRestartRecovery(restartedProfile(coreResult, configPath));
+        });
         // Re-read after awaits: user may have switched language during restart.
         const tSuccess = /** @type {any} */ (translations)[currentLang] || {};
-        showNotification(tSuccess.coreRestarted || 'Core restarted', 'success');
+        if (recovery?.failed) {
+            showNotification(tSuccess.restartRecoveryWarn || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        } else {
+            showNotification(tSuccess.coreRestarted || 'Core restarted', 'success');
+        }
     } catch (err) {
         proxyLogger.error(`Failed to restart core from ${context}`, err);
         showNotification(String(err), 'error');
