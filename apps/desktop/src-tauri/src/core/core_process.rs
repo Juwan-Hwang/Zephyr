@@ -1540,7 +1540,6 @@ fn runs_requested_config(running: Option<&str>, requested: &str, requested_missi
     running == Some(requested)
 }
 
-#[allow(clippy::cognitive_complexity)]
 pub async fn start_core_inner(
     app: AppHandle,
     state: State<'_, MihomoState>,
@@ -1549,6 +1548,38 @@ pub async fn start_core_inner(
     secret: Option<String>,
     force: Option<bool>,
 ) -> Result<CoreStartResult, String> {
+    Box::pin(start_core_with(
+        app,
+        state,
+        config_path,
+        custom_args,
+        secret,
+        force,
+        None,
+    ))
+    .await
+}
+
+/// The error [`start_core_with`] returns when the core it was meant to replace
+/// was already replaced by another start.
+pub const CORE_START_SUPERSEDED: &str = "core already restarted by another start";
+
+/// Like [`start_core_inner`]. With `expect_started_at`, the start only goes
+/// ahead when, once it holds the start lock, the running core is still the
+/// instance that started at that time; otherwise it returns
+/// [`CORE_START_SUPERSEDED`] and leaves the newer core alone (a restart of the
+/// same profile keeps the port and config, but not the start time). A core
+/// with no start time stopped or exited meanwhile: the start goes ahead.
+#[allow(clippy::cognitive_complexity)]
+pub async fn start_core_with(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    config_path: String,
+    custom_args: Vec<String>,
+    secret: Option<String>,
+    force: Option<bool>,
+    expect_started_at: Option<Option<std::time::Instant>>,
+) -> Result<CoreStartResult, String> {
     // Wait for any previous core start operation to complete (max 10s)
     let mut wait_ms = 0;
     while CORE_STARTING
@@ -1556,6 +1587,13 @@ pub async fn start_core_inner(
         .is_err()
     {
         if wait_ms > 10000 {
+            // A guarded restart (resume recovery) only stands in for a core
+            // nobody else is starting: one still starting after 10 s (a
+            // macOS TUN start waiting for authorization) supersedes it, and
+            // taking the lock from it would run two starts at once.
+            if expect_started_at.is_some() {
+                return Err(CORE_START_SUPERSEDED.to_owned());
+            }
             emit_warn!(
                 Core,
                 CORE_START_FAILED,
@@ -1581,6 +1619,19 @@ pub async fn start_core_inner(
         }
     }
     let _guard = ResetGuard;
+
+    if let Some(expected) = expect_started_at {
+        let current = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .started_at();
+        // Only a different start time is another start; none means the
+        // core stopped or exited meanwhile and still needs this one.
+        if current.is_some() && current != expected {
+            return Err(CORE_START_SUPERSEDED.to_owned());
+        }
+    }
 
     // Reuse checks compare against the profile this start would actually run: a missing
     // request falls back to another profile. With no profile at all the core runs the

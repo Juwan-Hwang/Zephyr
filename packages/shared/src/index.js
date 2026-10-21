@@ -157,6 +157,7 @@ export const MISC = Object.freeze({
     WRITE_FRONTEND_LOG: "write_frontend_log",
     EXPORT_BACKUP: "export_backup",
     IMPORT_BACKUP: "import_backup",
+    GET_PROCESS_ICON: "get_process_icon",
 });
 
 // ---------------------------------------------------------------------------
