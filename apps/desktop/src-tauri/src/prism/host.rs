@@ -249,7 +249,9 @@ impl PrismHost for ZephyrPrismHost {
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let http_status_code = Self::http_put(&url, &body, &secret);
-        set_current_apply_http_status(http_status_code);
+        // A reload the core did not answer is recorded as status 0 (not a
+        // success), so callers can tell it from "no reload was sent" (None).
+        set_current_apply_http_status(Some(http_status_code.unwrap_or(0)));
         let hot_reload_success =
             http_status_code.is_some_and(crate::network_coordinator::is_http_success);
 

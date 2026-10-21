@@ -76,3 +76,21 @@ export function createSequential() {
 
     return { run, destroy };
 }
+
+/**
+ * Serial queue — each task starts only after the previous one settled, in
+ * the order run() was called. A failed task rejects its own promise and does
+ * not stop the ones queued after it.
+ * @returns {{ run: <T>(fn: () => Promise<T> | T) => Promise<T> }}
+ */
+export function createSerialQueue() {
+    /** @type {Promise<unknown>} */
+    let tail = Promise.resolve();
+    return {
+        run(fn) {
+            const task = tail.then(fn);
+            tail = task.catch(() => {});
+            return task;
+        },
+    };
+}
