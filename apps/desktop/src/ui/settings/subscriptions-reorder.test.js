@@ -16,7 +16,13 @@ vi.mock('../../api.js', () => ({
 /** @type {Promise<void> | null} A slot the test holds back. */
 let slotGate = null;
 vi.mock('./sub-download-gate.js', async (importOriginal) => ({ ...(await importOriginal()), subDownloadSlot: async () => { if (slotGate) await slotGate; } }));
-vi.mock('../lifecycle.js', () => ({ switchToConfig: vi.fn(), postRestartRecovery: vi.fn() }));
+vi.mock('../lifecycle.js', () => ({
+    switchToConfig: vi.fn(),
+    postRestartRecovery: vi.fn(),
+    withPageBusy: (fn) => fn(),
+    restartedProfile: (r, requested) => (r && 'active_config' in r ? r.active_config ?? '' : requested),
+    persistActiveConfig: vi.fn(async () => null),
+}));
 vi.mock('../tray.js', () => ({ updateTrayMenu: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../cache.js', () => ({
     getSettingsCached: vi.fn(async () => ({ ...settings })),
@@ -26,8 +32,10 @@ vi.mock('../cache.js', () => ({
 }));
 
 import { COMMANDS } from '@zephyr/shared';
-import { invoke } from '../../api.js';
-import { initSubscriptionSettings, createDownloadGate, _subUpdateStateForTests } from './subscriptions.js';
+import { invoke, restartCore } from '../../api.js';
+import { postRestartRecovery, persistActiveConfig } from '../lifecycle.js';
+import { appStore } from '../state.js';
+import { initSubscriptionSettings, createDownloadGate, _subUpdateStateForTests, keepFallbackProfile } from './subscriptions.js';
 
 const names = (/** @type {HTMLElement} */ list) => [...list.querySelectorAll('[data-config-name]')].map(c => /** @type {HTMLElement} */ (c).dataset.configName);
 
@@ -129,6 +137,101 @@ describe('subscription update guards', () => {
         ctl.destroy();
     });
 
+    it('restarts the core for the updated current profile only once the network lock is free, and holds it meanwhile', async () => {
+        const subs = [{ name: 'a.yaml', url_display: 'https://x/sub' }];
+        const saved = configs.splice(0, configs.length, ...subs);
+        let downloaded = false;
+        vi.mocked(invoke).mockImplementation(async (/** @type {string} */ cmd) => {
+            if (cmd === COMMANDS.DOWNLOAD_SUB) { downloaded = true; return null; }
+            if (String(cmd).includes('list_configs')) return subs;
+            if (String(cmd).includes('settings')) return { ...settings };
+            return null;
+        });
+        /** @type {boolean[]} */
+        const lockDuringRestart = [];
+        vi.mocked(restartCore).mockReset().mockImplementation(async () => { lockDuringRestart.push(appStore.get('isNetworkUpdating')); return /** @type {any} */ ({}); });
+        const list = document.createElement('div');
+        list.id = 'configs-list';
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        await ctl.renderConfigs(true);
+        // A core update holds the lock while this download finishes.
+        appStore.set('isNetworkUpdating', true);
+        const btn = /** @type {HTMLButtonElement} */ ([...list.querySelectorAll('[data-config-name="a.yaml"] .sub-action-btn')]
+            .find((b) => /update/i.test(b.getAttribute('aria-label') || '')));
+        btn.click();
+        await vi.waitFor(() => expect(downloaded).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        expect(restartCore).not.toHaveBeenCalled();
+        appStore.set('isNetworkUpdating', false);
+        await vi.waitFor(() => expect(restartCore).toHaveBeenCalledTimes(1), { timeout: 2000 });
+        expect(lockDuringRestart).toEqual([true]);
+        await vi.waitFor(() => expect(appStore.get('isNetworkUpdating')).toBe(false));
+        configs.splice(0, configs.length, ...saved);
+        ctl.destroy();
+    });
+
+    it('skips the restart when a switch to another profile finished while it waited for the lock', async () => {
+        const subs = [{ name: 'a.yaml', url_display: 'https://x/sub' }];
+        const saved = configs.splice(0, configs.length, ...subs);
+        let downloaded = false;
+        let lastConfig = 'a.yaml';
+        vi.mocked(invoke).mockImplementation(async (/** @type {string} */ cmd) => {
+            if (cmd === COMMANDS.DOWNLOAD_SUB) { downloaded = true; return null; }
+            if (String(cmd).includes('list_configs')) return subs;
+            if (String(cmd).includes('settings')) return { ...settings, last_config: lastConfig };
+            return null;
+        });
+        vi.mocked(restartCore).mockReset().mockResolvedValue(/** @type {any} */ ({}));
+        const list = document.createElement('div');
+        list.id = 'configs-list';
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        await ctl.renderConfigs(true);
+        appStore.set('isNetworkUpdating', true);
+        const btn = /** @type {HTMLButtonElement} */ ([...list.querySelectorAll('[data-config-name="a.yaml"] .sub-action-btn')]
+            .find((b) => /update/i.test(b.getAttribute('aria-label') || '')));
+        btn.click();
+        await vi.waitFor(() => expect(downloaded).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        // The switch holding the lock moves to b.yaml, then lets go.
+        lastConfig = 'b.yaml';
+        appStore.set('isNetworkUpdating', false);
+        await new Promise((r) => setTimeout(r, 500));
+        expect(restartCore).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(appStore.get('isNetworkUpdating')).toBe(false));
+        configs.splice(0, configs.length, ...saved);
+        ctl.destroy();
+    });
+
+    it('runs recovery for the profile the restart actually loaded', async () => {
+        const subs = [{ name: 'a.yaml', url_display: 'https://x/sub' }];
+        const saved = configs.splice(0, configs.length, ...subs);
+        vi.mocked(invoke).mockImplementation(async (/** @type {string} */ cmd) => {
+            if (cmd === COMMANDS.DOWNLOAD_SUB) return null;
+            if (String(cmd).includes('list_configs')) return subs;
+            if (String(cmd).includes('settings')) return { ...settings, last_config: 'a.yaml' };
+            return null;
+        });
+        // The fresh file fails to load: the core falls back to the minimal config.
+        vi.mocked(restartCore).mockReset().mockResolvedValue(/** @type {any} */ ({ active_config: null }));
+        vi.mocked(postRestartRecovery).mockReset().mockResolvedValue(/** @type {any} */ ({ failed: 0 }));
+        const list = document.createElement('div');
+        list.id = 'configs-list';
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        await ctl.renderConfigs(true);
+        const btn = /** @type {HTMLButtonElement} */ ([...list.querySelectorAll('[data-config-name="a.yaml"] .sub-action-btn')]
+            .find((b) => /update/i.test(b.getAttribute('aria-label') || '')));
+        btn.click();
+        await vi.waitFor(() => expect(postRestartRecovery).toHaveBeenCalledWith(''));
+        await vi.waitFor(() => expect(appStore.get('isNetworkUpdating')).toBe(false));
+        expect(appStore.get('noSubscription')).toBe(true);
+        appStore.set('noSubscription', false);
+        configs.splice(0, configs.length, ...saved);
+        ctl.destroy();
+    });
+
     it('lets a download still waiting for its slot take a link saved meanwhile, without a second download', async () => {
         const subs = [{ name: 'b.yaml', url_display: 'https://x/sub' }];
         const saved = configs.splice(0, configs.length, ...subs);
@@ -199,5 +302,39 @@ describe('subscription update guards', () => {
         expect(_subUpdateStateForTests.waitingUa.size).toBe(0);
         configs.splice(0, configs.length, ...saved);
         ctl.destroy();
+    });
+});
+
+describe('restart after a subscription update', () => {
+    it('saves the profile the core fell back to, and nothing otherwise', async () => {
+        vi.mocked(persistActiveConfig).mockClear();
+        await keepFallbackProfile({ active_config: 'b.yaml' }, 'a.yaml');
+        expect(persistActiveConfig).toHaveBeenCalledWith('b.yaml');
+
+        vi.mocked(persistActiveConfig).mockClear();
+        await keepFallbackProfile({ active_config: 'a' }, 'a.yaml');
+        await keepFallbackProfile({ active_config: null }, 'a.yaml');
+        await keepFallbackProfile({}, 'a.yaml');
+        expect(persistActiveConfig).not.toHaveBeenCalled();
+    });
+
+    it('treats a.yml and a.yaml as two profiles', async () => {
+        vi.mocked(persistActiveConfig).mockClear();
+        expect(await keepFallbackProfile({ active_config: 'a.yml' }, 'a.yaml')).toBe(true);
+        expect(persistActiveConfig).toHaveBeenCalledWith('a.yml');
+
+        vi.mocked(persistActiveConfig).mockClear();
+        expect(await keepFallbackProfile({ active_config: 'A.yaml' }, 'a.yaml')).toBe(false);
+        expect(await keepFallbackProfile({ active_config: 'a.yaml' }, 'a')).toBe(false);
+        expect(persistActiveConfig).not.toHaveBeenCalled();
+    });
+
+    it('marks the minimal config as no subscription and keeps the saved profile', async () => {
+        vi.mocked(persistActiveConfig).mockClear();
+        appStore.set('noSubscription', false);
+        await keepFallbackProfile({ active_config: null }, 'a.yaml');
+        expect(appStore.get('noSubscription')).toBe(true);
+        expect(persistActiveConfig).not.toHaveBeenCalled();
+        appStore.set('noSubscription', false);
     });
 });
