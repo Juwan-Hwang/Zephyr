@@ -25,6 +25,7 @@ import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGrou
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
+import { queueSmartConfigWrite, syncSmartShown } from './settings/auto-switch.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
@@ -3098,20 +3099,21 @@ export async function renderProxies() {
 
 // --- Smart UI visibility sync ---
 
-/** Sync the --smart-enabled CSS var with backend config. */
+/**
+ * Sync the --smart-enabled CSS var with backend config. Runs in the switches'
+ * write queue, so a read taken before a switch's save can't undo it.
+ */
 async function syncSmartUiVisibility() {
-    let enabled;
-    try {
-        const config = await smartConfig();
-        // Backend only returns `enabled` if smart.toml has the key.
-        // Fallback to localStorage for migration scenarios.
-        enabled = (/** @type {any} */ (config)).enabled ?? localStorage.getItem('smartEnabled') === 'true';
-    } catch {
-        // Fallback to localStorage on error
-        enabled = localStorage.getItem('smartEnabled') === 'true';
-    }
-
-    document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+    const enabled = await queueSmartConfigWrite(async () => {
+        const { on, changed } = await syncSmartShown({
+            getSmartConfig: smartConfig,
+            startAutoTest: () => _autoTest.start(),
+            stopAutoTest: () => _autoTest.stop(),
+        });
+        // The settings switches show the new state too.
+        if (changed) Bus.emit(Events.SMART_ENABLED_SYNCED, { enabled: on });
+        return on;
+    });
 
     // Reset sort mode to default if smart is disabled but current mode is smart
     if (!enabled && appStore.get('currentSortMode') === 'smart') {
