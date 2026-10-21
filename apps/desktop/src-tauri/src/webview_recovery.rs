@@ -293,8 +293,13 @@ fn recreate_window(app: &AppHandle) {
                 // before the crash — otherwise keep it hidden to respect
                 // the user's close-to-tray preference.
                 if was_visible {
-                    let _ = window.show();
+                    // As in `lib.rs`: still hidden (show failed), the update
+                    // hold's hidden mark stands and the page is released.
+                    let shown = window.show().is_ok();
                     let _ = window.set_focus();
+                    if shown {
+                        crate::updater::window_reopened();
+                    }
                 }
             }
             Err(e) => {

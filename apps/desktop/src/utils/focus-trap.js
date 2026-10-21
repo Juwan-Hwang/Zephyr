@@ -82,12 +82,66 @@ export function focusRespectingModality(el) {
  */
 
 /**
+ * Hidden by class, attribute or style (display:none is also set inline):
+ * focusing such an element is a silent no-op, and a dialog hidden that way
+ * is not the one still open.
+ * @param {Element} el
+ */
+function shown(el) {
+    if (el.closest('.hidden, [hidden]')) return false;
+    // visibility is inherited and a descendant can override it, so only the
+    // element's own computed value counts; display:none on any ancestor hides it.
+    if (getComputedStyle(el).visibility === 'hidden') return false;
+    for (let n = /** @type {Element | null} */ (el); n; n = n.parentElement) {
+        if (getComputedStyle(n).display === 'none') return false;
+    }
+    return true;
+}
+
+/**
+ * Whether a disabled <fieldset> disables the element. Controls inside the
+ * fieldset's first <legend> stay enabled, as in HTML.
+ * @param {Element} el
+ */
+function inDisabledFieldset(el) {
+    for (let fs = el.closest('fieldset[disabled]'); fs; fs = fs.parentElement?.closest('fieldset[disabled]') ?? null) {
+        const legend = Array.from(fs.children).find((c) => c.tagName === 'LEGEND');
+        if (!legend?.contains(el)) return true;
+    }
+    return false;
+}
+
+/**
+ * Whether focus can land on the element: shown and not disabled. A control
+ * inside a disabled <fieldset> is disabled too (checked directly as well:
+ * not every engine applies :disabled to it).
+ * @param {Element} el
+ */
+function usable(el) {
+    return shown(el) && !el.matches(':disabled') && !inDisabledFieldset(el);
+}
+
+/**
  * Stack of currently active traps, most recently activated last. Only the
  * topmost trap answers keys: a dialog opened over another trapped panel has
  * its own trap, and the outer one must not pull focus out of the dialog.
  * @type {FocusTrapHandle[]}
  */
 const activeTraps = [];
+
+/**
+ * Each trap's container, so a trap closing underneath can tell a dialog
+ * still open over it from a stale entry or one nested inside itself.
+ * @type {WeakMap<FocusTrapHandle, HTMLElement>}
+ */
+const trapContainers = new WeakMap();
+
+/**
+ * Lets a trap closing underneath hand its return target to a trap above
+ * that will otherwise return focus into the closing container.
+ * @type {WeakMap<FocusTrapHandle, (from: HTMLElement, target: HTMLElement) => void>}
+ */
+const trapAdopters = new WeakMap();
 
 /**
  * Create a focus trap on the given container.
@@ -207,13 +261,47 @@ export function createFocusTrap(container, options = {}) {
         active = false;
         focusGen++;
         const at = activeTraps.indexOf(handle);
+        // A separate dialog opened over this one is still open and keeps
+        // focus; it returns focus itself when it closes. One nested inside
+        // this container closes with it, so it does not count.
+        const covered = at >= 0 && activeTraps.slice(at + 1).some((t) => {
+            const above = trapContainers.get(t);
+            return Boolean(above?.isConnected && shown(above) && !container.contains(above));
+        });
+        if (covered && previousFocus) {
+            // The dialog above came from inside this one; once both close,
+            // focus goes back to where this one was opened from.
+            for (const t of activeTraps.slice(at + 1)) trapAdopters.get(t)?.(container, previousFocus);
+        }
         if (at >= 0) activeTraps.splice(at, 1);
         document.removeEventListener('keydown', onKeyDown, true);
 
-        if (previousFocus && previousFocus.isConnected) {
-            focusRespectingModality(previousFocus);
+        if (previousFocus && !covered) {
+            // Still there but hidden or disabled (the dialog underneath hid
+            // or disabled it) counts as gone: focusing it would be a silent no-op.
+            const back = previousFocus.isConnected && usable(previousFocus)
+                ? previousFocus
+                : focusFallback();
+            if (back) focusRespectingModality(back);
         }
         previousFocus = null;
+    }
+
+    /**
+     * The element focus came from is gone (a dialog underneath re-rendered
+     * its buttons): land in the dialog that is still open instead of leaving
+     * focus on the one closing.
+     * @returns {HTMLElement | null}
+     */
+    function focusFallback() {
+        const open = Array.from(document.querySelectorAll('[aria-modal="true"]')).filter((d) =>
+            !container.contains(d) && !d.contains(container) && shown(d));
+        const top = open.at(-1);
+        if (!top) return null;
+        const primary = Array.from(top.querySelectorAll('.btn-primary'))
+            .find((el) => el.matches(FOCUSABLE) && usable(el));
+        const any = Array.from(top.querySelectorAll(FOCUSABLE)).find(usable);
+        return /** @type {HTMLElement | null} */ (primary || any || null);
     }
 
     function destroy() {
@@ -221,5 +309,9 @@ export function createFocusTrap(container, options = {}) {
     }
 
     const handle = { activate, deactivate, destroy };
+    trapContainers.set(handle, container);
+    trapAdopters.set(handle, (from, target) => {
+        if (active && previousFocus && from.contains(previousFocus)) previousFocus = target;
+    });
     return handle;
 }
