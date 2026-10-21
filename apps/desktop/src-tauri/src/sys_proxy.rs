@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use tauri::command;
 use tauri::AppHandle;
+use tauri::Manager as _;
 
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -77,6 +78,15 @@ pub fn has_ownership(app: &AppHandle) -> bool {
 #[command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn restore_sys_proxy(app: AppHandle) -> Result<(), String> {
+    // Shutting down (quit, or the administrator relaunch, which turns the proxy
+    // off on purpose and leaves the marker for the next instance): a guard
+    // check still in flight must not turn it back on toward a stopped core.
+    if app
+        .try_state::<crate::ExplicitExitFlag>()
+        .is_some_and(|flag| flag.0.load(std::sync::atomic::Ordering::SeqCst))
+    {
+        return Ok(());
+    }
     let server = read_ownership(&app).ok_or("No proxy ownership marker found")?;
     enable_sysproxy(app, server, None)?;
     Ok(())
@@ -549,6 +559,7 @@ pub fn enable_sysproxy(
         }
 
         write_ownership(&app, &server);
+        *enabled_server_slot() = Some(server);
         Ok("System proxy enabled".to_owned())
     }
 
@@ -599,36 +610,42 @@ pub fn enable_sysproxy(
     }
 }
 
+/// Turn the Windows system proxy off without touching the ownership marker.
+#[cfg(target_os = "windows")]
+fn disable_windows_proxy() -> Result<(), String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    let (key, _) = hkcu.create_subkey(path).map_err(|e| e.to_string())?;
+
+    key.set_value("ProxyEnable", &0u32)
+        .map_err(|e| e.to_string())?;
+
+    // SAFETY: Same as enable_sysproxy — InternetSetOptionW with null/zero params
+    // is the documented pattern for refreshing proxy settings.
+    #[allow(clippy::multiple_unsafe_ops_per_block)]
+    unsafe {
+        let res1 = InternetSetOptionW(
+            ptr::null_mut(),
+            INTERNET_OPTION_SETTINGS_CHANGED,
+            ptr::null_mut(),
+            0,
+        );
+        let res2 = InternetSetOptionW(ptr::null_mut(), INTERNET_OPTION_REFRESH, ptr::null_mut(), 0);
+        if res1 == 0 || res2 == 0 {
+            return Err("Failed to refresh system proxy settings".to_owned());
+        }
+    }
+    Ok(())
+}
+
 #[command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn disable_sysproxy(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
-        let (key, _) = hkcu.create_subkey(path).map_err(|e| e.to_string())?;
-
-        key.set_value("ProxyEnable", &0u32)
-            .map_err(|e| e.to_string())?;
-
-        // SAFETY: Same as enable_sysproxy — InternetSetOptionW with null/zero params
-        // is the documented pattern for refreshing proxy settings.
-        #[allow(clippy::multiple_unsafe_ops_per_block)]
-        unsafe {
-            let res1 = InternetSetOptionW(
-                ptr::null_mut(),
-                INTERNET_OPTION_SETTINGS_CHANGED,
-                ptr::null_mut(),
-                0,
-            );
-            let res2 =
-                InternetSetOptionW(ptr::null_mut(), INTERNET_OPTION_REFRESH, ptr::null_mut(), 0);
-            if res1 == 0 || res2 == 0 {
-                return Err("Failed to refresh system proxy settings".to_owned());
-            }
-        }
-
+        disable_windows_proxy()?;
         remove_ownership(&app);
+        *enabled_server_slot() = None;
         Ok("System proxy disabled".to_owned())
     }
 
@@ -746,6 +763,54 @@ pub fn clear_sys_proxy(app: &AppHandle) -> Result<(), String> {
     // to avoid a stale marker triggering unwanted restore on next launch.
     cleanup_ownership(app);
     result.map(|_| ())
+}
+
+/// Turn the system proxy off for a restart into another instance, keeping the
+/// ownership marker so that instance restores it (the crash-recovery path).
+/// Without a marker, Zephyr does not own the proxy and it is left alone.
+#[cfg(target_os = "windows")]
+pub fn suspend_sys_proxy(app: &AppHandle) -> Result<(), String> {
+    if !has_ownership(app) {
+        // The marker write can fail while enabling (it only warns). If the
+        // proxy this process enabled is still the system proxy, it is ours
+        // all the same: try the marker once more so the next instance
+        // restores it, and turn it off either way, since it is about to
+        // point at a stopped core.
+        let Some(server) = enabled_server_slot().clone() else {
+            return Ok(());
+        };
+        if !windows_proxy_is(&server) {
+            return Ok(());
+        }
+        write_ownership(app, &server);
+        return disable_windows_proxy();
+    }
+    // The marker stays as it is: removing and rewriting it could lose it.
+    disable_windows_proxy()
+}
+
+/// The server this process last enabled as the Windows system proxy, kept
+/// in memory so it is known even when the ownership marker could not be
+/// written. Cleared when Zephyr turns the proxy off.
+#[cfg(target_os = "windows")]
+fn enabled_server_slot() -> std::sync::MutexGuard<'static, Option<String>> {
+    static ENABLED_SERVER: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    ENABLED_SERVER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether the Windows system proxy is on and set to exactly `server`.
+#[cfg(target_os = "windows")]
+fn windows_proxy_is(server: &str) -> bool {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    let Ok(key) = hkcu.open_subkey(path) else {
+        return false;
+    };
+    let enable: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+    let current: String = key.get_value("ProxyServer").unwrap_or_default();
+    enable == 1 && current == server
 }
 
 /// Check whether Zephyr currently owns the system proxy (for frontend guard).

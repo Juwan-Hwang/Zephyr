@@ -519,6 +519,22 @@ fn live_tun_enabled(app: &AppHandle) -> Option<bool> {
     if let Some(live) = crate::core_manager::core::tun_manager::live_tun_override() {
         return Some(live);
     }
+    applicable_tun_preference(app)
+}
+
+/// The saved TUN preference as far as this process can apply it.
+///
+/// Windows: an unelevated process starts the core without TUN whatever
+/// the preference says (see `Settings::to_global_prefs`), so it reports
+/// TUN off and keeps the preference for the next elevated start. Reporting
+/// the preference instead would show TUN on while it is off, the sync
+/// would copy that into the in-app switches, and a tray click would turn
+/// TUN "off" instead of offering the administrator relaunch.
+fn applicable_tun_preference(app: &AppHandle) -> Option<bool> {
+    #[cfg(target_os = "windows")]
+    if !crate::elevation::is_elevated() {
+        return Some(false);
+    }
     let settings_state = app.state::<crate::SettingsState>();
     let guard = settings_state
         .0
@@ -553,15 +569,8 @@ pub(crate) fn tray_tun_shown_enabled(app: &AppHandle) -> bool {
     if crate::core_manager::core::subscription::is_core_running(app) {
         return effective_tun_enabled(app);
     }
-    let settings_state = app.state::<crate::SettingsState>();
-    let preference = {
-        let guard = settings_state
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.tun_enabled
-    };
-    preference.unwrap_or_else(|| get_tun_status_from_config(app).unwrap_or(false))
+    applicable_tun_preference(app)
+        .unwrap_or_else(|| get_tun_status_from_config(app).unwrap_or(false))
 }
 
 /// Get TUN status from config file
@@ -940,6 +949,16 @@ fn toggle_tun(app: &AppHandle) {
     // stale value would emit the state the core is already in — a
     // no-op the user has to click twice to escape.
     let current = tray_tun_shown_enabled(app);
+
+    // The toggle runs in the frontend, which also releases the lock. With no
+    // main webview (lightweight mode destroyed it) nothing would hear the
+    // event and the lock would stay taken, blocking every later TUN toggle:
+    // release it and open the window instead, where TUN can be switched.
+    if app.get_webview_window("main").is_none() {
+        crate::core_manager::release_tun_toggle();
+        show_or_recreate_window(app);
+        return;
+    }
 
     // Emit event to frontend to handle TUN toggle
     // The lock will be released by the frontend via release_tun_toggle command
