@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use tauri::command;
 use tauri::AppHandle;
+use tauri::Manager as _;
 
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -37,15 +38,21 @@ fn ownership_path(app: &AppHandle) -> Option<PathBuf> {
         .map(|p| p.app_data_dir.join(OWNERSHIP_FILE))
 }
 
-/// Write the ownership marker with the given server address.
-fn write_ownership(app: &AppHandle, server: &str) {
-    if let Some(path) = ownership_path(app) {
-        if let Err(e) = std::fs::write(&path, server) {
+/// Write the ownership marker with the given server address. Returns
+/// whether the marker was written.
+fn write_ownership(app: &AppHandle, server: &str) -> bool {
+    let Some(path) = ownership_path(app) else {
+        return false;
+    };
+    match std::fs::write(&path, server) {
+        Ok(()) => true,
+        Err(e) => {
             emit_warn!(
                 System,
                 SYS_PROXY_FAILED,
                 "Failed to write proxy ownership marker: {e}"
             );
+            false
         }
     }
 }
@@ -77,9 +84,32 @@ pub fn has_ownership(app: &AppHandle) -> bool {
 #[command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn restore_sys_proxy(app: AppHandle) -> Result<(), String> {
+    // Held through the exit check and the enable, and by the relaunch's
+    // suspend: a restore that passed the check finishes before the suspend
+    // turns the proxy off, so the suspend is the last change before the core
+    // stops.
+    let _transition = proxy_transition_lock();
+    // Shutting down (quit, or the administrator relaunch, which turns the proxy
+    // off on purpose and leaves the marker for the next instance): a guard
+    // check still in flight must not turn it back on toward a stopped core.
+    if app
+        .try_state::<crate::ExplicitExitFlag>()
+        .is_some_and(|flag| flag.0.load(std::sync::atomic::Ordering::SeqCst))
+    {
+        return Ok(());
+    }
     let server = read_ownership(&app).ok_or("No proxy ownership marker found")?;
     enable_sysproxy(app, server, None)?;
     Ok(())
+}
+
+/// Serializes a restore of the system proxy with the administrator
+/// relaunch's suspend of it.
+fn proxy_transition_lock() -> std::sync::MutexGuard<'static, ()> {
+    static TRANSITION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    TRANSITION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Clean up the ownership marker on normal exit.
@@ -527,6 +557,7 @@ pub fn enable_sysproxy(
             let _ = key.set_value("ProxyEnable", &old_enable);
             let _ = key.set_value("ProxyServer", &old_server);
             let _ = key.set_value("ProxyOverride", &old_override);
+            keep_ownership_if_active(&app, &server);
             return Err(format!("Failed to set proxy (rolled back): {e}"));
         }
 
@@ -544,11 +575,32 @@ pub fn enable_sysproxy(
             let res2 =
                 InternetSetOptionW(ptr::null_mut(), INTERNET_OPTION_REFRESH, ptr::null_mut(), 0);
             if res1 == 0 || res2 == 0 {
-                return Err("Failed to refresh system proxy settings".to_owned());
+                // The registry already points at this server, but nothing
+                // records it as Zephyr's (no marker, no in-memory server), so
+                // a later quit or relaunch would leave it toward a stopped
+                // core: put the old values back, as for a failed write.
+                let _ = key.set_value("ProxyEnable", &old_enable);
+                let _ = key.set_value("ProxyServer", &old_server);
+                let _ = key.set_value("ProxyOverride", &old_override);
+                let _ = InternetSetOptionW(
+                    ptr::null_mut(),
+                    INTERNET_OPTION_SETTINGS_CHANGED,
+                    ptr::null_mut(),
+                    0,
+                );
+                let _ = InternetSetOptionW(
+                    ptr::null_mut(),
+                    INTERNET_OPTION_REFRESH,
+                    ptr::null_mut(),
+                    0,
+                );
+                keep_ownership_if_active(&app, &server);
+                return Err("Failed to refresh system proxy settings (rolled back)".to_owned());
             }
         }
 
         write_ownership(&app, &server);
+        *enabled_server_slot() = Some(server);
         Ok("System proxy enabled".to_owned())
     }
 
@@ -599,36 +651,56 @@ pub fn enable_sysproxy(
     }
 }
 
+/// Turn the Windows system proxy off without touching the ownership marker.
+#[cfg(target_os = "windows")]
+fn disable_windows_proxy() -> Result<(), String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    let (key, _) = hkcu.create_subkey(path).map_err(|e| e.to_string())?;
+
+    key.set_value("ProxyEnable", &0u32)
+        .map_err(|e| e.to_string())?;
+
+    // SAFETY: Same as enable_sysproxy — InternetSetOptionW with null/zero params
+    // is the documented pattern for refreshing proxy settings.
+    #[allow(clippy::multiple_unsafe_ops_per_block)]
+    unsafe {
+        let res1 = InternetSetOptionW(
+            ptr::null_mut(),
+            INTERNET_OPTION_SETTINGS_CHANGED,
+            ptr::null_mut(),
+            0,
+        );
+        let res2 = InternetSetOptionW(ptr::null_mut(), INTERNET_OPTION_REFRESH, ptr::null_mut(), 0);
+        if res1 == 0 || res2 == 0 {
+            return Err("Failed to refresh system proxy settings".to_owned());
+        }
+    }
+    Ok(())
+}
+
 #[command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn disable_sysproxy(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
-        let (key, _) = hkcu.create_subkey(path).map_err(|e| e.to_string())?;
-
-        key.set_value("ProxyEnable", &0u32)
-            .map_err(|e| e.to_string())?;
-
-        // SAFETY: Same as enable_sysproxy — InternetSetOptionW with null/zero params
-        // is the documented pattern for refreshing proxy settings.
-        #[allow(clippy::multiple_unsafe_ops_per_block)]
-        unsafe {
-            let res1 = InternetSetOptionW(
-                ptr::null_mut(),
-                INTERNET_OPTION_SETTINGS_CHANGED,
-                ptr::null_mut(),
-                0,
-            );
-            let res2 =
-                InternetSetOptionW(ptr::null_mut(), INTERNET_OPTION_REFRESH, ptr::null_mut(), 0);
-            if res1 == 0 || res2 == 0 {
-                return Err("Failed to refresh system proxy settings".to_owned());
-            }
+        let result = disable_windows_proxy();
+        // A failed refresh comes after `ProxyEnable` is already 0: the proxy
+        // is off for the next reader, so Zephyr no longer owns it. Keeping the
+        // marker would make the guard turn it back on. The same goes for a
+        // proxy another program set right after ours went off: it is not
+        // Zephyr's, and a marker left behind would restore ours once that
+        // one is turned off. A registry that cannot be read says nothing
+        // either way, and a proxy still pointing at ours means the disable
+        // did not take, so in those cases the marker stays.
+        let ours = enabled_server_slot()
+            .clone()
+            .or_else(|| read_ownership(&app));
+        if disable_releases_ownership(&windows_proxy_read(), ours.as_deref()) {
+            remove_ownership(&app);
+            *enabled_server_slot() = None;
         }
-
-        remove_ownership(&app);
+        result?;
         Ok("System proxy disabled".to_owned())
     }
 
@@ -746,6 +818,153 @@ pub fn clear_sys_proxy(app: &AppHandle) -> Result<(), String> {
     // to avoid a stale marker triggering unwanted restore on next launch.
     cleanup_ownership(app);
     result.map(|_| ())
+}
+
+/// What [`suspend_sys_proxy`] does, from the ownership marker, the server
+/// this process enabled, and the active system proxy (`None` when off).
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, PartialEq, Eq)]
+enum Suspend {
+    /// Leave everything as it is.
+    Nothing,
+    /// Turn the proxy off; `Some` first writes that server as the marker.
+    Disable(Option<String>),
+    /// The active proxy is another program's: leave it on and drop the
+    /// stale marker, so the next instance does not put Zephyr's back over it.
+    DropMarker,
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn suspend_action(marker: Option<&str>, enabled: Option<&str>, active: Option<&str>) -> Suspend {
+    match (marker.map(str::trim), active) {
+        (Some(m), Some(a)) if a == m => Suspend::Disable(None),
+        // The marker names an older server of this process when writing the
+        // new one failed (a port change): the active proxy is still ours.
+        (Some(_), Some(a)) if enabled == Some(a) => Suspend::Disable(Some(a.to_owned())),
+        (Some(_), Some(_)) => Suspend::DropMarker,
+        // Off already: the marker stays for the next instance, which turns
+        // it back on as the guard would here.
+        (Some(_), None) | (None, None) => Suspend::Nothing,
+        // The marker write can fail while enabling (it only warns). If the
+        // proxy this process enabled is still the system proxy, it is ours
+        // all the same: try the marker once more so the next instance
+        // restores it, and turn it off, since it is about to point at a
+        // stopped core.
+        (None, Some(a)) => match enabled {
+            Some(e) if e == a => Suspend::Disable(Some(e.to_owned())),
+            _ => Suspend::Nothing,
+        },
+    }
+}
+
+/// Turn the system proxy off for a restart into another instance, keeping the
+/// ownership marker so that instance restores it (the crash-recovery path).
+/// A proxy Zephyr does not own (no marker, or another server active) is left
+/// alone.
+#[cfg(target_os = "windows")]
+pub fn suspend_sys_proxy(app: &AppHandle) -> Result<(), String> {
+    let _transition = proxy_transition_lock();
+    let marker = read_ownership(app);
+    let enabled = enabled_server_slot().clone();
+    // An unreadable registry is not an inactive proxy: assume it is still
+    // the one Zephyr last set (or recorded), so it is turned off before the
+    // core stops rather than left toward it.
+    let active = windows_proxy_read().unwrap_or_else(|_| {
+        enabled
+            .clone()
+            .or_else(|| marker.as_deref().map(|m| m.trim().to_owned()))
+    });
+    match suspend_action(marker.as_deref(), enabled.as_deref(), active.as_deref()) {
+        Suspend::Nothing => Ok(()),
+        Suspend::Disable(write) => {
+            if let Some(server) = write {
+                if !write_ownership(app, &server) {
+                    // Without a marker the next instance would leave the
+                    // proxy off. Left on, it points at the same address the
+                    // next instance starts its core on, so it works again then.
+                    // An older marker would have it put back an older address.
+                    remove_ownership(app);
+                    emit_warn!(
+                        System,
+                        SYS_PROXY_FAILED,
+                        "Leaving the system proxy on for the relaunch: its ownership could not be recorded"
+                    );
+                    return Ok(());
+                }
+            }
+            // The marker stays as it is: removing and rewriting it could lose it.
+            disable_windows_proxy()
+        }
+        Suspend::DropMarker => {
+            remove_ownership(app);
+            *enabled_server_slot() = None;
+            Ok(())
+        }
+    }
+}
+
+/// The server this process last enabled as the Windows system proxy, kept
+/// in memory so it is known even when the ownership marker could not be
+/// written. Cleared when Zephyr turns the proxy off.
+#[cfg(target_os = "windows")]
+fn enabled_server_slot() -> std::sync::MutexGuard<'static, Option<String>> {
+    static ENABLED_SERVER: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    ENABLED_SERVER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The Windows system proxy server while the proxy is on, `None` when off
+/// or when the registry cannot be read.
+#[cfg(target_os = "windows")]
+fn windows_active_proxy() -> Option<String> {
+    windows_proxy_read().ok().flatten()
+}
+
+/// The Windows system proxy server while the proxy is on, `Ok(None)` when
+/// off, and an error when the registry cannot be read (a missing value is
+/// read as Windows reads it: off, or an empty server).
+#[cfg(target_os = "windows")]
+fn windows_proxy_read() -> Result<Option<String>, String> {
+    fn or_missing<T>(value: std::io::Result<T>, missing: T) -> Result<T, String> {
+        match value {
+            Ok(v) => Ok(v),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(missing),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    let Some(key) = or_missing(hkcu.open_subkey(path).map(Some), None)? else {
+        return Ok(None);
+    };
+    let enable: u32 = or_missing(key.get_value("ProxyEnable"), 0)?;
+    if enable != 1 {
+        return Ok(None);
+    }
+    or_missing(key.get_value("ProxyServer"), String::new()).map(Some)
+}
+
+/// Whether a disable leaves Zephyr without the system proxy, judged from the
+/// registry read right after it: off, or now another program's proxy.
+#[cfg(any(target_os = "windows", test))]
+fn disable_releases_ownership(read: &Result<Option<String>, String>, ours: Option<&str>) -> bool {
+    match read {
+        Ok(None) => true,
+        Ok(Some(active)) => ours.is_some_and(|server| server.trim() != active.trim()),
+        Err(_) => false,
+    }
+}
+
+/// After a failed enable whose rollback did not take, the registry may still
+/// point at `server`: record it as Zephyr's, so quitting or relaunching turns
+/// it off instead of leaving it toward a stopped core.
+#[cfg(target_os = "windows")]
+fn keep_ownership_if_active(app: &AppHandle, server: &str) {
+    if windows_active_proxy().as_deref() == Some(server) {
+        write_ownership(app, server);
+        *enabled_server_slot() = Some(server.to_owned());
+    }
 }
 
 /// Check whether Zephyr currently owns the system proxy (for frontend guard).
@@ -1061,5 +1280,66 @@ mod tests {
         assert!(parse_host_port("[::1]").is_err());
         assert!(parse_host_port("[::1]:").is_err());
         assert!(parse_host_port("[::1]:abc").is_err());
+    }
+
+    #[test]
+    fn suspend_disables_only_a_proxy_zephyr_owns() {
+        const Z: &str = "127.0.0.1:7890";
+        // Marker matches the active proxy: turn it off, keep the marker.
+        assert_eq!(
+            suspend_action(Some(Z), None, Some(Z)),
+            Suspend::Disable(None)
+        );
+        assert_eq!(
+            suspend_action(Some("127.0.0.1:7890\n"), None, Some(Z)),
+            Suspend::Disable(None)
+        );
+        // The marker names an older server of this process (writing the new
+        // one failed): the active proxy is still ours, so rewrite and turn off.
+        assert_eq!(
+            suspend_action(Some("127.0.0.1:7891"), Some(Z), Some(Z)),
+            Suspend::Disable(Some(Z.to_owned()))
+        );
+        // Another program's proxy is active: leave it, drop the stale marker.
+        assert_eq!(
+            suspend_action(Some(Z), Some(Z), Some("127.0.0.1:1080")),
+            Suspend::DropMarker
+        );
+        // Already off: nothing to turn off, the marker stays for the next instance.
+        assert_eq!(suspend_action(Some(Z), Some(Z), None), Suspend::Nothing);
+        // No marker, but this process enabled the active proxy: write it, turn it off.
+        assert_eq!(
+            suspend_action(None, Some(Z), Some(Z)),
+            Suspend::Disable(Some(Z.to_owned()))
+        );
+        // No marker and not ours (or nothing enabled here): leave it alone.
+        assert_eq!(
+            suspend_action(None, Some(Z), Some("127.0.0.1:1080")),
+            Suspend::Nothing
+        );
+        assert_eq!(suspend_action(None, None, Some(Z)), Suspend::Nothing);
+        assert_eq!(suspend_action(None, None, None), Suspend::Nothing);
+    }
+
+    #[test]
+    fn disable_keeps_the_marker_only_while_the_proxy_may_still_be_ours() {
+        const Z: &str = "127.0.0.1:7890";
+        assert!(disable_releases_ownership(&Ok(None), Some(Z)));
+        assert!(disable_releases_ownership(&Ok(None), None));
+        // Another program set its proxy right after ours went off.
+        assert!(disable_releases_ownership(
+            &Ok(Some("127.0.0.1:1080".to_owned())),
+            Some(Z)
+        ));
+        // Still ours (the disable did not take), or ours is unknown.
+        assert!(!disable_releases_ownership(
+            &Ok(Some(Z.to_owned())),
+            Some("127.0.0.1:7890\n")
+        ));
+        assert!(!disable_releases_ownership(&Ok(Some(Z.to_owned())), None));
+        assert!(!disable_releases_ownership(
+            &Err("read failed".to_owned()),
+            Some(Z)
+        ));
     }
 }

@@ -3182,9 +3182,6 @@ header:not(.is-compact) #sort-btn { min-width: 112px; }
 .input-unit > .form-control { width: 100%; padding-inline-end: 3rem; }
 .input-unit-label { position: absolute; inset-inline-end: 1rem; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
 
-/* Advanced page: the section a settings link opened briefly gets an accent ring */
-.adv-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s ease-out; }
-
 /* Settings rows: a switch row with a trailing text button keeps the button and switch on one line */
 [data-page="settings"] .ios-switch { flex-shrink: 0; }
 

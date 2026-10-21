@@ -265,8 +265,8 @@ function getCurrentWindow() {
   const label = _t?.metadata?.currentWindow?.label ?? 'main';
   return {
     label,
-    hide:        () => invoke('plugin:window|set_visible', { label, value: false }),
-    show:        () => invoke('plugin:window|set_visible', { label, value: true }),
+    hide:        () => invoke('plugin:window|hide',             { label }),
+    show:        () => invoke('plugin:window|show',             { label }),
     close:       () => invoke('plugin:window|close',           { label }),
     minimize:    () => invoke('plugin:window|minimize',         { label }),
     maximize:    () => invoke('plugin:window|maximize',         { label }),

@@ -44,6 +44,7 @@ import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache
 import { getSubscriptionUserAgent } from './settings.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
+import { mirrorTunToggle } from './tun.js';
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
 const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM', my: 'my-MM', ar: 'ar-SA', ur: 'ur-PK', sw: 'sw-KE', tr: 'tr-TR', vi: 'vi-VN' };
@@ -1666,22 +1667,10 @@ function _buildConsoleHome(container) {
         });
     }
     if (tunToggle) {
-    _cleanups.push(bind(appStore, tunToggle, 'isTunEnabled', 'checked'));
-    on(tunToggle, 'change', () => {
-            const enabled = tunToggle.checked;
-            const mainToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('tun-proxy-toggle'));
-            if (mainToggle) {
-                mainToggle.checked = enabled;
-                // Dispatch a real change event so both onchange handlers and
-                // addEventListener('change', ...) listeners in tun.js fire.
-                // The handler in initTunToggle will update appStore on success
-                // or roll back on failure, keeping state in sync.
-                mainToggle.dispatchEvent(new Event('change', { bubbles: true }));
-            } else {
-                // Fallback: no main toggle, update appStore directly
-                appStore.set('isTunEnabled', enabled);
-            }
-        });
+        // Same flow as the minimal home: the home toggle runs the switch
+        // (authorisation, rollback, notices) and this one follows its result,
+        // including a failed start that leaves the store unchanged.
+        _cleanups.push(mirrorTunToggle(tunToggle));
     }
 
     // Update proxy/TUN status text

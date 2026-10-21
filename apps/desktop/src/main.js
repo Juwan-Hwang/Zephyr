@@ -630,10 +630,12 @@ async function initApp() {
   // 8. Initial config sync and tray (parallel — no dependencies)
   try {
     await Promise.all([syncCoreConfig(), updateTrayStatus(), updateTrayMenu()]);
-    startUnifiedSync();
   } catch (err) {
     apiLogger.warn('Initial sync failed', err);
   }
+  // Even after a failed first sync: its periodic retry and the system proxy
+  // recovery (say after an administrator relaunch) must still run.
+  startUnifiedSync();
 
   // 8b. Activate console home page (if enabled and still visible)
   try {
