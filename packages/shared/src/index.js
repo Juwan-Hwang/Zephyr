@@ -82,6 +82,11 @@ export const TUN = Object.freeze({
     KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
     GRANT_LINUX_PERMISSION: "grant_linux_tun_permission",
+    // Windows: TUN needs an elevated process, so the app relaunches itself
+    // through UAC (the counterpart of the two commands above).
+    IS_PROCESS_ELEVATED: "is_process_elevated",
+    CAN_ELEVATE_AS_SELF: "can_elevate_as_self",
+    RESTART_AS_ADMIN: "restart_as_admin_cmd",
     APPLY_WINDOWS_TCP_OPTIMIZATIONS: "apply_windows_tcp_optimizations",
 });
 

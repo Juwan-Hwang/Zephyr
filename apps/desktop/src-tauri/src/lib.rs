@@ -19,6 +19,7 @@ pub mod config_manager;
 pub mod core_event_bridge;
 pub mod core_manager;
 pub mod deep_link;
+pub mod elevation;
 pub mod global_shortcut;
 pub mod minisign_verify;
 pub mod network_coordinator;
@@ -426,10 +427,26 @@ fn default_copy_env_format() -> String {
 
 impl Settings {
     /// Extract global preferences for runtime config injection.
+    ///
+    /// Windows: a saved TUN preference applies only to an elevated process.
+    /// Without administrator rights the core cannot create the adapter, so a
+    /// normal launch after an elevated session (autostart, Start menu) would
+    /// otherwise try TUN again and fail; it starts without TUN instead, keeps
+    /// the preference, and the switch offers the administrator relaunch.
     pub fn to_global_prefs(&self) -> crate::core_manager::core::core_process::GlobalPreferences {
+        #[cfg(target_os = "windows")]
+        // Off, not unset, when unelevated: an unset preference would let the
+        // profile's own `tun.enable: true` through to a core that can't start it.
+        let tun_enabled = if crate::elevation::is_elevated() {
+            self.tun_enabled
+        } else {
+            Some(false)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let tun_enabled = self.tun_enabled;
         crate::core_manager::core::core_process::GlobalPreferences {
             mode: self.mode.clone(),
-            tun_enabled: self.tun_enabled,
+            tun_enabled,
             mixed_port: self.mixed_port,
             socks_port: self.socks_port,
             http_port: self.http_port,
@@ -1542,6 +1559,13 @@ fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<f64, String> {
 // This is a false positive — cargo build/clippy sets OUT_DIR correctly and compiles fine.
 #[allow(rust_analyzer::proc_macro_unresolved)]
 pub fn run() {
+    // An elevated relaunch (TUN on Windows) waits here for the instance it
+    // replaces, before the single-instance plugin would hand it back to it.
+    #[cfg(target_os = "windows")]
+    {
+        elevation::wait_for_replaced_instance();
+    }
+
     #[cfg(target_os = "linux")]
     {
         let has_dri_access = std::fs::read_dir("/dev/dri")
@@ -1653,16 +1677,27 @@ pub fn run() {
     // In debug builds (pnpm run dev), multiple instances are allowed for testing.
     #[cfg(all(desktop, not(debug_assertions)))]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Focus the existing window, or recreate it if the webview is dead.
-            show_or_recreate_main_window(app);
-            // Forward deep link arguments from the second instance to the first.
-            for arg in args {
-                if arg.starts_with("clash://") {
-                    deep_link::emit_deep_link(app, &arg);
+        // An elevated relaunch whose predecessor would not exit skips it: the
+        // plugin would hand this launch back to that instance.
+        #[cfg(target_os = "windows")]
+        let single_instance = !elevation::predecessor_survived();
+        #[cfg(not(target_os = "windows"))]
+        let single_instance = true;
+        if single_instance {
+            // While Zephyr runs elevated the plugin can't see it from here.
+            #[cfg(target_os = "windows")]
+            elevation::forward_to_elevated_instance();
+            builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+                // Focus the existing window, or recreate it if the webview is dead.
+                show_or_recreate_main_window(app);
+                // Forward deep link arguments from the second instance to the first.
+                for arg in args {
+                    if arg.starts_with("clash://") {
+                        deep_link::emit_deep_link(app, &arg);
+                    }
                 }
-            }
-        }));
+            }));
+        }
     }
 
     builder = builder
@@ -1784,6 +1819,12 @@ pub fn run() {
                     core_manager::core::LOG_MAX_FILE_MB.store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
                 }
             }
+            // The relaunch wait ran before logging existed: log what it did now.
+            #[cfg(target_os = "windows")]
+            crate::elevation::log_forced_replacement();
+            // The single-instance plugin's window exists by now.
+            #[cfg(target_os = "windows")]
+            crate::elevation::allow_forwarding_from_unelevated();
 
             // `patch_settings` persists `encrypt_configs` before it transforms the
             // profiles, so a crash or a failed write in that batch leaves files in
@@ -2017,6 +2058,9 @@ invalidate_heartbeat(window.app_handle());
             kill_all_mihomo_as_root_cmd,
             disable_tun_cmd,
             grant_linux_tun_permission,
+            elevation::is_process_elevated,
+            elevation::can_elevate_as_self,
+            elevation::restart_as_admin_cmd,
             core_manager::core::tun_manager::apply_windows_tcp_optimizations,
             // Network Optimization commands
             core_manager::core::network_optim::apply_network_optimizations,
