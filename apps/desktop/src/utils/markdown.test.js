@@ -62,3 +62,47 @@ describe('markdownToHtml', () => {
         expect(html).not.toMatch(/<p[^>]*><(?:ul|li)/);
     });
 });
+
+describe('markdownToHtml link targets', () => {
+    it('keeps emphasis delimiters inside a link URL', () => {
+        const html = markdownToHtml('See [notes](https://example.com/a*b*c) and **bold**');
+        expect(html).toContain('href="https://example.com/a*b*c"');
+        expect(html).toContain('<strong');
+    });
+
+    it('keeps double asterisks and tildes in a URL', () => {
+        const html = markdownToHtml('[x](https://e.com/**y**~~z~~)');
+        expect(html).toContain('href="https://e.com/**y**~~z~~"');
+        expect(html).not.toContain('<del');
+    });
+
+    it('leaves a stray ]( that is no link as written', () => {
+        const html = markdownToHtml('odd](text) here');
+        expect(html).toContain('odd](text) here');
+    });
+
+    it('still applies emphasis after a stray ]( with no [ before it', () => {
+        const html = markdownToHtml('odd](see *this*) here');
+        expect(html).toContain('<em>this</em>');
+    });
+
+    it('restores inline code inside an unused target', () => {
+        const html = markdownToHtml('odd](`text`) here');
+        expect(html).toContain('<code');
+        expect(html).toContain('>text</code>');
+        expect(html).not.toContain('INLINECODE');
+    });
+
+    it('keeps backticks in a link URL as part of the address', () => {
+        const html = markdownToHtml('[x](https://e.com/`a<b`)');
+        expect(html).toContain('href="https://e.com/`a<b`"');
+        expect(html).not.toContain('<code');
+        expect(html).not.toContain('INLINECODE');
+    });
+
+    it('still shows image alt text only', () => {
+        const html = markdownToHtml('![logo](https://e.com/*a*.png)');
+        expect(html).toContain('[logo]');
+        expect(html).not.toContain('<img');
+    });
+});
