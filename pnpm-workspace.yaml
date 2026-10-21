@@ -7,7 +7,7 @@ onlyBuiltDependencies:
   - esbuild
 
 overrides:
-  vite: 8.1.4
+  vite: 8.1.6
   # CVE-2024-4068: brace-expansion ReDoS — fix not backported to 1.x/2.x.
   brace-expansion: 5.0.12
   # CVE-2024-37890: ws DoS via overly long headers.
