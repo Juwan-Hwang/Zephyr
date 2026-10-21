@@ -61,7 +61,7 @@ vi.mock('./proxy-memory.js', () => ({
     savePrimaryGroupPreference: vi.fn(),
 }));
 vi.mock('./run-config-cache.js', () => ({ invalidateRunConfigCache: vi.fn() }));
-vi.mock('./lifecycle.js', () => ({ postRestartRecovery: vi.fn() }));
+vi.mock('./lifecycle.js', () => ({ postRestartRecovery: vi.fn(), restartedProfile: vi.fn(() => ''), withPageBusy: (fn) => fn() }));
 vi.mock('./observed-group.js', () => ({
     startObservedGroupWatcher: vi.fn(),
     stopObservedGroupWatcher: vi.fn(),
