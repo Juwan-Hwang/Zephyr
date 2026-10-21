@@ -2838,6 +2838,9 @@ html.dark {
 
 /* Override cards: disabled ones read quieter. */
 #plugin-list .glass-card.is-disabled .text-sm { color: var(--text-tertiary); }
+/* Room for the cards' 4px hover slide: the list clips overflow-x, which cut the slid card's
+   end edge and rounded corners. Same card width, the room sits in the gutter. */
+#plugin-list { padding-inline-end: 4px; margin-inline-end: -4px; }
 
 /* New subscription: brief highlight once its card appears. */
 .sub-card-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s; }
@@ -2845,6 +2848,11 @@ html.dark {
 /* Context menus: opaque so the card underneath (traffic bars) doesn't show through. */
 html.dark .ctx-menu-root.glass-card { background: rgb(30, 30, 34); }
 html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
+/* Context menus (utils/context-menu.js, the subscription menu): options are inset rounded
+   pills like the sort and group menus, never full-bleed squares against the rounded menu. */
+.ctx-menu-root > .menu-scroll { padding: 4px; }
+.ctx-menu-root :is(button, label, .cursor-pointer) { border-radius: var(--radius-dropdown-option); }
+.ctx-menu-root :is(button, label, .cursor-pointer) + :is(button, label, .cursor-pointer) { margin-top: 2px; }
 
 /* .hidden loses to these components' own display rule — keep hidden things hidden. */
 .input-paste-wrapper.hidden, .edit-url-current.hidden { display: none; }
@@ -2993,7 +3001,7 @@ html:not(.dark) .proxy-group-menu { background: rgb(252, 252, 253); }
 
 /* Proxies: sort menu (same surface as the group menu) and a steady-width sort button. */
 header:not(.is-compact) #sort-btn { min-width: 112px; }
-.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; }
+.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; display: flex; flex-direction: column; gap: 2px; /* hovered and selected pills never merge */ }
 .proxy-sort-menu.is-end { inset-inline-start: auto; inset-inline-end: 0; }
 .proxy-sort-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border-radius: var(--radius-dropdown-option); text-align: start; }
 .proxy-sort-option .proxy-sort-body { flex: 1; min-width: 0; }
@@ -3105,9 +3113,11 @@ html:not(.dark) .seg-item[aria-pressed="true"] { background: rgba(255, 255, 255,
 /* Settings section index (ui/settings-nav.js): short marks in the right gutter, covering
    no rows. Names slide out beside the marks only while the rail is hovered or focused. */
 .settings-rail {
-  position: fixed; top: 50%; inset-inline-end: 10px; z-index: 30; transform: translateY(-50%);
+  position: fixed; top: 50%; inset-inline-end: 6px; z-index: 30; transform: translateY(-50%);
   width: auto; max-width: none; margin: 0; /* not the 800px column rule for settings children on wide windows */
-  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; /* 24px between item centres */
+  /* 24px between item centres; the 4px end padding keeps a hovered item's pill off the
+     expanded panel's rounded edge (the marks stay where they were: inset 6px + 4px) */
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; padding-inline-end: 4px;
 }
 .settings-rail-item {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 18px;
