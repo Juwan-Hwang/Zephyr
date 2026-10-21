@@ -1,8 +1,11 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - 现代 Mihomo GUI 客户端 Logo" width="128" height="128">
-
-# Zephyr
+<h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/src-tauri/icons/lockup-white.svg">
+  <img src="apps/desktop/src-tauri/icons/lockup.svg" alt="Zephyr - 现代 Mihomo GUI 客户端 Logo" width="420">
+</picture>
+</h1>
 
 **安全至上 · 极简美学 · 轻量高效**
 

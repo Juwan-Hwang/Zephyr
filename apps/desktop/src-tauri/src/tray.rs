@@ -120,19 +120,171 @@ pub fn set_tray_menu_state(app: AppHandle, new_state: TrayMenuState) -> Result<(
     Ok(())
 }
 
-/// Change tray icon based on mode
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+/// The last claimed tray icon update: its generation, together with the
+/// mode that claim asked for, in a single lock-protected record so the
+/// two are never read or written apart. A refresh reads the proxy status
+/// slowly (it can shell out), so it snapshots the generation first and
+/// claims the next one — under the same lock, leaving the record
+/// untouched when the snapshot is stale — only if no direct writer (a
+/// proxy toggle, init) has claimed one in the meantime;
+/// otherwise its now-stale icon would land on top of the fresher one.
+/// Between two refreshes the start ticket (below) decides instead: the
+/// later-started read wins, whichever of them finishes first.
+///
+/// Claiming alone cannot order the icon writes themselves: `set_icon`
+/// runs on the main thread and waits for it, so holding a lock across
+/// it could deadlock against a main-thread caller waiting for the same
+/// lock, and a writer can still be mid-apply when a newer claim lands.
+/// After applying, a writer that finds a newer claim re-applies that
+/// claim's mode. The correction is sent after its own stale write, and
+/// the newer writer's write lands either before it (the correction
+/// repeats the same icon) or after it (it wins directly): either way
+/// the last write on the tray is the newest claimed mode. The lock is
+/// only ever held for the record update itself, never across `set_icon`.
+///
+/// The record's third field is the start ticket of the refresh that made
+/// the claim (0 when no refresh has claimed yet): refreshes take a ticket
+/// from `TRAY_ICON_REFRESH_TICKET` before they start reading, so a claim
+/// can tell a later-started refresh's claim (higher ticket — it wins)
+/// from a direct writer's claim. The fourth field counts direct claims
+/// on its own: a refresh snapshots it before reading and yields when it
+/// moved, however the generation got there — detecting a direct claim
+/// only from "generation moved, ticket unchanged" misses the case where
+/// another refresh claimed first and a direct writer claimed after it,
+/// which leaves the ticket changed as well. See `refresh_tray_icon`.
+static TRAY_ICON_CLAIM: Mutex<(u64, String, u64, u64)> = Mutex::new((0, String::new(), 0, 0));
+
+/// Hands out the start tickets that order tray icon refreshes by when
+/// their status read began (see `TRAY_ICON_CLAIM`).
+static TRAY_ICON_REFRESH_TICKET: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn lock_tray_icon_claim() -> std::sync::MutexGuard<'static, (u64, String, u64, u64)> {
+    TRAY_ICON_CLAIM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Record `mode` as the newest claim and publish its generation.
+fn claim_tray_icon(mode: &str) -> u64 {
+    let mut claim = lock_tray_icon_claim();
+    claim.0 += 1;
+    claim.3 += 1;
+    mode.clone_into(&mut claim.1);
+    claim.0
+}
+
+/// The newest claim: its generation and the mode it asked for.
+fn claimed_tray_icon() -> (u64, String) {
+    let claim = lock_tray_icon_claim();
+    (claim.0, claim.1.clone())
+}
+
+/// Pick the idle (no proxy mode active) tray icon for the current platform.
+///
+/// - macOS: a pure-black template image. The system tints template images
+///   to match the menu bar, so it must be applied with
+///   `set_icon_as_template(true)`.
+/// - Windows: a plain glyph on transparency — ink for light taskbars, white
+///   for dark ones. The taskbar follows the *system* colour mode
+///   (`SystemUsesLightTheme` in the registry), which Windows keeps separate
+///   from the *app* colour mode that `window.theme()` reports, so the
+///   registry value is the source of truth here.
+/// - Other platforms: the full app icon tile, as before.
+// Not a `const fn` on Windows, where the body reads the registry at
+// runtime; the lint only sees the constant-looking fallback body on
+// platforms where the other branches are compiled out.
+#[allow(clippy::missing_const_for_fn)]
+fn idle_tray_icon(app: &AppHandle) -> (&'static [u8], bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        (include_bytes!("../icons/tray-idle-template.png"), true)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if windows_taskbar_uses_dark_mode(app) {
+            (include_bytes!("../icons/tray-idle-dark.png"), false)
+        } else {
+            (include_bytes!("../icons/tray-idle-light.png"), false)
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        #[allow(clippy::large_include_file)]
+        let bytes: &[u8] = include_bytes!("../icons/icon.png");
+        (bytes, false)
+    }
+}
+
+/// The taskbar colour mode from the registry, when it can be read:
+/// `Some(true)` for a light taskbar, `Some(false)` for a dark one.
+#[cfg(target_os = "windows")]
+fn system_uses_light_theme() -> Option<bool> {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .ok()
+        .map(|value| value == 1)
+}
+
+/// Whether the Windows taskbar is in dark mode.
+///
+/// Reads `SystemUsesLightTheme` from the Personalize key. When the value
+/// cannot be read, fall back to the main window's theme (the app colour
+/// mode — not always the taskbar's, but the closest available signal),
+/// and then to light: consumer editions of Windows 11 ship with a light
+/// taskbar by default (only the commercial editions default to dark).
+#[cfg(target_os = "windows")]
+fn windows_taskbar_uses_dark_mode(app: &AppHandle) -> bool {
+    match system_uses_light_theme() {
+        Some(light) => !light,
+        None => app
+            .get_webview_window("main")
+            .and_then(|window| window.theme().ok())
+            .is_some_and(|theme| theme == tauri::Theme::Dark),
+    }
+}
+
+/// Apply the tray icon for `mode`: "tun", "sysproxy", or idle for anything else.
+pub fn apply_tray_icon(app: &AppHandle, mode: &str) -> Result<(), String> {
+    // Claim the newest generation: any refresh still holding an older
+    // snapshot will now skip applying its stale result.
+    let generation = claim_tray_icon(mode);
+    apply_tray_icon_reconciled(app, generation, mode)
+}
+
+/// Apply the icon for a claim, then keep re-applying the newest claimed
+/// mode for as long as newer claims landed while an apply was in flight,
+/// so a stale write never stays on the tray (see `TRAY_ICON_CLAIM`).
+fn apply_tray_icon_reconciled(
+    app: &AppHandle,
+    mut generation: u64,
+    initial_mode: &str,
+) -> Result<(), String> {
+    let mut mode = initial_mode.to_owned();
+    loop {
+        let result = apply_tray_icon_now(app, &mode);
+        let (latest_generation, latest_mode) = claimed_tray_icon();
+        if latest_generation == generation {
+            return result;
+        }
+        generation = latest_generation;
+        mode = latest_mode;
+    }
+}
+
+fn apply_tray_icon_now(app: &AppHandle, mode: &str) -> Result<(), String> {
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Tray icon not found".to_owned())?;
 
     #[allow(clippy::large_include_file)]
-    let icon_bytes: &[u8] = match mode.as_str() {
-        "tun" => include_bytes!("../icons/red-icon.png"),
-        "sysproxy" => include_bytes!("../icons/yellow-icon.png"),
-        _ => include_bytes!("../icons/icon.png"),
+    let (icon_bytes, as_template): (&[u8], bool) = match mode {
+        "tun" => (include_bytes!("../icons/tray-tun.png"), false),
+        "sysproxy" => (include_bytes!("../icons/tray-proxy.png"), false),
+        _ => idle_tray_icon(app),
     };
 
     let image = Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
@@ -140,23 +292,203 @@ pub fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
     tray.set_icon(Some(image))
         .map_err(|e| format!("Failed to set icon: {e}"))?;
 
+    // Template images only exist on macOS. The coloured state icons must
+    // explicitly leave template mode again, otherwise the system would
+    // tint them monochrome.
+    #[cfg(target_os = "macos")]
+    tray.set_icon_as_template(as_template)
+        .map_err(|e| format!("Failed to set icon template mode: {e}"))?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = as_template;
+
     Ok(())
+}
+
+/// Re-read the proxy status and re-apply the tray icon for it, unless a
+/// newer icon update landed while the status was being read. Callers run
+/// this off the window event thread (see the theme handler in lib.rs):
+/// the status lookup can shell out, but that gap must not let this
+/// refresh overwrite a fresher icon with the mode it read earlier.
+pub fn refresh_tray_icon(app: &AppHandle) {
+    // Take a start ticket before reading the status: refreshes are ordered
+    // by when their read *started*, not by when it finished. Two refreshes
+    // can snapshot the same claim generation (the claim only moves when a
+    // read finishes), so the generation check alone lets the first to
+    // finish win — and a slow read that started before the core started
+    // would claim its stale result over a fresher read that started after
+    // it but finished later, leaving the idle icon on a running core.
+    let (ticket, snapshot_direct) = take_refresh_ticket();
+    let mode = get_tray_proxy_status_blocking(app.clone()).unwrap_or_else(|_| "default".to_owned());
+    claim_refresh_result(app, ticket, snapshot_direct, &mode);
+}
+
+/// Take the start ticket and direct-claim snapshot a status read is
+/// ordered by (see `refresh_tray_icon` and `TRAY_ICON_CLAIM`).
+fn take_refresh_ticket() -> (u64, u64) {
+    let ticket = TRAY_ICON_REFRESH_TICKET.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let snapshot_direct = {
+        let claim = lock_tray_icon_claim();
+        claim.3
+    };
+    (ticket, snapshot_direct)
+}
+
+/// Claim `mode` for a status read that took `ticket` and snapshotted the
+/// direct-claim sequence at `snapshot_direct`, then apply it.
+/// Claim the next generation under the same lock that records the mode.
+/// Yield to a refresh that started later and already claimed (its ticket
+/// outranks this one), and to any direct claim (a proxy toggle, init)
+/// that landed while this read was running — the direct
+/// sequence counts those on their own, so a direct claim is detected
+/// even when another refresh claimed in between and moved the ticket
+/// as well. An earlier-started refresh claiming in the meantime
+/// (ticket changed, but below this one, direct sequence untouched)
+/// does not block this fresher read: it claims over that result, and
+/// the earlier refresh's own correction pass re-applies the newest
+/// claim after its write.
+fn claim_refresh_result(app: &AppHandle, ticket: u64, snapshot_direct: u64, mode: &str) {
+    let generation = {
+        let mut claim = lock_tray_icon_claim();
+        if claim.2 > ticket {
+            return;
+        }
+        if claim.3 != snapshot_direct {
+            return;
+        }
+        claim.0 += 1;
+        mode.clone_into(&mut claim.1);
+        claim.2 = ticket;
+        claim.0
+    };
+    let _ = apply_tray_icon_reconciled(app, generation, mode);
+}
+
+/// Watch the Windows taskbar colour mode for the app's whole lifetime.
+///
+/// The window-event handlers in `lib.rs` cannot cover a taskbar-only
+/// change while the main window is hidden to the tray or destroyed in
+/// lightweight mode — exactly when the tray icon is the only visible
+/// surface — because both handlers need an event from that window. This
+/// watcher is app-level instead: it polls the registry value (a cheap
+/// local read) and refreshes the icon when the value flips. The refresh
+/// goes through the same generation claim as every other icon update,
+/// so it never overwrites a fresher mode.
+#[cfg(target_os = "windows")]
+pub fn watch_windows_taskbar_theme(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = system_uses_light_theme();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let current = system_uses_light_theme();
+            if current.is_some() && current != last {
+                last = current;
+                refresh_tray_icon(&app);
+            }
+        }
+    });
+}
+
+/// Change tray icon based on mode
+#[tauri::command]
+pub async fn change_tray_icon(app: AppHandle, mode: String) -> Result<(), String> {
+    // The status read below can shell out to the system proxy tools, so
+    // it runs on a blocking task: as a synchronous command it would run
+    // on the main thread and stall the UI for the whole lookup.
+    tauri::async_runtime::spawn_blocking(move || change_tray_icon_blocking(&app, &mode))
+        .await
+        .map_err(|e| format!("Tray icon task failed: {e}"))
+}
+
+/// The blocking half of `change_tray_icon`.
+fn change_tray_icon_blocking(app: &AppHandle, sent_mode: &str) {
+    // The mode the frontend sends was derived from a status read that a
+    // core start or stop can already have overtaken: a backend refresh
+    // may have painted the current icon while that read was in flight,
+    // and the frontend's own sequence check only orders frontend calls
+    // against each other. When the backend can read the status itself,
+    // its fresher read is the mode to claim; the sent mode only stands
+    // when that read fails, which is also the case the frontend derived
+    // it from its store as a fallback for.
+    //
+    // That read goes through the same ticket and claim protocol as a
+    // backend refresh instead of claiming its result directly: the read
+    // itself can wait on the system proxy lookup, and a core stop that
+    // lands in that gap refreshes the icon to idle — an unconditional
+    // claim afterwards would put the stale mode back on top, with no
+    // frontend sync in lightweight mode to repair it. Yielding to the
+    // stop's later-started refresh keeps the icon it painted.
+    let (ticket, snapshot_direct) = take_refresh_ticket();
+    let fresh = get_tray_proxy_status_blocking(app.clone());
+    let icon_mode = match fresh.as_deref() {
+        Ok("tun") => "tun",
+        Ok("sysproxy") => "sysproxy",
+        Ok(_) => "default",
+        Err(_) => sent_mode,
+    };
+    claim_refresh_result(app, ticket, snapshot_direct, icon_mode);
+}
+
+/// The mode of the icon the tray is actually showing, from the newest
+/// claim every icon writer records (see `TRAY_ICON_CLAIM`).
+///
+/// The frontend's periodic sync compares this against the mode the
+/// backend's live status implies: comparing two derivations of that
+/// status instead would agree with each other even when the icon on
+/// the tray is a different one — a stopped core's leftover TUN icon,
+/// or an idle icon painted while the core was mid-restart — and the
+/// mismatch would never be corrected. Claims recorded for a running
+/// or stopped core ("running" / "stopped") both applied the idle icon,
+/// like every mode other than the two active ones.
+#[tauri::command]
+#[must_use]
+pub fn get_tray_icon_mode() -> String {
+    match claimed_tray_icon().1.as_str() {
+        "tun" => "tun".to_owned(),
+        "sysproxy" => "sysproxy".to_owned(),
+        _ => "default".to_owned(),
+    }
 }
 
 /// Get current proxy mode for tray status
 #[tauri::command]
+pub async fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
+    // The status read can shell out to the system proxy tools, so it
+    // runs on a blocking task: as a synchronous command it would run
+    // on the main thread and stall the UI for the whole lookup — the
+    // same treatment `change_tray_icon` already gets. The frontend's
+    // periodic sync invokes this on every tick (and the TUN alignment
+    // re-reads it), so the stall would repeat all session long.
+    tauri::async_runtime::spawn_blocking(move || get_tray_proxy_status_blocking(app))
+        .await
+        .map_err(|e| format!("Tray status task failed: {e}"))?
+}
+
+/// The blocking half of `get_tray_proxy_status`, for the backend's own
+/// status readers, which already run off the main thread.
 #[allow(clippy::needless_pass_by_value)]
-pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
+pub fn get_tray_proxy_status_blocking(app: AppHandle) -> Result<String, String> {
     // TUN-aware: a macOS root TUN core has no `Child` handle.
     if !crate::core_manager::core::subscription::is_core_running(&app) {
         return Ok("stopped".to_owned());
     }
 
-    let sys_proxy_enabled = sys_proxy::get_sys_proxy().unwrap_or(false);
+    // Propagate a failed system-proxy read instead of reporting it as
+    // off: callers already fall back on `Err` (the frontend-sent mode in
+    // `change_tray_icon_blocking`, the idle mode in `refresh_tray_icon`),
+    // and swallowing the error here would paint the idle icon over a
+    // proxy that is actually on.
+    let sys_proxy_enabled = sys_proxy::get_sys_proxy()?;
 
-    // Check TUN status from config file (authoritative source)
-    // Note: run_config.yaml is the actual config loaded by Mihomo
-    let tun_enabled = get_tun_status_from_config(&app).unwrap_or(false);
+    // Check the live TUN state: the TUN commands record the running
+    // core's state in the settings state as soon as the core confirms a
+    // change, and an override hot-reload records its confirmed state as
+    // the live override that outranks it. `run_config.yaml` can lag
+    // behind that record — the flows that apply TUN to the core
+    // themselves record it without rewriting the file, which then only
+    // catches up at the next core start — and a refresh reading the
+    // file would restore the pre-toggle icon. The file is only the
+    // fallback for when no live state has been recorded.
+    let tun_enabled = effective_tun_enabled(&app);
 
     if tun_enabled {
         Ok("tun".to_owned())
@@ -167,8 +499,66 @@ pub fn get_tray_proxy_status(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Get TUN status from config file (authoritative source)
-/// `run_config.yaml` is what Mihomo actually loads, so it's the truth
+/// The TUN state recorded for the running core, when one has been
+/// recorded this session (or loaded from the saved preference at
+/// startup, which the core start that follows is driven by).
+///
+/// A live override the running core confirmed after an override
+/// hot-reload outranks the saved preference: the preference is the
+/// user's own choice for the *next* start, while the override is what
+/// this core is actually running.
+fn live_tun_enabled(app: &AppHandle) -> Option<bool> {
+    if let Some(live) = crate::core_manager::core::tun_manager::live_tun_override() {
+        return Some(live);
+    }
+    let settings_state = app.state::<crate::SettingsState>();
+    let guard = settings_state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.tun_enabled
+}
+
+/// The TUN state every tray status and icon consumer agrees on: the
+/// live recorded state when there is one, otherwise the state in
+/// `run_config.yaml` (what the running core was last made to load).
+/// `TrayState.tun_enabled` is only the frontend-fed menu state and can
+/// diverge from both, so icon and status decisions must not read it.
+pub(crate) fn effective_tun_enabled(app: &AppHandle) -> bool {
+    live_tun_enabled(app).unwrap_or_else(|| get_tun_status_from_config(app).unwrap_or(false))
+}
+
+/// The TUN state the tray's TUN item displays, and that a click on it
+/// toggles away from.
+///
+/// While the core runs, this is the live state (`effective_tun_enabled`):
+/// an override hot-reload may have flipped TUN without the saved
+/// preference — or the in-app toggle — ever hearing of it. While the
+/// core is stopped there is no live state to answer: the item then
+/// shows the saved preference, which is also the state the in-app
+/// toggle shows, so a click turns TUN off when the preference is on
+/// instead of running the enable flow a second time. The live override
+/// is not consulted for a stopped core: it describes a core that is no
+/// longer running (the stop path drops it, but a crashed core can leave
+/// one behind).
+pub(crate) fn tray_tun_shown_enabled(app: &AppHandle) -> bool {
+    if crate::core_manager::core::subscription::is_core_running(app) {
+        return effective_tun_enabled(app);
+    }
+    let settings_state = app.state::<crate::SettingsState>();
+    let preference = {
+        let guard = settings_state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.tun_enabled
+    };
+    preference.unwrap_or_else(|| get_tun_status_from_config(app).unwrap_or(false))
+}
+
+/// Get TUN status from config file
+/// `run_config.yaml` is what Mihomo loaded at core start, so it only
+/// reflects the state as of that start
 fn get_tun_status_from_config(app: &AppHandle) -> Result<bool, String> {
     let paths = crate::core_manager::ensure_app_storage(app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
@@ -233,6 +623,10 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     tray_builder
         .build(app)
         .map_err(|e| format!("Failed to build tray: {e}"))?;
+
+    // Start from the platform's idle icon (template image on macOS,
+    // theme-matched glyph on Windows) instead of the window icon.
+    let _ = apply_tray_icon(app, "default");
 
     Ok(())
 }
@@ -426,7 +820,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
                 SYS_PROXY_TOGGLE_FAILED,
                 "System proxy not enabled: the core is not running"
             );
-            rebuild_tray_menu_from_state(app);
+            rebuild_tray_menu_from_state_if_lightweight(app);
             return;
         }
         if !has_profile {
@@ -438,7 +832,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
                 SYS_PROXY_TOGGLE_FAILED,
                 "System proxy not enabled: add a subscription first"
             );
-            rebuild_tray_menu_from_state(app);
+            rebuild_tray_menu_from_state_if_lightweight(app);
             return;
         }
         let Some(proxy_endpoint) = endpoint else {
@@ -453,7 +847,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
                 SYS_PROXY_TOGGLE_FAILED,
                 "System proxy not enabled: no managed proxy endpoint is configured"
             );
-            rebuild_tray_menu_from_state(app);
+            rebuild_tray_menu_from_state_if_lightweight(app);
             return;
         };
         // `enable_sysproxy` takes a bare `host:port` and applies it to the HTTP,
@@ -473,7 +867,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
                 "System proxy not enabled: the managed core exposes only a SOCKS listener. \
                  Enable a mixed or HTTP port in the profile to use the system proxy."
             );
-            rebuild_tray_menu_from_state(app);
+            rebuild_tray_menu_from_state_if_lightweight(app);
             return;
         }
         sys_proxy::enable_sysproxy(app.clone(), proxy_endpoint.host_port(), None)
@@ -486,7 +880,7 @@ fn toggle_sys_proxy(app: &AppHandle) {
             "Failed to toggle system proxy: {e}"
         );
         // Operation failed — do not update state, rebuild menu with current state
-        rebuild_tray_menu_from_state(app);
+        rebuild_tray_menu_from_state_if_lightweight(app);
         return;
     }
 
@@ -497,19 +891,28 @@ fn toggle_sys_proxy(app: &AppHandle) {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.sys_proxy_enabled = new_state;
-    let tun_enabled = guard.tun_enabled;
     drop(guard);
+    // Repaint the icon from a fresh status read instead of claiming a
+    // mode derived here: the TUN state can change between this toggle's
+    // own read and the claim (a hot reload confirming TUN refreshes the
+    // icon in between), and an unconditional claim would put the stale
+    // system-proxy icon back on top, with no frontend sync in
+    // lightweight mode to correct it. `refresh_tray_icon` re-reads the
+    // status — which gates TUN on the core actually running, so the
+    // disable path for a stopped core still lands on the idle icon —
+    // and only claims when no fresher writer landed in the meantime.
+    // The refresh re-reads the system-proxy status, which can shell out,
+    // and this handler runs on the tray menu thread, so it goes to a
+    // blocking task like the theme-change refresh in lib.rs instead of
+    // stalling the menu.
+    let app_icon = app.clone();
+    // `drop` on the handle, not `let _ =`: the handle is a future, and
+    // discarding it still lets the blocking task run to completion.
+    drop(tauri::async_runtime::spawn_blocking(move || {
+        refresh_tray_icon(&app_icon);
+    }));
 
-    let icon_mode = if tun_enabled {
-        "tun"
-    } else if new_state {
-        "sysproxy"
-    } else {
-        "default"
-    };
-    let _ = change_tray_icon(app.clone(), icon_mode.to_owned());
-
-    rebuild_tray_menu_from_state(app);
+    rebuild_tray_menu_from_state_if_lightweight(app);
 
     // Also emit to frontend (will be ignored if no WebView, which is fine)
     crate::backend_event::emit_to_main(app, "tray-sysproxy-changed", new_state);
@@ -522,12 +925,13 @@ fn toggle_tun(app: &AppHandle) {
         return;
     }
 
-    let state = app.state::<TrayState>();
-    let current = state
-        .0
-        .lock()
-        .map(|guard| guard.tun_enabled)
-        .unwrap_or(false);
+    // Decide the direction from the state the tray item displays (see
+    // `tray_tun_shown_enabled`), not the frontend-fed menu state: an
+    // override hot-reload can have flipped TUN on the running core
+    // without the menu state ever hearing of it, and toggling from that
+    // stale value would emit the state the core is already in — a
+    // no-op the user has to click twice to escape.
+    let current = tray_tun_shown_enabled(app);
 
     // Emit event to frontend to handle TUN toggle
     // The lock will be released by the frontend via release_tun_toggle command
@@ -736,6 +1140,20 @@ pub fn update_tray_full_menu(app: AppHandle, params: TrayMenuParams) -> Result<(
     Ok(())
 }
 
+/// Rebuild the reduced menu only when no main window exists. With a main
+/// window the frontend owns the tray menu — it builds the full one, with
+/// the Subscriptions and Proxies submenus this reduced build does not
+/// have — and its own store sync re-pushes it when the TUN state it
+/// displays changes. Rebuilding the reduced menu there would strip those
+/// submenus until some unrelated store change happened to restore them.
+/// Without a window (lightweight mode) nothing else can repaint the
+/// menu, so the backend rebuild is the only one that keeps it honest.
+pub(crate) fn rebuild_tray_menu_from_state_if_lightweight(app: &AppHandle) {
+    if app.get_webview_window("main").is_none() {
+        rebuild_tray_menu_from_state(app);
+    }
+}
+
 /// Update just the toggle states (lightweight update)
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -760,14 +1178,13 @@ pub fn update_tray_toggle_states(
 /// Used when tray operations happen in lightweight mode or when the frontend
 /// is not available to provide full menu data.
 #[allow(clippy::doc_markdown)]
-fn rebuild_tray_menu_from_state(app: &AppHandle) {
+pub(crate) fn rebuild_tray_menu_from_state(app: &AppHandle) {
     let tray_state = app.state::<TrayState>();
     let guard = tray_state
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let sys_on = guard.sys_proxy_enabled;
-    let tun_on = guard.tun_enabled;
     let mode = if guard.current_mode.is_empty() {
         "rule".to_owned()
     } else {
@@ -775,6 +1192,15 @@ fn rebuild_tray_menu_from_state(app: &AppHandle) {
     };
     let labels = guard.labels.clone();
     drop(guard);
+    // The TUN label answers the state the tray item displays (see
+    // `tray_tun_shown_enabled`), not the frontend-fed menu state: this
+    // rebuild is the lightweight-mode path, where no frontend ever
+    // refreshes that state, so an override hot-reload would leave the
+    // label claiming the opposite of what the running core (and the
+    // tray icon) say. Computed after the guard is dropped: it locks the
+    // settings and core state and can touch the filesystem, and holding
+    // `TrayState` across that would order this lock before both.
+    let tun_on = tray_tun_shown_enabled(app);
 
     let tray = match app.tray_by_id("main") {
         Some(t) => t,
