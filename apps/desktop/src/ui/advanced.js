@@ -271,31 +271,6 @@ function buildNestedPayload(path, value) {
 
 // --- Render functions ---
 
-/** Top-level key to bring into view after the next render (e.g. 'tun'). */
-/** @type {string|null} */
-let pendingFocusKey = null;
-
-/**
- * Open the advanced page scrolled to one top-level section of the core config.
- * The page renders asynchronously, so the key is applied after that render.
- * @param {string} key
- */
-export function focusAdvancedSection(key) {
-    pendingFocusKey = key;
-}
-
-/** @param {HTMLElement} container */
-function applyPendingFocus(container) {
-    const key = pendingFocusKey;
-    pendingFocusKey = null;
-    if (!key) return;
-    const card = /** @type {HTMLElement|null} */ (container.querySelector(`[data-key="${CSS.escape(key)}"]`));
-    if (!card) return;
-    card.scrollIntoView({ block: 'start', behavior: 'auto' });
-    card.classList.add('adv-flash');
-    setTimeout(() => card.classList.remove('adv-flash'), 1600);
-}
-
 export async function renderAdvancedSettings() {
     const container = document.getElementById('advanced-settings-container');
     if (!container) return;
@@ -313,10 +288,7 @@ export async function renderAdvancedSettings() {
 
         container.replaceChildren();
         container.appendChild(fragment);
-        applyPendingFocus(container);
     } catch (err) {
-        // A failed render must not leave its section to jump to on a later one.
-        pendingFocusKey = null;
         advancedLogger.error('Advanced settings render error', err);
         container.replaceChildren();
         const errDiv = document.createElement('div');
