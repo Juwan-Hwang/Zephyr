@@ -32,6 +32,7 @@ import { createFocusTrap } from '../../utils/focus-trap.js';
 import { showLinkDialog } from '../link-dialog.js';
 import { validateHttpUrl } from '../../utils/url-validate.js';
 import * as prism from '../prism.js';
+import { queueSmartConfigWrite } from './auto-switch.js';
 
 /** Longest wait for another network operation before giving up on activating a new profile. */
 const NETWORK_IDLE_TIMEOUT_MS = 15000;
@@ -190,6 +191,8 @@ let activeEditUADropdown = null;
  * @type {Map<string, { reason: string, at: number }>}
  */
 const _subUpdateErrors = new Map();
+/** Subscriptions with an update running: survives card re-renders (language change, refresh). */
+const _subUpdating = new Set();
 
 /** @param {string} name @param {string} reason */
 function setSubUpdateError(name, reason) {
@@ -497,6 +500,13 @@ async function showEditPanel(configInfo) {
             return;
         }
 
+        // A running update downloads under the old name: renaming now would let it
+        // bring the old file back and leave the renamed card without its busy state.
+        if (configStem(newName) !== currentStem && _subUpdating.has(configInfo.name)) {
+            showNotification(t.subRenameWhileUpdating || 'This subscription is updating. Rename it once the update finishes.', 'error');
+            return;
+        }
+
         const linkCode = newUrl ? validateHttpUrl(newUrl) : '';
         if (linkCode) {
             showNotification(linkCode === 'scheme'
@@ -556,6 +566,9 @@ async function showEditPanel(configInfo) {
             } else if (newUrl) {
                 // Show the saved name and link now: the download (and a possible core
                 // restart) can take a while, and the old card would act on the old name.
+                // The card shows it busy, and a rename or its Update button waits.
+                const marked = !_subUpdating.has(finalName);
+                if (marked) _subUpdating.add(finalName);
                 if (finalName !== configInfo.name) moduleRenderConfigs?.(true);
                 // A new link only matters once its nodes are downloaded: do that now.
                 try {
@@ -565,6 +578,8 @@ async function showEditPanel(configInfo) {
                 } catch (dlErr) {
                     setSubUpdateError(finalName, String(dlErr instanceof Error ? dlErr.message : dlErr));
                     showNotification(`${t.notifUrlSavedDownloadFailed || 'Link saved, but the download failed'}: ${dlErr}`, 'error');
+                } finally {
+                    if (marked) _subUpdating.delete(finalName);
                 }
             } else {
                 showNotification(t.notifSettingsSaved || 'Settings saved', 'success');
@@ -791,12 +806,21 @@ export function initSubscriptionSettings({
                 const userAgent = getSubscriptionUserAgent();
                 const batchItems = subConfigs.map(/** @param {any} c */ (c) => ({ name: c.name }));
 
-                // Single batch call — no per-item rate limiting
+                // Busy like a card's own update: no rename or second download meanwhile.
+                /** @type {string[]} */
+                const marked = batchItems.map((/** @type {{name: string}} */ i) => i.name).filter((/** @type {string} */ n) => !_subUpdating.has(n));
+                for (const n of marked) _subUpdating.add(n);
                 /** @type {Array<{name: string, success: boolean, error?: string}>} */
-                const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
-                    items: batchItems,
-                    userAgent: userAgent || null,
-                });
+                let results;
+                try {
+                    // Single batch call — no per-item rate limiting
+                    results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
+                        items: batchItems,
+                        userAgent: userAgent || null,
+                    });
+                } finally {
+                    for (const n of marked) _subUpdating.delete(n);
+                }
 
                 /** @type {string[]} */
                 const failedNames = [];
@@ -1048,7 +1072,7 @@ export function initSubscriptionSettings({
 
         // --- "Edit" item ---
         const editItem = document.createElement('div');
-        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
@@ -1065,7 +1089,7 @@ export function initSubscriptionSettings({
 
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
-        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
@@ -1140,7 +1164,7 @@ export function initSubscriptionSettings({
                 // Helper: create a checkbox item for a rule file
                 const createRuleItem = (/** @type {{filename: string, rule_count: number}} */ file) => {
                     const item = document.createElement('label');
-                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-accent/10 hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
@@ -1183,7 +1207,7 @@ export function initSubscriptionSettings({
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
-                        spinner.className = 'animate-spin ms-1 text-[var(--text-muted)]';
+                        spinner.className = 'inline-flex animate-spin ms-1 text-[var(--text-muted)]'; // inline-flex: a plain inline span does not rotate
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
@@ -1354,9 +1378,13 @@ export function initSubscriptionSettings({
      */
     async function persistOrder(newOrder, revision) {
         try {
-            const s = await invoke(COMMANDS.GET_SETTINGS);
-            s.config_order = newOrder;
-            await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+            // A full settings save: in the switches' write queue, so this snapshot
+            // can't write back an auto-switch value saved between its read and save.
+            await queueSmartConfigWrite(async () => {
+                const s = await invoke(COMMANDS.GET_SETTINGS);
+                s.config_order = newOrder;
+                await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+            });
             invalidateSettingsCache();
             if (revision === _orderSaveRev) _pendingOrder = null;
         } catch (err) {
@@ -1730,24 +1758,36 @@ export function initSubscriptionSettings({
                 updateBtn.innerHTML = SVG_ICONS.refresh; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 updateBtn.title = t.update;
                 updateBtn.setAttribute('aria-label', t?.update || 'Update');
+                // Spin the icon only: the button's hover background stays put.
+                const icon = updateBtn.querySelector('svg');
+                if (_subUpdating.has(configInfo.name)) {
+                    icon?.classList.add('animate-spin');
+                    updateBtn.setAttribute('aria-busy', 'true');
+                }
                 updateBtn.onclick = async (e) => {
                     e.stopPropagation();
-                    updateBtn.classList.add('animate-spin');
+                    // A second click while this one is running would download twice,
+                    // also from a card rendered again meanwhile.
+                    if (_subUpdating.has(configInfo.name)) return;
+                    _subUpdating.add(configInfo.name);
+                    icon?.classList.add('animate-spin');
+                    updateBtn.setAttribute('aria-busy', 'true');
                     try {
                         // Prefer per-subscription UA, fall back to global fake-client UA
                         await downloadSubscription(configInfo.name, configInfo.user_agent || '');
                         _subUpdateErrors.delete(configInfo.name);
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
-                        void renderConfigs();
                     } catch (err) {
                         const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                         // Same card status as a failed "Update all".
                         setSubUpdateError(configInfo.name, error.message || String(err));
                         showNotification(`${t.notifSubFailed}: ${error}`, 'error');
-                        void renderConfigs();
                     } finally {
-                        updateBtn.classList.remove('animate-spin');
+                        _subUpdating.delete(configInfo.name);
+                        icon?.classList.remove('animate-spin');
+                        updateBtn.removeAttribute('aria-busy');
                     }
+                    void renderConfigs();
                 };
                 actions.appendChild(updateBtn);
             }
