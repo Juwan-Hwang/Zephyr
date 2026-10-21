@@ -347,6 +347,17 @@ describe('switchProxy', () => {
 
     });
 
+    it('readAutoStartEnabled throws when the state cannot be read, unlike isAutoStartEnabled', async () => {
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: vi.fn().mockRejectedValue(new Error('registry unavailable')),
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+        await expect(api.readAutoStartEnabled()).rejects.toThrow('registry unavailable');
+        await expect(api.isAutoStartEnabled()).resolves.toBe(false);
+    });
+
     it('reports a rejected backend GLOBAL switch as false', async () => {
         // The backend rejects with a plain Error carrying the real reason (e.g.
         // "Subscription update in progress", "GLOBAL proxy group no longer
