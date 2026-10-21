@@ -206,17 +206,6 @@ impl PrismHost for ZephyrPrismHost {
         // Secure write (Unix 0600 / Windows DACL)
         write_file_secure(&run_config_path, config)?;
 
-        // Hot-reload via mihomo REST API (PUT for full config replacement)
-        let (port, secret) = {
-            let state = self.app.state::<MihomoState>();
-            let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-            (
-                lock.last_port().unwrap_or(9090),
-                lock.last_secret().to_owned(),
-            )
-        };
-
-        let url = format!("http://127.0.0.1:{port}/configs?force=true");
         // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
         // from disk — NOT the raw YAML config. Sending raw YAML with
         // Content-Type: application/json causes a silent 400 Bad Request.
@@ -239,6 +228,18 @@ impl PrismHost for ZephyrPrismHost {
         // the confirmation wait to that block, which is the price of
         // keeping the sequence ordered end to end.
         let sequence = super::pipeline::acquire_reload_reconcile_lock();
+        // Hot-reload via mihomo REST API (PUT for full config replacement).
+        // The endpoint is read under the sequence lock: a core restart while
+        // this waited for it changes the port and secret.
+        let (port, secret) = {
+            let state = self.app.state::<MihomoState>();
+            let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            (
+                lock.last_port().unwrap_or(9090),
+                lock.last_secret().to_owned(),
+            )
+        };
+        let url = format!("http://127.0.0.1:{port}/configs?force=true");
         // Snapshot the live-state generation before the reload: the PUT
         // below can block for seconds, and a snapshot taken only after
         // it returns would include a TUN preference recorded in the
@@ -249,7 +250,10 @@ impl PrismHost for ZephyrPrismHost {
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let http_status_code = Self::http_put(&url, &body, &secret);
-        set_current_apply_http_status(http_status_code);
+        // A reload the core did not answer is recorded as 0, so callers can
+        // tell it from "no reload was sent" (None); `reload_outcome` in
+        // prism.rs reports it as a failed reload without an HTTP status.
+        set_current_apply_http_status(Some(http_status_code.unwrap_or(0)));
         let hot_reload_success =
             http_status_code.is_some_and(crate::network_coordinator::is_http_success);
 

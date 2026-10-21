@@ -16,7 +16,7 @@ vi.mock('../../api.js', () => ({
 /** @type {Promise<void> | null} A slot the test holds back. */
 let slotGate = null;
 vi.mock('./sub-download-gate.js', async (importOriginal) => ({ ...(await importOriginal()), subDownloadSlot: async () => { if (slotGate) await slotGate; } }));
-vi.mock('../lifecycle.js', () => ({ switchToConfig: vi.fn(), postRestartRecovery: vi.fn() }));
+vi.mock('../lifecycle.js', () => ({ switchToConfig: vi.fn(), postRestartRecovery: vi.fn(), withPageBusy: (fn) => fn() }));
 vi.mock('../tray.js', () => ({ updateTrayMenu: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../cache.js', () => ({
     getSettingsCached: vi.fn(async () => ({ ...settings })),
@@ -26,7 +26,8 @@ vi.mock('../cache.js', () => ({
 }));
 
 import { COMMANDS } from '@zephyr/shared';
-import { invoke } from '../../api.js';
+import { invoke, restartCore } from '../../api.js';
+import { appStore } from '../state.js';
 import { initSubscriptionSettings, createDownloadGate, _subUpdateStateForTests } from './subscriptions.js';
 
 const names = (/** @type {HTMLElement} */ list) => [...list.querySelectorAll('[data-config-name]')].map(c => /** @type {HTMLElement} */ (c).dataset.configName);
@@ -125,6 +126,40 @@ describe('subscription update guards', () => {
         await vi.waitFor(() => expect(_subUpdateStateForTests.updating.has('b.yaml')).toBe(false));
         expect(_subUpdateStateForTests.followUp.size).toBe(0);
         expect(downloads).toHaveLength(2);
+        configs.splice(0, configs.length, ...saved);
+        ctl.destroy();
+    });
+
+    it('restarts the core for the updated current profile only once the network lock is free, and holds it meanwhile', async () => {
+        const subs = [{ name: 'a.yaml', url_display: 'https://x/sub' }];
+        const saved = configs.splice(0, configs.length, ...subs);
+        let downloaded = false;
+        vi.mocked(invoke).mockImplementation(async (/** @type {string} */ cmd) => {
+            if (cmd === COMMANDS.DOWNLOAD_SUB) { downloaded = true; return null; }
+            if (String(cmd).includes('list_configs')) return subs;
+            if (String(cmd).includes('settings')) return { ...settings };
+            return null;
+        });
+        /** @type {boolean[]} */
+        const lockDuringRestart = [];
+        vi.mocked(restartCore).mockReset().mockImplementation(async () => { lockDuringRestart.push(appStore.get('isNetworkUpdating')); return /** @type {any} */ ({}); });
+        const list = document.createElement('div');
+        list.id = 'configs-list';
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        await ctl.renderConfigs(true);
+        // A core update holds the lock while this download finishes.
+        appStore.set('isNetworkUpdating', true);
+        const btn = /** @type {HTMLButtonElement} */ ([...list.querySelectorAll('[data-config-name="a.yaml"] .sub-action-btn')]
+            .find((b) => /update/i.test(b.getAttribute('aria-label') || '')));
+        btn.click();
+        await vi.waitFor(() => expect(downloaded).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        expect(restartCore).not.toHaveBeenCalled();
+        appStore.set('isNetworkUpdating', false);
+        await vi.waitFor(() => expect(restartCore).toHaveBeenCalledTimes(1), { timeout: 2000 });
+        expect(lockDuringRestart).toEqual([true]);
+        await vi.waitFor(() => expect(appStore.get('isNetworkUpdating')).toBe(false));
         configs.splice(0, configs.length, ...saved);
         ctl.destroy();
     });

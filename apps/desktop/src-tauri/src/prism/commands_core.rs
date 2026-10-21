@@ -253,6 +253,9 @@ pub async fn prism_rebuild(
     };
 
     tokio::task::spawn_blocking(move || {
+        // Captures the core's answer to the reload `ext.apply` triggers
+        // (set by `ZephyrPrismHost::apply_config` on this thread).
+        let status_guard = super::host::HttpStatusGuard::enter();
         // Step 1: Write the original profile config to run_config.yaml (clean base),
         // then re-inject secret & external-controller (prepare_runtime_config does both).
         {
@@ -279,7 +282,21 @@ pub async fn prism_rebuild(
         let result = ext.apply(opts)?;
         drop(lock);
 
-        serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))
+        let mut value =
+            serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))?;
+        // Whether the core took the rebuilt config: true / false (refused or
+        // did not answer), or null when no reload was sent. `ApplyResult` does not
+        // carry it, so a caller could not tell a rejected reload from success.
+        let hot_reload_success = status_guard
+            .take()
+            .map(crate::network_coordinator::is_http_success);
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "hot_reload_success".to_owned(),
+                serde_json::json!(hot_reload_success),
+            );
+        }
+        Ok(value)
     })
     .await
     .map_err(|e| format!("Task join failed: {e}"))?

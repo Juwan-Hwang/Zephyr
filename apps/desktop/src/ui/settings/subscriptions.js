@@ -57,6 +57,28 @@ async function acquireNetworkLock() {
     }
 }
 
+/**
+ * Restart the core on a profile whose file just changed, then run recovery,
+ * holding isNetworkUpdating like every other restart: a download that ends
+ * during a core update or a profile switch waits for it instead of
+ * restarting the core underneath it.
+ * @param {string} name
+ * @param {string[]} customArgs
+ */
+async function restartUpdatedProfile(name, customArgs) {
+    while (!(await acquireNetworkLock())) { /* keep waiting */ }
+    try {
+        abortLatencyTests();
+        await restartCore(name, customArgs);
+        const recovery = await postRestartRecovery(name);
+        if (recovery?.failed) {
+            showNotification(tr('restartRecoveryWarn') || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        }
+    } finally {
+        appStore.set('isNetworkUpdating', false);
+    }
+}
+
 const normalizeConfigName = (/** @type {string | null | undefined} */ configName) => typeof configName === 'string' ? configName.toLowerCase().replace(/\.(ya?ml)$/i, '') : '';
 
 /**
@@ -330,12 +352,10 @@ async function downloadSubscription(name, userAgent = '') {
     const settings = await getSettingsCached();
     // No last_config means the core runs the default config.yaml.
     if (normalizeConfigName(currentProfile(settings, 'config.yaml')) === normalizeConfigName(name)) {
-        abortLatencyTests();
         // The file is updated at this point: a failed restart is its own warning,
         // not a failed download (the card would otherwise keep "Update failed").
         try {
-            await restartCore(name, settings.custom_args || []);
-            await postRestartRecovery(name);
+            await restartUpdatedProfile(name, settings.custom_args || []);
         } catch (restartErr) {
             rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
             showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
@@ -833,10 +853,7 @@ export function initSubscriptionSettings({
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = currentProfile(subSettings, 'config.yaml');
                 if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
-                    abortLatencyTests();
-                    const customArgs = subSettings.custom_args || [];
-                    await restartCore(savedConfigName, customArgs);
-                    await postRestartRecovery(savedConfigName);
+                    await restartUpdatedProfile(savedConfigName, subSettings.custom_args || []);
                 } else if (appStore.get('noSubscription')) {
                     // The first subscription: nothing is loaded yet, so start using it
                     // (otherwise the empty state stays up after adding it). It is saved
@@ -951,9 +968,7 @@ export function initSubscriptionSettings({
                 const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
 
                 if (isCurrentConfigUpdated) {
-                    abortLatencyTests();
-                    await restartCore(currentConfig, customArgs);
-                    await postRestartRecovery(currentConfig);
+                    await restartUpdatedProfile(currentConfig, customArgs);
                 }
 
                 if (failCount === 0) {

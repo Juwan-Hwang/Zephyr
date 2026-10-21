@@ -501,7 +501,13 @@ async function toggleWindow() {
     try {
         const win = getCurrentWindow();
         const visible = await win.isVisible();
-        if (visible) { await win.hide(); } else { await win.show(); await win.setFocus(); }
+        if (visible) {
+            await win.hide();
+        } else {
+            // Through the backend, like the tray: it also clears the mark a
+            // lightweight-mode close left, so this page is not released later.
+            await invoke(COMMANDS.SHOW_MAIN_WINDOW);
+        }
     } catch (err) {
         apiLogger.warn('[GlobalShortcut] Failed to toggle window:', err);
     }
