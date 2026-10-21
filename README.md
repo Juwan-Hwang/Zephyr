@@ -355,6 +355,17 @@ Zephyr 采用了纵深防御策略：SSRF 防护、脚本沙箱、更新完整�
       <sub>Windows 发布版本经 SignPath Foundation 证书数字签名。详见 <a href="CODE_SIGNING_POLICY.md">Code Signing Policy</a>。</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://mergestorm.ai/?ref=zephyr">
+        <img src="https://avatars.githubusercontent.com/u/290165854?s=200&v=4" width="50" alt="Mergestorm">
+      </a>
+    </td>
+    <td valign="middle">
+      Free AI code review provided by <a href="https://mergestorm.ai/?ref=zephyr">Mergestorm</a>.<br>
+      <sub>所有拉取请求在合并前由 Mergestorm 自动评审。</sub>
+    </td>
+  </tr>
 </table>
 
 ---

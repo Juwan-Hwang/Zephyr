@@ -354,6 +354,17 @@ This project uses [MIT License](LICENSE).
       <sub>Windows release binaries are digitally signed via SignPath Foundation. See <a href="CODE_SIGNING_POLICY.md">Code Signing Policy</a>.</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://mergestorm.ai/?ref=zephyr">
+        <img src="https://avatars.githubusercontent.com/u/290165854?s=200&v=4" width="50" alt="Mergestorm">
+      </a>
+    </td>
+    <td valign="middle">
+      Free AI code review provided by <a href="https://mergestorm.ai/?ref=zephyr">Mergestorm</a>.<br>
+      <sub>Every pull request is reviewed by Mergestorm before it merges.</sub>
+    </td>
+  </tr>
 </table>
 
 ---
