@@ -91,6 +91,10 @@ pub fn smart_config_save(
 
     let config: SmartConfig =
         serde_json::from_value(config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
+    // Validate what is being saved, not the file it replaces.
+    config
+        .validate()
+        .map_err(|errors| format!("Config validation failed: {}", errors.join("; ")))?;
     let mut toml_str =
         toml::to_string_pretty(&config).map_err(|e| format!("Failed to serialize to TOML: {e}"))?;
 

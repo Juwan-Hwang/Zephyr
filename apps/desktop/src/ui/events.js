@@ -218,4 +218,6 @@ export const Events = Object.freeze({
     PRISM_APPLIED: 'prism-applied',
     PRISM_FAILED: 'prism-failed',
     FAILOVER_POLICY_CHANGED: 'failover-policy-changed',
+    /** The smart engine's `enabled` was read from the engine (fires even when unchanged). */
+    SMART_ENABLED_SYNCED: 'smart-enabled-synced',
 });

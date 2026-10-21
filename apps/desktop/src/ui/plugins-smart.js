@@ -459,17 +459,9 @@ function initSmartPage() {
     // Save smart config (with validation)
     const saveSmartBtn = document.getElementById('smart-save-config-btn');
     if (saveSmartBtn) {
-        saveSmartBtn.addEventListener('click', async () => {
-            // Validate before save
-            try {
-                const errors = await prism.smartValidateConfig();
-                if (errors.length > 0) {
-                    showNotification(`Config validation failed: ${errors.join('; ')}`, 'error');
-                    return;
-                }
-            } catch {}
-            await saveSmartConfig();
-        });
+        // The save validates the values it writes (checking smart.toml first
+        // would judge the old values, and block saving a fix to them).
+        saveSmartBtn.addEventListener('click', () => saveSmartConfig());
     }
 
     // Clear history
@@ -554,8 +546,18 @@ async function loadSmartConfig() {
 }
 
 async function saveSmartConfig() {
+    // The form as it was when Save was clicked: the write may wait in the queue,
+    // and edits made meanwhile belong to the next save.
+    const form = {
+        latency_p90: getNumberInput('smart-weight-latency', 0.4),
+        success_rate: getNumberInput('smart-weight-success', 0.4),
+        stability: getNumberInput('smart-weight-stability', 0.2),
+        half_life_hours: getNumberInput('smart-decay-half-life', 1.0),
+        base_interval_secs: getNumberInput('smart-base-interval', 300),
+        adaptive: getCheckboxValue('smart-adaptive-toggle'),
+    };
     try {
-        // Read-modify-write in the auto-switch queue, so neither overwrites the other's enabled state.
+        // Read-modify-write in the switches' queue, so neither overwrites the other's enabled state.
         await queueSmartConfigWrite(async () => {
             // Fetch current config to preserve the enabled state. A failed read aborts the
             // save (and is reported) instead of writing enabled = false.
@@ -570,16 +572,16 @@ async function saveSmartConfig() {
                     type: score.type || 'ema',
                     weights: {
                         ...score.weights,
-                        latency_p90: getNumberInput('smart-weight-latency', 0.4),
-                        success_rate: getNumberInput('smart-weight-success', 0.4),
-                        stability: getNumberInput('smart-weight-stability', 0.2),
+                        latency_p90: form.latency_p90,
+                        success_rate: form.success_rate,
+                        stability: form.stability,
                     },
-                    decay: { ...score.decay, half_life_hours: getNumberInput('smart-decay-half-life', 1.0) },
+                    decay: { ...score.decay, half_life_hours: form.half_life_hours },
                 },
                 scheduler: {
                     ...currentConfig.scheduler,
-                    base_interval_secs: getNumberInput('smart-base-interval', 300),
-                    adaptive: getCheckboxValue('smart-adaptive-toggle'),
+                    base_interval_secs: form.base_interval_secs,
+                    adaptive: form.adaptive,
                 },
             });
         });
@@ -615,13 +617,16 @@ async function loadFailoverPolicy() {
 
 async function saveFailoverPolicy() {
     try {
-        await prism.failoverSetPolicy({
+        const policy = {
             enabled: getCheckboxValue('failover-enabled-toggle'),
             threshold: getNumberInput('failover-threshold', 3),
             cooldownSecs: getNumberInput('failover-cooldown', 60),
             fallbackGroup: getStringInput('failover-fallback-group') || undefined,
-        });
-        // The settings page's auto-switch shows off while this policy is off.
+        };
+        // Same queue as the settings switch, which reads the policy and writes it
+        // back: neither may land between the other's read and write.
+        await queueSmartConfigWrite(() => prism.failoverSetPolicy(policy));
+        // The settings page's auto-switch (failover) shows off while this policy is off.
         Bus.emit(Events.FAILOVER_POLICY_CHANGED);
         showNotification('Failover policy saved', 'success');
     } catch (e) { showNotification(String(e), 'error'); }

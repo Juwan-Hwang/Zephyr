@@ -14,6 +14,7 @@ import { apiLogger } from '../utils/logger.js';
 import { appStore } from './state.js';
 import { switchToConfig } from './lifecycle.js';
 import { invalidateConfigsCache } from './cache.js';
+import { subDownloadSlot } from './settings/sub-download-gate.js';
 
 /** Same threshold Settings uses before telling the user the lock is still held. */
 const BUSY_WARN_AFTER_MS = 15000;
@@ -96,6 +97,7 @@ async function handleInstallConfig(url, name) {
 
     try {
         /** @type {{ name?: string } | null} */
+        await subDownloadSlot();
         const saved = await invoke(COMMANDS.DOWNLOAD_SUB, { url, name: displayName });
         invalidateConfigsCache();
         showNotification(t.notifSubSuccess || 'Subscription added successfully', 'success');
