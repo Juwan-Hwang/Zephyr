@@ -24,7 +24,7 @@ vi.mock('../cache.js', () => ({
 
 import { COMMANDS } from '@zephyr/shared';
 import { invoke } from '../../api.js';
-import { initSubscriptionSettings } from './subscriptions.js';
+import { initSubscriptionSettings, createDownloadGate } from './subscriptions.js';
 
 const names = (/** @type {HTMLElement} */ list) => [...list.querySelectorAll('[data-config-name]')].map(c => /** @type {HTMLElement} */ (c).dataset.configName);
 
@@ -57,5 +57,25 @@ describe('subscription card reorder', () => {
         a.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true }));
         expect(names(list)).toEqual(['a.yaml', 'b.yaml', 'c.yaml']);
         ctl.destroy();
+    });
+});
+
+describe('subscription download gate', () => {
+    it('spaces downloads past the backend limit and lets the first go at once', async () => {
+        let now = 1_000_000;
+        const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+        /** @type {number[]} */
+        const waits = [];
+        const gate = createDownloadGate(5000, async (ms) => { waits.push(ms); now += ms; });
+        await gate();
+        expect(waits).toEqual([]);
+        now += 1000;
+        // Two follow-ups queued together: each waits for its own slot.
+        await Promise.all([gate(), gate()]);
+        expect(waits).toEqual([4000, 5000]);
+        now += 6000;
+        await gate();
+        expect(waits).toEqual([4000, 5000]);
+        spy.mockRestore();
     });
 });

@@ -25,6 +25,7 @@ import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGrou
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
+import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
@@ -441,14 +442,10 @@ async function backfillSmartScores(container) {
         // Check smart enabled state directly (CSS var may not be set yet due to async init)
         let smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
         if (!smartEnabled) {
-            try {
-                const config = await smartConfig();
-                smartEnabled = !!(/** @type {any} */ (config)).enabled;
-                // Sync CSS variable so badge visibility stays consistent
-                if (smartEnabled) {
-                    document.documentElement.style.setProperty('--smart-enabled', '1');
-                }
-            } catch { /* not enabled */ }
+            // Same path as a config reload: smart.toml without `enabled` uses the
+            // fallback, the fallback follows the engine, scheduled tests left on
+            // without a timer start, and the settings switches show it.
+            try { smartEnabled = await syncSmartFromEngine(); } catch { /* not enabled */ }
         }
         if (!smartEnabled) return;
 
@@ -3098,20 +3095,31 @@ export async function renderProxies() {
 
 // --- Smart UI visibility sync ---
 
-/** Sync the --smart-enabled CSS var with backend config. */
-async function syncSmartUiVisibility() {
-    let enabled;
-    try {
-        const config = await smartConfig();
-        // Backend only returns `enabled` if smart.toml has the key.
-        // Fallback to localStorage for migration scenarios.
-        enabled = (/** @type {any} */ (config)).enabled ?? localStorage.getItem('smartEnabled') === 'true';
-    } catch {
-        // Fallback to localStorage on error
-        enabled = localStorage.getItem('smartEnabled') === 'true';
-    }
+/**
+ * Show scoring as the engine has it, in the switches' write queue (a read taken
+ * before a switch's save can't undo it), and tell the settings switches.
+ * @returns {Promise<boolean>} whether scoring shows on
+ */
+function syncSmartFromEngine() {
+    return queueSmartConfigWrite(async () => {
+        const { on, fromEngine } = await syncSmartShown({
+            getSmartConfig: smartConfig,
+            startAutoTest: () => _autoTest.start(),
+            stopAutoTest: () => _autoTest.stop(),
+        });
+        // The settings switches show what the engine has; a localStorage guess
+        // after a failed read is not passed on.
+        if (fromEngine) Bus.emit(Events.SMART_ENABLED_SYNCED, { enabled: on });
+        return on;
+    });
+}
 
-    document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+/**
+ * Sync the --smart-enabled CSS var with backend config. Runs in the switches'
+ * write queue, so a read taken before a switch's save can't undo it.
+ */
+async function syncSmartUiVisibility() {
+    const enabled = await syncSmartFromEngine();
 
     // Reset sort mode to default if smart is disabled but current mode is smart
     if (!enabled && appStore.get('currentSortMode') === 'smart') {
@@ -3251,17 +3259,64 @@ appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 /** Shortest gap between automatic latency passes (each one measures every node). */
 const AUTO_TEST_MIN_INTERVAL_SECS = 60;
 
+/**
+ * Seconds until the next automatic pass: adaptive between the engine's bounds,
+ * by the average score of the nodes just tested.
+ * @returns {Promise<number>}
+ */
+async function nextAutoTestSecs() {
+    const config = /** @type {any} */ (await smartConfig().catch(() => null));
+    // smart.toml keeps the intervals under [scheduler]. A pass measures every node,
+    // so never start one more often than once a minute (the old plugin page saved
+    // a 10 s minimum that was never read before).
+    const minInterval = Math.max(AUTO_TEST_MIN_INTERVAL_SECS, Number(config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60) || 60);
+    const maxInterval = Math.max(minInterval, Number(config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600) || 600);
+    // Use average score of all tested nodes as network quality
+    const rankings = await smartRank().catch(() => []);
+    const avgScore = rankings.length > 0
+        ? rankings.reduce((sum, r) => sum + (r.score || 0), 0) / rankings.length
+        : 50;
+    return smartNextInterval(avgScore / 100, minInterval, maxInterval).catch(() => maxInterval);
+}
+
+/**
+ * One node of a scheduled test pass: feeds the score batcher and failover.
+ * @param {string} name
+ * @param {() => boolean} stopped  the pass was stopped (scoring or scheduled tests turned off)
+ * @returns {Promise<boolean>} false when the pass was stopped or aborted meanwhile and its result dropped
+ */
+async function autoTestProbe(name, stopped) {
+    try {
+        // testProxy already handles abort internally and returns -1 on cancellation.
+        // The signal this test runs under: a later reset swaps in a fresh one.
+        const signal = getLatencyTestSignal();
+        const delay = await testProxy(name);
+        const success = delay > 0 && delay < 999999;
+        // An aborted test (-1: a manual test or a switch took over) measured
+        // nothing: it must not count as a failure against the node.
+        if (stopped() || signal.aborted) return false;
+        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+            _smartBatcher.push(name, success ? delay : 999999, success);
+        }
+        // Report to failover engine if enabled
+        if (appStore.get('failoverEnabled')) {
+            void reportFailover(name, success);
+        }
+    } catch { /* skip individual failures */ }
+    return true;
+}
+
 const _autoTest = {
     /** @type {number|null} */
     _timer: null,
     _running: false,
+    /** Bumped by stop(): a pass already running ends at its next node. */
+    _gen: 0,
 
     /** Check whether auto-test is enabled (setting + smart enabled). */
     _isEnabled() {
-        const autoTest = localStorage.getItem('smartAutoTest');
         const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
-        const enabled = autoTest === 'true' && cssEnabled === '1';
-        return enabled;
+        return readAutoTestEnabled() && cssEnabled === '1';
     },
 
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
@@ -3269,6 +3324,8 @@ const _autoTest = {
         if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
         resetLatencyTestController();  // Reset controller before starting
         this._running = true;
+        const gen = this._gen;
+        const stopped = () => gen !== this._gen;
         try {
             // Pass the user's currently-viewed group (same fix as test button handler)
             const proxyGroupsResult = await fetchProxyGroupsShared({
@@ -3289,23 +3346,13 @@ const _autoTest = {
             let idx = 0;
             const workers = Array.from({ length: concurrency }, async () => {
                 while (idx < validProxies.length) {
-                    if (getLatencyTestSignal().aborted) break;
+                    if (getLatencyTestSignal().aborted || stopped()) break;
                     const name = validProxies[idx++];
-                    try {
-                        // testProxy already handles abort internally and returns -1 on cancellation
-                        const delay = await testProxy(name);
-                        const success = delay > 0 && delay < 999999;
-                        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
-                            _smartBatcher.push(name, success ? delay : 999999, success);
-                        }
-                        // Report to failover engine if enabled
-                        if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
-                            void reportFailover(name, success);
-                        }
-                    } catch { /* skip individual failures */ }
+                    if (!(await autoTestProbe(name, stopped))) break;
                 }
             });
             await Promise.all(workers);
+            if (stopped()) return;
 
             // Wait for all pending smart score IPC updates before ranking
             if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
@@ -3313,24 +3360,16 @@ const _autoTest = {
             }
 
             // Schedule next cycle using adaptive interval
-            const config = /** @type {any} */ (await smartConfig().catch(() => null));
-            // smart.toml keeps the intervals under [scheduler]. A pass measures every node,
-            // so never start one more often than once a minute (the old plugin page saved
-            // a 10 s minimum that was never read before).
-            const minInterval = Math.max(AUTO_TEST_MIN_INTERVAL_SECS, Number(config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60) || 60);
-            const maxInterval = Math.max(minInterval, Number(config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600) || 600);
-            // Use average score of all tested nodes as network quality
-            const rankings = await smartRank().catch(() => []);
-            const avgScore = rankings.length > 0
-                ? rankings.reduce((sum, r) => sum + (r.score || 0), 0) / rankings.length
-                : 50;
-            const nextSecs = await smartNextInterval(avgScore / 100, minInterval, maxInterval).catch(() => maxInterval);
+            const nextSecs = await nextAutoTestSecs();
+            // Stopped (and maybe restarted) during the reads above: the timer is not ours to set.
+            if (stopped()) return;
             this._scheduleNext(nextSecs * 1000);
         } catch {
             // On error, retry after a longer delay
-            this._scheduleNext(300_000);
+            if (!stopped()) this._scheduleNext(300_000);
         } finally {
-            this._running = false;
+            // A stopped pass leaves the flag to the one that may have started since.
+            if (!stopped()) this._running = false;
         }
     },
 
@@ -3365,6 +3404,7 @@ const _autoTest = {
     /** Stop and disable the auto-test scheduler. */
     stop() {
         this._stop();
+        this._gen++;
         this._running = false;
     },
 };
