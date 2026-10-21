@@ -24,6 +24,7 @@ pub mod minisign_verify;
 pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
+pub mod process_icon;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -1995,6 +1996,7 @@ invalidate_heartbeat(window.app_handle());
             get_core_version,
             get_core_uptime,
             exempt_uwp_apps,
+            process_icon::get_process_icon,
             read_config_file,
             write_config_file,
             open_config_folder,
@@ -2296,7 +2298,7 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
     }
 
     // Read the last-known core port + config from MihomoState.
-    let (port, config_path, custom_args) = {
+    let (port, config_path, custom_args, started_at) = {
         let state = app.state::<MihomoState>();
         let guard = state
             .0
@@ -2306,6 +2308,7 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
             guard.last_port(),
             guard.last_config_path().map(str::to_owned),
             guard.last_custom_args().map(<[String]>::to_vec),
+            guard.started_at(),
         )
     };
 
@@ -2363,6 +2366,28 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         return;
     }
 
+    // A restart made while the probe ran (a profile switch or a restart of
+    // the same profile from the page) already replaced the core. Every start
+    // sets a new start time; the restart below checks it again once it holds
+    // the start lock, so a start still running now is not undone either.
+    let superseded = || {
+        crate::emit_info!(
+            System,
+            SYS_RESUMED_CORE_HEALTHY,
+            "Core was restarted while it was checked after resume — no action needed"
+        );
+    };
+    let now = app
+        .state::<MihomoState>()
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .started_at();
+    if now != started_at {
+        superseded();
+        return;
+    }
+
     // Core is unresponsive — restart it.
     // start_core_inner already handles stopping the old core process
     // via spawn_blocking internally, so no manual stop is needed here.
@@ -2378,21 +2403,34 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
     let state = app.state::<MihomoState>();
     // On success, start_core_inner already notifies the coordinator with a
     // Manual event, so no duplicate notification is needed here.
-    if let Err(e) = core_manager::core::core_process::start_core_inner(
+    match Box::pin(core_manager::core::core_process::start_core_with(
         app.clone(),
         state,
         config,
         args,
         None,
         Some(true), // Force restart: the old process may still be alive but unresponsive
-    )
+        Some(started_at),
+    ))
     .await
     {
-        crate::emit_error!(
+        // The page follows it like any restart it made itself: the new
+        // secret, overrides re-applied, delays of the old instance dropped.
+        Ok(result) => crate::backend_event::emit_to_main(
+            app,
+            "core-restarted-after-resume",
+            serde_json::json!({
+                "port": result.port,
+                "secret": result.secret,
+                "active_config": result.active_config,
+            }),
+        ),
+        Err(e) if e == core_manager::core::core_process::CORE_START_SUPERSEDED => superseded(),
+        Err(e) => crate::emit_error!(
             System,
             SYS_RESUMED_CORE_RESTART,
             "Failed to restart core after resume: {e}"
-        );
+        ),
     }
 }
 
