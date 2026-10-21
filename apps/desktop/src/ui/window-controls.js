@@ -7,41 +7,13 @@
  */
 
 import { getCurrentWindow, invoke, listen } from '../api.js';
+import { COMMANDS } from '@zephyr/shared';
+import { appStore } from './state.js';
 import { registerCleanup } from '../utils/cleanup-registry.js';
 import { uiLogger } from '../utils/logger.js';
-import { getSettingsCached } from './cache.js';
-import { sendOSNotification } from './os-notification.js';
-import { t } from '../i18n.js';
 
-const TRAY_HINT_KEY = 'zephyr.trayHintShown';
-
-/** Longest the close button waits for the tray hint before closing anyway. */
-const TRAY_HINT_WAIT_MS = 800;
-
-/** In-flight hint attempt, shared so repeated close clicks send it at most once. */
-/** @type {Promise<void> | null} */
-let _trayHintPending = null;
-
-/**
- * The first time the close button only hides the window (close-to-tray), say once,
- * via a system notification, that Zephyr keeps running in the tray.
- * @returns {Promise<void>}
- */
-function maybeShowTrayHint() {
-    if (_trayHintPending !== null) return _trayHintPending;
-    _trayHintPending = (async () => {
-        try {
-            if (localStorage.getItem(TRAY_HINT_KEY)) return;
-            const settings = await getSettingsCached();
-            if (!settings?.close_to_tray) return;
-            // Only remember the hint once the OS took it, so a failed send retries next close.
-            if (await sendOSNotification('Zephyr', t('trayStillRunning'))) localStorage.setItem(TRAY_HINT_KEY, '1');
-        } catch { /* non-critical */ }
-    })().finally(() => {
-        _trayHintPending = null;
-    });
-    return _trayHintPending;
-}
+/** How long the page stays marked busy after the network lock is released. */
+export const PAGE_IDLE_GRACE_MS = 600;
 
 /**
  * Initialize window control event listeners.
@@ -53,16 +25,45 @@ export function initWindowControls() {
     const closeBtn = document.getElementById('close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-            // Lightweight mode destroys the WebView on close: give the hint a
-            // moment to be sent and remembered, but never hold the close up for long.
-            const hint = Promise.race([maybeShowTrayHint(), new Promise((r) => setTimeout(r, TRAY_HINT_WAIT_MS))]);
             // close() can throw synchronously when IPC is missing; the
-            // .then wrapper turns that into a rejection too.
-            hint
+            // Promise wrapper turns that into a rejection too.
+            Promise.resolve()
                 .then(() => getCurrentWindow().close())
                 .catch((err) => uiLogger.warn('Failed to close window', err));
         });
     }
+
+    // While the page holds the network lock (a subscription switch, a TUN
+    // toggle, recovery after a restart), a lightweight-mode close must only
+    // hide it: destroying the page would drop the rest of that work.
+    // A fresh page starts idle, which also clears a mark a destroyed one left.
+    const sendBusy = (/** @type {boolean} */ busy) => {
+        Promise.resolve()
+            .then(() => invoke(COMMANDS.SET_PAGE_BUSY, { busy }))
+            .catch(() => { /* older backend or non-Tauri: lightweight close as before */ });
+    };
+    // Going idle is reported a little late: work queued behind the lock
+    // (acquireNetworkLock polls every 200 ms) takes it on its next poll, and
+    // a close in that gap would drop it.
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let idleTimer = null;
+    const reportBusy = (/** @type {boolean} */ busy) => {
+        if (idleTimer !== null) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+        }
+        if (busy) {
+            sendBusy(true);
+            return;
+        }
+        idleTimer = setTimeout(() => {
+            idleTimer = null;
+            if (!appStore.get('isNetworkUpdating')) sendBusy(false);
+        }, PAGE_IDLE_GRACE_MS);
+    };
+    sendBusy(!!appStore.get('isNetworkUpdating'));
+    registerCleanup(/** @type {() => void} */ (appStore.subscribe('isNetworkUpdating', (/** @type {unknown} */ v) => reportBusy(!!v))));
+    registerCleanup(() => { if (idleTimer !== null) clearTimeout(idleTimer); });
 
     const coreLoadingIcon = document.getElementById('core-loading-icon');
     if (coreLoadingIcon) {

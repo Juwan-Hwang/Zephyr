@@ -62,8 +62,8 @@ use tauri_plugin_autostart::Builder as AutostartBuilder;
 use tauri_plugin_window_state::WindowExt as _;
 use tray::{change_tray_icon, init_tray, update_tray_full_menu, TrayState};
 use updater::{
-    get_latest_client_version, get_latest_client_versions, get_latest_version, update_client,
-    update_core, update_geo_data,
+    end_update_hold, get_latest_client_version, get_latest_client_versions, get_latest_version,
+    set_page_busy, update_client, update_core, update_geo_data,
 };
 use uwp_loopback::exempt_uwp_apps;
 
@@ -672,8 +672,14 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let was_visible = window.is_visible().unwrap_or(true);
         if is_webview_alive(app) {
-            let _ = window.show();
+            let shown = window.show().is_ok();
             let _ = window.set_focus();
+            // Shown again, focused or not: a close the update hold turned
+            // into a hide no longer stands. Still hidden (show failed), it
+            // does, and the page is released when the hold ends.
+            if shown {
+                updater::window_reopened();
+            }
             // Only apply the grace period when the window was previously
             // hidden — if it was already visible, the heartbeat is current and
             // artificially aging it could cause false-positive recreation.
@@ -702,8 +708,11 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let was_visible = window.is_visible().unwrap_or(true);
         if is_webview_alive(app) {
-            let _ = window.show();
+            let shown = window.show().is_ok();
             let _ = window.set_focus();
+            if shown {
+                updater::window_reopened();
+            }
             // Same conditional grace period as the fast path above.
             if !was_visible {
                 reset_heartbeat_grace(app);
@@ -728,8 +737,11 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
             // `recreate_main_window()` internally calls `touch_heartbeat()`
             // which clears the `i64::MIN` sentinel, preventing a queued
             // `recreate_window` closure from destroying this new window.
-            let _ = window.show();
+            let shown = window.show().is_ok();
             let _ = window.set_focus();
+            if shown {
+                updater::window_reopened();
+            }
         }
         Err(e) => {
             emit_error!(
@@ -803,6 +815,7 @@ fn save_settings(
     // flip the flag with no transform, leaving the flag and the profile files
     // disagreeing.
     next.encrypt_configs = guard.encrypt_configs;
+    keep_backend_owned(&mut next, &guard);
     let snapshot = next.clone();
     // Persist before publishing the snapshot in memory, so a failed write cannot
     // leave memory holding settings that `settings.json` does not (and vice
@@ -812,6 +825,24 @@ fn save_settings(
     *guard = next;
     drop(guard);
     Ok(())
+}
+
+/// Keep the values that only dedicated commands write.
+///
+/// `update_proxy_selection`, `update_primary_group_preference`,
+/// `update_last_config`, `update_subscription_user_agent` and a profile rename
+/// or delete change these under the settings lock; the frontend never writes
+/// them through a full save. A full snapshot read before such a write would
+/// otherwise put the older value back and lose the user's latest proxy choice,
+/// the profile they just switched to, or the subscription User-Agent.
+fn keep_backend_owned(next: &mut Settings, current: &Settings) {
+    next.last_config.clone_from(&current.last_config);
+    next.last_proxy_selection
+        .clone_from(&current.last_proxy_selection);
+    next.primary_group_preference
+        .clone_from(&current.primary_group_preference);
+    next.subscription_user_agent
+        .clone_from(&current.subscription_user_agent);
 }
 
 /// Serializes the `encrypt_configs` profile transform *and* every profile write.
@@ -1939,7 +1970,8 @@ pub fn run() {
 
                     if close_to_tray {
                         api.prevent_close();
-                        if lightweight_mode {
+                        // An update still running in the page keeps it alive.
+                        if lightweight_mode && !updater::keep_webview_on_close() {
                             // Lightweight mode: destroy the WebView to free memory.
                             // The app stays alive in the tray because we prevent
                             // exit on ExitRequested. Tray click recreates the window.
@@ -1984,12 +2016,18 @@ invalidate_heartbeat(window.app_handle());
                 // ThemeChanged fires for it. That Settings visit takes
                 // focus away from the main window; re-check the glyph when
                 // the window regains focus.
-                #[cfg(target_os = "windows")]
                 tauri::WindowEvent::Focused(true) if window.label() == "main" => {
-                    let app = window.app_handle().clone();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        crate::tray::refresh_tray_icon(&app);
-                    });
+                    // Reopened: a lightweight-mode close the update hold
+                    // turned into a hide no longer stands, so a later hide
+                    // (the global shortcut) is not released as that close.
+                    updater::window_reopened();
+                    #[cfg(target_os = "windows")]
+                    {
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            crate::tray::refresh_tray_icon(&app);
+                        });
+                    }
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     // Off the main thread: `save_profile_file` waits on the
@@ -2064,6 +2102,8 @@ invalidate_heartbeat(window.app_handle());
             rename_config,
             get_latest_version,
             update_core,
+            end_update_hold,
+            set_page_busy,
             enable_sysproxy,
             disable_sysproxy,
             get_sys_proxy,
@@ -2529,6 +2569,43 @@ mod tests {
     use super::*;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn full_save_keeps_choices_written_since_its_read() {
+        let mut current = Settings::default();
+        current
+            .last_proxy_selection
+            .insert("a.yaml".to_owned(), "new".to_owned());
+        current
+            .primary_group_preference
+            .insert("a.yaml".to_owned(), "Main".to_owned());
+        let mut next = Settings {
+            ui_scale: 1.25,
+            ..Settings::default()
+        };
+        current.last_config = Some("b.yaml".to_owned());
+        next.last_proxy_selection
+            .insert("a.yaml".to_owned(), "old".to_owned());
+        next.last_config = Some("a.yaml".to_owned());
+        current.subscription_user_agent = Some("clash-verge/v2".to_owned());
+        keep_backend_owned(&mut next, &current);
+        assert_eq!(next.last_config.as_deref(), Some("b.yaml"));
+        assert_eq!(
+            next.subscription_user_agent.as_deref(),
+            Some("clash-verge/v2")
+        );
+        assert_eq!(
+            next.last_proxy_selection.get("a.yaml").map(String::as_str),
+            Some("new")
+        );
+        assert_eq!(
+            next.primary_group_preference
+                .get("a.yaml")
+                .map(String::as_str),
+            Some("Main")
+        );
+        assert!((next.ui_scale - 1.25).abs() < f64::EPSILON);
+    }
 
     #[test]
     fn test_rate_limiter_allows_first_call() {
