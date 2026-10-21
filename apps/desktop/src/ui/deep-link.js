@@ -62,15 +62,33 @@ async function activateIfFirst(configName) {
  * @returns {Promise<() => Promise<void>>} Unlisten function
  */
 export async function initDeepLink() {
-    return listen('deep-link', async (/** @type {{ payload: DeepLinkPayload }} */ event) => {
-        const { action, url, name } = event.payload;
+    const unlisten = await listen('deep-link', (/** @type {{ payload: DeepLinkPayload }} */ event) => handleDeepLink(event.payload));
+    // Links that arrived while this page was loading (a launch with a link,
+    // or one forwarded while the window was being recreated) were held by
+    // the backend until now; from here on they come as events.
+    void handlePendingDeepLinks();
+    return unlisten;
+}
 
-        if (action === 'install-config') {
-            await handleInstallConfig(url, name);
-        } else {
-            apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+async function handlePendingDeepLinks() {
+    try {
+        /** @type {DeepLinkPayload[]} */
+        const pending = await invoke(COMMANDS.TAKE_PENDING_DEEP_LINKS);
+        for (const payload of Array.isArray(pending) ? pending : []) {
+            await handleDeepLink(payload);
         }
-    });
+    } catch (err) {
+        apiLogger.warn('[DeepLink] Could not handle links that arrived during startup', err);
+    }
+}
+
+/** @param {DeepLinkPayload} payload */
+async function handleDeepLink({ action, url, name }) {
+    if (action === 'install-config') {
+        await handleInstallConfig(url, name);
+    } else {
+        apiLogger.warn(`[DeepLink] Unknown action: ${action}`);
+    }
 }
 
 /**
