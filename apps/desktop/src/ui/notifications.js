@@ -5,7 +5,6 @@
  */
 
 import { createFocusTrap } from '../utils/focus-trap.js';
-import { markdownToHtml } from '../utils/markdown.js';
 import { sanitizeHtml } from '../utils/sanitize.js';
 import { translations } from '../i18n.js';
 import { appStore } from './state.js';
@@ -514,36 +513,4 @@ function openConfirmModal(title, message = '', options = {}) {
             // Escape handled by focus trap
         };
     });
-}
-
-// ---------------------------------------------------------------------------
-// Update notes modal (renders Markdown release notes)
-// ---------------------------------------------------------------------------
-
-/**
- * Show a modal with rendered Markdown release notes and confirm/cancel buttons.
- * Content is scrollable.
- * @param {string} title - Modal title
- * @param {string} releaseNotesMd - Raw Markdown release notes
- * @returns {Promise<boolean>} true if user confirmed
- */
-export async function showUpdateNotesModal(title, releaseNotesMd) {
-    const html = sanitizeHtml(markdownToHtml(releaseNotesMd || ''));
-    const customHtml = `<div class="space-y-1">${html}</div>`;
-
-    // Use isCustomContent=true for scrollable layout, but restore confirm/cancel buttons via onReady.
-    const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
-    const updateBtnText = t.update || 'Update';
-    // The update check runs in the background: wait for any dialog that is open
-    // (a confirmation, another modal) instead of being dropped as a cancel.
-    while (_modalOpen) await _modalReleased;
-    return showModal(title, '', '', true, customHtml, () => {
-        const confirmBtn = document.getElementById('modal-confirm');
-        const cancelBtn = document.getElementById('modal-cancel');
-        if (confirmBtn) {
-            confirmBtn.classList.remove('hidden');
-            confirmBtn.textContent = updateBtnText;
-        }
-        if (cancelBtn) cancelBtn.classList.remove('hidden');
-    }).then(result => !!result);
 }

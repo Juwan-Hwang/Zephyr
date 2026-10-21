@@ -495,11 +495,11 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="themeDesc">Auto / Light / Dark appearance</p>
                                     </div>
                                 </div>
-                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
-                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
-                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
+                                <div id="setting-theme-mode-container" class="seg-control w-[180px]" style="--seg-count: 3" role="group" data-i18n-aria-label="theme" aria-label="Theme">
+                                    <div id="setting-theme-mode-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="seg-btn" data-i18n="themeLight">Light</button>
+                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="seg-btn" data-i18n="themeAuto">Auto</button>
+                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="seg-btn" data-i18n="themeDark">Dark</button>
                                 </div>
                             </div>
 
@@ -560,11 +560,12 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
                                     </div>
                                 </div>
-                                <div class="seg-control relative grid grid-cols-4 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 w-[220px]" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
-                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">100%</button>
-                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">110%</button>
-                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">125%</button>
-                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">150%</button>
+                                <div id="setting-ui-scale-container" class="seg-control w-[220px]" style="--seg-count: 4" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
+                                    <div id="setting-ui-scale-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">100%</button>
+                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">110%</button>
+                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">125%</button>
+                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">150%</button>
                                 </div>
                             </div>
 
@@ -581,10 +582,10 @@
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="homePageModeDesc">Switch between minimal and console dashboard</p>
                                     </div>
                                 </div>
-                                <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageMinimal">Minimal</button>
-                                    <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageConsole">Console</button>
+                                <div id="setting-home-mode-container" class="seg-control w-[180px]" style="--seg-count: 2" role="group" data-i18n-aria-label="homePageMode" aria-label="Home Page Mode">
+                                    <div id="setting-home-mode-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="seg-btn" data-i18n="homePageMinimal">Minimal</button>
+                                    <button type="button" data-home-mode="console" aria-pressed="false" class="seg-btn" data-i18n="homePageConsole">Console</button>
                                 </div>
                             </div>
                         </div>
@@ -656,7 +657,7 @@
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z"/><path d="M16 8 2 22"/><path d="M17.5 15H9"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4c-7.5 0-13 5-13 13 2.8 0 5.3-.7 7.3-2L12 13l5.8-1.4C19.3 9.5 20 7 20 4z"/><path d="M3 21 16 8"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-lightweight-mode-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="lightweightMode">Lightweight Mode</p>
