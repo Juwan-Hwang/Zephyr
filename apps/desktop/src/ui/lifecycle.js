@@ -16,22 +16,23 @@ import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
 
 /**
- * 切换到指定配置（订阅）
- * @param {string} configName - 目标配置文件名
- * @param {string[]} [customArgs=[]] - 自定义核心参数
- * @returns {Promise<{secret: string, port: number, active_config: string|null, fallbackOccurred: boolean, actualConfig: string|null}>} coreResult
+ * Save the active profile. Resolves to the error instead of throwing it.
+ * @param {string} configName
+ * @returns {Promise<unknown>} null when saved
  */
-export async function switchToConfig(configName, customArgs = []) {
-  // 中止正在进行的延迟测试，让 mihomo 处于空闲状态以便更快 kill
-  abortLatencyTests();
-  // 关闭所有连接以解除 mihomo 的请求队列阻塞（给后续 fetchProxyGroups 解堵）
+async function persistActiveConfig(configName) {
   try {
-    await closeAllConnections();
-  } catch (e) {
-    apiLogger.warn('[switchToConfig] closeAllConnections failed:', e);
+    await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName });
+    return null;
+  } catch (err) {
+    return err;
   }
+}
 
-  // 切换前保存当前代理选择
+/**
+ * 切换前保存当前配置的代理选择（失败只记日志）
+ */
+async function saveCurrentSelection() {
   try {
     const { fetchProxyGroups } = await import('./proxy-groups.js');
     const groupName = appStore.get('uiGroupName');
@@ -75,6 +76,26 @@ export async function switchToConfig(configName, customArgs = []) {
   } catch (e) {
     apiLogger.warn('[switchToConfig] Failed to save proxy selection:', e);
   }
+}
+
+/**
+ * 切换到指定配置（订阅）
+ * @param {string} configName - 目标配置文件名
+ * @param {string[]} [customArgs=[]] - 自定义核心参数
+ * @returns {Promise<{secret: string, port: number, active_config: string|null, fallbackOccurred: boolean, actualConfig: string|null}>} coreResult
+ */
+export async function switchToConfig(configName, customArgs = []) {
+  // 中止正在进行的延迟测试，让 mihomo 处于空闲状态以便更快 kill
+  abortLatencyTests();
+  // 关闭所有连接以解除 mihomo 的请求队列阻塞（给后续 fetchProxyGroups 解堵）
+  try {
+    await closeAllConnections();
+  } catch (e) {
+    apiLogger.warn('[switchToConfig] closeAllConnections failed:', e);
+  }
+
+  // 切换前保存当前代理选择
+  await saveCurrentSelection();
 
   // 重启核心
   const coreResult = await restartCore(configName, customArgs);
@@ -106,11 +127,20 @@ export async function switchToConfig(configName, customArgs = []) {
   // 持久化实际活动配置（原子更新，避免 RMW 竞态）
   // 如果发生了回退，使用实际加载的配置名
   const configToPersist = actualConfig || configName;
-  await invoke(COMMANDS.UPDATE_LAST_CONFIG, { configName: configToPersist });
+  // The core already runs this profile: a failed save must not skip the
+  // recovery below (overrides, proxy selection), which nothing else would run.
+  // Nor is it a failed switch for the caller, whose tray check mark and
+  // picker must follow the profile now running: it is reported as a warning
+  // that the next launch may start with the previous one.
+  const persistError = await persistActiveConfig(configToPersist);
   invalidateSettingsCache();
 
   // Post-restart recovery: rebuild prism, reapply overrides, restore proxy, refresh UI
   await postRestartRecovery(configToPersist);
+  if (persistError) {
+    apiLogger.warn('[switchToConfig] Saving the active config failed:', persistError);
+    showNotification(t('configPersistFailed', { name: configToPersist }), 'warning');
+  }
 
   return {
     ...coreResult,

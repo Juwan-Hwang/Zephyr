@@ -64,24 +64,22 @@ export function notifySwitchFailed(err) {
 
 export { switchPage } from './navigation.js';
 
-/** Close open connections after a node switch; false when that failed. */
+/** Close open connections after a node switch so it applies at once. */
 async function closeConnsAfterSwitch() {
     try {
         await closeAllConnections();
-        return true;
     } catch (err) {
         proxyLogger.warn('Failed to close connections after proxy switch', err);
-        return false;
     }
 }
 
 /**
- * Confirm a node switch, mentioning the closed connections only when they were.
+ * Confirm a node switch. Closing the old connections is how a switch takes
+ * effect, not news for the user, so the toast just names the node.
  * @param {string} node
- * @param {boolean} closedConns
  */
-function notifySwitched(node, closedConns) {
-    showNotification(tFmt(closedConns ? 'switchedNodeClosedConns' : 'switchedNode', { node }), 'success');
+function notifySwitched(node) {
+    showNotification(tFmt('switchedNode', { node }), 'success');
 }
 
 // --- Constants ---
@@ -1469,7 +1467,7 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         if (group && proxyMap?.[group]?.now === node) {
             // Already in use, but the saved choice for the profile may still differ.
             await saveSelection(group);
-            notifySwitched(node, false);
+            notifySwitched(node);
             return;
         }
         if (!group || !(await switchProxy(group, node))) {
@@ -1478,7 +1476,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         }
         invalidateProxiesCache();
         await saveSelection(group);
-        notifySwitched(node, await closeConnsAfterSwitch());
+        await closeConnsAfterSwitch();
+        notifySwitched(node);
         // The switch already happened: a failed refresh afterwards is not a failed switch.
         await syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after switch failed', e));
         await renderProxies().catch((e) => proxyLogger.warn('Re-render after switch failed', e));
@@ -2679,10 +2678,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    // Open connections are closed so the new node applies at once; only
-                    // say so once that actually happened.
-                    const closed = await closeConnsAfterSwitch();
-                    notifySwitched(name, closed);
+                    // Open connections are closed so the new node applies at once.
+                    await closeConnsAfterSwitch();
+                    notifySwitched(name);
                     void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     notifySwitchFailed(switchRejection);
@@ -3256,6 +3254,8 @@ appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 //  Smart Auto-Test Scheduler
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Retry delay for a scheduled pass that found a full test running. */
+const AUTO_TEST_BUSY_RETRY_MS = 60_000;
 /** Shortest gap between automatic latency passes (each one measures every node). */
 const AUTO_TEST_MIN_INTERVAL_SECS = 60;
 
@@ -3323,7 +3323,12 @@ const _autoTest = {
 
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
     async _runOnce() {
-        if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
+        if (!this._isEnabled() || this._running) return;
+        // A full test is running: try again later instead of ending the schedule.
+        if (appStore.get('isTestingLatency')) {
+            this._scheduleNext(AUTO_TEST_BUSY_RETRY_MS);
+            return;
+        }
         resetLatencyTestController();  // Reset controller before starting
         // This pass's signal, taken before any await: a manual test that
         // replaces the controller while the groups load supersedes the pass.
@@ -3336,7 +3341,12 @@ const _autoTest = {
             const proxyGroupsResult = await fetchProxyGroupsShared({
                 preferredGroupName: appStore.get('uiGroupName') || undefined,
             });
-            if (!proxyGroupsResult) return;
+            // Nothing to test right now (core not answering, an empty group):
+            // keep the schedule, as after an error.
+            if (!proxyGroupsResult) {
+                this._scheduleNext(300_000);
+                return;
+            }
             const { data, proxies } = proxyGroupsResult;
 
             const validProxies = proxies.filter((/** @type {string} */ name) => {
@@ -3344,7 +3354,10 @@ const _autoTest = {
                 const type = node?.type?.toLowerCase() || '';
                 return type !== 'reject' && type !== 'compatible' && type !== 'pass';
             });
-            if (validProxies.length === 0) return;
+            if (validProxies.length === 0) {
+                this._scheduleNext(300_000);
+                return;
+            }
 
             // Test all nodes concurrently (respecting mihomo's internal concurrency)
             const concurrency = Math.min(12, validProxies.length);
