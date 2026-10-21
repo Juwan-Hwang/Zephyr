@@ -1048,7 +1048,7 @@ export function initSubscriptionSettings({
 
         // --- "Edit" item ---
         const editItem = document.createElement('div');
-        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
@@ -1065,7 +1065,7 @@ export function initSubscriptionSettings({
 
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
-        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
@@ -1140,7 +1140,7 @@ export function initSubscriptionSettings({
                 // Helper: create a checkbox item for a rule file
                 const createRuleItem = (/** @type {{filename: string, rule_count: number}} */ file) => {
                     const item = document.createElement('label');
-                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-accent/10 hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
@@ -1183,7 +1183,7 @@ export function initSubscriptionSettings({
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
-                        spinner.className = 'animate-spin ms-1 text-[var(--text-muted)]';
+                        spinner.className = 'inline-flex animate-spin ms-1 text-[var(--text-muted)]'; // inline-flex: a plain inline span does not rotate
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
@@ -1732,7 +1732,12 @@ export function initSubscriptionSettings({
                 updateBtn.setAttribute('aria-label', t?.update || 'Update');
                 updateBtn.onclick = async (e) => {
                     e.stopPropagation();
-                    updateBtn.classList.add('animate-spin');
+                    // A second click while this one is running would download twice.
+                    if (updateBtn.getAttribute('aria-busy') === 'true') return;
+                    // Spin the icon only: the button's hover background stays put.
+                    const icon = updateBtn.querySelector('svg');
+                    icon?.classList.add('animate-spin');
+                    updateBtn.setAttribute('aria-busy', 'true');
                     try {
                         // Prefer per-subscription UA, fall back to global fake-client UA
                         await downloadSubscription(configInfo.name, configInfo.user_agent || '');
@@ -1746,7 +1751,8 @@ export function initSubscriptionSettings({
                         showNotification(`${t.notifSubFailed}: ${error}`, 'error');
                         void renderConfigs();
                     } finally {
-                        updateBtn.classList.remove('animate-spin');
+                        icon?.classList.remove('animate-spin');
+                        updateBtn.removeAttribute('aria-busy');
                     }
                 };
                 actions.appendChild(updateBtn);
