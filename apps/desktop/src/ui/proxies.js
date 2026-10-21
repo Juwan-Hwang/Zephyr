@@ -27,6 +27,7 @@ import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.j
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery } from './lifecycle.js';
+import { activeProfile } from './active-profile.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
@@ -64,24 +65,22 @@ export function notifySwitchFailed(err) {
 
 export { switchPage } from './navigation.js';
 
-/** Close open connections after a node switch; false when that failed. */
+/** Close open connections after a node switch so it applies at once. */
 async function closeConnsAfterSwitch() {
     try {
         await closeAllConnections();
-        return true;
     } catch (err) {
         proxyLogger.warn('Failed to close connections after proxy switch', err);
-        return false;
     }
 }
 
 /**
- * Confirm a node switch, mentioning the closed connections only when they were.
+ * Confirm a node switch. Closing the old connections is how a switch takes
+ * effect, not news for the user, so the toast just names the node.
  * @param {string} node
- * @param {boolean} closedConns
  */
-function notifySwitched(node, closedConns) {
-    showNotification(tFmt(closedConns ? 'switchedNodeClosedConns' : 'switchedNode', { node }), 'success');
+function notifySwitched(node) {
+    showNotification(tFmt('switchedNode', { node }), 'success');
 }
 
 // --- Constants ---
@@ -841,7 +840,7 @@ export function initProxyControls() {
                 const settings = await getSettingsCached();
                 hideTimeoutEnabled = !!settings?.hide_timeout_nodes;
                 // The "switch to fastest" action belongs to this profile only.
-                const testedProfile = settings?.last_config || 'config.yaml';
+                const testedProfile = activeProfile(settings, 'config.yaml');
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -1436,8 +1435,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         // The profile changed since the test: its group and node may exist here too,
         // but the result says nothing about this profile, so neither switch nor save.
         // Read it uncached, as a cached name can lag just after a profile change.
-        const activeProfile = (await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml';
-        if (testedProfile && activeProfile !== testedProfile) {
+        const runningProfile = activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml');
+        if (testedProfile && runningProfile !== testedProfile) {
             showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
             return;
         }
@@ -1451,7 +1450,7 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         // Saved for the profile verified above, the one the switch applies to.
         const saveSelection = async (/** @type {string} */ savedGroup) => {
             try {
-                await saveProxySelection(activeProfile, { node, group: savedGroup });
+                await saveProxySelection(runningProfile, { node, group: savedGroup });
             } catch (e) {
                 proxyLogger.warn('Failed to save proxy selection', e);
             }
@@ -1462,14 +1461,14 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
             showNotification(t('consoleSubUpdateBusy'), 'info');
             return;
         }
-        if (((await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml') !== activeProfile) {
+        if (activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml') !== runningProfile) {
             showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
             return;
         }
         if (group && proxyMap?.[group]?.now === node) {
             // Already in use, but the saved choice for the profile may still differ.
             await saveSelection(group);
-            notifySwitched(node, false);
+            notifySwitched(node);
             return;
         }
         if (!group || !(await switchProxy(group, node))) {
@@ -1478,7 +1477,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         }
         invalidateProxiesCache();
         await saveSelection(group);
-        notifySwitched(node, await closeConnsAfterSwitch());
+        await closeConnsAfterSwitch();
+        notifySwitched(node);
         // The switch already happened: a failed refresh afterwards is not a failed switch.
         await syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after switch failed', e));
         await renderProxies().catch((e) => proxyLogger.warn('Re-render after switch failed', e));
@@ -1831,7 +1831,8 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
                 invalidateRunConfigCache();
                 // Persist group preference for restore after restart
                 const settings = await getSettingsCached();
-                const profileName = settings?.last_config;
+                // No profile (no subscription, the minimal config): nothing to save under.
+                const profileName = activeProfile(settings);
                 if (profileName) {
                     savePrimaryGroupPreference(profileName, targetGroup).catch(() => {});
                 }
@@ -1962,7 +1963,8 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
 
                 // Persist preference
                 const settings = await getSettingsCached();
-                const profileName = settings?.last_config;
+                // No profile (no subscription, the minimal config): nothing to save under.
+                const profileName = activeProfile(settings);
                 if (profileName) {
                     savePrimaryGroupPreference(profileName, groupName).catch(() => {});
                 }
@@ -2669,7 +2671,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     // Save proxy selection for current profile (use cached settings)
                     try {
                         const settings = await getSettingsCached();
-                        const currentProfile = settings.last_config || 'config.yaml';
+                        const currentProfile = activeProfile(settings, 'config.yaml');
                         await saveProxySelection(currentProfile, { node: name, group: mainGroup });
                     } catch (_e) { /* ignore */ }
 
@@ -2679,10 +2681,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    // Open connections are closed so the new node applies at once; only
-                    // say so once that actually happened.
-                    const closed = await closeConnsAfterSwitch();
-                    notifySwitched(name, closed);
+                    // Open connections are closed so the new node applies at once.
+                    await closeConnsAfterSwitch();
+                    notifySwitched(name);
                     void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     notifySwitchFailed(switchRejection);
@@ -3256,6 +3257,8 @@ appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 //  Smart Auto-Test Scheduler
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Retry delay for a scheduled pass that found a full test running. */
+const AUTO_TEST_BUSY_RETRY_MS = 60_000;
 /** Shortest gap between automatic latency passes (each one measures every node). */
 const AUTO_TEST_MIN_INTERVAL_SECS = 60;
 
@@ -3323,7 +3326,12 @@ const _autoTest = {
 
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
     async _runOnce() {
-        if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
+        if (!this._isEnabled() || this._running) return;
+        // A full test is running: try again later instead of ending the schedule.
+        if (appStore.get('isTestingLatency')) {
+            this._scheduleNext(AUTO_TEST_BUSY_RETRY_MS);
+            return;
+        }
         resetLatencyTestController();  // Reset controller before starting
         // This pass's signal, taken before any await: a manual test that
         // replaces the controller while the groups load supersedes the pass.
@@ -3336,7 +3344,13 @@ const _autoTest = {
             const proxyGroupsResult = await fetchProxyGroupsShared({
                 preferredGroupName: appStore.get('uiGroupName') || undefined,
             });
-            if (!proxyGroupsResult) return;
+            // Nothing to test right now (core not answering, an empty group):
+            // keep the schedule, as after an error.
+            // A pass stopped meanwhile leaves the schedule to whoever restarted it.
+            if (!proxyGroupsResult) {
+                if (!stopped()) this._scheduleNext(300_000);
+                return;
+            }
             const { data, proxies } = proxyGroupsResult;
 
             const validProxies = proxies.filter((/** @type {string} */ name) => {
@@ -3344,7 +3358,10 @@ const _autoTest = {
                 const type = node?.type?.toLowerCase() || '';
                 return type !== 'reject' && type !== 'compatible' && type !== 'pass';
             });
-            if (validProxies.length === 0) return;
+            if (validProxies.length === 0) {
+                if (!stopped()) this._scheduleNext(300_000);
+                return;
+            }
 
             // Test all nodes concurrently (respecting mihomo's internal concurrency)
             const concurrency = Math.min(12, validProxies.length);

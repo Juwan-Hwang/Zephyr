@@ -1958,12 +1958,12 @@ html.dark #fullscreen-editor-output {
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
 .dz-kpi-value span { font-size: 13px; font-weight: 500; color: var(--zephyr-text-muted); }
 .dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* Keep footer text clear of the sparkline drawn in the bottom corner */
-.dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
 .dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The footer is a flex row: ellipsize its text pieces, not just the row. */
 .dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
+/* The sparkline trails the speed figure, so the peak line below keeps the card's full width */
+.dz-kpi-value b, .dz-kpi-value span { flex-shrink: 0; }
+.dz-spark { flex: 0 1 72px; min-width: 0; height: 24px; margin-inline-start: auto; align-self: center; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
 .dz-grid-main { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
@@ -1994,6 +1994,14 @@ html.dark #fullscreen-editor-output {
 .dz-node-latency { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .dz-latency-num { font-size: 28px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .dz-latency-num small { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 600; margin-inline-start: 2px; }
+/* Latency read-out states (see renderLatency): no dash while a first measurement runs */
+[data-lat-state]:not([data-lat-state="value"]) .dz-lat-unit { display: none; }
+.latency-badge[hidden] { display: none; }
+.dz-lat-num.is-pending::before { content: ''; display: inline-block; width: .5em; height: .5em; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; opacity: .35; vertical-align: middle; animation: dz-lat-spin .9s linear infinite; }
+.dz-lat-num.is-text { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--zephyr-color-danger); }
+@keyframes dz-lat-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dz-lat-num.is-pending::before { animation: none; } }
+.dz-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .dz-test-btn { margin-inline-start: auto; padding: 5px 12px; }
 
 /* Node card */
@@ -2070,7 +2078,11 @@ html:not(.dark) #mode-slider { background: #fff; }
 .dz-conn-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; margin: 0 -6px; padding: 0 6px; }
 .dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background var(--motion-fast) var(--motion-ease-out); min-width: 0; }
 .dz-conn-row:hover { background: var(--zephyr-bg-subtle); }
-.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
+.dz-conn-proc { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dz-conn-proc img { width: 24px; height: 24px; object-fit: contain; display: block; }
+/* No real icon: a quiet, neutral app glyph rather than a coloured letter tile */
+.dz-conn-proc.is-placeholder { background: color-mix(in srgb, var(--zephyr-text-primary) 6%, transparent); box-shadow: inset 0 0 0 1px var(--zephyr-border-subtle); color: var(--zephyr-text-muted); }
+.dz-conn-proc.is-placeholder svg { width: 14px; height: 14px; }
 .dz-conn-info { flex: 1; min-width: 0; }
 .dz-conn-host { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dz-conn-chain { font-size: 11px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
