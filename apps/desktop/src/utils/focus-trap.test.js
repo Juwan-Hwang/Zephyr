@@ -106,3 +106,216 @@ describe('focus trap modality', () => {
         expect(field.classList.contains('focus-quiet')).toBe(false);
     });
 });
+
+describe('focus trap restore', () => {
+    beforeEach(() => { document.body.innerHTML = ''; });
+
+    it('falls back to the dialog underneath when the element it came from was replaced', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old" class="btn-ghost">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        // The dialog underneath re-renders its footer while the top one is open.
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<button id="done" class="btn-primary">Done</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('skips a hidden primary button in the dialog underneath', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<button id="hid" class="btn-primary hidden">Install</button><button id="back">Back</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('back');
+    });
+
+    it('skips a primary button inside a disabled fieldset in the dialog underneath', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<fieldset disabled><button id="off" class="btn-primary">Install</button></fieldset><button id="back">Back</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('back');
+    });
+
+    it('skips a primary element that cannot take focus', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<span id="badge" class="btn-primary">New</span><button id="back">Back</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('back');
+    });
+
+    it('skips a primary button hidden with an inline display:none', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old">Close</button></div></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<span style="display:none"><button id="hid" class="btn-primary">Save</button></span><button id="back">Back</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('back');
+    });
+
+    it('skips a dialog underneath that is hidden with an inline display:none', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><div id="foot"><button id="old">Close</button></div></div>'
+            + '<div role="dialog" aria-modal="true" style="display:none"><button class="btn-primary">Stale</button></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        const foot = /** @type {HTMLElement} */ (document.getElementById('foot'));
+        foot.innerHTML = '<button id="done" class="btn-primary">Done</button>';
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('falls back when the element it came from is still there but hidden', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><button id="old">Install</button><button id="done" class="btn-primary">Done</button></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        document.getElementById('old')?.classList.add('hidden');
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('falls back when the element it came from is now disabled', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><button id="old">Install</button><button id="done" class="btn-primary">Done</button></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        /** @type {HTMLButtonElement} */ (document.getElementById('old')).disabled = true;
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('returns focus to an element that overrides a hidden ancestor with visibility:visible', async () => {
+        document.body.innerHTML = '<div role="dialog" aria-modal="true"><div style="visibility:hidden"><button id="old" style="visibility:visible">Close</button></div><button class="btn-primary">Done</button></div><div id="top"><button>OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('old');
+    });
+
+    it('falls back when the element it came from is inside a now-disabled fieldset', async () => {
+        document.body.innerHTML = '<div id="under" role="dialog" aria-modal="true"><fieldset id="fs"><button id="old">Install</button></fieldset><button id="done" class="btn-primary">Done</button></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        document.getElementById('fs')?.setAttribute('disabled', '');
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('done');
+    });
+
+    it('closing a dialog underneath leaves focus in the dialog still open over it', async () => {
+        document.body.innerHTML = '<button id="opener">open</button><div id="outer"><button id="o1">O1</button></div><div id="inner"><button id="i1">I1</button></div>';
+        document.getElementById('opener')?.focus();
+        const outer = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('outer')));
+        outer.activate();
+        await nextFrame();
+        const inner = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('inner')));
+        inner.activate();
+        await nextFrame();
+        expect(document.activeElement?.id).toBe('i1');
+        outer.deactivate();
+        expect(document.activeElement?.id).toBe('i1');
+        inner.destroy();
+    });
+
+    it('a dialog closing under the one it opened hands its opener to that dialog', async () => {
+        document.body.innerHTML = '<button id="opener">open</button><div id="outer"><button id="o1">O1</button></div><div id="inner"><button id="i1">I1</button></div>';
+        document.getElementById('opener')?.focus();
+        const outer = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('outer')));
+        outer.activate();
+        await nextFrame();
+        document.getElementById('o1')?.focus();
+        const inner = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('inner')));
+        inner.activate();
+        await nextFrame();
+        outer.deactivate();
+        document.getElementById('outer')?.classList.add('hidden');
+        expect(document.activeElement?.id).toBe('i1');
+        inner.destroy();
+        expect(document.activeElement?.id).toBe('opener');
+    });
+
+    it('returns focus to a control in the legend of a disabled fieldset', async () => {
+        document.body.innerHTML = '<div role="dialog" aria-modal="true"><fieldset id="fs" disabled><legend><button id="old">Toggle</button></legend><button id="in">In</button></fieldset><button id="done" class="btn-primary">Done</button></div>'
+            + '<div id="top"><button id="ok">OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('old');
+    });
+
+    it('a stale trap above whose container is gone does not keep focus from returning', async () => {
+        document.body.innerHTML = '<button id="opener">open</button><div id="outer"><button id="o1">O1</button></div><div id="inner"><button id="i1">I1</button></div>';
+        document.getElementById('opener')?.focus();
+        const outer = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('outer')));
+        outer.activate();
+        await nextFrame();
+        const inner = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('inner')));
+        inner.activate();
+        await nextFrame();
+        document.getElementById('inner')?.classList.add('hidden');
+        document.getElementById('o1')?.focus();
+        outer.deactivate();
+        expect(document.activeElement?.id).toBe('opener');
+        inner.destroy();
+    });
+
+    it('a trap nested inside the closing dialog does not keep focus from returning', async () => {
+        document.body.innerHTML = '<button id="opener">open</button><div id="outer"><button id="o1">O1</button><div id="inner"><button id="i1">I1</button></div></div>';
+        document.getElementById('opener')?.focus();
+        const outer = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('outer')));
+        outer.activate();
+        await nextFrame();
+        const inner = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('inner')));
+        inner.activate();
+        await nextFrame();
+        outer.deactivate();
+        expect(document.activeElement?.id).toBe('opener');
+        inner.destroy();
+    });
+
+    it('still returns focus to the original element when it is there', async () => {
+        document.body.innerHTML = '<div role="dialog" aria-modal="true"><button id="old">Close</button><button class="btn-primary">Done</button></div><div id="top"><button>OK</button></div>';
+        document.getElementById('old')?.focus();
+        const trap = createFocusTrap(/** @type {HTMLElement} */ (document.getElementById('top')));
+        trap.activate();
+        await nextFrame();
+        trap.deactivate();
+        expect(document.activeElement?.id).toBe('old');
+    });
+});

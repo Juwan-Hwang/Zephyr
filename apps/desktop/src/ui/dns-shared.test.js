@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG } from './dns-shared.js';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../api.js', async (importOriginal) => ({ ...(await importOriginal()), getConfig: vi.fn(), invoke: vi.fn() }));
+
+import { getConfig, invoke } from '../api.js';
+import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG, createDnsReapply, dnsShownAfterFailure, buildDnsRewritePayload } from './dns-shared.js';
 
 describe('isValidIPv6', () => {
     it('full address', () => expect(isValidIPv6('2001:0db8:85a3:0000:0000:8a2e:0370:7334')).toBe(true));
@@ -94,5 +98,173 @@ describe('DEFAULT_DNS_CONFIG', () => {
         for (const fb of DEFAULT_DNS_CONFIG.fallback) {
             expect(isValidDns(fb)).toBe(true);
         }
+    });
+});
+
+describe('createDnsReapply', () => {
+    const deferred = () => {
+        /** @type {(v?: any) => void} */ let resolve = () => {};
+        /** @type {(e?: any) => void} */ let reject = () => {};
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+    };
+
+    it('re-applies and saves the saved choice', async () => {
+        const apply = vi.fn(async () => {});
+        const persist = vi.fn(async () => {});
+        const setChecked = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist, setChecked });
+        await r.run();
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(setChecked).toHaveBeenCalledWith(true);
+        expect(persist).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a saved rewrite it could not apply', async () => {
+        const onError = vi.fn();
+        const setChecked = vi.fn();
+        const r = createDnsReapply({
+            isSaved: async () => true,
+            apply: async () => { throw new Error('core down'); },
+            persist: async () => {},
+            setChecked,
+            onError,
+            wait: async () => {},
+        });
+        await expect(r.run()).resolves.toBe(false);
+        expect(setChecked).toHaveBeenCalledWith(false);
+        expect(onError).toHaveBeenCalledTimes(1);
+        const off = createDnsReapply({ isSaved: async () => false, apply: vi.fn(), persist: vi.fn(), setChecked: vi.fn() });
+        await expect(off.run()).resolves.toBe(true);
+    });
+
+    it('a user turning DNS off mid re-apply wins: no check, no save, and the disable runs after', async () => {
+        const pending = deferred();
+        const order = /** @type {string[]} */ ([]);
+        const persist = vi.fn(async () => {});
+        const setChecked = vi.fn();
+        const r = createDnsReapply({
+            isSaved: async () => true,
+            apply: async () => { order.push('apply'); await pending.promise; order.push('applied'); },
+            persist,
+            setChecked,
+        });
+        const run = r.run();
+        await new Promise((res) => setTimeout(res, 0));
+        const off = r.userChange(async () => { order.push('disable'); });
+        pending.resolve();
+        await run; await off;
+        expect(order).toEqual(['apply', 'applied', 'disable']);
+        expect(setChecked).not.toHaveBeenCalled();
+        expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('stops retrying once the user changes the toggle', async () => {
+        const apply = vi.fn(async () => { throw new Error('core down'); });
+        const setChecked = vi.fn();
+        /** @type {() => void} */ let tick = () => {};
+        const wait = () => new Promise((res) => { tick = () => res(undefined); });
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: async () => {}, setChecked, wait });
+        const run = r.run();
+        await new Promise((res) => setTimeout(res, 0));
+        const change = r.userChange(async () => {});
+        tick();
+        await run; await change;
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(setChecked).not.toHaveBeenCalled();
+    });
+
+    it('tells a toggle whether a newer one has been queued since', async () => {
+        const r = createDnsReapply({ isSaved: async () => false, apply: async () => {}, persist: async () => {}, setChecked: vi.fn() });
+        const first = deferred();
+        /** @type {boolean[]} */ const seen = [];
+        const a = r.userChange(async (isLatest) => { await first.promise; seen.push(isLatest()); });
+        const b = r.userChange(async (isLatest) => { seen.push(isLatest()); });
+        first.resolve();
+        await a; await b;
+        expect(seen).toEqual([false, true]);
+    });
+
+    it('keeps a toggle the latest when saved servers are applied after it', async () => {
+        const r = createDnsReapply({ isSaved: async () => false, apply: async () => {}, persist: async () => {}, setChecked: vi.fn() });
+        const first = deferred();
+        /** @type {boolean[]} */ const seen = [];
+        const off = r.userChange(async (isLatest) => { await first.promise; seen.push(isLatest()); });
+        /** @type {string[]} */ const order = [];
+        const servers = r.serversChange(async () => { order.push('servers'); });
+        first.resolve();
+        await off; await servers;
+        expect(seen).toEqual([true]);
+        expect(order).toEqual(['servers']);
+    });
+
+    it('reports a failed settings read instead of rejecting, and applies nothing', async () => {
+        const apply = vi.fn(async () => {});
+        const onError = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => { throw new Error('ipc'); }, apply, persist: async () => {}, setChecked: vi.fn(), onError });
+        await expect(r.run()).resolves.toBe(false);
+        expect(apply).not.toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the switch on when only saving the choice fails', async () => {
+        const apply = vi.fn(async () => {});
+        const setChecked = vi.fn();
+        const onError = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: async () => { throw new Error('disk'); }, setChecked, onError, wait: async () => {} });
+        await r.run();
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(setChecked.mock.calls).toEqual([[true]]);
+        expect(onError).toHaveBeenCalledTimes(1);
+    });
+    it('runs the startup sync in turn with restart re-applies', async () => {
+        const order = [];
+        const gate = deferred();
+        const r = createDnsReapply({
+            isSaved: async () => true,
+            apply: async () => { await gate.promise; order.push('reapply'); },
+            persist: async () => {},
+            setChecked: (v) => order.push(`checked:${v}`),
+        });
+        const restart = r.run();
+        const startup = r.initial(async () => { order.push('startup'); });
+        await Promise.resolve();
+        expect(order).toEqual([]);
+        gate.resolve();
+        await Promise.all([restart, startup]);
+        expect(order).toEqual(['reapply', 'checked:true', 'startup']);
+    });
+});
+
+describe('dnsShownAfterFailure', () => {
+    it('shows the core state, not just the opposite of the failed toggle', async () => {
+        // On then off, both refused: the core is still off.
+        vi.mocked(getConfig).mockResolvedValueOnce({ dns: { enable: false } });
+        expect(await dnsShownAfterFailure(false)).toBe(false);
+        vi.mocked(getConfig).mockResolvedValueOnce({ dns: { enable: true } });
+        expect(await dnsShownAfterFailure(true)).toBe(true);
+    });
+
+    it('falls back to the state before the toggle when the core can\'t be read', async () => {
+        vi.mocked(getConfig).mockRejectedValueOnce(new Error('down'));
+        expect(await dnsShownAfterFailure(false)).toBe(true);
+        vi.mocked(getConfig).mockResolvedValueOnce({});
+        expect(await dnsShownAfterFailure(true)).toBe(false);
+    });
+
+    it('falls back to a known earlier state when given one', async () => {
+        vi.mocked(getConfig).mockRejectedValueOnce(new Error('down'));
+        expect(await dnsShownAfterFailure(true, true)).toBe(true);
+    });
+});
+
+describe('buildDnsRewritePayload', () => {
+    it('uses the servers it is given instead of the saved ones', async () => {
+        vi.mocked(invoke).mockResolvedValue({ dns_nameservers: ['https://custom/dns-query'], dns_fallbacks: ['1.1.1.1'] });
+        const payload = /** @type {any} */ (await buildDnsRewritePayload(DEFAULT_DNS_CONFIG));
+        expect(payload.dns.nameserver).toEqual(DEFAULT_DNS_CONFIG.nameserver);
+        expect(payload.dns.fallback).toEqual(DEFAULT_DNS_CONFIG.fallback);
+        const saved = /** @type {any} */ (await buildDnsRewritePayload());
+        expect(saved.dns.nameserver).toEqual(['https://custom/dns-query']);
     });
 });
