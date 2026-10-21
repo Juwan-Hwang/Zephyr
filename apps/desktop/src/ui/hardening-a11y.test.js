@@ -55,6 +55,32 @@ describe('home page switches and theme swatches accessibility', () => {
     });
 });
 
+describe('modal dialog accessibility', () => {
+    it('modal overlays in index.html carry proper role, aria-modal, and valid aria-labelledby targets', () => {
+        const doc = parseIndex();
+        const modals = [
+            'modal-bg',
+            'plugin-panel',
+            'dns-config-modal',
+            'port-config-modal',
+            'fullscreen-editor-overlay',
+        ];
+
+        for (const id of modals) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.getAttribute('role'), id).toBe('dialog');
+            expect(el?.getAttribute('aria-modal'), id).toBe('true');
+
+            const titleId = el?.getAttribute('aria-labelledby');
+            expect(titleId, `${id} aria-labelledby`).toBeTruthy();
+            if (titleId) {
+                expect(doc.getElementById(titleId), `${id} title element #${titleId}`).toBeTruthy();
+            }
+        }
+    });
+});
+
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();

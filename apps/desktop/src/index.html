@@ -244,7 +244,7 @@
                 </div>
 
                 <!-- Plugin Panel (overlay) -->
-                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="plugin-panel-title">
                     <div class="absolute inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md" id="plugin-panel-backdrop"></div>
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
@@ -1329,9 +1329,9 @@
     </div>
 
     <!-- DNS Configuration Modal -->
-    <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
+    <div id="dns-config-modal" role="dialog" aria-modal="true" aria-labelledby="dns-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
         <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+            <h3 id="dns-config-title" class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
 
             <div class="space-y-4">
