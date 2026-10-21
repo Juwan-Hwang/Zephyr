@@ -971,45 +971,8 @@ function autoSwitchDeps() {
     };
 }
 
-/**
- * TUN row in the Proxy section: the same switch as the home TUN card (it
- * drives that card's toggle, so authorisation, errors and rollback stay in
- * one place) plus a link to the core's tun settings on the advanced page.
- */
-function initSettingsTun() {
-    const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('settings-tun-toggle'));
-    const configBtn = document.getElementById('settings-tun-config-btn');
-    if (toggle) {
-        const syncFromHome = () => {
-            const home = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
-            toggle.checked = home ? home.checked : !!appStore.get('isTunEnabled');
-        };
-        // A store change carries the new state (the home toggle may not have caught up
-        // yet, e.g. during Restore Defaults); the settle below covers a rolled-back switch.
-        appStore.subscribe('isTunEnabled', (/** @type {boolean} */ on) => { toggle.checked = !!on; });
-        // A failed switch rolls the home toggle back without a store change; re-read when it settles.
-        appStore.subscribe('isNetworkUpdating', (/** @type {boolean} */ busy) => {
-            toggle.disabled = !!busy;
-            if (!busy) syncFromHome();
-        });
-        syncFromHome();
-        toggle.addEventListener('change', () => {
-            const home = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
-            if (!home) { toggle.checked = !toggle.checked; return; }
-            home.checked = toggle.checked;
-            home.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-    }
-    configBtn?.addEventListener('click', async () => {
-        const { focusAdvancedSection } = await import('./advanced.js');
-        focusAdvancedSection('tun');
-        navigateTo('advanced');
-    });
-}
-
 export async function initSettings() {
     initSettingsNav();
-    initSettingsTun();
     // Portable mode: hide unsupported options
     const isPortable = await invoke(COMMANDS.GET_PORTABLE_MODE);
     if (isPortable) {

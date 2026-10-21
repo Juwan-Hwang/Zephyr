@@ -361,6 +361,21 @@ export async function initTrayEventListeners() {
 /** @type {ReturnType<typeof setInterval> | null} */
 let _unifiedSyncInterval = null;
 
+/**
+ * Whether the core answers. The system proxy is only put back while it does:
+ * pointing it at a port nobody listens on (the core is still starting, or
+ * stopped) would cut the connection; the periodic check tries again.
+ * @returns {Promise<boolean>}
+ */
+async function coreAnswers() {
+    try {
+        await getConfig();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export function startUnifiedSync() {
     if (_unifiedSyncInterval) {
         clearInterval(_unifiedSyncInterval);
@@ -379,7 +394,7 @@ export function startUnifiedSync() {
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
-            if (!sysProxyOn && hasOwnership) {
+            if (!sysProxyOn && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
@@ -403,7 +418,7 @@ export function startUnifiedSync() {
             }
 
             // Guard: if we own the proxy but it was disabled externally, restore it
-            if (!realSysProxyState && hasOwnership) {
+            if (!realSysProxyState && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
