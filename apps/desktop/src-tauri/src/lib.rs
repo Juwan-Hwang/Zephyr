@@ -24,6 +24,7 @@ pub mod minisign_verify;
 pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
+pub mod process_icon;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -1995,6 +1996,7 @@ invalidate_heartbeat(window.app_handle());
             get_core_version,
             get_core_uptime,
             exempt_uwp_apps,
+            process_icon::get_process_icon,
             read_config_file,
             write_config_file,
             open_config_folder,
