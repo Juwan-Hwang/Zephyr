@@ -1413,3 +1413,12 @@ rules:
         }
     }
 }
+
+#[test]
+fn reload_outcome_tells_unanswered_from_not_sent() {
+    assert_eq!(super::reload_outcome(Some(204)), (Some(204), Some(true)));
+    assert_eq!(super::reload_outcome(Some(400)), (Some(400), Some(false)));
+    // Sent but never answered: a failed reload, with no made-up HTTP status.
+    assert_eq!(super::reload_outcome(Some(0)), (None, Some(false)));
+    assert_eq!(super::reload_outcome(None), (None, None));
+}

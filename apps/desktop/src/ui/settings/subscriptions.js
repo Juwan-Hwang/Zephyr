@@ -13,7 +13,7 @@ import {
     restartCore,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery, restartedProfile } from '../lifecycle.js';
 import { currentProfile, noteProfileRenamed } from '../active-profile.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
@@ -54,6 +54,34 @@ async function acquireNetworkLock() {
         }
         if (Date.now() >= until) return false;
         await new Promise((r) => setTimeout(r, 200));
+    }
+}
+
+/**
+ * Restart the core on a profile whose file just changed, then run recovery,
+ * holding isNetworkUpdating like every other restart: a download that ends
+ * during a core update or a profile switch waits for it instead of
+ * restarting the core underneath it. Whether the profile is still the
+ * current one, and its launch arguments, are read once the lock is held, so
+ * a switch that finished while this waited is not undone.
+ * @param {string} name
+ * @returns {Promise<boolean>} whether the core was restarted
+ */
+async function restartUpdatedProfile(name) {
+    while (!(await acquireNetworkLock())) { /* keep waiting */ }
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        if (normalizeConfigName(currentProfile(settings, 'config.yaml')) !== normalizeConfigName(name)) return false;
+        abortLatencyTests();
+        const coreResult = await restartCore(name, settings?.custom_args || []);
+        const recovery = await postRestartRecovery(restartedProfile(coreResult, name));
+        if (recovery?.failed) {
+            showNotification(tr('restartRecoveryWarn') || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        }
+        return true;
+    } finally {
+        appStore.set('isNetworkUpdating', false);
     }
 }
 
@@ -330,12 +358,10 @@ async function downloadSubscription(name, userAgent = '') {
     const settings = await getSettingsCached();
     // No last_config means the core runs the default config.yaml.
     if (normalizeConfigName(currentProfile(settings, 'config.yaml')) === normalizeConfigName(name)) {
-        abortLatencyTests();
         // The file is updated at this point: a failed restart is its own warning,
         // not a failed download (the card would otherwise keep "Update failed").
         try {
-            await restartCore(name, settings.custom_args || []);
-            await postRestartRecovery(name);
+            await restartUpdatedProfile(name);
         } catch (restartErr) {
             rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
             showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
@@ -833,10 +859,7 @@ export function initSubscriptionSettings({
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = currentProfile(subSettings, 'config.yaml');
                 if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
-                    abortLatencyTests();
-                    const customArgs = subSettings.custom_args || [];
-                    await restartCore(savedConfigName, customArgs);
-                    await postRestartRecovery(savedConfigName);
+                    await restartUpdatedProfile(savedConfigName);
                 } else if (appStore.get('noSubscription')) {
                     // The first subscription: nothing is loaded yet, so start using it
                     // (otherwise the empty state stays up after adding it). It is saved
@@ -947,13 +970,10 @@ export function initSubscriptionSettings({
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
                 const currentConfig = currentProfile(subSettings, 'config.yaml');
-                const customArgs = subSettings.custom_args || [];
                 const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
 
                 if (isCurrentConfigUpdated) {
-                    abortLatencyTests();
-                    await restartCore(currentConfig, customArgs);
-                    await postRestartRecovery(currentConfig);
+                    await restartUpdatedProfile(currentConfig);
                 }
 
                 if (failCount === 0) {
