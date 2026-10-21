@@ -2,6 +2,12 @@
 
 Zephyr uses the following open source components. We are grateful to all contributors.
 
+This file is a summary. The complete license texts of every component —
+as required for binary distribution — ship with the app in
+`apps/desktop/src-tauri/THIRD-PARTY-LICENSES.txt` (also readable in the app
+under Settings > About > Third-party Licenses) and are generated from the
+lockfiles by `scripts/generate-licenses.sh`.
+
 ## Rust Dependencies (Runtime)
 
 | Crate | Version | License | Homepage |
@@ -33,7 +39,7 @@ Zephyr uses the following open source components. We are grateful to all contrib
 | thiserror | 1.0.89 | MIT / Apache-2.0 | https://github.com/dtolnay/thiserror |
 | windows-sys | 0.59.0 | MIT / Apache-2.0 | https://github.com/microsoft/windows-rs |
 | winreg | 0.52.0 | MIT | https://github.com/gentoo/winreg |
-| glib | >= 0.20, < 1 | LGPL-2.1 | https://gitlab.gnome.org/GNOME/glib |
+| glib | 0.18.5 / 0.22.7 | MIT | https://github.com/gtk-rs/gtk-rs-core |
 | clash-prism-core | 0.1.4 | Apache-2.0 | https://github.com/Juwan-Hwang/Clash-Prism-Engine |
 | clash-prism-extension | 0.1.7 | Apache-2.0 | https://github.com/Juwan-Hwang/Clash-Prism-Engine |
 | clash-prism-plugin | 0.1.1 | Apache-2.0 | https://github.com/Juwan-Hwang/Clash-Prism-Engine |
@@ -45,15 +51,18 @@ Zephyr uses the following open source components. We are grateful to all contrib
 
 | Package | Version | License | Homepage |
 |---------|---------|---------|----------|
-| tailwindcss | 4.2.2 | MIT | https://tailwindcss.com |
-| @tailwindcss/cli | 4.2.2 | MIT | https://tailwindcss.com |
-| @tauri-apps/plugin-autostart | 2.5.1 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
-| js-yaml | 4.x | MIT | https://github.com/nodeca/js-yaml |
+| @codemirror/* and @lezer/* (editor) | 6.x | MIT | https://codemirror.net |
+| @tauri-apps/api | 2.12.4 | MIT / Apache-2.0 | https://github.com/tauri-apps/tauri |
+| @tauri-apps/plugin-autostart | 2.7.0 | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
+| js-yaml (vendored file) | 4.1.0 | MIT | https://github.com/nodeca/js-yaml |
+| UnoCSS (build-time; generated CSS ships) | 66.11.0 | MIT | https://unocss.dev |
 
 ## Bundled Assets
 
 | Asset | Version | License | Homepage |
 |-------|---------|---------|----------|
+| mihomo proxy core binary (bundled unmodified; latest upstream release at build time) | — | GPL-3.0 (per upstream repository) | https://github.com/MetaCubeX/mihomo |
+| Geo data files `geoip.dat`, `geosite.dat`, `Country.mmdb` (MetaCubeX/meta-rules-dat, bundled unmodified) | — | GPL-3.0 (per upstream repository) | https://github.com/MetaCubeX/meta-rules-dat |
 | Zephyr Country Flags font (`apps/desktop/src/fonts/ZephyrCountryFlags.woff2`), subset of Catrinity Flags | 1.110 | SIL OFL 1.1 | https://catrinity-font.de |
 
 Flag artwork from Catrinity Flags by Alexander Lange (https://catrinity-font.de).
@@ -174,20 +183,20 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 | License | Count |
 |---------|-------|
 | MIT / Apache-2.0 (dual) | 26 |
-| MIT | 8 |
+| MIT | 7 |
 | Apache-2.0 | 6 |
+| GPL-3.0 | 2 |
 | OFL-1.1 (flag font) | 1 |
-| LGPL-2.1 | 1 |
 
 Full license texts:
 - **MIT**: https://opensource.org/licenses/MIT
 - **Apache-2.0**: https://www.apache.org/licenses/LICENSE-2.0
-- **LGPL-2.1**: www.gnu.org/licenses/lgpl-2.1.html
+- **GPL-3.0**: https://www.gnu.org/licenses/gpl-3.0.html
 - **OFL-1.1**: https://openfontlicense.org
 
 > For complete copyright and license information of each dependency,
 > please refer to their respective source repositories linked above.
-> All license texts can be found in the `LICENSE` or `LICENSE-MIT` / `LICENSE-APACHE`
-> files within each repository.
->
-> Generated from `cargo tree --depth 1` and `package.json`. Last updated: 2026-04-14.
+> The complete license texts ship with the app in
+> `apps/desktop/src-tauri/THIRD-PARTY-LICENSES.txt` (also readable in the
+> app under Settings > About > Third-party Licenses) and are generated
+> from the lockfiles by `scripts/generate-licenses.sh`.

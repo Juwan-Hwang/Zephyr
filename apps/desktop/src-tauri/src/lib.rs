@@ -724,6 +724,15 @@ pub(crate) fn show_or_recreate_main_window(app: &tauri::AppHandle) {
     release_reconstruct_gate(app);
 }
 
+/// Full third-party license texts shipped with the app. The file is embedded
+/// at compile time from the copy that is also bundled as a package resource,
+/// so the in-app viewer and the installed file can never diverge. It is
+/// generated from the workspace lockfiles by scripts/generate-licenses.sh.
+#[tauri::command]
+const fn get_third_party_licenses() -> &'static str {
+    include_str!("../THIRD-PARTY-LICENSES.txt")
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn get_settings(state: tauri::State<SettingsState>) -> Settings {
@@ -1995,6 +2004,7 @@ invalidate_heartbeat(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
+            get_third_party_licenses,
             get_portable_mode,
             set_ui_scale,
             start_core,
