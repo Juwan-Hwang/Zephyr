@@ -14,6 +14,9 @@
 // These tests import REAL source modules and cross-check them against each other.
 // A failure here means a "silent" integration bug that unit tests cannot catch.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { COMMANDS, PRISM, RULE } from '@zephyr/shared';
 import { translations } from './i18n.js';
@@ -125,7 +128,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         'COMMANDS.DISABLE_SYSPROXY', 'COMMANDS.RELEASE_TUN_TOGGLE',
         'COMMANDS.GET_TRAY_STATUS',
         // deep-link.js
-        'COMMANDS.DOWNLOAD_SUB',
+        'COMMANDS.DOWNLOAD_SUB', 'COMMANDS.TAKE_PENDING_DEEP_LINKS',
         // advanced.js
         'COMMANDS.READ_CONFIG_FILE', 'COMMANDS.LIST_CONFIGS',
         // global-shortcut.js
@@ -507,7 +510,8 @@ describe('Tauri plugin permission contract', () => {
         'plugin:event|listen',
         'plugin:event|unlisten',
         'plugin:opener|open_url',
-        'plugin:window|set_visible',
+        'plugin:window|show',
+        'plugin:window|hide',
         'plugin:window|close',
         'plugin:window|minimize',
         'plugin:window|maximize',
@@ -520,41 +524,21 @@ describe('Tauri plugin permission contract', () => {
         'plugin:autostart|is_enabled',
     ];
 
-    // Permissions declared in capabilities/default.json
-    // Source: apps/desktop/src-tauri/capabilities/default.json
-    const declaredPermissions = [
-        'opener:default',
-        'autostart:allow-enable',
-        'autostart:allow-disable',
-        'autostart:allow-is-enabled',
-        'core:window:allow-close',
-        'core:window:allow-start-dragging',
-        'core:window:allow-minimize',
-        'core:window:allow-maximize',
-        'core:window:allow-hide',
-        'core:window:allow-show',
-        'core:window:allow-set-focus',
-        'core:window:allow-is-visible',
-        'core:window:allow-set-title',
-        'core:window:allow-is-maximized',
-        'core:event:allow-listen',
-        'core:event:allow-unlisten',
-        'core:image:default',
-        'core:menu:default',
-        'core:tray:default',
-        'core:resources:default',
-        'core:app:default',
-        'dialog:allow-message',
-        'notification:allow-notify',
-        'global-shortcut:allow-register',
-        'global-shortcut:allow-unregister',
-    ];
+    // Permissions declared in capabilities/default.json, read from the file
+    // itself so removing one there fails this test.
+    const capabilitiesPath = path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../src-tauri/capabilities/default.json',
+    );
+    /** @type {string[]} */
+    const declaredPermissions = JSON.parse(fs.readFileSync(capabilitiesPath, 'utf8')).permissions
+        .map((/** @type {string | { identifier: string }} */ p) => (typeof p === 'string' ? p : p.identifier));
 
     /**
      * Convert a plugin command like "plugin:window|set_title" to the
      * corresponding permission like "core:window:allow-set-title".
      * Note: Tauri v2 permission names use hyphens, but command names use
-     * underscores (e.g., set_visible → allow-set-visible).
+     * underscores (e.g., set_title → allow-set-title).
      */
     function commandToPermission(cmd) {
         const [pluginPart, action] = cmd.split('|');
@@ -576,9 +560,12 @@ describe('Tauri plugin permission contract', () => {
     // simple "allow-{action}" pattern.
     const permissionOverrides = {
         'plugin:opener|open_url': 'opener:default',
-        // set_visible is covered by allow-hide + allow-show (no single allow-set-visible)
-        'plugin:window|set_visible': 'core:window:allow-hide+core:window:allow-show',
     };
+
+    it('reads the declared permissions from capabilities/default.json', () => {
+        expect(declaredPermissions).toContain('core:window:allow-show');
+        expect(declaredPermissions).toContain('core:window:allow-hide');
+    });
 
     it('every used plugin command has a declared permission', () => {
         const permissionSet = new Set(declaredPermissions);
@@ -614,9 +601,8 @@ describe('Tauri plugin permission contract', () => {
             'core:resources:default',
             'core:app:default',
             'dialog:allow-message',
-            'notification:allow-notify',
-            'global-shortcut:allow-register',
-            'global-shortcut:allow-unregister',
+            'notification:default',
+            'window-state:default',
             'core:window:allow-start-dragging',
             'core:window:allow-hide',
             'core:window:allow-show',

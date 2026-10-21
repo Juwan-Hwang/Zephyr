@@ -45,6 +45,10 @@ vi.mock('./notifications.js', () => ({
     showNotification: vi.fn(),
 }));
 
+vi.mock('./tun.js', () => ({
+    mirrorTunToggle: vi.fn(() => () => {}),
+}));
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -216,6 +220,23 @@ describe('Console Dashboard Width Threshold and Notification', () => {
                 expect(showNotification).not.toHaveBeenCalled();
             } finally {
                 deactivateConsole();
+            }
+        });
+
+        it('hands its TUN switch to the shared home-toggle mirror', async () => {
+            // The console DOM is built once per module: load a fresh copy so the
+            // build (and its call) happens inside this test.
+            document.body.innerHTML = '<div data-page="console"></div><div data-page="home"></div>';
+            vi.resetModules();
+            const fresh = await import('./console-home.js');
+            const { mirrorTunToggle: freshMirror } = await import('./tun.js');
+            try {
+                fresh.activateConsole();
+                const tunToggle = document.getElementById('dz-tun-toggle');
+                expect(tunToggle).not.toBeNull();
+                expect(freshMirror).toHaveBeenCalledWith(tunToggle);
+            } finally {
+                fresh.deactivateConsole();
             }
         });
     });
