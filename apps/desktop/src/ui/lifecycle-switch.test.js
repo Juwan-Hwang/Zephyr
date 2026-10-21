@@ -12,6 +12,7 @@ vi.mock('./notifications.js', () => ({ showNotification: notify }));
 vi.mock('./prism.js', () => ({ rebuild: vi.fn(async () => {}), overrideApplyAll: vi.fn(async () => []) }));
 vi.mock('./proxy-memory.js', () => ({
     restoreProxySelection: vi.fn(async () => {}),
+    restoreProxySelectionResult: vi.fn(async () => 'restored'),
     saveProxySelection: vi.fn(async () => {}),
     waitForMihomoReady: vi.fn(async () => true),
 }));
@@ -38,7 +39,7 @@ describe('switchToConfig', () => {
         expect(notify).toHaveBeenCalledWith(expect.any(String), 'warning');
         // The recovery still runs for the profile the core switched to.
         expect(prism.overrideApplyAll).toHaveBeenCalled();
-        expect(memory.restoreProxySelection).toHaveBeenCalledWith('b.yaml');
+        expect(memory.restoreProxySelectionResult).toHaveBeenCalledWith('b.yaml');
     });
 
     it('saves the next selection under the running profile when its save failed', async () => {
@@ -53,6 +54,24 @@ describe('switchToConfig', () => {
         api.restartCore.mockResolvedValue({ secret: 's', port: 9090, active_config: 'c.yaml' });
         await switchToConfig('c.yaml');
         expect(memory.saveProxySelection).toHaveBeenCalledWith('b.yaml', { node: 'HK', group: 'Main' });
+    });
+
+    it('restores no saved selection onto the minimal config when the profile fails to load', async () => {
+        api.invoke.mockResolvedValue(null);
+        api.restartCore.mockResolvedValue({ secret: 's', port: 9090, active_config: null });
+        const result = await switchToConfig('b.yaml');
+        expect(result.fallbackOccurred).toBe(true);
+        expect(memory.restoreProxySelectionResult).toHaveBeenCalledWith('');
+        expect(memory.restoreProxySelectionResult).not.toHaveBeenCalledWith('b.yaml');
+    });
+
+    it('warns when the switch worked but recovery did not fully restore', async () => {
+        api.invoke.mockResolvedValue(null);
+        memory.restoreProxySelectionResult.mockResolvedValueOnce('failed');
+        const result = await switchToConfig('b.yaml');
+        expect(result.actualConfig).toBe('b.yaml');
+        expect(notify).toHaveBeenCalledTimes(1);
+        expect(notify).toHaveBeenCalledWith(expect.stringMatching(/restor/i), 'warning');
     });
 
     it('shows no warning when the save works', async () => {
