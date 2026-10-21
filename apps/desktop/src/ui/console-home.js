@@ -21,7 +21,7 @@
  * view-switch in the header — mirrors the original homepage layout.
  */
 
-import { getConnections, testProxy, switchProxyResult, getConfig, invoke, closeAllConnections } from '../api.js';
+import { getConnections, testProxy, getLatencyTestSignal, resetLatencyTestController, switchProxyResult, getConfig, invoke, closeAllConnections } from '../api.js';
 import { appStore } from './state.js';
 
 import { Bus, Events } from './events.js';
@@ -44,6 +44,7 @@ import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache
 import { getSubscriptionUserAgent } from './settings.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
+import { createProcessIcon } from './process-icon.js';
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
 const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM', my: 'my-MM', ar: 'ar-SA', ur: 'ur-PK', sw: 'sw-KE', tr: 'tr-TR', vi: 'vi-VN' };
@@ -386,34 +387,188 @@ function tickUptime() {
     renderUptime();
 }
 
-function renderLatency(/** @type {number} */ v) {
-    state.latency = v;
-    const latEl = $('dz-lat-val');
-    if (latEl) latEl.textContent = v > 0 ? String(v) : '—';
-    const nodeLat = $('dz-node-lat');
-    if (nodeLat) nodeLat.textContent = v > 0 ? String(v) : '—';
-    if (v <= 0) {
-        // Clear badges on failure so stale class/text don't persist
-        for (const id of ['dz-lat-badge', 'dz-node-lat-badge']) {
-            const b = $(id);
-            if (b) { b.className = 'latency-badge'; b.textContent = '—'; }
+/**
+ * How the latency read-out is shown:
+ * - `value`: a measured delay in ms
+ * - `pending`: a first measurement is on its way (small spinner, no placeholder dash)
+ * - `timeout`: the last test failed
+ * - `none`: there is no node to measure
+ * @typedef {'value' | 'pending' | 'timeout' | 'none'} LatencyStatus
+ */
+
+/** @type {LatencyStatus} */
+let latencyStatus = 'pending';
+
+/**
+ * Text of a latency value element for `status`.
+ * @param {number} v
+ * @param {LatencyStatus} status
+ */
+function latencyText(v, status) {
+    if (status === 'value') return String(v);
+    if (status === 'timeout') return t('timeout');
+    if (status === 'none') return '—';
+    return '';
+}
+
+/**
+ * @param {number} v delay in ms; <= 0 means the test failed
+ * @param {LatencyStatus} [status]
+ */
+function renderLatency(v, status = v > 0 ? 'value' : 'timeout') {
+    state.latency = status === 'value' ? v : 0;
+    latencyStatus = status;
+    const text = latencyText(v, status);
+    for (const id of ['dz-lat-val', 'dz-node-lat']) {
+        const el = $(id);
+        if (!el) continue;
+        if (status === 'pending') {
+            // The spinner is CSS-only: give screen readers the words for it.
+            const label = document.createElement('span');
+            label.className = 'dz-sr-only';
+            label.textContent = t('loading');
+            el.replaceChildren(label);
+            el.setAttribute('aria-busy', 'true');
+        } else {
+            el.textContent = text;
+            el.removeAttribute('aria-busy');
         }
-        return;
+        el.classList.toggle('is-pending', status === 'pending');
+        el.classList.toggle('is-text', status === 'timeout');
+        el.parentElement?.setAttribute('data-lat-state', status);
     }
-    const [cls, txt] = latBadge(v);
+    renderLatencyBadges(v, status);
+}
+
+/**
+ * @param {number} v
+ * @param {LatencyStatus} status
+ */
+function renderLatencyBadges(v, status) {
+    const [cls, txt] = status === 'value' ? latBadge(v) : ['', ''];
     for (const id of ['dz-lat-badge', 'dz-node-lat-badge']) {
         const b = $(id);
-        if (b) {
-            b.className = 'latency-badge ' + cls;
-            b.textContent = txt;
-        }
+        if (!b) continue;
+        b.className = cls ? 'latency-badge ' + cls : 'latency-badge';
+        b.textContent = txt;
+        b.hidden = status !== 'value';
     }
+}
+
+/** A delay the core reports for a working node (999999+ / 0 mean failure). @param {unknown} d */
+const isUsableDelay = (d) => typeof d === 'number' && d > 0 && d < 999999;
+
+/**
+ * Last delay seen per leaf node, so returning to the console paints at once.
+ * `delay <= 0` records a failed test.
+ * @type {Map<string, { delay: number, at: number }>}
+ */
+const latencyByNode = new Map();
+/** A failed automatic test is not repeated for this long. */
+const LATENCY_RETRY_MS = 30_000;
+/** @type {Set<string>} leaves with an automatic test in flight */
+const latencyProbes = new Set();
+/** Bumped when remembered delays are dropped, so a test that started before is not kept. */
+let latencyGeneration = 0;
+
+/** @param {string} leaf @param {number} delay */
+function rememberLatency(leaf, delay) {
+    if (leaf) latencyByNode.set(leaf, { delay, at: Date.now() });
+}
+
+/**
+ * Forget every remembered delay: after a core restart or config change a node
+ * name may point at a different server, and the core's own history is gone.
+ */
+function forgetLatencies() {
+    latencyByNode.clear();
+    latencyGeneration++;
+}
+
+/**
+ * Test `leaf` once. `cancelled` means a global stop (node switch, config
+ * switch, core restart) aborted it, which says nothing about the node.
+ * @param {string} leaf
+ * @returns {Promise<{ delay: number, cancelled: boolean }>}
+ */
+export async function measureLatency(leaf) {
+    // A stop or switch earlier leaves the shared signal aborted, and a later one
+    // could not be told apart from a timeout: with no full test running, start
+    // from a fresh controller (as the proxies page does).
+    if (getLatencyTestSignal().aborted && !appStore.get('isTestingLatency')) resetLatencyTestController();
+    const signal = getLatencyTestSignal();
+    // A stopped full test is still winding down: this test would be cut short.
+    if (signal.aborted) return { delay: -1, cancelled: true };
+    /** @type {unknown} */
+    let result = -1;
+    try {
+        result = await testProxy(leaf, 5000);
+    } catch {
+        result = -1;
+    }
+    if (isUsableDelay(result)) return { delay: /** @type {number} */ (result), cancelled: false };
+    return { delay: -1, cancelled: signal.aborted };
+}
+
+/**
+ * Show the current node's latency without a placeholder dash: the core's
+ * history when it has one, else the last value we saw, else test it now.
+ * @param {string} leaf
+ * @param {any} node proxy entry from /proxies
+ */
+function showNodeLatency(leaf, node) {
+    if (!leaf) {
+        renderLatency(0, 'none');
+        return;
+    }
+    const history = Array.isArray(node?.history) ? node.history : [];
+    if (history.length > 0) {
+        const delay = Number(history[history.length - 1]?.delay) || 0;
+        const ok = isUsableDelay(delay);
+        rememberLatency(leaf, ok ? delay : -1);
+        renderLatency(ok ? delay : -1);
+        return;
+    }
+    const seen = latencyByNode.get(leaf);
+    if (seen && (seen.delay > 0 || Date.now() - seen.at < LATENCY_RETRY_MS)) {
+        renderLatency(seen.delay);
+        return;
+    }
+    // Never tested since the core started (common for manually picked nodes):
+    // measure it now instead of leaving the card empty.
+    renderLatency(0, 'pending');
+    void probeLatency(leaf);
+}
+
+/** @param {string} leaf */
+async function probeLatency(leaf) {
+    if (latencyProbes.has(leaf)) return;
+    latencyProbes.add(leaf);
+    const generation = latencyGeneration;
+    /** @type {{ delay: number, cancelled: boolean }} */
+    let outcome;
+    try {
+        outcome = await measureLatency(leaf);
+    } finally {
+        latencyProbes.delete(leaf);
+    }
+    const stale = generation !== latencyGeneration;
+    if (!outcome.cancelled && !stale) rememberLatency(leaf, outcome.delay);
+    // The user may have switched node (or left the page) meanwhile.
+    if (!isActive || $('dz-node-name')?.dataset.leaf !== leaf) return;
+    if (outcome.cancelled || stale) {
+        // Not a result for this node (stopped by a switch, or from before a
+        // restart): measure again rather than show a timeout or spin forever.
+        if (latencyStatus === 'pending') void probeLatency(leaf);
+        return;
+    }
+    renderLatency(outcome.delay);
 }
 
 // ── Connections ──────────────────────────────────────────────────────────
 
 /**
- * @typedef {{ proc: string, host: string, chain: string, tcp: boolean, speed: number, total: number, color: string }} ConnRow
+ * @typedef {{ proc: string, procPath: string, host: string, chain: string, tcp: boolean, speed: number, total: number }} ConnRow
  */
 
 /** Connection sort modes
@@ -438,7 +593,8 @@ function processConnections(rawConns) {
     const now = Date.now();
     const rows = rawConns.map((c) => {
         const md = c.metadata || {};
-        const proc = md.process || md.processPath || t('unknown');
+        const procPath = typeof md.processPath === 'string' ? md.processPath : '';
+        const proc = md.process || procPath.split(/[\\/]/).pop() || t('unknown');
         const host = md.host ? md.host + ':' + (md.destinationPort || '') : (md.destinationIP || t('unknown'));
         const chain = (c.chains && c.chains.length > 0) ? c.chains.join(' → ') : 'DIRECT';
         const upload = c.upload || 0;
@@ -459,12 +615,12 @@ function processConnections(rawConns) {
 
         return {
             proc: proc,
+            procPath,
             host: host,
             chain: chain,
             tcp: (md.network || 'tcp').toLowerCase() === 'tcp',
             speed: speed,
             total: (upload + download) / 1024 / 1024, // MB
-            color: procColor(proc),
         };
     });
 
@@ -481,14 +637,6 @@ function processConnections(rawConns) {
     return { rows, total, tcpTotal };
 }
 
-/** Generate a stable color from a process name. @param {string} name */
-function procColor(name) {
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    const hue = Math.abs(hash) % 360;
-    return `hsl(${hue}, 65%, 55%)`;
-}
-
 function renderConns(/** @type {ReturnType<typeof processConnections>} */ data) {
     const conns = data.rows;
     conns.sort(SORT_MODES[sortIdx].cmp);
@@ -500,10 +648,7 @@ function renderConns(/** @type {ReturnType<typeof processConnections>} */ data) 
         const s = fmtSpeed(c.speed);
         const row = document.createElement('div');
         row.className = 'dz-conn-row';
-        const procEl = document.createElement('span');
-        procEl.className = 'dz-conn-proc';
-        procEl.style.background = c.color;
-        procEl.textContent = c.proc.slice(0, 1).toUpperCase();
+        const procEl = createProcessIcon(c.procPath);
         const info = document.createElement('div');
         info.className = 'dz-conn-info';
         const hostEl = document.createElement('div');
@@ -649,6 +794,15 @@ async function buildPickerFromProxyGroups(proxyGroupsResult) {
     // even when the user has not visited the Proxies page yet.
     if (uiGroupName) appStore.set('uiGroupName', uiGroupName);
 
+    // Paint the latency now; the subscription and host lookups below are slower.
+    // Only while the card still names this node (or none yet), so a switch
+    // never shows the new node's delay beside the old node's name.
+    const earlyLeaf = resolveLeafNode(currentNodeName, proxyMap) || currentNodeName;
+    const shownLeaf = $('dz-node-name')?.dataset.leaf;
+    if (earlyLeaf && (!shownLeaf || shownLeaf === earlyLeaf)) {
+        showNodeLatency(earlyLeaf, proxyMap[earlyLeaf] || proxyMap[currentNodeName]);
+    }
+
     // Fetch subscription configs for picker tabs
     subConfigs = await loadSubConfigs();
 
@@ -701,17 +855,15 @@ async function refreshNodeData({ forceInvalidate = false } = {}) {
         //    to sync mode, TUN, and #current-node-name.
         await syncCoreConfig();
 
-        // 2. Fetch proxy data for latency + picker
+        // 2. Fetch proxy data for latency + picker. The version line is
+        //    independent, so it no longer holds up the node card.
+        void getConfig().then((configData) => {
+            const ver = /** @type {any} */ (configData)?.version;
+            const verEl = ver ? $('dz-version') : null;
+            if (verEl) verEl.textContent = 'mihomo ' + ver;
+        }).catch((e) => consoleLogger.warn('Failed to read core version', e));
         const preferredGroupName = appStore.get('uiGroupName') || null;
         const proxyGroupsResult = await fetchProxyGroups({ preferredGroupName });
-        const configData = await getConfig();
-
-        // Update version info
-        const ver = /** @type {any} */ (configData)?.version;
-        if (ver) {
-            const verEl = $('dz-version');
-            if (verEl) verEl.textContent = 'mihomo ' + ver;
-        }
 
         if (!proxyGroupsResult) {
             scheduleNodeRetry();
@@ -762,6 +914,8 @@ function scheduleNodeRetry() {
     if (!isActive) return;
     if (nodeRetryCount >= NODE_RETRY_DELAYS.length) {
         nodeRetryCount = 0;
+        // No node to measure: stop the spinner rather than leave it running.
+        if (latencyStatus === 'pending' && !$('dz-node-name')?.dataset.leaf) renderLatency(0, 'none');
         return; // exhausted retries — give up silently
     }
     const delay = NODE_RETRY_DELAYS[nodeRetryCount++];
@@ -795,10 +949,8 @@ function renderNodeCard(nodeName, proxies, hostMap = {}) {
 
     // dz-node-host already shows server:port — no separate exit-IP row (mihomo doesn't expose real exit IP)
 
-    // Extract latency from proxy history (mihomo /proxies → history[].delay)
-    const history = node?.history;
-    const lastDelay = (history && history.length > 0) ? history[history.length - 1].delay : 0;
-    renderLatency(lastDelay || 0);
+    // Latency from proxy history (mihomo /proxies → history[].delay), or measured now
+    showNodeLatency(leafName || nodeName || '', node);
 
     // Render node picker
     renderPicker();
@@ -1293,9 +1445,8 @@ const TEMPLATE = `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M4 21h16"/></svg>
                 </span>
             </div>
-            <div class="dz-kpi-value"><b id="dz-down-val">0</b><span id="dz-down-unit">KB/s</span></div>
+            <div class="dz-kpi-value"><b id="dz-down-val">0</b><span id="dz-down-unit">KB/s</span><canvas class="dz-spark" id="dz-spark-down"></canvas></div>
             <div class="dz-kpi-foot"><span data-i18n="consolePeak">Peak</span> <span id="dz-down-peak">0 KB/s</span></div>
-            <canvas class="dz-spark" id="dz-spark-down"></canvas>
         </div>
         <div class="glass-card dz-kpi">
             <div class="dz-kpi-top">
@@ -1304,9 +1455,8 @@ const TEMPLATE = `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9m0 0 5 5m-5-5-5 5"/><path d="M4 3h16"/></svg>
                 </span>
             </div>
-            <div class="dz-kpi-value"><b id="dz-up-val">0</b><span id="dz-up-unit">KB/s</span></div>
+            <div class="dz-kpi-value"><b id="dz-up-val">0</b><span id="dz-up-unit">KB/s</span><canvas class="dz-spark" id="dz-spark-up"></canvas></div>
             <div class="dz-kpi-foot"><span data-i18n="consolePeak">Peak</span> <span id="dz-up-peak">0 KB/s</span></div>
-            <canvas class="dz-spark" id="dz-spark-up"></canvas>
         </div>
         <div class="glass-card dz-kpi">
             <div class="dz-kpi-top">
@@ -1335,8 +1485,8 @@ const TEMPLATE = `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
                 </span>
             </div>
-            <div class="dz-kpi-value"><b id="dz-lat-val">—</b><span>ms</span></div>
-            <div class="dz-kpi-foot"><span class="latency-badge latency-badge--fast" id="dz-lat-badge">—</span></div>
+            <div class="dz-kpi-value" data-lat-state="pending"><b id="dz-lat-val" class="dz-lat-num is-pending"></b><span class="dz-lat-unit">ms</span></div>
+            <div class="dz-kpi-foot"><span class="latency-badge" id="dz-lat-badge" hidden></span></div>
         </div>
     </div>
 
@@ -1378,8 +1528,8 @@ const TEMPLATE = `
                         <span style="font-family:var(--font-mono)" id="dz-node-host"></span>
                     </div>
                     <div class="dz-node-latency">
-                        <span class="dz-latency-num"><span id="dz-node-lat">—</span><small>ms</small></span>
-                        <span class="latency-badge latency-badge--fast" id="dz-node-lat-badge">—</span>
+                        <span class="dz-latency-num" data-lat-state="pending"><span id="dz-node-lat" class="dz-lat-num is-pending"></span><small class="dz-lat-unit">ms</small></span>
+                        <span class="latency-badge" id="dz-node-lat-badge" hidden></span>
                         <button class="btn-ghost dz-test-btn" id="dz-test-btn" style="padding:5px 12px;font-size:11px;">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="consoleTestLatency">Test</span>
@@ -1624,11 +1774,22 @@ function _buildConsoleHome(container) {
         if (!leafName) return;
         btn.setAttribute('aria-busy', 'true');
         btn.disabled = true;
+        const generation = latencyGeneration;
         try {
-            const delay = await testProxy(leafName, 5000);
-            renderLatency(delay);
-        } catch {
-            renderLatency(-1);
+            const { delay, cancelled } = await measureLatency(leafName);
+            const shown = $('dz-node-name')?.dataset.leaf === leafName;
+            if (generation !== latencyGeneration) {
+                // Started before a restart or config change: the name may now be
+                // another server, so measure that one instead of keeping this.
+                if (shown) {
+                    renderLatency(0, 'pending');
+                    void probeLatency(leafName);
+                }
+            } else if (!cancelled) {
+                // A stop from a node or config switch is not a timeout: keep what is shown.
+                rememberLatency(leafName, delay);
+                if (shown) renderLatency(delay);
+            }
         } finally {
             btn.removeAttribute('aria-busy');
             btn.disabled = false;
@@ -1769,6 +1930,7 @@ function _buildConsoleHome(container) {
     // settings changes (restore defaults, node-scroll toggle, etc.).
     const _coreRestartedUnsub = Bus.on(Events.CORE_RESTARTED, () => {
         coreGeneration++;
+        forgetLatencies();
         state.totalDown = 0;
         state.totalUp = 0;
         state.downPeak = 0;
@@ -1788,6 +1950,8 @@ function _buildConsoleHome(container) {
     // overrides applied, proxy selection restored, caches invalidated).
     // Also fires on non-restart settings changes — that's fine for data refresh.
     const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, () => {
+        // Node names may now point at other servers: measure them afresh.
+        forgetLatencies();
         if (!isActive) return; // skip IPC calls when console page is hidden
         nodeRetryCount = 0; // core fully restarted - give retry budget back
         void fetchCoreUptime(); // uptime resets after restart
@@ -1906,7 +2070,7 @@ function _buildConsoleHome(container) {
         renderUptime();
         renderPicker();
         renderSubscriptionCard();
-        if (state.latency > 0) renderLatency(state.latency);
+        if (latencyStatus !== 'pending') renderLatency(state.latency, latencyStatus);
     }));
 
     // Register all cleanups (after all _cleanups pushes are done)
