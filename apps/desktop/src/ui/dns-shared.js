@@ -18,6 +18,7 @@ import { createFocusTrap } from '../utils/focus-trap.js';
 import { Bus, Events } from './events.js';
 import { getSetting, saveSetting } from './settings-helpers.js';
 import { pasteWithFeedback } from '../utils/clipboard.js';
+import { queueSmartConfigWrite } from './settings/auto-switch.js';
 
 // ---------------------------------------------------------------------------
 //  DNS bootstrap constants
@@ -399,10 +400,14 @@ document.getElementById('dns-fallbacks-paste-btn')?.addEventListener('click', (e
             }
 
             try {
-                const settings = await invoke(COMMANDS.GET_SETTINGS);
-                settings.dns_nameservers = nameservers;
-                settings.dns_fallbacks = fallbacks.length > 0 ? fallbacks : null;
-                await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                // A full settings save: in the switches' write queue, so this snapshot
+                // can't write back an auto-switch value saved between its read and save.
+                await queueSmartConfigWrite(async () => {
+                    const settings = await invoke(COMMANDS.GET_SETTINGS);
+                    settings.dns_nameservers = nameservers;
+                    settings.dns_fallbacks = fallbacks.length > 0 ? fallbacks : null;
+                    await invoke(COMMANDS.SAVE_SETTINGS, { settings });
+                });
                 invalidateSettingsCache();
 
                 closeModal();
