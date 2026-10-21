@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  vite: 8.1.4
+  vite: 8.1.6
   brace-expansion: 5.0.12
   ws: 8.21.1
   nanoid@3: 3.3.18
@@ -51,13 +51,13 @@ importers:
         version: 7.0.2
       unocss:
         specifier: ^66.11.0
-        version: 66.11.0(@oxc-project/types@0.154.0)(cac@7.1.0)(rolldown@1.2.14)(srvx@1.0.6)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+        version: 66.11.0(@oxc-project/types@0.154.0)(cac@7.1.0)(rolldown@1.2.14)(srvx@1.0.6)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
       vite:
-        specifier: 8.1.4
-        version: 8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+        specifier: 8.1.6
+        version: 8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
       vitest:
         specifier: 5.0.4
-        version: 5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+        version: 5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
   apps/desktop:
     dependencies:
@@ -1373,7 +1373,7 @@ packages:
   '@unocss/vite@66.11.0':
     resolution: {integrity: sha512-1kfKcuF8bAAf+ZDkvCYsDhAfAz+vM6d5SjntabPSrsv7O1h7++r93Nw/gOE30nrITKZ1UynLE0yXO0GQ2zmrkg==}
     peerDependencies:
-      vite: 8.1.4
+      vite: 8.1.6
 
   '@vitest/coverage-v8@5.0.4':
     resolution: {integrity: sha512-P5YcQY8Y6RmoE9xRXI38rT8pssbcubEzqtYTM2XQoxOXMDn04nRaTI1SM8qCl9/NfW3ag9GlzdSXu7IwO5Ft8A==}
@@ -1396,7 +1396,7 @@ packages:
     resolution: {integrity: sha512-tqAlrYWce4iUxhr3ncNohejtCTOcHeE8XWrSNZY3OhPoDn01yeGv+gnaBy64ATp7o6pb03eIbBAjzmibpc9vIQ==}
     peerDependencies:
       msw: ^2.4.9 || ^3.0.0
-      vite: 8.1.4
+      vite: 8.1.6
     peerDependenciesMeta:
       msw:
         optional: true
@@ -2673,8 +2673,8 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
-  vite@8.1.4:
-    resolution: {integrity: sha512-bTT9PsdWO+MQMNG9ZXIP/qM9wGh37DFxTV/sPq9cFpHr3w4jkgef032PkAL9jAqhk3Nz8NQw3O8n6/xFkqO4QQ==}
+  vite@8.1.6:
+    resolution: {integrity: sha512-aRAHIxx5SW5zc1sMqFwJU/t5qaFfXb5Hj0J7W0VXihu/X99+346tz6080tO1T1xVIJORX/b3zVTXGFqUXh35uw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -2732,7 +2732,7 @@ packages:
       '@vitest/ui': 5.0.4
       happy-dom: '*'
       jsdom: '*'
-      vite: 8.1.4
+      vite: 8.1.6
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -4031,7 +4031,7 @@ snapshots:
     dependencies:
       '@unocss/core': 66.11.0
 
-  '@unocss/vite@66.11.0(cac@7.1.0)(srvx@1.0.6)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))':
+  '@unocss/vite@66.11.0(cac@7.1.0)(srvx@1.0.6)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/remapping': 2.3.5
       '@unocss/config': 66.11.0
@@ -4042,7 +4042,7 @@ snapshots:
       pathe: 2.0.3
       tinyglobby: 0.2.17
       unplugin-utils: 0.3.2
-      vite: 8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vite: 8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
     transitivePeerDependencies:
       - '@devframes/agentic'
       - cac
@@ -4059,7 +4059,7 @@ snapshots:
       obug: 3.0.0
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      vitest: 5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
   '@vitest/istanbul-lib-coverage@1.0.2': {}
 
@@ -4067,14 +4067,14 @@ snapshots:
     dependencies:
       '@vitest/istanbul-lib-coverage': 1.0.2
 
-  '@vitest/mocker@5.0.4(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))':
+  '@vitest/mocker@5.0.4(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.4
       estree-walker: 3.0.3
       magic-string: 1.4.3
     optionalDependencies:
-      vite: 8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vite: 8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
 
   '@vitest/spy@5.0.4': {}
 
@@ -5385,7 +5385,7 @@ snapshots:
 
   undici@7.29.1: {}
 
-  unocss@66.11.0(@oxc-project/types@0.154.0)(cac@7.1.0)(rolldown@1.2.14)(srvx@1.0.6)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)):
+  unocss@66.11.0(@oxc-project/types@0.154.0)(cac@7.1.0)(rolldown@1.2.14)(srvx@1.0.6)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@unocss/cli': 66.11.0
       '@unocss/core': 66.11.0
@@ -5404,7 +5404,7 @@ snapshots:
       '@unocss/transformer-compile-class': 66.11.0
       '@unocss/transformer-directives': 66.11.0
       '@unocss/transformer-variant-group': 66.11.0
-      '@unocss/vite': 66.11.0(cac@7.1.0)(srvx@1.0.6)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@unocss/vite': 66.11.0(cac@7.1.0)(srvx@1.0.6)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
     transitivePeerDependencies:
       - '@devframes/agentic'
       - '@oxc-project/types'
@@ -5452,7 +5452,7 @@ snapshots:
   vary@1.1.2:
     optional: true
 
-  vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1):
+  vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -5466,10 +5466,10 @@ snapshots:
       jiti: 2.7.0
       yaml: 2.9.1
 
-  vitest@5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)):
+  vitest@5.0.4(@types/node@26.4.0)(@vitest/coverage-v8@5.0.4)(happy-dom@20.11.15)(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.4(vite@8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@vitest/mocker': 5.0.4(vite@8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -5480,7 +5480,7 @@ snapshots:
       tinybench: 6.2.2
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.1.4(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vite: 8.1.6(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 26.4.0
