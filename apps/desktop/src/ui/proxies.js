@@ -63,24 +63,22 @@ export function notifySwitchFailed(err) {
 
 export { switchPage } from './navigation.js';
 
-/** Close open connections after a node switch; false when that failed. */
+/** Close open connections after a node switch so it applies at once. */
 async function closeConnsAfterSwitch() {
     try {
         await closeAllConnections();
-        return true;
     } catch (err) {
         proxyLogger.warn('Failed to close connections after proxy switch', err);
-        return false;
     }
 }
 
 /**
- * Confirm a node switch, mentioning the closed connections only when they were.
+ * Confirm a node switch. Closing the old connections is how a switch takes
+ * effect, not news for the user, so the toast just names the node.
  * @param {string} node
- * @param {boolean} closedConns
  */
-function notifySwitched(node, closedConns) {
-    showNotification(tFmt(closedConns ? 'switchedNodeClosedConns' : 'switchedNode', { node }), 'success');
+function notifySwitched(node) {
+    showNotification(tFmt('switchedNode', { node }), 'success');
 }
 
 // --- Constants ---
@@ -1472,7 +1470,7 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         if (group && proxyMap?.[group]?.now === node) {
             // Already in use, but the saved choice for the profile may still differ.
             await saveSelection(group);
-            notifySwitched(node, false);
+            notifySwitched(node);
             return;
         }
         if (!group || !(await switchProxy(group, node))) {
@@ -1481,7 +1479,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         }
         invalidateProxiesCache();
         await saveSelection(group);
-        notifySwitched(node, await closeConnsAfterSwitch());
+        await closeConnsAfterSwitch();
+        notifySwitched(node);
         // The switch already happened: a failed refresh afterwards is not a failed switch.
         await syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after switch failed', e));
         await renderProxies().catch((e) => proxyLogger.warn('Re-render after switch failed', e));
@@ -2682,10 +2681,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    // Open connections are closed so the new node applies at once; only
-                    // say so once that actually happened.
-                    const closed = await closeConnsAfterSwitch();
-                    notifySwitched(name, closed);
+                    // Open connections are closed so the new node applies at once.
+                    await closeConnsAfterSwitch();
+                    notifySwitched(name);
                     void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     notifySwitchFailed(switchRejection);

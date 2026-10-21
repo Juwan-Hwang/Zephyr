@@ -9,6 +9,7 @@ vi.mock('../api.js', () => ({
     getConnections: vi.fn().mockResolvedValue({ connections: [] }),
     getProxies: vi.fn().mockResolvedValue({ proxies: {} }),
     testProxy: vi.fn().mockResolvedValue({ delay: 100 }),
+    getLatencyTestSignal: vi.fn(() => new AbortController().signal),
     switchProxy: vi.fn().mockResolvedValue(true),
     switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
     getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
@@ -50,7 +51,8 @@ import {
     isConsoleFullyExpanded,
     checkConsoleWidthNotification
 } from './console-width.js';
-import { activateConsole, deactivateConsole } from './console-home.js';
+import { activateConsole, deactivateConsole, measureLatency } from './console-home.js';
+import { testProxy, getLatencyTestSignal } from '../api.js';
 import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
 
@@ -330,6 +332,35 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             expect(setHomeModeUIMock).toHaveBeenCalledWith('console');
             // invoke should have been called only once
             expect(invoke).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('measureLatency()', () => {
+        it('tells a stopped test apart from a failed one', async () => {
+            const stop = new AbortController();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                stop.abort();
+                return -1;
+            });
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: true });
+
+            // A controller already stopped before the test cannot stop it: a real failure.
+            vi.mocked(testProxy).mockResolvedValueOnce(-1);
+            expect(await measureLatency('HK')).toEqual({ delay: -1, cancelled: false });
+        });
+
+        it('keeps a usable delay even if a stop lands right after it', async () => {
+            const stop = new AbortController();
+            vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                stop.abort();
+                return 87;
+            });
+            expect(await measureLatency('JP')).toEqual({ delay: 87, cancelled: false });
+            vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
+            vi.mocked(testProxy).mockResolvedValueOnce(999999);
+            expect(await measureLatency('JP')).toEqual({ delay: -1, cancelled: false });
         });
     });
 });
