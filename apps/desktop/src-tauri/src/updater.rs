@@ -5,7 +5,8 @@ use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{command, Manager as _, State, Window};
 
 // ── Pure helper functions ────────────────────────────────────────────────
@@ -1561,17 +1562,54 @@ async fn update_core_inner(
     }
 }
 
+/// Until when (Unix seconds) closing the main window hides it instead of
+/// destroying the `WebView` in lightweight mode. An update runs from the page:
+/// it holds the network lock, runs the app installer after a core update and
+/// reports the outcome; destroying the page meanwhile would drop all of that.
+/// 0 means not held.
+static KEEP_WEBVIEW_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+/// After a core update that the app installer follows, the page refreshes its
+/// state and then starts the installer; the hold lapses on its own if it never
+/// does.
+const KEEP_WEBVIEW_BEFORE_CLIENT_SECS: u64 = 600;
+
+/// After an update step ends, time for the page to report the outcome.
+const KEEP_WEBVIEW_AFTER_SECS: u64 = 30;
+
+/// An update step just ended: keep the page alive for `after_secs` more.
+fn hold_webview_for(after_secs: u64) {
+    KEEP_WEBVIEW_UNTIL.store(unix_now_secs().saturating_add(after_secs), Ordering::SeqCst);
+}
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Whether a close in lightweight mode should hide the window rather than
+/// destroy its `WebView`, because an update step still runs in the page.
+pub fn keep_webview_on_close() -> bool {
+    unix_now_secs() < KEEP_WEBVIEW_UNTIL.load(Ordering::SeqCst)
+}
+
 /// Tauri command wrapper for `update_core_inner` with `catch_unwind` guard.
+///
+/// `then_client`: the app installer follows this update; keep the page alive
+/// until it starts. Every core update keeps the page alive while it runs.
 #[command]
 pub async fn update_core(
     window: Window,
     state: State<'_, MihomoState>,
     url: String,
+    then_client: Option<bool>,
 ) -> Result<core_manager::CoreStartResult, String> {
     use futures_util::future::FutureExt as _;
     use std::panic::AssertUnwindSafe;
 
-    AssertUnwindSafe(update_core_inner(window, state, url))
+    KEEP_WEBVIEW_UNTIL.store(u64::MAX, Ordering::SeqCst);
+    let result = AssertUnwindSafe(update_core_inner(window, state, url))
         .catch_unwind()
         .await
         .map_err(|payload| {
@@ -1579,7 +1617,13 @@ pub async fn update_core(
             crate::emit_error!(Updater, UPDATE_PANIC_GUARD, "Panic in update_core: {msg}");
             format!("Internal error in update_core: {msg}")
         })
-        .and_then(std::convert::identity)
+        .and_then(std::convert::identity);
+    hold_webview_for(if result.is_ok() && then_client.unwrap_or(false) {
+        KEEP_WEBVIEW_BEFORE_CLIENT_SECS
+    } else {
+        KEEP_WEBVIEW_AFTER_SECS
+    });
+    result
 }
 
 /// Removes the listed files when dropped; missing files are ignored.
@@ -1873,13 +1917,21 @@ pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUp
 /// Download and open the Zephyr client installer.
 #[command]
 pub async fn update_client(window: Window) -> Result<String, String> {
+    // The page awaits this step to report its outcome.
+    KEEP_WEBVIEW_UNTIL.store(u64::MAX, Ordering::SeqCst);
+    let result = update_client_inner(&window).await;
+    hold_webview_for(KEEP_WEBVIEW_AFTER_SECS);
+    result
+}
+
+async fn update_client_inner(window: &Window) -> Result<String, String> {
     // Portable mode: cannot self-update (exe is locked while running)
     if crate::core_manager::core::core_process::is_portable_mode() {
         return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Checking for Zephyr updates...",
         5,
@@ -1894,7 +1946,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     }
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading Zephyr update...",
         10,
@@ -1914,7 +1966,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
 
     // Download the installer
     download_release_asset(
-        &window,
+        window,
         &info.download_url,
         &dest_path,
         UpdateComponent::Client,
@@ -1935,7 +1987,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         );
     };
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying installer integrity...",
         93,
@@ -1948,7 +2000,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     // Verify Minisign Ed25519 signature
     let minisig_url = format!("{}.minisig", info.download_url);
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Downloading signature...",
         94,
@@ -1976,7 +2028,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         })?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Verifying signature...",
         95,
@@ -1989,7 +2041,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
     )?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Opening installer...",
         96,
@@ -2000,7 +2052,7 @@ pub async fn update_client(window: Window) -> Result<String, String> {
         .map_err(|e| format!("Failed to open installer: {e}"))?;
 
     emit_download_status_ext(
-        &window,
+        window,
         Some(UpdateComponent::Client),
         "Installer launched",
         100,
@@ -2050,6 +2102,20 @@ mod tests {
     #[test]
     fn test_lowercase_v_priority_over_uppercase() {
         assert_eq!(strip_version_prefix("vV1.0"), "V1.0");
+    }
+
+    #[test]
+    fn test_keep_webview_hold_expires() {
+        KEEP_WEBVIEW_UNTIL.store(u64::MAX, Ordering::SeqCst);
+        assert!(keep_webview_on_close());
+        hold_webview_for(KEEP_WEBVIEW_BEFORE_CLIENT_SECS);
+        assert!(keep_webview_on_close());
+        hold_webview_for(KEEP_WEBVIEW_AFTER_SECS);
+        assert!(keep_webview_on_close());
+        KEEP_WEBVIEW_UNTIL.store(unix_now_secs().saturating_sub(1), Ordering::SeqCst);
+        assert!(!keep_webview_on_close());
+        KEEP_WEBVIEW_UNTIL.store(0, Ordering::SeqCst);
+        assert!(!keep_webview_on_close());
     }
 
     // ── select_release_asset_inner tests ──
