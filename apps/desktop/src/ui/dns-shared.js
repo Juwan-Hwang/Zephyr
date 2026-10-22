@@ -312,11 +312,23 @@ export async function initDnsRewriteToggle() {
         if (fallbacksInput) fallbacksInput.value = config.fallback.join('\n');
     }
 
+    /** @type {{ activate(): void, deactivate(): void } | null} */
+    let modalTrap = null;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let hideTimer = null;
+
     // Open config modal
     if (configBtn) {
         configBtn.addEventListener('click', async () => {
             await loadDnsConfig();
             if (modal) {
+                // A reopen inside the close animation must cancel the
+                // pending hide, or the timer hides the reopened dialog
+                // while its focus trap is already active.
+                if (hideTimer !== null) {
+                    clearTimeout(hideTimer);
+                    hideTimer = null;
+                }
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
                 // Animate in
@@ -332,7 +344,8 @@ export async function initDnsRewriteToggle() {
                         });
                     }
                 });
-                createFocusTrap(modal, { onEscape: closeModal });
+                modalTrap ??= createFocusTrap(modal, { onEscape: closeModal });
+                modalTrap.activate();
             }
         });
     }
@@ -340,12 +353,14 @@ export async function initDnsRewriteToggle() {
     // Close modal
     function closeModal() {
         if (!modal) return;
+        modalTrap?.deactivate();
         const inner = modal.querySelector('.glass-card');
         if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';
             inner.style.transform = 'scale(0.96)';
             inner.style.opacity = '0';
-            setTimeout(() => {
+            hideTimer = setTimeout(() => {
+                hideTimer = null;
                 modal.classList.add('hidden');
                 modal.classList.remove('flex');
             }, 150);
