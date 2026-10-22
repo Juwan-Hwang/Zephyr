@@ -1,0 +1,65 @@
+# ============================================================
+# CodSpeed benchmarks
+# Runs the zephyr-core divan benchmarks under CodSpeed's CPU
+# simulation instrument and reports results on PRs and main.
+# All GitHub Actions are pinned to immutable commit SHAs
+# (same pins as ci.yml).
+# ============================================================
+
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Lets CodSpeed trigger backtest runs to build initial history.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codspeed-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    # Fork PRs never get an OIDC token from GitHub, so their results could
+    # not be uploaded anyway; skip them outright instead of building and
+    # running untrusted code in a job that holds id-token permission.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # OIDC authentication with CodSpeed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          # Keep in sync with rust-toolchain.toml.
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: . -> target
+          key: codspeed
+
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-codspeed
+
+      - name: Build the benchmark target(s)
+        run: cargo codspeed build -m simulation -p zephyr-core --locked
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        with:
+          mode: simulation
+          run: cargo codspeed run -p zephyr-core
