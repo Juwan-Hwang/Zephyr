@@ -244,7 +244,7 @@
                 </div>
 
                 <!-- Plugin Panel (overlay) -->
-                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="plugin-panel-title">
                     <div class="absolute inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md" id="plugin-panel-backdrop"></div>
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
@@ -278,18 +278,18 @@
                             />
                             <!-- New override dropdown -->
                             <div class="relative">
-                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1" aria-haspopup="menu" aria-expanded="false">
                                     <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
-                                <div id="plugin-new-dropdown" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
-                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
-                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
+                                <div id="plugin-new-dropdown" role="menu" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
+                                    <div role="separator" class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
+                                    <div role="separator" class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
                                 </div>
                             </div>
                             <!-- More: bulk enable / disable -->
@@ -346,7 +346,7 @@
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
                         <!-- Group Selector Dropdown -->
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
-                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" aria-haspopup="menu" aria-expanded="false" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
                                 <svg aria-hidden="true" class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
@@ -1363,9 +1363,9 @@
     </div>
 
     <!-- DNS Configuration Modal -->
-    <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
+    <div id="dns-config-modal" role="dialog" aria-modal="true" aria-labelledby="dns-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
         <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+            <h3 id="dns-config-title" class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
 
             <div class="space-y-4">

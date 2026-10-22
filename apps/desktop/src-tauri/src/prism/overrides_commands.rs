@@ -16,7 +16,7 @@ use crate::prism::overrides::overrides_store;
 use crate::prism::pipeline::{
     execute_batch_pipeline, execute_test_pipeline, execute_write_pipeline,
 };
-use crate::prism::types::check_input_size;
+use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
 
 /// List all override items, sorted by order.
@@ -51,6 +51,8 @@ pub async fn override_create(
     r#type: String,
     url: Option<String>,
 ) -> Result<OverrideItem, String> {
+    // Security: Override names are identifiers; cap them like other names.
+    check_name_size(&name, "Override name")?;
     let mut ext = OverrideExt::from_ext(&ext).ok_or_else(|| format!("Unknown ext: {ext}"))?;
     let r#type = match r#type.as_str() {
         "local" => OverrideType::Local,
@@ -309,6 +311,14 @@ pub fn override_update(
     mut profile_ids: Option<Vec<String>>,
     mut url: Option<String>,
 ) -> Result<OverrideItem, String> {
+    if let Some(n) = &name {
+        // Only a changed name is a new identifier held to the cap;
+        // resubmitting the stored name (say, toggling an imported item
+        // whose name predates the limit) stays allowed.
+        if overrides_store::load_item(&state, &id)?.name != *n {
+            check_name_size(n, "Override name")?;
+        }
+    }
     // update_item performs read-modify-write within a single lock acquisition,
     // preventing race conditions with concurrent updates.
     overrides_store::update_item(&state, &id, |item| {
@@ -1180,6 +1190,11 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
             );
             continue;
         }
+
+        // No name-size check on import: this is a restore path for backups
+        // exported earlier, and legacy names must round-trip. The payload
+        // as a whole is already capped by check_input_size above; the
+        // 1024-byte name limit applies to interactive create/rename only.
 
         let Some(ext) = OverrideExt::from_ext(&entry.ext) else {
             emit_warn!(
