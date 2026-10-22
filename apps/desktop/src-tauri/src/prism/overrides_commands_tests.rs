@@ -18,7 +18,9 @@
     clippy::panic
 )]
 mod tests {
-    use super::super::{check_write_mode, default_template_content, OverrideExt};
+    use super::super::{
+        check_write_mode, default_template_content, sanitize_override_yaml, OverrideExt,
+    };
 
     #[test]
     fn js_template() {
@@ -41,5 +43,27 @@ mod tests {
         assert!(check_write_mode(Some(true), None).is_ok());
         assert!(check_write_mode(Some(false), Some(true)).is_ok());
         assert!(check_write_mode(Some(true), Some(false)).is_ok());
+    }
+
+    #[test]
+    fn sanitize_override_yaml_strips_dangerous_keys() {
+        let input = "script: evil.js\nexternal-controller-pipe: '\\\\.\\pipe\\evil'\nrules:\n  $append:\n    - DOMAIN,example.com,DIRECT\n";
+        let sanitized = sanitize_override_yaml(input).expect("valid YAML");
+        assert!(!sanitized.contains("script"));
+        assert!(!sanitized.contains("external-controller-pipe"));
+        assert!(sanitized.contains("DOMAIN,example.com,DIRECT"));
+    }
+
+    #[test]
+    fn sanitize_override_yaml_preserves_clean_content() {
+        let input = "rules:\n  $prepend:\n    - DOMAIN-SUFFIX,google.com,DIRECT\n";
+        let sanitized = sanitize_override_yaml(input).expect("valid YAML");
+        assert_eq!(sanitized, input);
+    }
+
+    #[test]
+    fn sanitize_override_yaml_rejects_invalid_yaml() {
+        let input = "rules: [unclosed\n";
+        assert!(sanitize_override_yaml(input).is_err());
     }
 }

@@ -9,3 +9,8 @@
 **Vulnerability:** `rule_create` and `rule_update` written `.prism.yaml` rule files directly to disk without stripping dangerous YAML keys (`script`, `external-controller-*`, `external-ui`, provider `path`), unlike `rule_import_*` functions which sanitized YAML.
 **Learning:** High-level import wrappers sanitizing input can obscure missing sanitization in lower-level CRUD commands (`create`/`update`).
 **Prevention:** Always apply `remove_dangerous_keys` across all IPC commands that accept user-provided or API-provided YAML configuration/rule inputs.
+
+## 2026-07-17 - Missing YAML Sanitization in Prism Overrides System
+**Vulnerability:** `override_create`, `override_set_content`, `override_refresh_remote`, and `override_import` wrote user-provided, imported, and remote Prism YAML overrides to disk without stripping dangerous YAML keys (`script`, `external-controller-*`, `external-ui`, provider `path`).
+**Learning:** Adding new override or patch compilation mechanisms in the Tauri command layer can re-introduce YAML injection vectors if sanitization is not consistently applied across all YAML ingestion paths.
+**Prevention:** Always invoke `remove_dangerous_keys_internal_pub` or a `sanitize_override_yaml` wrapper whenever user or remote YAML content is persisted or processed.
