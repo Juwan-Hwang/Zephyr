@@ -312,6 +312,9 @@ export async function initDnsRewriteToggle() {
         if (fallbacksInput) fallbacksInput.value = config.fallback.join('\n');
     }
 
+    /** @type {{ activate(): void, deactivate(): void } | null} */
+    let modalTrap = null;
+
     // Open config modal
     if (configBtn) {
         configBtn.addEventListener('click', async () => {
@@ -332,7 +335,8 @@ export async function initDnsRewriteToggle() {
                         });
                     }
                 });
-                createFocusTrap(modal, { onEscape: closeModal });
+                modalTrap ??= createFocusTrap(modal, { onEscape: closeModal });
+                modalTrap.activate();
             }
         });
     }
@@ -340,6 +344,7 @@ export async function initDnsRewriteToggle() {
     // Close modal
     function closeModal() {
         if (!modal) return;
+        modalTrap?.deactivate();
         const inner = modal.querySelector('.glass-card');
         if (inner instanceof HTMLElement) {
             inner.style.transition = 'all 0.15s ease-in';

@@ -40,6 +40,23 @@ describe('focus trap modality', () => {
         trap.destroy();
     });
 
+    it('tab with focus outside the dialog pulls focus back inside', async () => {
+        const dlg = dialog();
+        const trap = createFocusTrap(dlg);
+        trap.activate();
+        await nextFrame();
+        // Simulate focus escaping to the opener (e.g. after a click on
+        // non-focusable dialog content dropped focus back to <body>).
+        document.getElementById('opener')?.focus();
+        expect(document.activeElement?.id).toBe('opener');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+        expect(document.activeElement?.id).toBe('first');
+        document.getElementById('opener')?.focus();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+        expect(document.activeElement?.id).toBe('last');
+        trap.destroy();
+    });
+
     it('text fields are never quieted', () => {
         dialog();
         document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));

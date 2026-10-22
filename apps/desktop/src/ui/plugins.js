@@ -61,6 +61,11 @@ function updateDirtyMarker() {
  * @param {boolean} editing
  */
 function setEditorChrome(editing) {
+    // The dialog's accessible name must follow the visible heading: the list
+    // title in list view, the script title in the editor.
+    document
+        .getElementById('plugin-panel')
+        ?.setAttribute('aria-labelledby', editing ? 'plugin-script-title' : 'plugin-panel-title');
     document.getElementById('plugin-panel-title')?.classList.toggle('hidden', editing);
     document.getElementById('plugin-script-crumb')?.classList.toggle('hidden', !editing);
     document.getElementById('plugin-toolbar')?.classList.toggle('hidden', editing);
@@ -595,11 +600,13 @@ function setupNewOverrideDropdown(_panel) {
 
     newBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.classList.toggle('hidden');
+        const open = dropdown.classList.toggle('hidden') === false;
+        newBtn.setAttribute('aria-expanded', String(open));
     });
 
     document.addEventListener('click', () => {
         dropdown.classList.add('hidden');
+        newBtn.setAttribute('aria-expanded', 'false');
     });
 
     dropdown.addEventListener('click', (e) => {
@@ -615,6 +622,7 @@ function setupNewOverrideDropdown(_panel) {
         else if (action === 'export-all') void exportAllOverrides();
         else if (action === 'import-file') void importFromFile();
         dropdown.classList.add('hidden');
+        newBtn.setAttribute('aria-expanded', 'false');
     });
 }
 

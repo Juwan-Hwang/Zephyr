@@ -119,6 +119,15 @@ export function createFocusTrap(container, options = {}) {
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
 
+        // Focus sitting outside the container (e.g. on <body> after a click
+        // on non-focusable dialog content) would otherwise tab straight out
+        // behind the modal: pull it back in instead.
+        if (!container.contains(document.activeElement)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+            return;
+        }
+
         if (e.shiftKey) {
             if (document.activeElement === first) {
                 e.preventDefault();
