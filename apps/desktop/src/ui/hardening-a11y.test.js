@@ -74,6 +74,45 @@ describe('home and settings page switches and theme swatches accessibility', () 
     });
 });
 
+describe('modal dialog accessibility', () => {
+    it('modal overlays in index.html carry proper role, aria-modal, and valid aria-labelledby targets', () => {
+        const doc = parseIndex();
+        const modals = [
+            'modal-bg',
+            'plugin-panel',
+            'dns-config-modal',
+            'port-config-modal',
+            'fullscreen-editor-overlay',
+        ];
+
+        for (const id of modals) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.getAttribute('role'), id).toBe('dialog');
+            expect(el?.getAttribute('aria-modal'), id).toBe('true');
+
+            const titleId = el?.getAttribute('aria-labelledby');
+            expect(titleId, `${id} aria-labelledby`).toBeTruthy();
+            if (titleId) {
+                expect(doc.getElementById(titleId), `${id} title element #${titleId}`).toBeTruthy();
+            }
+        }
+    });
+});
+
+describe('menu triggers accessibility', () => {
+    it('index.html dropdown triggers carry aria-haspopup="menu" and aria-expanded attributes', () => {
+        const doc = parseIndex();
+        const triggers = ['proxy-group-trigger', 'sort-btn', 'copy-env-format-btn', 'plugin-new-btn', 'plugin-more-btn'];
+        for (const id of triggers) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('aria-haspopup')).toBe('menu');
+            expect(btn?.getAttribute('aria-expanded')).toBe('false');
+        }
+    });
+});
+
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();
