@@ -1955,6 +1955,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         btn.onclick = async () => {
             // Close menu
             menu.classList.add('hidden');
+            trigger.setAttribute('aria-expanded', 'false');
             trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
 
             // Switch group
@@ -2011,6 +2012,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                 menu.style.top = ((rect.bottom + 6) / uiScale) + 'px';
                 menu.style.width = (Math.max(rect.width, 160) / uiScale) + 'px';
                 menu.classList.remove('hidden');
+                trigger.setAttribute('aria-expanded', 'true');
                 trigger.querySelector('.dropdown-arrow')?.classList.add('rotate-180');
 
                 // Viewport overflow correction (mirrors context-menu.js logic)
@@ -2026,6 +2028,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                 });
             } else {
                 menu.classList.add('hidden');
+                trigger.setAttribute('aria-expanded', 'false');
                 trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
             }
         });
@@ -2034,6 +2037,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         document.addEventListener('click', (e) => {
             if (!selector.contains(/** @type {Node} */ (e.target)) && !menu.contains(/** @type {Node} */ (e.target))) {
                 menu.classList.add('hidden');
+                trigger.setAttribute('aria-expanded', 'false');
                 trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
             }
         });
@@ -2042,6 +2046,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
                 menu.classList.add('hidden');
+                trigger.setAttribute('aria-expanded', 'false');
                 trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
             }
         });
@@ -2050,6 +2055,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         const closeMenu = () => {
             if (!menu.classList.contains('hidden')) {
                 menu.classList.add('hidden');
+                trigger.setAttribute('aria-expanded', 'false');
                 trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
             }
         };

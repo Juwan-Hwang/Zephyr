@@ -278,7 +278,7 @@
                             />
                             <!-- New override dropdown -->
                             <div class="relative">
-                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1" aria-haspopup="menu" aria-expanded="false">
                                     <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
@@ -346,7 +346,7 @@
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
                         <!-- Group Selector Dropdown -->
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
-                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" aria-haspopup="menu" aria-expanded="false" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
                                 <svg aria-hidden="true" class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
@@ -907,7 +907,7 @@
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0">
                                     <div id="copy-env-format-wrap" class="relative">
-                                        <button type="button" id="copy-env-format-btn" class="env-format-chip" aria-haspopup="menu" aria-expanded="false" data-i18n-title="copyEnvFormat" title="Shell Format"><span id="copy-env-format-label">Bash</span><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                                        <button type="button" id="copy-env-format-btn" class="env-format-chip" aria-haspopup="menu" aria-expanded="false" data-i18n-title="copyEnvFormat" data-i18n-aria-label="copyEnvFormat" title="Shell Format" aria-label="Shell Format"><span id="copy-env-format-label">Bash</span><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
                                         <div id="copy-env-format-menu" role="menu" class="hidden absolute end-0 top-[calc(100%+6px)] w-40 rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30"><div class="menu-scroll"></div></div>
                                     </div>
                                     <button type="button" id="copy-env-btn" class="row-action"><span data-i18n="copy">Copy</span></button>

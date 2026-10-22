@@ -59,6 +59,26 @@ describe('home and settings page switches and theme swatches accessibility', () 
     });
 });
 
+describe('menu triggers accessibility', () => {
+    it('index.html dropdown triggers carry aria-haspopup="menu" and aria-expanded attributes', () => {
+        const doc = parseIndex();
+        const triggers = ['proxy-group-trigger', 'sort-btn', 'copy-env-format-btn', 'plugin-new-btn', 'plugin-more-btn'];
+        for (const id of triggers) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('aria-haspopup')).toBe('menu');
+            expect(btn?.getAttribute('aria-expanded')).toBe('false');
+        }
+    });
+
+    it('copy-env-format-btn carries translatable aria-label', () => {
+        const doc = parseIndex();
+        const btn = doc.getElementById('copy-env-format-btn');
+        expect(btn?.getAttribute('aria-label')).toBe('Shell Format');
+        expect(btn?.getAttribute('data-i18n-aria-label')).toBe('copyEnvFormat');
+    });
+});
+
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();

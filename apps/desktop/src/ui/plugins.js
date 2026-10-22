@@ -595,11 +595,13 @@ function setupNewOverrideDropdown(_panel) {
 
     newBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.classList.toggle('hidden');
+        const open = dropdown.classList.toggle('hidden') === false;
+        newBtn.setAttribute('aria-expanded', String(open));
     });
 
     document.addEventListener('click', () => {
         dropdown.classList.add('hidden');
+        newBtn.setAttribute('aria-expanded', 'false');
     });
 
     dropdown.addEventListener('click', (e) => {
