@@ -42,6 +42,21 @@ describe('home and settings page switches and theme swatches accessibility', () 
         }
     });
 
+    it('settings segmented controls carry role="group" and translatable aria-labels', () => {
+        const doc = parseIndex();
+        const controls = [
+            { id: 'setting-theme-mode-container', key: 'theme' },
+            { id: 'setting-home-mode-container', key: 'homePageMode' },
+        ];
+        for (const { id, key } of controls) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.getAttribute('role')).toBe('group');
+            expect(el?.getAttribute('aria-label')).toBeTruthy();
+            expect(el?.getAttribute('data-i18n-aria-label')).toBe(key);
+        }
+    });
+
     it('preset theme color swatches carry translatable aria-labels', () => {
         const doc = parseIndex();
         const swatches = [
