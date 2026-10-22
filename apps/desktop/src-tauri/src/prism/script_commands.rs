@@ -7,7 +7,7 @@ use tauri::State;
 use clash_prism_script::{SandboxConfig, ScriptContext, ScriptRuntime};
 
 use crate::prism::pipeline::{execute_write_pipeline, pipeline_result_to_json};
-use crate::prism::types::check_input_size;
+use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
 
 /// Execute a JavaScript script inside the Prism sandbox.
@@ -25,7 +25,9 @@ pub fn script_execute(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute")?;
+    // Security: Validate script and script name input size to prevent DoS
     check_input_size(&script, "Script")?;
+    check_name_size(&script_name, "Script name")?;
     let config_str = state.with_ext(|_ext| {
         // Read running config directly from disk
         let paths = crate::ensure_app_storage(&state.app)?;
@@ -82,7 +84,9 @@ pub async fn script_execute_write(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute_write")?;
+    // Security: Validate script and script name input size to prevent DoS
     check_input_size(&script, "Script")?;
+    check_name_size(&script_name, "Script name")?;
 
     // Tauri automatically runs async commands on a blocking thread pool,
     // so we can call the synchronous pipeline directly without blocking the UI.
@@ -92,6 +96,7 @@ pub async fn script_execute_write(
 
 #[tauri::command]
 pub fn script_validate(script: String) -> Result<bool, String> {
+    check_input_size(&script, "Script")?;
     let runtime = ScriptRuntime::new();
     match runtime.validate(&script) {
         Ok(()) => Ok(true),

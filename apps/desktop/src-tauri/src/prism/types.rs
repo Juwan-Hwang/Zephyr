@@ -7,6 +7,11 @@ use zephyr_core::config::sanitizer::{sanitize_base_filename, url_decode_complete
 /// Maximum allowed size for user-supplied text inputs (10 MB).
 pub const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
 
+/// Maximum allowed size for identifier-like inputs (KV keys, group names,
+/// script names). The 10 MB text limit is sized for whole scripts and
+/// configs; identifiers stored on every write need a far smaller cap.
+pub const MAX_NAME_SIZE: usize = 1024;
+
 // ===========================================================================
 // Serializable types
 // ===========================================================================
@@ -46,6 +51,17 @@ pub fn check_input_size(input: &str, label: &str) -> Result<(), String> {
     if input.len() > MAX_INPUT_SIZE {
         return Err(format!(
             "{label} too large ({} bytes, max {MAX_INPUT_SIZE} bytes)",
+            input.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Reject identifier-like inputs that exceed `MAX_NAME_SIZE`.
+pub fn check_name_size(input: &str, label: &str) -> Result<(), String> {
+    if input.len() > MAX_NAME_SIZE {
+        return Err(format!(
+            "{label} too large ({} bytes, max {MAX_NAME_SIZE} bytes)",
             input.len()
         ));
     }
