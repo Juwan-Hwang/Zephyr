@@ -5,8 +5,8 @@
 use tauri::State;
 
 use crate::prism::types::{
-    read_groups, read_prism_settings, sanitize_filename, write_groups, write_prism_settings,
-    RuleGroup, RuleGroups,
+    check_input_size, read_groups, read_prism_settings, sanitize_filename, write_groups,
+    write_prism_settings, RuleGroup, RuleGroups,
 };
 use crate::prism::PrismState;
 
@@ -18,6 +18,8 @@ pub fn rule_group_list(state: State<PrismState>) -> Result<RuleGroups, String> {
 
 #[tauri::command]
 pub fn rule_group_create(state: State<PrismState>, name: String) -> Result<(), String> {
+    // Security: Validate group name input size to prevent DoS
+    check_input_size(&name, "Group name")?;
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 
@@ -38,6 +40,9 @@ pub fn rule_group_rename(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
+    // Security: Validate group name input size to prevent DoS
+    check_input_size(&old_name, "Group name")?;
+    check_input_size(&new_name, "Group name")?;
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 
@@ -60,6 +65,8 @@ pub fn rule_group_rename(
 
 #[tauri::command]
 pub fn rule_group_delete(state: State<PrismState>, name: String) -> Result<(), String> {
+    // Security: Validate group name input size to prevent DoS
+    check_input_size(&name, "Group name")?;
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 

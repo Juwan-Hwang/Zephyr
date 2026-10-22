@@ -25,7 +25,9 @@ pub fn script_execute(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute")?;
+    // Security: Validate script and script name input size to prevent DoS
     check_input_size(&script, "Script")?;
+    check_input_size(&script_name, "Script name")?;
     let config_str = state.with_ext(|_ext| {
         // Read running config directly from disk
         let paths = crate::ensure_app_storage(&state.app)?;
@@ -82,7 +84,9 @@ pub async fn script_execute_write(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute_write")?;
+    // Security: Validate script and script name input size to prevent DoS
     check_input_size(&script, "Script")?;
+    check_input_size(&script_name, "Script name")?;
 
     // Tauri automatically runs async commands on a blocking thread pool,
     // so we can call the synchronous pipeline directly without blocking the UI.
