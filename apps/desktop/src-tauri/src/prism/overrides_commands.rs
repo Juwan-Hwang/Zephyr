@@ -18,6 +18,25 @@ use crate::prism::pipeline::{
 };
 use crate::prism::types::check_input_size;
 use crate::prism::PrismState;
+use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
+
+/// Sanitize user-supplied or remote Prism YAML override content before it is written to disk.
+///
+/// Strips dangerous YAML keys (`script`, `external-controller-*`, `external-ui`, provider `path`).
+fn sanitize_override_yaml(content: &str) -> Result<String, String> {
+    let value = match serde_yaml::from_str::<serde_yaml::Value>(content) {
+        Ok(value) => value,
+        Err(e) => return Err(format!("Invalid YAML: {e}")),
+    };
+    let mut sanitized = value.clone();
+    remove_dangerous_keys(&mut sanitized, false);
+    if sanitized == value {
+        Ok(content.to_owned())
+    } else {
+        serde_yaml::to_string(&sanitized)
+            .map_err(|e| format!("Failed to serialize sanitized YAML: {e}"))
+    }
+}
 
 /// List all override items, sorted by order.
 #[tauri::command]
@@ -120,7 +139,10 @@ pub async fn override_create(
     // Write content: use pre-downloaded content, or fall back to default template
     let dir = overrides_store::overrides_dir(&state)?;
     let content_path = dir.join(item.content_filename());
-    let content = pre_downloaded.unwrap_or_else(|| default_template_content(item.ext));
+    let mut content = pre_downloaded.unwrap_or_else(|| default_template_content(item.ext));
+    if item.ext == OverrideExt::PrismYaml {
+        content = sanitize_override_yaml(&content)?;
+    }
 
     write_file_secure(&content_path, &content)
         .map_err(|e| format!("Failed to create content file: {e}"))?;
@@ -372,20 +394,20 @@ pub async fn override_set_content(
 
     let item = overrides_store::load_item(&state, &id)?;
 
-    // Validate the content
-    if item.ext == OverrideExt::Js {
+    // Validate and sanitize the content
+    let content = if item.ext == OverrideExt::Js {
         let runtime = clash_prism_script::ScriptRuntime::with_context(
             crate::prism::pipeline::build_script_context(),
         );
         if let Err(e) = runtime.validate(&content) {
             return Err(format!("Script validation failed: {e}"));
         }
+        content
     } else if item.ext == OverrideExt::PrismYaml {
-        // No dry run for Prism YAML: at least refuse content that is not YAML.
-        if let Err(e) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            return Err(format!("YAML syntax error: {e}"));
-        }
-    }
+        sanitize_override_yaml(&content)?
+    } else {
+        content
+    };
 
     // Save only: persist the content without executing it (JS is syntax-checked,
     // Prism YAML is parse-checked; both are fully checked when they run).
@@ -760,6 +782,24 @@ pub fn override_reorder(state: State<PrismState>, ids: Vec<String>) -> Result<()
 /// Toggle override enabled/disabled.
 #[tauri::command]
 pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> Result<(), String> {
+    // When enabling a Prism YAML override, read and sanitize the stored
+    // content before persisting the flag: if the content cannot be restored
+    // as a patch, the toggle fails without changing any state.
+    let prepared = if enabled {
+        let peek = overrides_store::load_item(&state, &id)?;
+        if peek.ext == OverrideExt::PrismYaml {
+            let content = overrides_store::read_content(&state, &id)
+                .map_err(|e| format!("Failed to read override content to restore patch: {e}"))?;
+            // Sanitize on restore so a stored override saved before
+            // write-path sanitization cannot reactivate dangerous keys.
+            Some(sanitize_override_yaml(&content)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Use atomic update to avoid read-modify-write race
     let item = overrides_store::update_item(&state, &id, |item| {
         item.enabled = enabled;
@@ -772,11 +812,11 @@ pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> R
         let patch_path = prism_dir.join(item.patch_filename());
 
         if enabled {
-            // Re-enable: restore patch file from stored content
-            let content = overrides_store::read_content(&state, &id)
-                .map_err(|e| format!("Failed to read override content to restore patch: {e}"))?;
-            write_file_secure(&patch_path, &content)
-                .map_err(|e| format!("Failed to restore patch file: {e}"))?;
+            // Re-enable: restore patch file from the content prepared above
+            if let Some(content) = &prepared {
+                write_file_secure(&patch_path, content)
+                    .map_err(|e| format!("Failed to restore patch file: {e}"))?;
+            }
         } else {
             // Disable: remove patch so Prism extension stops applying it
             if patch_path.exists() {
@@ -794,6 +834,13 @@ pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> R
 pub fn override_test(state: State<PrismState>, id: String) -> Result<OverrideLog, String> {
     let item = overrides_store::load_item(&state, &id)?;
     let content = overrides_store::read_content(&state, &id)?;
+    // Test what would actually be applied: stored Prism YAML goes through
+    // the same sanitization as the apply path.
+    let content = if item.ext == OverrideExt::PrismYaml {
+        sanitize_override_yaml(&content)?
+    } else {
+        content
+    };
     // A dry run: report it, but keep the last real apply's log as the override's status.
     execute_override_test(&state, &item, &content)
 }
@@ -821,7 +868,10 @@ pub async fn override_refresh_remote(
         .clone();
 
     // Direct first, then through the managed core if direct fails
-    let content = download_remote_content(&state.app, &url).await?;
+    let mut content = download_remote_content(&state.app, &url).await?;
+    if item.ext == OverrideExt::PrismYaml {
+        content = sanitize_override_yaml(&content)?;
+    }
 
     // Update content
     overrides_store::write_content(&state, &id, &content)?;
@@ -890,12 +940,66 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         match overrides_store::read_content(&state, &item.id) {
             Ok(c) if !c.is_empty() => {
                 if item.ext == OverrideExt::PrismYaml {
-                    prism_patches.push((
-                        item.id.clone(),
-                        item.name.clone(),
-                        item.patch_filename(),
-                        c,
-                    ));
+                    // Stored content saved before write-path sanitization (or
+                    // edited on disk) must not reach the core unsanitized.
+                    match sanitize_override_yaml(&c) {
+                        Ok(clean) => {
+                            prism_patches.push((
+                                item.id.clone(),
+                                item.name.clone(),
+                                item.patch_filename(),
+                                clean,
+                            ));
+                        }
+                        Err(e) => {
+                            // The batch compilation applies every patch file
+                            // in the workspace, so a stale patch left by an
+                            // earlier apply must not survive this failure.
+                            // A removal failure is reported in the log below
+                            // instead of being silently discarded.
+                            let removal_note = match crate::prism::prism_data_dir(&state.app) {
+                                Ok(prism_dir) => {
+                                    let patch_path = prism_dir.join(item.patch_filename());
+                                    if patch_path.exists() {
+                                        match std::fs::remove_file(&patch_path) {
+                                            Ok(()) => None,
+                                            Err(re) => Some(format!(
+                                                " Also failed to remove its stale workspace patch: {re}"
+                                            )),
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Err(_) => None,
+                            };
+                            let log = OverrideLog {
+                                script_id: item.id.clone(),
+                                script_name: item.name.clone(),
+                                executed_at: now,
+                                duration_us: 0,
+                                success: false,
+                                config_modified: false,
+                                error: Some(format!("Invalid Prism YAML: {e}")),
+                                logs: vec![LogEntry {
+                                    level: "Error".to_owned(),
+                                    message: format!(
+                                        "Stored override content is not valid YAML: {e}{}",
+                                        removal_note.as_deref().unwrap_or_default()
+                                    ),
+                                }],
+                            };
+                            if let Err(e) = overrides_store::save_log(&state, &item.id, &log) {
+                                emit_warn!(
+                                    Override,
+                                    OVERRIDE_APPLY_FAILED,
+                                    "Failed to save log for '{}': {e}",
+                                    item.name
+                                );
+                            }
+                            pre_logs.push(log);
+                        }
+                    }
                 } else {
                     js_scripts.push((item.id.clone(), item.name.clone(), c));
                 }
@@ -1195,6 +1299,23 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
             _ => OverrideType::Local,
         };
 
+        let content = if ext == OverrideExt::PrismYaml {
+            match sanitize_override_yaml(&entry.content) {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Skipping import entry with invalid YAML '{}': {e}",
+                        entry.name
+                    );
+                    continue;
+                }
+            }
+        } else {
+            entry.content
+        };
+
         // Pre-populate all fields to avoid redundant update_item call
         let mut item = OverrideItem::new(entry.name, ext, r#type);
         item.global = entry.global;
@@ -1202,7 +1323,7 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
         item.enabled = entry.enabled;
         item.url = entry.url;
 
-        items_to_import.push((item, entry.content));
+        items_to_import.push((item, content));
     }
 
     // Batch import: single metadata lock, then best-effort content writes
