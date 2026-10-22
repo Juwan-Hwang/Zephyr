@@ -5,8 +5,8 @@
 use tauri::State;
 
 use crate::prism::types::{
-    read_groups, read_prism_settings, sanitize_filename, write_groups, write_prism_settings,
-    RuleGroup, RuleGroups,
+    check_name_size, read_groups, read_prism_settings, sanitize_filename, write_groups,
+    write_prism_settings, RuleGroup, RuleGroups,
 };
 use crate::prism::PrismState;
 
@@ -18,6 +18,8 @@ pub fn rule_group_list(state: State<PrismState>) -> Result<RuleGroups, String> {
 
 #[tauri::command]
 pub fn rule_group_create(state: State<PrismState>, name: String) -> Result<(), String> {
+    // Security: Validate group name input size to prevent DoS
+    check_name_size(&name, "Group name")?;
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 
@@ -38,6 +40,10 @@ pub fn rule_group_rename(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
+    // Security: Only the new name is size-checked (it is what gets stored).
+    // The old name is a pure lookup, so an oversized group stored by an
+    // older version can still be renamed away.
+    check_name_size(&new_name, "Group name")?;
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 
@@ -60,6 +66,8 @@ pub fn rule_group_rename(
 
 #[tauri::command]
 pub fn rule_group_delete(state: State<PrismState>, name: String) -> Result<(), String> {
+    // No size check: deleting must always work, even for a group whose
+    // oversized name was stored by an older version.
     let prism_dir = state.get_prism_workspace()?;
     let mut groups = read_groups(&prism_dir)?;
 

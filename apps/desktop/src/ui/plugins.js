@@ -61,6 +61,11 @@ function updateDirtyMarker() {
  * @param {boolean} editing
  */
 function setEditorChrome(editing) {
+    // The dialog's accessible name must follow the visible heading: the list
+    // title in list view, the script title in the editor.
+    document
+        .getElementById('plugin-panel')
+        ?.setAttribute('aria-labelledby', editing ? 'plugin-script-title' : 'plugin-panel-title');
     document.getElementById('plugin-panel-title')?.classList.toggle('hidden', editing);
     document.getElementById('plugin-script-crumb')?.classList.toggle('hidden', !editing);
     document.getElementById('plugin-toolbar')?.classList.toggle('hidden', editing);
@@ -222,6 +227,8 @@ const GRIP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="current
 /** Dialogs opened on top of the override panel, each with its own Esc handling. */
 function isNestedDialogOpen() {
     if (document.getElementById('modal-bg')?.classList.contains('hidden') === false) return true;
+    // The new-override menu handles its own Escape while it is open.
+    if (document.getElementById('plugin-new-dropdown')?.classList.contains('hidden') === false) return true;
     return !!document.getElementById('link-dialog') || !!document.getElementById('scope-editor-overlay');
 }
 
@@ -593,13 +600,46 @@ function setupNewOverrideDropdown(_panel) {
 
     if (!newBtn || !dropdown) return;
 
+    const menuItems = /** @type {HTMLElement[]} */ (Array.from(dropdown.querySelectorAll('[role="menuitem"]')));
+    for (const item of menuItems) item.tabIndex = -1;
+
     newBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.classList.toggle('hidden');
+        const open = dropdown.classList.toggle('hidden') === false;
+        newBtn.setAttribute('aria-expanded', String(open));
+        // Menus move focus to their first item when opened; the panel trap
+        // passes Escape through while the menu is open (isNestedDialogOpen).
+        if (open) menuItems[0]?.focus();
+    });
+
+    dropdown.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            dropdown.classList.add('hidden');
+            newBtn.setAttribute('aria-expanded', 'false');
+            newBtn.focus();
+            return;
+        }
+        if (e.key === 'Tab') {
+            // Close and let Tab continue from the trigger.
+            dropdown.classList.add('hidden');
+            newBtn.setAttribute('aria-expanded', 'false');
+            newBtn.focus();
+            return;
+        }
+        const at = menuItems.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+        /** @type {Record<string, number>} */
+        const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: menuItems.length - 1 };
+        if (!(e.key in moves) || menuItems.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        menuItems[(moves[e.key] + menuItems.length) % menuItems.length].focus();
     });
 
     document.addEventListener('click', () => {
         dropdown.classList.add('hidden');
+        newBtn.setAttribute('aria-expanded', 'false');
     });
 
     dropdown.addEventListener('click', (e) => {
@@ -609,12 +649,18 @@ function setupNewOverrideDropdown(_panel) {
         if (!(target instanceof Element)) return;
         const actionEl = target.closest('[data-action]');
         const action = actionEl instanceof HTMLElement ? actionEl.dataset.action : undefined;
+        // Close first and return focus to the trigger: the actions open
+        // dialogs that capture the previously focused element on activate,
+        // and a hidden menu item must not be what they capture.
+        const hadFocus = dropdown.contains(document.activeElement);
+        dropdown.classList.add('hidden');
+        newBtn.setAttribute('aria-expanded', 'false');
+        if (hadFocus) newBtn.focus();
         if (action === 'new-js') void createNewOverride('js');
         else if (action === 'new-prism') void createNewOverride('prism.yaml');
         else if (action === 'import-url') void importFromUrl();
         else if (action === 'export-all') void exportAllOverrides();
         else if (action === 'import-file') void importFromFile();
-        dropdown.classList.add('hidden');
     });
 }
 
