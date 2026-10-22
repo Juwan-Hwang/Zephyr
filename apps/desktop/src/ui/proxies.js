@@ -1903,7 +1903,12 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
             trigger.setAttribute('aria-expanded', 'false');
             trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
         }
-        if (menuHadFocus) document.getElementById('proxy-search')?.focus();
+        if (menuHadFocus) {
+            const search = document.getElementById('proxy-search');
+            // The empty state can hide the search box too; only use it
+            // as the landing spot while it is actually visible.
+            if (search && search.getClientRects().length > 0) search.focus();
+        }
         return;
     }
 

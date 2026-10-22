@@ -311,17 +311,25 @@ pub fn override_update(
     mut profile_ids: Option<Vec<String>>,
     mut url: Option<String>,
 ) -> Result<OverrideItem, String> {
-    if let Some(n) = &name {
-        // Only a changed name is a new identifier held to the cap;
-        // resubmitting the stored name (say, toggling an imported item
-        // whose name predates the limit) stays allowed.
-        if overrides_store::load_item(&state, &id)?.name != *n {
-            check_name_size(n, "Override name")?;
-        }
-    }
     // update_item performs read-modify-write within a single lock acquisition,
-    // preventing race conditions with concurrent updates.
-    overrides_store::update_item(&state, &id, |item| {
+    // preventing race conditions with concurrent updates. The name check
+    // lives inside it for the same reason: only a changed name is a new
+    // identifier held to the cap, while resubmitting the stored name
+    // (say, toggling an imported item whose name predates the limit)
+    // stays allowed — comparing against a copy loaded beforehand could
+    // race another update's rename.
+    let mut name_error: Option<String> = None;
+    let updated = overrides_store::update_item(&state, &id, |item| {
+        // A failed name check aborts the whole update: returning false
+        // means update_item saves nothing at all.
+        if let Some(n) = &name {
+            if *n != item.name {
+                if let Err(e) = check_name_size(n, "Override name") {
+                    name_error = Some(e);
+                    return false;
+                }
+            }
+        }
         if let Some(n) = name.take() {
             item.name = n;
         }
@@ -337,7 +345,12 @@ pub fn override_update(
         if let Some(u) = url.take() {
             item.url = Some(u);
         }
-    })
+        true
+    });
+    if let Some(e) = name_error {
+        return Err(e);
+    }
+    updated
 }
 
 /// Delete an override item and its content/log files.
@@ -773,6 +786,7 @@ pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> R
     // Use atomic update to avoid read-modify-write race
     let item = overrides_store::update_item(&state, &id, |item| {
         item.enabled = enabled;
+        true
     })?;
 
     // Synchronize Prism workspace patch file for Prism YAML overrides
@@ -839,6 +853,7 @@ pub async fn override_refresh_remote(
     // Update timestamp atomically (returns the updated item)
     let updated_item = overrides_store::update_item(&state, &id, |item| {
         item.updated_at = Some(chrono::Utc::now().timestamp_millis());
+        true
     })?;
 
     // Execute via write pipeline so the refreshed override takes effect immediately.

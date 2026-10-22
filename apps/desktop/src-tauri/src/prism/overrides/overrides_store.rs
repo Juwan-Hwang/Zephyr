@@ -91,7 +91,7 @@ pub fn update_item<F>(
     mut update_fn: F,
 ) -> Result<OverrideItem, String>
 where
-    F: FnMut(&mut OverrideItem),
+    F: FnMut(&mut OverrideItem) -> bool,
 {
     let _guard = acquire_meta_lock()?;
     let mut meta = load_meta_inner(state)?;
@@ -100,9 +100,13 @@ where
         .iter_mut()
         .find(|i| i.id == id)
         .ok_or_else(|| format!("Override item not found: {id}"))?;
-    update_fn(item);
+    // The closure returns false to abort (e.g. a validation failed):
+    // nothing is saved, so a rejected update never rewrites meta.json.
+    let proceed = update_fn(item);
     let updated = item.clone();
-    save_meta_inner(state, &meta)?;
+    if proceed {
+        save_meta_inner(state, &meta)?;
+    }
     Ok(updated)
 }
 
