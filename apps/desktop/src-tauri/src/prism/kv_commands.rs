@@ -64,7 +64,7 @@ mod tests {
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("KV key too large"));
 
-        let valid_key = "valid_key".to_string();
+        let valid_key = "valid_key".to_owned();
         assert!(check_input_size(&valid_key, "KV key").is_ok());
     }
 }
