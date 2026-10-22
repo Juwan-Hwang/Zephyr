@@ -18,6 +18,25 @@ use crate::prism::pipeline::{
 };
 use crate::prism::types::check_input_size;
 use crate::prism::PrismState;
+use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
+
+/// Sanitize user-supplied or remote Prism YAML override content before it is written to disk.
+///
+/// Strips dangerous YAML keys (`script`, `external-controller-*`, `external-ui`, provider `path`).
+fn sanitize_override_yaml(content: &str) -> Result<String, String> {
+    let value = match serde_yaml::from_str::<serde_yaml::Value>(content) {
+        Ok(value) => value,
+        Err(e) => return Err(format!("Invalid YAML: {e}")),
+    };
+    let mut sanitized = value.clone();
+    remove_dangerous_keys(&mut sanitized, false);
+    if sanitized == value {
+        Ok(content.to_owned())
+    } else {
+        serde_yaml::to_string(&sanitized)
+            .map_err(|e| format!("Failed to serialize sanitized YAML: {e}"))
+    }
+}
 
 /// List all override items, sorted by order.
 #[tauri::command]
@@ -120,7 +139,10 @@ pub async fn override_create(
     // Write content: use pre-downloaded content, or fall back to default template
     let dir = overrides_store::overrides_dir(&state)?;
     let content_path = dir.join(item.content_filename());
-    let content = pre_downloaded.unwrap_or_else(|| default_template_content(item.ext));
+    let mut content = pre_downloaded.unwrap_or_else(|| default_template_content(item.ext));
+    if item.ext == OverrideExt::PrismYaml {
+        content = sanitize_override_yaml(&content)?;
+    }
 
     write_file_secure(&content_path, &content)
         .map_err(|e| format!("Failed to create content file: {e}"))?;
@@ -372,20 +394,20 @@ pub async fn override_set_content(
 
     let item = overrides_store::load_item(&state, &id)?;
 
-    // Validate the content
-    if item.ext == OverrideExt::Js {
+    // Validate and sanitize the content
+    let content = if item.ext == OverrideExt::Js {
         let runtime = clash_prism_script::ScriptRuntime::with_context(
             crate::prism::pipeline::build_script_context(),
         );
         if let Err(e) = runtime.validate(&content) {
             return Err(format!("Script validation failed: {e}"));
         }
+        content
     } else if item.ext == OverrideExt::PrismYaml {
-        // No dry run for Prism YAML: at least refuse content that is not YAML.
-        if let Err(e) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            return Err(format!("YAML syntax error: {e}"));
-        }
-    }
+        sanitize_override_yaml(&content)?
+    } else {
+        content
+    };
 
     // Save only: persist the content without executing it (JS is syntax-checked,
     // Prism YAML is parse-checked; both are fully checked when they run).
@@ -821,7 +843,10 @@ pub async fn override_refresh_remote(
         .clone();
 
     // Direct first, then through the managed core if direct fails
-    let content = download_remote_content(&state.app, &url).await?;
+    let mut content = download_remote_content(&state.app, &url).await?;
+    if item.ext == OverrideExt::PrismYaml {
+        content = sanitize_override_yaml(&content)?;
+    }
 
     // Update content
     overrides_store::write_content(&state, &id, &content)?;
@@ -1195,6 +1220,23 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
             _ => OverrideType::Local,
         };
 
+        let content = if ext == OverrideExt::PrismYaml {
+            match sanitize_override_yaml(&entry.content) {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Skipping import entry with invalid YAML '{}': {e}",
+                        entry.name
+                    );
+                    continue;
+                }
+            }
+        } else {
+            entry.content
+        };
+
         // Pre-populate all fields to avoid redundant update_item call
         let mut item = OverrideItem::new(entry.name, ext, r#type);
         item.global = entry.global;
@@ -1202,7 +1244,7 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
         item.enabled = entry.enabled;
         item.url = entry.url;
 
-        items_to_import.push((item, entry.content));
+        items_to_import.push((item, content));
     }
 
     // Batch import: single metadata lock, then best-effort content writes
