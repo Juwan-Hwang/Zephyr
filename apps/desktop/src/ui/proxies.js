@@ -1891,9 +1891,15 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
 
     if (!selector || !trigger || !label) return;
 
-    // Hide if no groups available
+    // Hide if no groups available (and close a menu left over from a
+    // previous render, which would otherwise stay visible and focused)
     if (!groups || groups.length === 0) {
         selector.classList.add('hidden');
+        if (_groupMenuElement) {
+            _groupMenuElement.classList.add('hidden');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+        }
         return;
     }
 
@@ -1907,6 +1913,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
+        _groupMenuElement.setAttribute('role', 'menu');
         _groupMenuElement.className = 'proxy-group-menu hidden fixed border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
         const scrollDiv = document.createElement('div');
@@ -1917,7 +1924,55 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     const menu = _groupMenuElement;
     const menuScroll = /** @type {HTMLElement} */ (menu.querySelector('.menu-scroll'));
 
-    // Build menu items
+    // Close the menu; when focus was inside it, return focus to the trigger
+    // instead of dropping it to <body> as the menu becomes display:none.
+    const hideGroupMenu = (plainFocusRestore = true) => {
+        if (menu.classList.contains('hidden')) return;
+        const hadFocus = menu.contains(document.activeElement);
+        menu.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+        // Scroll/resize closes restore focus with preventScroll: leaving
+        // focus on a hidden item strands keyboard users, but a plain
+        // focus() would scroll the trigger back into view and undo the
+        // user's scroll.
+        if (hadFocus) trigger.focus(plainFocusRestore ? undefined : { preventScroll: true });
+    };
+
+    // Menu keyboard pattern (mirrors the sort menu): arrows move between
+    // options, Escape closes, Tab closes and continues from the trigger.
+    if (!menu.dataset.keyboardBound) {
+        menu.dataset.keyboardBound = '1';
+        menu.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                hideGroupMenu();
+                return;
+            }
+            if (e.key === 'Tab') {
+                // Same Shift+Tab rule as the override menu: land on the
+                // trigger instead of skipping backward past it.
+                if (e.shiftKey) e.preventDefault();
+                hideGroupMenu();
+                return;
+            }
+            const items = /** @type {HTMLElement[]} */ (Array.from(menu.querySelectorAll('[role="menuitemradio"]')));
+            const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+            /** @type {Record<string, number>} */
+            const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 };
+            if (!(e.key in moves) || items.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            items[(moves[e.key] + items.length) % items.length].focus();
+        });
+    }
+
+    // Build menu items. A re-render while the menu is open must not strand
+    // keyboard focus on a detached item: remember which group had focus
+    // and restore it to the rebuilt item below.
+    const hadMenuFocus = !menu.classList.contains('hidden') && menu.contains(document.activeElement);
+    const focusedGroup = hadMenuFocus ? /** @type {HTMLElement|null} */ (document.activeElement)?.dataset.group : undefined;
 
     menuScroll.replaceChildren();
     groups.forEach(groupName => {
@@ -1926,6 +1981,9 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         btn.className = 'proxy-group-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         btn.dataset.group = groupName;
         const isCurrent = groupName === currentGroup;
+        btn.setAttribute('role', 'menuitemradio');
+        btn.setAttribute('aria-checked', isCurrent ? 'true' : 'false');
+        btn.tabIndex = -1;
         if (isCurrent) {
             btn.classList.add('active');
             btn.setAttribute('aria-current', 'true');
@@ -1953,9 +2011,8 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         route.title = route.textContent;
         btn.append(check, nameEl, route);
         btn.onclick = async () => {
-            // Close menu
-            menu.classList.add('hidden');
-            trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+            // Close menu (restores focus to the trigger if it was inside)
+            hideGroupMenu();
 
             // Switch group
             try {
@@ -1984,6 +2041,17 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     // Store current group for mouseleave restore
     menuScroll.dataset.currentGroup = currentGroup;
 
+    if (hadMenuFocus) {
+        // If the focused group vanished in this render, fall back to the
+        // current group (or the first option) rather than dropping focus.
+        const restored = (focusedGroup
+            ? menuScroll.querySelector(`[data-group="${CSS.escape(focusedGroup)}"]`)
+            : null)
+            || menuScroll.querySelector('[role="menuitemradio"][aria-checked="true"]')
+            || menuScroll.querySelector('[role="menuitemradio"]');
+        if (restored instanceof HTMLElement) restored.focus();
+    }
+
     // Initialize event listeners once
     if (!_groupSelectorInitialized) {
         _groupSelectorInitialized = true;
@@ -2011,7 +2079,11 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                 menu.style.top = ((rect.bottom + 6) / uiScale) + 'px';
                 menu.style.width = (Math.max(rect.width, 160) / uiScale) + 'px';
                 menu.classList.remove('hidden');
+                trigger.setAttribute('aria-expanded', 'true');
                 trigger.querySelector('.dropdown-arrow')?.classList.add('rotate-180');
+                // Menus move focus into themselves when opened.
+                const startItem = menuScroll.querySelector('[role="menuitemradio"][aria-checked="true"]') || menuScroll.querySelector('[role="menuitemradio"]');
+                if (startItem instanceof HTMLElement) startItem.focus();
 
                 // Viewport overflow correction (mirrors context-menu.js logic)
                 requestAnimationFrame(() => {
@@ -2025,33 +2097,27 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                     }
                 });
             } else {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on outside click
         document.addEventListener('click', (e) => {
             if (!selector.contains(/** @type {Node} */ (e.target)) && !menu.contains(/** @type {Node} */ (e.target))) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on scroll or resize to prevent menu misalignment
         const closeMenu = () => {
-            if (!menu.classList.contains('hidden')) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
-            }
+            hideGroupMenu(false);
         };
         window.addEventListener('scroll', closeMenu, { passive: true });
         window.addEventListener('resize', closeMenu, { passive: true });
