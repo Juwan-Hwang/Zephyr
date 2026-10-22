@@ -85,19 +85,40 @@ const LEVEL_PRIORITY = Object.freeze({
 // mihomo format: level=info / level=warn / level=error / level=debug / level=fatal
 const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)(?:\]|\b)/i;
 
+/** @type {Map<string, 'debug'|'info'|'warn'|'error'|'fatal'>} Bounded cache for log level parsing to avoid repeated regex execution during filtering and rendering. */
+const _logLevelCache = new Map();
+const MAX_LOG_LEVEL_CACHE = 4000;
+
 /**
  * Extract log level from a line.
  * Supports both mihomo format (`level=info`) and bracket format (`[INFO]`).
+ *
+ * Performance optimization: Memoized via bounded _logLevelCache to skip repeated
+ * LEVEL_RE regex execution during high-frequency poll updates and virtual scroll rendering.
  * @param {string} line
  * @returns {'debug'|'info'|'warn'|'error'|'fatal'}
  */
 function parseLogLevel(line) {
+    const cached = _logLevelCache.get(line);
+    if (cached !== undefined) return cached;
+
+    /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */
+    let level = 'info';
     // Fast path: if the line lacks both '[' and '=', it cannot contain level indicators
-    if (!line.includes('[') && !line.includes('=')) return 'info';
-    const m = LEVEL_RE.exec(line);
-    if (!m) return 'info';
-    const lvl = m[1].toUpperCase();
-    return lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (lvl.toLowerCase());
+    if (line.includes('[') || line.includes('=')) {
+        const m = LEVEL_RE.exec(line);
+        if (m) {
+            const lvl = m[1].toUpperCase();
+            level = lvl === 'WARNING' ? 'warn' : /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */ (lvl.toLowerCase());
+        }
+    }
+
+    if (_logLevelCache.size >= MAX_LOG_LEVEL_CACHE) {
+        const firstKey = _logLevelCache.keys().next().value;
+        if (firstKey !== undefined) _logLevelCache.delete(firstKey);
+    }
+    _logLevelCache.set(line, level);
+    return level;
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -235,6 +256,7 @@ function resetState(opts = {}) {
     _offset = 0;
     _allLines = [];
     _filteredIndices = [];
+    _logLevelCache.clear();
     _autoScroll = true;
     _newWhileAway = 0;
     _logsPaused = false;
@@ -657,6 +679,7 @@ async function fetchLogs() {
         if (result.rotated || result.next_offset < _offset) {
             _offset = 0;
             _allLines = [];
+            _logLevelCache.clear();
             _vs?.clearHeightCache();
             // invalidateFilter() will rebuild indices and call _vs.invalidate()
             invalidateFilter();
@@ -669,7 +692,8 @@ async function fetchLogs() {
         // Append new lines
         _allLines.push(...result.lines);
         if (!_autoScroll) {
-            _newWhileAway += result.lines.filter((l) => lineMatchesFilter(l)).length;
+            const lowerQuery = _searchQuery ? _searchQuery.toLowerCase() : '';
+            _newWhileAway += result.lines.filter((l) => lineMatchesFilter(l, lowerQuery)).length;
             updateJumpPill();
         }
 
@@ -720,19 +744,21 @@ function rebuildFilteredIndices() {
         return;
     }
 
+    const lowerQuery = _searchQuery ? _searchQuery.toLowerCase() : '';
     _filteredIndices = [];
     for (let i = 0; i < _allLines.length; i++) {
-        if (lineMatchesFilter(_allLines[i])) _filteredIndices.push(i);
+        if (lineMatchesFilter(_allLines[i], lowerQuery)) _filteredIndices.push(i);
     }
 }
 
 /**
  * Whether a line passes the level filter (selected level and above) and the search.
  * @param {string} line
+ * @param {string} [lowerQuery] - Pre-lowercased search query to avoid repeated string allocation in loop
  */
-function lineMatchesFilter(line) {
+function lineMatchesFilter(line, lowerQuery = _searchQuery.toLowerCase()) {
     if (_levelFilter !== 'all' && LEVEL_PRIORITY[parseLogLevel(line)] < LEVEL_PRIORITY[_levelFilter]) return false;
-    return !_searchQuery || line.toLowerCase().includes(_searchQuery.toLowerCase());
+    return !lowerQuery || line.toLowerCase().includes(lowerQuery);
 }
 
 // ── Virtual Scroll Instance ─────────────────────────────────────────────────
