@@ -82,6 +82,14 @@ export function focusRespectingModality(el) {
  */
 
 /**
+ * Stack of currently active traps, most recently activated last. Only the
+ * topmost trap answers keys: a dialog opened over another trapped panel has
+ * its own trap, and the outer one must not pull focus out of the dialog.
+ * @type {FocusTrapHandle[]}
+ */
+const activeTraps = [];
+
+/**
  * Create a focus trap on the given container.
  *
  * @param {HTMLElement} container
@@ -94,10 +102,14 @@ export function focusRespectingModality(el) {
  */
 export function createFocusTrap(container, options = {}) {
     let active = false;
+    // Bumped on every activate/deactivate so a pending initial-focus frame
+    // from an earlier activation can tell it has been superseded.
+    let focusGen = 0;
     let previousFocus = /** @type {HTMLElement|null} */ (document.activeElement);
 
     /** @param {KeyboardEvent} e */
     function onKeyDown(e) {
+        if (activeTraps[activeTraps.length - 1] !== handle) return;
         if (!active) return;
 
         if (e.key === 'Escape') {
@@ -118,6 +130,15 @@ export function createFocusTrap(container, options = {}) {
 
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
+
+        // Focus sitting outside the container (e.g. on <body> after a click
+        // on non-focusable dialog content) would otherwise tab straight out
+        // behind the modal: pull it back in instead.
+        if (!container.contains(document.activeElement)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+            return;
+        }
 
         if (e.shiftKey) {
             if (document.activeElement === first) {
@@ -145,18 +166,28 @@ export function createFocusTrap(container, options = {}) {
     function activate() {
         if (active) return;
         active = true;
+        activeTraps.push(handle);
         previousFocus = /** @type {HTMLElement|null} */ (document.activeElement);
         document.addEventListener('keydown', onKeyDown, true);
 
         const target = options.initialFocus || getFocusableElements()[0];
         if (target instanceof HTMLElement) {
-            requestAnimationFrame(() => focusRespectingModality(target));
+            const gen = ++focusGen;
+            requestAnimationFrame(() => {
+                // The trap may have been deactivated again before this
+                // frame ran; focusing now would drag focus back into a
+                // dialog that is already closing.
+                if (active && gen === focusGen) focusRespectingModality(target);
+            });
         }
     }
 
     function deactivate() {
         if (!active) return;
         active = false;
+        focusGen++;
+        const at = activeTraps.indexOf(handle);
+        if (at >= 0) activeTraps.splice(at, 1);
         document.removeEventListener('keydown', onKeyDown, true);
 
         if (previousFocus && previousFocus.isConnected) {
@@ -169,5 +200,6 @@ export function createFocusTrap(container, options = {}) {
         deactivate();
     }
 
-    return { activate, deactivate, destroy };
+    const handle = { activate, deactivate, destroy };
+    return handle;
 }
