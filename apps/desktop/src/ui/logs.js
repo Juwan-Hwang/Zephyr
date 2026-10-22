@@ -84,8 +84,6 @@ const LEVEL_PRIORITY = Object.freeze({
 
 // mihomo format: level=info / level=warn / level=error / level=debug / level=fatal
 const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)(?:\]|\b)/i;
-/** Fast non-global pre-test to check if a log line might contain bracketed or level= tags. */
-const LEVEL_INDICATOR_TEST_RE = /[\[=]/;
 
 /**
  * Extract log level from a line.
@@ -95,7 +93,7 @@ const LEVEL_INDICATOR_TEST_RE = /[\[=]/;
  */
 function parseLogLevel(line) {
     // Fast path: if the line lacks both '[' and '=', it cannot contain level indicators
-    if (!LEVEL_INDICATOR_TEST_RE.test(line)) return 'info';
+    if (!line.includes('[') && !line.includes('=')) return 'info';
     const m = LEVEL_RE.exec(line);
     if (!m) return 'info';
     const lvl = m[1].toUpperCase();
