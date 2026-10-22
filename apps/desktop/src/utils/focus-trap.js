@@ -82,6 +82,14 @@ export function focusRespectingModality(el) {
  */
 
 /**
+ * Stack of currently active traps, most recently activated last. Only the
+ * topmost trap answers keys: a dialog opened over another trapped panel has
+ * its own trap, and the outer one must not pull focus out of the dialog.
+ * @type {FocusTrapHandle[]}
+ */
+const activeTraps = [];
+
+/**
  * Create a focus trap on the given container.
  *
  * @param {HTMLElement} container
@@ -94,11 +102,25 @@ export function focusRespectingModality(el) {
  */
 export function createFocusTrap(container, options = {}) {
     let active = false;
+    // Bumped on every activate/deactivate so a pending initial-focus frame
+    // from an earlier activation can tell it has been superseded.
+    let focusGen = 0;
     let previousFocus = /** @type {HTMLElement|null} */ (document.activeElement);
+
+    // A trap whose container has been hidden out from under it (a close
+    // animation that finished after activation, a reopen race) must not
+    // keep answering keys: it would mute every trap beneath it.
+    const containerHidden = () =>
+        container.classList.contains('hidden') || getComputedStyle(container).display === 'none';
 
     /** @param {KeyboardEvent} e */
     function onKeyDown(e) {
+        if (activeTraps[activeTraps.length - 1] !== handle) return;
         if (!active) return;
+        if (containerHidden()) {
+            deactivate();
+            return;
+        }
 
         if (e.key === 'Escape') {
             if (options.passEscape?.()) return;
@@ -118,6 +140,15 @@ export function createFocusTrap(container, options = {}) {
 
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
+
+        // Focus sitting outside the container (e.g. on <body> after a click
+        // on non-focusable dialog content) would otherwise tab straight out
+        // behind the modal: pull it back in instead.
+        if (!container.contains(document.activeElement)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+            return;
+        }
 
         if (e.shiftKey) {
             if (document.activeElement === first) {
@@ -144,19 +175,37 @@ export function createFocusTrap(container, options = {}) {
 
     function activate() {
         if (active) return;
+        // Activation is often deferred to the next frame; if the dialog
+        // has already closed again by then, do not arm a trap on it.
+        if (containerHidden()) return;
         active = true;
-        previousFocus = /** @type {HTMLElement|null} */ (document.activeElement);
+        activeTraps.push(handle);
+        // Capture where to return focus — but if focus is already inside
+        // the dialog (callers may focus a field before activating), keep
+        // the element captured at construction instead of pointing the
+        // restore at the dialog itself.
+        const ae = document.activeElement;
+        if (ae instanceof HTMLElement && !container.contains(ae)) previousFocus = ae;
         document.addEventListener('keydown', onKeyDown, true);
 
         const target = options.initialFocus || getFocusableElements()[0];
         if (target instanceof HTMLElement) {
-            requestAnimationFrame(() => focusRespectingModality(target));
+            const gen = ++focusGen;
+            requestAnimationFrame(() => {
+                // The trap may have been deactivated again before this
+                // frame ran; focusing now would drag focus back into a
+                // dialog that is already closing.
+                if (active && gen === focusGen) focusRespectingModality(target);
+            });
         }
     }
 
     function deactivate() {
         if (!active) return;
         active = false;
+        focusGen++;
+        const at = activeTraps.indexOf(handle);
+        if (at >= 0) activeTraps.splice(at, 1);
         document.removeEventListener('keydown', onKeyDown, true);
 
         if (previousFocus && previousFocus.isConnected) {
@@ -169,5 +218,6 @@ export function createFocusTrap(container, options = {}) {
         deactivate();
     }
 
-    return { activate, deactivate, destroy };
+    const handle = { activate, deactivate, destroy };
+    return handle;
 }

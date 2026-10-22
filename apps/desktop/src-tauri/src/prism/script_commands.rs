@@ -25,6 +25,7 @@ pub fn script_execute(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute")?;
+    // Security: Validate script input size to prevent DoS
     check_input_size(&script, "Script")?;
     let config_str = state.with_ext(|_ext| {
         // Read running config directly from disk
@@ -82,6 +83,7 @@ pub async fn script_execute_write(
     script_name: String,
 ) -> Result<serde_json::Value, String> {
     state.check_rate_limit("script_execute_write")?;
+    // Security: Validate script input size to prevent DoS
     check_input_size(&script, "Script")?;
 
     // Tauri automatically runs async commands on a blocking thread pool,
@@ -92,6 +94,7 @@ pub async fn script_execute_write(
 
 #[tauri::command]
 pub fn script_validate(script: String) -> Result<bool, String> {
+    check_input_size(&script, "Script")?;
     let runtime = ScriptRuntime::new();
     match runtime.validate(&script) {
         Ok(()) => Ok(true),
