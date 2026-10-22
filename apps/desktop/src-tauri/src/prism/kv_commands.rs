@@ -36,6 +36,7 @@ pub fn kv_set(
         check_name_size(&key, "KV key")?;
     }
     lock.kv_store.set(key, value);
+    drop(lock);
     Ok(())
 }
 

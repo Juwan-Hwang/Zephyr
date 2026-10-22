@@ -111,7 +111,9 @@ export function createFocusTrap(container, options = {}) {
     // animation that finished after activation, a reopen race) must not
     // keep answering keys: it would mute every trap beneath it.
     const containerHidden = () =>
-        container.classList.contains('hidden') || getComputedStyle(container).display === 'none';
+        !container.isConnected ||
+        container.classList.contains('hidden') ||
+        getComputedStyle(container).display === 'none';
 
     /** @param {KeyboardEvent} e */
     function onKeyDown(e) {
