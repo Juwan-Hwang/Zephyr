@@ -85,7 +85,7 @@ const LEVEL_PRIORITY = Object.freeze({
 // mihomo format: level=info / level=warn / level=error / level=debug / level=fatal
 const LEVEL_RE = /(?:\[|\blevel=)(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)(?:\]|\b)/i;
 
-/** Bounded cache for log level parsing to avoid repeated regex execution during filtering and rendering. */
+/** @type {Map<string, 'debug'|'info'|'warn'|'error'|'fatal'>} Bounded cache for log level parsing to avoid repeated regex execution during filtering and rendering. */
 const _logLevelCache = new Map();
 const MAX_LOG_LEVEL_CACHE = 4000;
 
@@ -102,6 +102,7 @@ function parseLogLevel(line) {
     const cached = _logLevelCache.get(line);
     if (cached !== undefined) return cached;
 
+    /** @type {'debug'|'info'|'warn'|'error'|'fatal'} */
     let level = 'info';
     const m = LEVEL_RE.exec(line);
     if (m) {
