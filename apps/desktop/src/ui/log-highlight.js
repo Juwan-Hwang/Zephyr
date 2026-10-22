@@ -15,6 +15,8 @@ import { escapeHtml } from '../utils/sanitize.js';
 /** Level tags coloured inline (supports both `[INFO]` and `level=info`). */
 const LEVEL_TAG_RE = /\[(?:DEBUG|INFO|WARNING|WARN|ERROR|FATAL)\]|level=(?:debug|info|warning|warn|error|fatal)\b/gi;
 const LEVEL_WORD_RE = /DEBUG|INFO|WARN|WARNING|ERROR|FATAL/i;
+/** Fast non-global pre-test to check if a log line might contain bracketed or level= tags. */
+const LEVEL_INDICATOR_TEST_RE = /[\[=]/;
 
 export const SEARCH_MARK_OPEN = '<mark class="bg-accent/30 text-accent rounded px-0.5">';
 const SEARCH_MARK_CLOSE = '</mark>';
@@ -97,6 +99,10 @@ export function findSearchRanges(text, query) {
  */
 export function renderLogLineHtml(line, query, levelColors, fallbackColor) {
     if (typeof line !== 'string' || line.length === 0) return '';
+    // Performance optimization: when no search query is present and the line contains neither
+    // '[' nor '=', it cannot match any level tags or search marks. Bypass regex parsing and
+    // string splitting by delegating straight to escapeHtml().
+    if (!query && !LEVEL_INDICATOR_TEST_RE.test(line)) return escapeHtml(line);
 
     /** @type {Array<{ start: number, end: number, color: string }>} */
     const levels = [];
@@ -164,7 +170,9 @@ const VALID_CORE_LEVELS = new Set(['debug', 'info', 'warn', 'error', 'fatal']);
  *   null when the line is not in the logfmt shape (callers fall back to raw rendering)
  */
 export function parseCoreLogLine(line) {
-    if (typeof line !== 'string') return null;
+    // Performance optimization: mihomo logfmt lines always start with 'time="'.
+    // A fast string prefix check skips regex engine overhead on non-logfmt lines.
+    if (typeof line !== 'string' || !line.startsWith('time="')) return null;
     const m = CORE_LINE_RE.exec(line);
     if (!m) return null;
     const raw = m[2].toLowerCase();
