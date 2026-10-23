@@ -9,15 +9,20 @@ use std::net::IpAddr;
 /// Maximum response size for subscription downloads (10 MB).
 pub const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
 
-#[inline]
-const fn decode_hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
+static HEX_LUT: [u8; 256] = {
+    let mut table = [255u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        table[i] = match i as u8 {
+            b'0'..=b'9' => i as u8 - b'0',
+            b'a'..=b'f' => i as u8 - b'a' + 10,
+            b'A'..=b'F' => i as u8 - b'A' + 10,
+            _ => 255,
+        };
+        i += 1;
     }
-}
+    table
+};
 
 // ── Pure functions for subscription content sanitization ─────────────────
 
@@ -132,13 +137,14 @@ pub fn percent_decode(input: &str) -> String {
 
     let mut result = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
+    let len = bytes.len();
     let mut i = 0;
-    while let Some(&byte) = bytes.get(i) {
-        if byte == b'%' {
-            if let (Some(hi), Some(lo)) = (
-                bytes.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                bytes.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
-            ) {
+    while i < len {
+        let byte = bytes[i];
+        if byte == b'%' && i + 2 < len {
+            let hi = HEX_LUT[bytes[i + 1] as usize];
+            let lo = HEX_LUT[bytes[i + 2] as usize];
+            if hi != 255 && lo != 255 {
                 result.push((hi << 4) | lo);
                 i += 3;
                 continue;
