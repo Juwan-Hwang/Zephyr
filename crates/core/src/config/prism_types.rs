@@ -60,12 +60,25 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), AppError> {
     const MAX_PLUGIN_ID_LEN: usize = 128;
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
     let decoded = url_decode_complete(plugin_id);
-    if decoded.is_empty()
+    let trimmed = decoded.trim_matches([' ', '.']);
+
+    let reserved_names = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
+    if trimmed.is_empty()
+        || decoded.is_empty()
         || decoded.len() > MAX_PLUGIN_ID_LEN
         || decoded.contains('/')
         || decoded.contains('\\')
+        || decoded.contains(':')
         || decoded.contains("..")
         || decoded.contains('\0')
+        || decoded.chars().any(char::is_control)
+        || trimmed == "."
+        || trimmed == ".."
+        || reserved_names.contains(&trimmed.to_ascii_uppercase().as_str())
     {
         return Err(AppError::ConfigError(
             "Invalid plugin ID: contains unsafe characters or exceeds length limit".to_owned(),
@@ -284,11 +297,23 @@ mod tests {
     #[test]
     fn test_validate_plugin_id_ok() {
         assert!(validate_plugin_id("my-plugin").is_ok());
+        assert!(validate_plugin_id("plugin_v1.0").is_ok());
+        assert!(validate_plugin_id("com.example.plugin").is_ok());
     }
 
     #[test]
-    fn test_validate_plugin_id_traversal() {
+    fn test_validate_plugin_id_traversal_and_special_paths() {
         assert!(validate_plugin_id("../etc/passwd").is_err());
+        assert!(validate_plugin_id(".").is_err());
+        assert!(validate_plugin_id("..").is_err());
+        assert!(validate_plugin_id(". ").is_err());
+        assert!(validate_plugin_id("%2e").is_err());
+        assert!(validate_plugin_id("%2e%2e").is_err());
+        assert!(validate_plugin_id("CON").is_err());
+        assert!(validate_plugin_id("NUL").is_err());
+        assert!(validate_plugin_id("foo/bar").is_err());
+        assert!(validate_plugin_id("foo\\bar").is_err());
+        assert!(validate_plugin_id("C:").is_err());
     }
 
     #[test]
