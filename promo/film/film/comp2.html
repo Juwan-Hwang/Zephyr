@@ -285,11 +285,13 @@ function drawThesis(t) {
 
 // ── security burst ──
 const SEC = [
-  ['加密', '机器绑定加密', '硬件指纹派生密钥，加密订阅元数据'], ['网络', 'SSRF 防护', '下载前 DNS 验证，拦截内网重定向'],
-  ['网络', 'DNS 防泄漏', 'TUN 模式自动注入 dns-hijack'], ['配置', '配置清洗', '递归移除危险 YAML 字段'],
-  ['脚本', '权限控制', '资源限制与权限限制双重约束'], ['输入', '输入验证', 'IPC 入口长度、格式、UTF-8 校验'],
-  ['限流', '双重限流', '固定冷却 + 滑动窗口'], ['文件', '文件安全', '路径遍历、符号链接、压缩炸弹'],
-  ['更新', '签名校验', 'SHA256 + Minisign Ed25519'], ['深链', '深链安全', '限制 clash:// 入口与 URL scheme'], ['构建', 'CSP 与加固', 'LTO · strip · panic=abort'],
+  ['前端', '内容安全策略', '脚本只许自身，连接只许本地'], ['权限', 'Tauri 最小权限', '没有文件、命令、网络插件权限'],
+  ['网络', 'SSRF 防护', '下载前 DNS 验证，拦截内网重定向'], ['加密', '机器绑定加密', '硬件指纹派生密钥，加密订阅元数据'],
+  ['文件', '路径遍历防护', '反复解码再校验，越界路径全拦'], ['配置', '危险配置清除', '递归移除危险 YAML 字段'],
+  ['更新', '签名校验', 'SHA256 + Minisign Ed25519'], ['限流', '速率限制', '最小间隔 + 滑动窗口 + 专用冷却'],
+  ['文件', '文件权限控制', '敏感文件仅所有者可读写'], ['脚本', '运行时安全加固', '脚本沙盒资源与权限双重约束'],
+  ['深链', '深链安全', '限制 clash:// 入口与 URL scheme'], ['特权', '特权提升与 TUN 安全', '只在用户操作时提权，TUN 注入 dns-hijack'],
+  ['构建', 'CI/CD 安全流水线', '审计、扫描、SBOM 随版验证'],
 ];
 const SEC_DT = BT / 2, SEC0 = T.sec + 0.12;
 function drawBurst(t) {
@@ -301,10 +303,10 @@ function drawBurst(t) {
   if (t < SEC0) { $('bk').textContent = ''; $('bww').textContent = ''; $('bd').textContent = ''; }
   else if (k < SEC.length) {
     const [key, w, d] = SEC[k];
-    $('bk').textContent = `${String(k + 1).padStart(2, '0')} / 11 · ${key}`; $('bww').textContent = w; $('bd').textContent = d; $('bww').style.fontSize = '150px';
+    $('bk').textContent = `${String(k + 1).padStart(2, '0')} / ${SEC.length} · ${key}`; $('bww').textContent = w; $('bd').textContent = d; $('bww').style.fontSize = '150px';
     sc = 1.07 - 0.07 * E.expoOut(clamp((t - SEC0 - k * SEC_DT) / SEC_DT * 2.2));
   } else {
-    $('bk').textContent = 'DEFENSE IN DEPTH'; $('bww').textContent = '十一层，纵深设防'; $('bd').textContent = '每一处入口，都有明确的约束'; $('bww').style.fontSize = '132px';
+    $('bk').textContent = 'DEFENSE IN DEPTH'; $('bww').textContent = '十三层，纵深设防'; $('bd').textContent = '每一处入口，都有明确的约束'; $('bww').style.fontSize = '132px';
     sc = 1 + 0.1 * (1 - springE(0.5, 0.25)(t - SEC0 - SEC.length * SEC_DT));
   }
   $('bw').style.transform = `translateY(${(540 - 210).toFixed(1)}px) scale(${sc.toFixed(4)})`;
@@ -506,7 +508,7 @@ window.__events = () => {
   for (const s of SHOTS) { const f = F[s[2]]; for (const c of f.clicks) { const tt = s[0] + c - s[3]; if (tt >= s[0] && tt < s[1]) add(tt, 'click'); } }
   const pk = [1.0, 1.2, 1.4, 1.75, 1.95, 2.75, 3.1]; for (const k of pk) add(filmT('prism', k), 'key');
   add(filmT('console', 1.9), 'tray'); add(filmT('console', 6.05), 'tray');
-  for (let k = 0; k < 12; k++) add(SEC0 + k * SEC_DT, 'hit', { k });
+  for (let k = 0; k < SEC.length + 1; k++) add(SEC0 + k * SEC_DT, 'hit', { k });
   add(filmT('close', 1.85), 'collapse'); add(T.plat - 0.3, 'iris'); add(T.end - 0.38, 'fold');
   return ev;
 };

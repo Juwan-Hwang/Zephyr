@@ -256,13 +256,13 @@ for i in range(4):
 add(fx, riser(BAR * 0.75, 400, 9000), tb(13.5), 0.6)
 add(padb, pad(CH['C'], BAR * 0.75, 2600, 0.1, 0.3), tb(13.5), 0.7)
 B0 = tb(14.25) + 0.12
-for i in range(11):
+for i in range(13):
     t = B0 + i * BEAT * 0.5
-    c = 'Dm' if i < 6 else 'Bb'
+    c = 'Dm' if i < 7 else 'Bb'
     for m in CH[c]:
         add(keys, pluck(m + 12, 0.28, 1.4), t, 0.11, 0.0)
     add(drums, kick(0.55), t, 0.6); add(drums, hat(), t + BEAT * 0.25, 0.12, 0.4)
-add(keys, bell(74, 3.0), B0 + 11 * BEAT * 0.5, 0.25, 0.0)
+add(keys, bell(74, 3.0), B0 + 13 * BEAT * 0.5, 0.25, 0.0)
 add(fx, swell(BEAT * 2.0), tb(16.25) - BEAT * 2.0, 0.6)
 # 12.75 theme (dark groove), 14.5 lightweight (thin), 16 build, 17.5 reprise
 add(drums, kick(1.1), tb(16.25)); add(drums, sub_drop(75, 32, 1.6), tb(16.25), 0.7)
