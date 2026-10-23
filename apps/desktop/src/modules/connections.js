@@ -566,6 +566,49 @@ function updateConnStats(conns) {
 /** Keys that sort as strings (lexicographic) rather than numerically */
 const SORT_TEXT_KEYS = new Set(['host', 'rule', 'chains']);
 
+/**
+ * Cache for connection lowercased search strings and sort values.
+ * Connection metadata, rule, and chains are immutable per connection instance.
+ * @type {WeakMap<object, { searchText: string, host: string, rule: string, chains: string }>}
+ */
+const _connSearchCache = new WeakMap();
+
+/**
+ * Get or compute lowercased search text and text-sort values for a connection object.
+ *
+ * Performance optimization: Connection metadata, rule, and chains are immutable.
+ * Memoizing pre-lowercased search strings in a WeakMap avoids repeated string
+ * allocations (`.toLowerCase()`, `.join()`, `String()`) during real-time polling
+ * (every 2s), filtering, and sorting comparisons across hundreds of items.
+ *
+ * @param {any} conn
+ * @returns {{ searchText: string, host: string, rule: string, chains: string }}
+ */
+function getConnSearchCache(conn) {
+    if (typeof conn !== 'object' || conn === null) {
+        return { searchText: '', host: '', rule: '', chains: '' };
+    }
+    let cached = _connSearchCache.get(conn);
+    if (!cached) {
+        const m = conn.metadata ?? {};
+        const host = (m.host ?? '').toLowerCase();
+        const destIP = (m.destinationIP ?? '').toLowerCase();
+        const destPort = String(m.destinationPort ?? '').toLowerCase();
+        const rule = (conn.rule ?? '').toLowerCase();
+        const chainsArr = conn.chains ?? [];
+        const chainsFilter = chainsArr.join(' ').toLowerCase();
+        const chainsSort = chainsArr.join(' → ').toLowerCase();
+        const process = (m.process ?? '').toLowerCase();
+
+        // Single pre-lowercased searchable text string for fast includes() checks
+        const searchText = `${host} ${destIP} ${destPort} ${rule} ${chainsFilter} ${process}`;
+
+        cached = { searchText, host, rule, chains: chainsSort };
+        _connSearchCache.set(conn, cached);
+    }
+    return cached;
+}
+
 // ============================================
 // Rendering
 // ============================================
@@ -581,15 +624,7 @@ const emptyTemplates = { active: null, closed: null };
 function filterConnsBySearch(connections) {
     if (!connectionsSearchQuery) return connections;
     const q = connectionsSearchQuery;
-    return connections.filter(/** @param {any} c */ (c) => {
-        const m = c.metadata ?? {};
-        return (m.host ?? '').toLowerCase().includes(q)
-            || (m.destinationIP ?? '').toLowerCase().includes(q)
-            || String(m.destinationPort ?? '').toLowerCase().includes(q)
-            || (c.rule ?? '').toLowerCase().includes(q)
-            || (c.chains ?? []).join(' ').toLowerCase().includes(q)
-            || (m.process ?? '').toLowerCase().includes(q);
-    });
+    return connections.filter(/** @param {any} c */ (c) => getConnSearchCache(c).searchText.includes(q));
 }
 
 /** While searching, "Close all" only closes what the search shows — and says so. */
@@ -779,10 +814,11 @@ function renderConnectionList(connections, mode) {
  * @param {string} mode
  */
 function getConnSortValue(conn, key, mode) {
+    const cached = getConnSearchCache(conn);
     switch (key) {
-        case 'host': return (conn.metadata?.host ?? '').toLowerCase();
-        case 'rule': return (conn.rule ?? '').toLowerCase();
-        case 'chains': return (conn.chains ?? []).join(' → ').toLowerCase();
+        case 'host': return cached.host;
+        case 'rule': return cached.rule;
+        case 'chains': return cached.chains;
         case 'dlSpeed': return mode === 'closed' ? Math.max(0, (conn.closedAt ?? 0) - connStartMs(conn)) : (connAccumulators[conn.id]?.dlSpeed ?? 0);
         case 'dlTotal': return mode === 'closed' ? (conn.dlTotal ?? 0) : (connAccumulators[conn.id]?.dl ?? 0);
         case 'ulSpeed': return mode === 'closed' ? (conn.closedAt ?? 0) : (connAccumulators[conn.id]?.ulSpeed ?? 0);
