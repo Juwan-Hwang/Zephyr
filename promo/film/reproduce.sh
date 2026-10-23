@@ -8,7 +8,8 @@ pip install -q -r requirements.txt
 python3 -m playwright install --with-deps chromium
 [ -d repos/Leonxlnx_earshot ] || { git clone -q https://github.com/Leonxlnx/earshot repos/Leonxlnx_earshot; git -C repos/Leonxlnx_earshot checkout -q 925ebe56a1b755e5d354ab642bb8f344440cfa9c; }
 pip install -q --no-deps -e repos/Leonxlnx_earshot
-# app/ = the exact front-end snapshot recorded (Zephyr UI + Argon v9 logo + demo mock incl. patches/demo-mock-api.patch)
+# app/ = the front-end snapshot recorded (Zephyr UI + Argon v9 logo + demo mock incl. patches/demo-mock-api.patch);
+# refreshed 2026-10-23 from main 135143e (v2.5.0 UI) with tokens + UnoCSS regenerated via the repo's build:css steps
 (python3 -m http.server 8765 --directory app >/tmp/http-app.log 2>&1 &)
 (python3 -m http.server 8766 --directory film >/tmp/http-film.log 2>&1 &)
 sleep 1

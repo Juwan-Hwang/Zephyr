@@ -13,7 +13,8 @@ import {
     restartCore,
     abortLatencyTests,
 } from '../../api.js';
-import { switchToConfig, postRestartRecovery } from '../lifecycle.js';
+import { switchToConfig, postRestartRecovery, restartedProfile, persistActiveConfig } from '../lifecycle.js';
+import { currentProfile, noteProfileRenamed } from '../active-profile.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -32,6 +33,8 @@ import { createFocusTrap } from '../../utils/focus-trap.js';
 import { showLinkDialog } from '../link-dialog.js';
 import { validateHttpUrl } from '../../utils/url-validate.js';
 import * as prism from '../prism.js';
+import { queueSmartConfigWrite } from './auto-switch.js';
+import { subDownloadSlot } from './sub-download-gate.js';
 
 /** Longest wait for another network operation before giving up on activating a new profile. */
 const NETWORK_IDLE_TIMEOUT_MS = 15000;
@@ -54,7 +57,106 @@ async function acquireNetworkLock() {
     }
 }
 
-const normalizeConfigName = (/** @type {string | null | undefined} */ configName) => typeof configName === 'string' ? configName.toLowerCase().replace(/\.(ya?ml)$/i, '') : '';
+/**
+ * Whether two profile names are the same file (the core loaded the requested
+ * one; an updated file is the running one). A name given without its
+ * extension matches either one, but a.yaml and a.yml are two files, and so
+ * are A.yaml and a.yaml (Linux keeps both), or a and A.yaml.
+ * @param {string} actual
+ * @param {string} requested
+ */
+const sameProfileFile = (actual, requested = '') => {
+    if (actual === requested) return true;
+    const hasExt = (/** @type {string} */ n) => /\.ya?ml$/i.test(n);
+    if (hasExt(actual) && hasExt(requested)) return false;
+    const stem = (/** @type {string} */ n) => n.replace(/\.ya?ml$/i, '');
+    return stem(actual) === stem(requested);
+};
+
+/**
+ * Whether a profile file of that name is in the list (assumed so when the
+ * list cannot be read).
+ * @param {string} name
+ */
+async function profileExists(name) {
+    try {
+        const list = await invoke(COMMANDS.LIST_CONFIGS);
+        if (!Array.isArray(list)) return true;
+        return list.some((/** @type {any} */ c) => typeof c?.name === 'string' && sameProfileFile(c.name, name));
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * After the updated profile failed to load and the core fell back to
+ * another one, save that one as the active profile (as a switch does), so
+ * the next launch does not start on the broken file again. When no profile
+ * loaded at all (the minimal config), warn the user as a switch does.
+ * @param {any} coreResult what restartCore returned
+ * @param {string} requested
+ * @returns {Promise<boolean>} whether the user was warned of a fallback
+ */
+export async function keepFallbackProfile(coreResult, requested) {
+    const actual = coreResult?.active_config;
+    if (coreResult && actual === null) {
+        // No profile loaded: the core runs the minimal config. The saved
+        // profile stays (as after a switch), but the user is told, instead of
+        // the update reading as a success over an empty proxy list. When the
+        // requested file does not exist (no profile added yet), the core also
+        // returns null though it rejected nothing: no warning then.
+        appStore.set('noSubscription', true);
+        if (!(await profileExists(requested))) return false;
+        showNotification(tr('configFallbackMinimal', { requested }), 'warning');
+        return true;
+    }
+    if (typeof actual !== 'string' || !actual || sameProfileFile(actual, requested)) return false;
+    showNotification(tr('configFallback', { requested, actual }), 'warning');
+    const err = await persistActiveConfig(actual);
+    invalidateSettingsCache();
+    if (err) {
+        rulesLogger.warn('[subscriptions] Saving the fallback profile failed:', err);
+        showNotification(tr('configPersistFailed', { name: actual }), 'warning');
+    }
+    // The tray marks the running profile: a restart in the background ends
+    // after the page last refreshed it.
+    import('../tray.js').then(m => m.updateTrayMenu(true)).catch((/** @type {unknown} */ e) => rulesLogger.warn('[subscriptions] Tray refresh failed:', e));
+    return true;
+}
+
+/**
+ * Restart the core on a profile whose file just changed, then run recovery,
+ * holding isNetworkUpdating like every other restart: a download that ends
+ * during a core update or a profile switch waits for it instead of
+ * restarting the core underneath it. Whether the profile is still the
+ * current one, and its launch arguments, are read once the lock is held, so
+ * a switch that finished while this waited is not undone.
+ * @param {string | string[]} names the updated file, or the files a batch
+ *   updated (the core restarts on whichever of them is current then)
+ * @returns {Promise<boolean>} whether the core was restarted
+ */
+async function restartUpdatedProfile(names) {
+    const updated = Array.isArray(names) ? names : [names];
+    while (!(await acquireNetworkLock())) { /* keep waiting */ }
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        const current = currentProfile(settings, 'config.yaml');
+        const name = updated.find((n) => sameProfileFile(current, n));
+        if (!name) return false;
+        abortLatencyTests();
+        const coreResult = await restartCore(name, settings?.custom_args || []);
+        await keepFallbackProfile(coreResult, name);
+        const recovery = await postRestartRecovery(restartedProfile(coreResult, name));
+        if (recovery?.failed) {
+            showNotification(tr('restartRecoveryWarn') || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        }
+        return true;
+    } finally {
+        appStore.set('isNetworkUpdating', false);
+    }
+}
+
 
 /**
  * A config file name without its .yaml / .yml extension.
@@ -190,10 +292,140 @@ let activeEditUADropdown = null;
  * @type {Map<string, { reason: string, at: number }>}
  */
 const _subUpdateErrors = new Map();
+/** Subscriptions with an update running: survives card re-renders (language change, refresh). */
+const _subUpdating = new Set();
+
+/**
+ * A new link saved while that subscription was downloading: fetched once the
+ * running download ends, with this user agent.
+ * @type {Map<string, string>}
+ */
+const _subFollowUp = new Map();
+
+/**
+ * Downloads waiting for their slot, with the per-subscription user agent they
+ * will send: a user agent saved meanwhile replaces it.
+ * @type {Map<string, string>}
+ */
+const _subWaitingUa = new Map();
+
+/** Test hook: the busy set, the queued link downloads and the waiting ones. */
+export const _subUpdateStateForTests = { updating: _subUpdating, followUp: _subFollowUp, waitingUa: _subWaitingUa };
 
 /** @param {string} name @param {string} reason */
 function setSubUpdateError(name, reason) {
     _subUpdateErrors.set(name, { reason, at: Math.floor(Date.now() / 1000) });
+}
+
+/** A click on something already updating: say so instead of doing nothing. */
+function notifyAlreadyUpdating() {
+    const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
+    showNotification(t.subAlreadyUpdating || 'Already updating.', 'info');
+}
+
+/**
+ * Note each batch result on its card and count them.
+ * @param {Array<{name: string, success: boolean, error?: string}>} results
+ */
+function recordBatchResults(results) {
+    let successCount = 0;
+    let failCount = 0;
+    /** @type {string[]} */
+    const failedNames = [];
+    for (const r of results) {
+        if (r.success) {
+            successCount++;
+            _subUpdateErrors.delete(r.name);
+        } else {
+            failCount++;
+            failedNames.push(r.name.replace(/\.(yaml|yml)$/i, ''));
+            setSubUpdateError(r.name, r.error || 'unknown');
+            rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
+        }
+    }
+    return { successCount, failCount, failedNames };
+}
+
+/**
+ * After a batch update: restart the core when the running profile was one of
+ * the updated files. The files are saved, so a failed restart is its own
+ * warning and the batch result is still reported.
+ * @param {Array<{name: string, success: boolean}>} results
+ */
+async function restartIfCurrentUpdated(results) {
+    try {
+        // Inside the try too: a failed settings read is a missed restart,
+        // not a failed batch.
+        /** @type {any} */
+        const subSettings = await invoke(COMMANDS.GET_SETTINGS);
+        const currentConfig = currentProfile(subSettings, 'config.yaml');
+        const updated = results.some(r => r.success && sameProfileFile(currentConfig, r.name));
+        if (!updated) {
+            // As after a single download: a switch to one of these profiles
+            // may still be loading it, and settings name it only once the
+            // core has started. Checked again once the lock is free.
+            const names = results.filter(r => r.success).map(r => r.name);
+            if (names.length && appStore.get('isNetworkUpdating')) {
+                void restartUpdatedProfile(names).catch((restartErr) => {
+                    rulesLogger.warn('[settings] Core restart after updating all subscriptions failed:', restartErr);
+                    showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+                });
+            }
+            return;
+        }
+        await restartUpdatedProfile(currentConfig);
+    } catch (restartErr) {
+        rulesLogger.warn('[settings] Core restart after updating all subscriptions failed:', restartErr);
+        showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+    }
+}
+
+/**
+ * The batch update's result toast.
+ * @param {Array<{name: string, success: boolean, error?: string}>} results
+ * @param {number} successCount
+ * @param {number} failCount
+ * @param {string[]} failedNames
+ */
+function notifyBatchOutcome(results, successCount, failCount, failedNames) {
+    const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
+    if (failCount === 0) {
+        showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
+    } else if (failedNames.length === 1) {
+        // Say which one failed and why (the reason used to go only to the log).
+        const only = results.find(r => !r.success);
+        showNotification(tr('subUpdateFailedOne', { name: failedNames[0], error: String(only?.error || '') }), 'error');
+    } else {
+        showNotification(tr('subUpdateFailedMany', { count: String(failedNames.length), names: new Intl.ListFormat(appStore.get('currentLang') || 'en').format(failedNames) }), 'error');
+    }
+}
+
+/**
+ * A download of `name` ended: it is no longer busy, and a link saved meanwhile
+ * is downloaded now (still shown busy until that ends).
+ * @param {string} name
+ */
+function finishSubUpdate(name) {
+    _subUpdating.delete(name);
+    const ua = _subFollowUp.get(name);
+    if (ua === undefined) return;
+    _subFollowUp.delete(name);
+    _subUpdating.add(name);
+    void (async () => {
+        const t = (/** @type {Record<string, any>} */ (translations))[appStore.get('currentLang')] || {};
+        moduleRenderConfigs?.(true);
+        try {
+            await downloadSubscription(name, ua);
+            _subUpdateErrors.delete(name);
+            showNotification(t.notifUrlUpdatedAndDownloaded || t.notifUrlUpdated || 'Subscription URL updated', 'success');
+        } catch (dlErr) {
+            setSubUpdateError(name, String(dlErr instanceof Error ? dlErr.message : dlErr));
+            showNotification(`${t.notifUrlSavedDownloadFailed || 'Link saved, but the download failed'}: ${dlErr}`, 'error');
+        } finally {
+            finishSubUpdate(name);
+            moduleRenderConfigs?.(true);
+        }
+    })();
 }
 
 /**
@@ -216,6 +448,8 @@ function getSubUpdateError(name, lastUpdated) {
 const GRIP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
 const EDIT_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 
+export { createDownloadGate } from './sub-download-gate.js';
+
 /**
  * Download (overwrite) one subscription and, when it is the config in use, restart the
  * core on it. Shared by the card's update button and the edit panel after a link change.
@@ -223,25 +457,48 @@ const EDIT_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" s
  * @param {string} [userAgent] - per-subscription UA; falls back to the global one
  */
 async function downloadSubscription(name, userAgent = '') {
-    const ua = userAgent || getSubscriptionUserAgent();
+    _subWaitingUa.set(name, userAgent);
+    let agent = userAgent;
+    try {
+        await subDownloadSlot();
+    } finally {
+        // A user agent saved while this waited is the one sent.
+        agent = _subWaitingUa.get(name) ?? userAgent;
+        _subWaitingUa.delete(name);
+    }
+    const ua = agent || getSubscriptionUserAgent();
     /** @type {any} */
     const invokeArgs = { name, overwrite: true };
     if (ua) invokeArgs.userAgent = ua;
+    // A link change saved while this waited for its slot is what this download
+    // reads: the follow-up download queued for it would only repeat it.
+    if (_subFollowUp.has(name)) {
+        const queuedUa = _subFollowUp.get(name) || getSubscriptionUserAgent();
+        _subFollowUp.delete(name);
+        if (queuedUa) invokeArgs.userAgent = queuedUa;
+        else delete invokeArgs.userAgent;
+    }
     await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
     invalidateConfigsCache();
     const settings = await getSettingsCached();
     // No last_config means the core runs the default config.yaml.
-    if (normalizeConfigName(settings?.last_config || 'config.yaml') === normalizeConfigName(name)) {
-        abortLatencyTests();
+    if (sameProfileFile(currentProfile(settings, 'config.yaml'), name)) {
         // The file is updated at this point: a failed restart is its own warning,
         // not a failed download (the card would otherwise keep "Update failed").
         try {
-            await restartCore(name, settings.custom_args || []);
-            await postRestartRecovery(name);
+            await restartUpdatedProfile(name);
         } catch (restartErr) {
             rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
             showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
         }
+    } else if (appStore.get('isNetworkUpdating')) {
+        // A switch to this profile may still be loading (settings name it only once
+        // the core has started on it, possibly from the file as it was before this
+        // download). The restart waits for the lock and checks again then.
+        void restartUpdatedProfile(name).catch((restartErr) => {
+            rulesLogger.warn('[settings] Core restart after subscription update failed:', restartErr);
+            showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+        });
     }
 }
 
@@ -497,6 +754,13 @@ async function showEditPanel(configInfo) {
             return;
         }
 
+        // A running update downloads under the old name: renaming now would let it
+        // bring the old file back and leave the renamed card without its busy state.
+        if (configStem(newName) !== currentStem && _subUpdating.has(configInfo.name)) {
+            showNotification(t.subRenameWhileUpdating || 'This subscription is updating. Rename it once the update finishes.', 'error');
+            return;
+        }
+
         const linkCode = newUrl ? validateHttpUrl(newUrl) : '';
         if (linkCode) {
             showNotification(linkCode === 'scheme'
@@ -506,6 +770,10 @@ async function showEditPanel(configInfo) {
         }
 
         isSaving = true;
+        // Busy while the rename is in flight: an update started during the
+        // writes below would download under the old name.
+        const renaming = configStem(newName) !== currentStem;
+        if (renaming) _subUpdating.add(configInfo.name);
         const saveBtn = document.getElementById('edit-modal-save');
         const cancelBtn = document.getElementById('edit-modal-cancel');
         if (saveBtn) saveBtn.classList.add('opacity-50', 'pointer-events-none');
@@ -530,14 +798,20 @@ async function showEditPanel(configInfo) {
                 const resolvedUA = await resolvePerSubUA(newUAPrefix);
                 await invoke(COMMANDS.UPDATE_SUBSCRIPTION_UA, { name: configInfo.name, userAgent: resolvedUA });
                 effectiveUA = resolvedUA || '';
+                // A link download still queued from an earlier edit uses the agent saved now.
+                if (_subFollowUp.has(configInfo.name)) _subFollowUp.set(configInfo.name, effectiveUA);
+                // So does a download still waiting for its slot.
+                if (_subWaitingUa.has(configInfo.name)) _subWaitingUa.set(configInfo.name, effectiveUA);
             }
 
             // Rename last — if this fails, updates are still applied under the old name
             let finalName = configInfo.name;
-            if (configStem(newName) !== currentStem) {
+            if (renaming) {
                 // The backend returns the file name it actually used (extension, sanitising).
                 const renamed = await invoke(COMMANDS.RENAME_CONFIG, { oldName: configInfo.name, newName });
                 finalName = typeof renamed === 'string' && renamed ? renamed : finalName;
+                _subUpdating.delete(configInfo.name);
+                noteProfileRenamed(configInfo.name, finalName);
                 invalidateSettingsCache();
                 // An "update failed" mark follows the subscription to its new name.
                 const failure = _subUpdateErrors.get(configInfo.name);
@@ -554,17 +828,29 @@ async function showEditPanel(configInfo) {
                 // presses Update, rather than overwriting the hand-written file now.
                 showNotification(t.notifUrlUpdated || 'Subscription URL updated', 'success');
             } else if (newUrl) {
-                // Show the saved name and link now: the download (and a possible core
-                // restart) can take a while, and the old card would act on the old name.
-                if (finalName !== configInfo.name) moduleRenderConfigs?.(true);
-                // A new link only matters once its nodes are downloaded: do that now.
-                try {
-                    await downloadSubscription(finalName, effectiveUA);
-                    _subUpdateErrors.delete(finalName);
-                    showNotification(t.notifUrlUpdatedAndDownloaded || t.notifUrlUpdated || 'Subscription URL updated', 'success');
-                } catch (dlErr) {
-                    setSubUpdateError(finalName, String(dlErr instanceof Error ? dlErr.message : dlErr));
-                    showNotification(`${t.notifUrlSavedDownloadFailed || 'Link saved, but the download failed'}: ${dlErr}`, 'error');
+                if (_subUpdating.has(finalName)) {
+                    // An update of this subscription is already downloading (it may
+                    // have read the old link): a second download now would write the
+                    // same file at once, so the new link downloads when it ends.
+                    _subFollowUp.set(finalName, effectiveUA);
+                    showNotification(t.notifUrlUpdated || 'Subscription URL updated', 'success');
+                } else {
+                    _subUpdating.add(finalName);
+                    // Show the saved name and link now, busy: the download (and a
+                    // possible core restart) can take a while, and the old card would
+                    // act on the old name.
+                    moduleRenderConfigs?.(true);
+                    // A new link only matters once its nodes are downloaded: do that now.
+                    try {
+                        await downloadSubscription(finalName, effectiveUA);
+                        _subUpdateErrors.delete(finalName);
+                        showNotification(t.notifUrlUpdatedAndDownloaded || t.notifUrlUpdated || 'Subscription URL updated', 'success');
+                    } catch (dlErr) {
+                        setSubUpdateError(finalName, String(dlErr instanceof Error ? dlErr.message : dlErr));
+                        showNotification(`${t.notifUrlSavedDownloadFailed || 'Link saved, but the download failed'}: ${dlErr}`, 'error');
+                    } finally {
+                        finishSubUpdate(finalName);
+                    }
                 }
             } else {
                 showNotification(t.notifSettingsSaved || 'Settings saved', 'success');
@@ -572,6 +858,7 @@ async function showEditPanel(configInfo) {
             // Force fresh render to get updated metadata
             moduleRenderConfigs?.(true);
         } catch (err) {
+            if (renaming) _subUpdating.delete(configInfo.name);
             isSaving = false;
             if (saveBtn) saveBtn.classList.remove('opacity-50', 'pointer-events-none');
             if (cancelBtn) cancelBtn.classList.remove('opacity-50', 'pointer-events-none');
@@ -679,6 +966,7 @@ export function initSubscriptionSettings({
                 if (userAgent) {
                     invokeArgs.userAgent = userAgent;
                 }
+                await subDownloadSlot();
                 /** @type {{name: string, message?: string}} */
                 const savedConfig = await invoke(COMMANDS.DOWNLOAD_SUB, invokeArgs);
                 downloaded = true;
@@ -702,12 +990,15 @@ export function initSubscriptionSettings({
 
                 /** @type {any} */
                 const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = subSettings.last_config || 'config.yaml';
-                if (normalizeConfigName(savedConfigName) === normalizeConfigName(currentConfig)) {
-                    abortLatencyTests();
-                    const customArgs = subSettings.custom_args || [];
-                    await restartCore(savedConfigName, customArgs);
-                    await postRestartRecovery(savedConfigName);
+                const currentConfig = currentProfile(subSettings, 'config.yaml');
+                if (sameProfileFile(currentConfig, savedConfigName)) {
+                    // The download succeeded: report it now and restart once the
+                    // network lock is free (a core update can hold it for minutes).
+                    // A failed restart is a warning, not a failed add.
+                    void restartUpdatedProfile(savedConfigName).catch((restartErr) => {
+                        rulesLogger.warn('[settings] Core restart after adding the current profile failed:', restartErr);
+                        showNotification(String(restartErr instanceof Error ? restartErr.message : restartErr), 'warning');
+                    });
                 } else if (appStore.get('noSubscription')) {
                     // The first subscription: nothing is loaded yet, so start using it
                     // (otherwise the empty state stays up after adding it). It is saved
@@ -715,7 +1006,11 @@ export function initSubscriptionSettings({
                     const activate = async () => {
                         try {
                             if (appStore.get('noSubscription')) {
-                                await switchToConfig(savedConfigName, subSettings.custom_args || []);
+                                // Read under the lock: launch arguments saved while
+                                // this waited for it are the ones to start with.
+                                /** @type {any} */
+                                const lockedSettings = await invoke(COMMANDS.GET_SETTINGS);
+                                await switchToConfig(savedConfigName, lockedSettings?.custom_args || []);
                             }
                         } finally {
                             appStore.set('isNetworkUpdating', false);
@@ -733,7 +1028,7 @@ export function initSubscriptionSettings({
                             while (!(await acquireNetworkLock())) { /* keep waiting */ }
                         }
                         await activate();
-                        void renderConfigs(true);
+                        void renderConfigs();
                     })().catch((switchErr) => {
                         rulesLogger.warn('[settings] Activating the first subscription failed:', switchErr);
                         showNotification(String(switchErr instanceof Error ? switchErr.message : switchErr), 'warning');
@@ -771,26 +1066,39 @@ export function initSubscriptionSettings({
             const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
             /** @type {any} */
             const configs = await invoke(COMMANDS.LIST_CONFIGS);
-            const subConfigs = configs.filter(/** @param {any} c */ (c) => c.url_display);
+            const allSubs = configs.filter(/** @param {any} c */ (c) => c.url_display);
+            // One already downloading (its card's Update or a new link) is left
+            // out: a second download would write the same file at once.
+            const subConfigs = allSubs.filter(/** @param {any} c */ (c) => !_subUpdating.has(c.name));
 
-            if (subConfigs.length === 0) {
+            if (allSubs.length === 0) {
                 showNotification(t.notifNoSubToUpdate, 'info');
+                return;
+            }
+            if (subConfigs.length === 0) {
+                notifyAlreadyUpdating();
                 return;
             }
 
             const icon = updateAllSubBtn.querySelector('svg');
             if (icon) icon.classList.add('animate-spin');
             updateAllSubBtn.classList.add('opacity-50', 'pointer-events-none');
+            /** @type {string[]} */
+            let marked = [];
 
             try {
-                let successCount = 0;
-                let failCount = 0;
                 showNotification(t.notifUpdateCount.replace('{count}', String(subConfigs.length)));
 
                 // Build batch items: only names needed, URLs resolved internally by backend
                 const userAgent = getSubscriptionUserAgent();
                 const batchItems = subConfigs.map(/** @param {any} c */ (c) => ({ name: c.name }));
 
+                // Busy like a card's own update, until the core restart below is
+                // done too: no rename or second download meanwhile. The cards
+                // show it.
+                marked = batchItems.map((/** @type {{name: string}} */ i) => i.name);
+                for (const n of marked) _subUpdating.add(n);
+                void renderConfigs();
                 // Single batch call — no per-item rate limiting
                 /** @type {Array<{name: string, success: boolean, error?: string}>} */
                 const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
@@ -798,51 +1106,23 @@ export function initSubscriptionSettings({
                     userAgent: userAgent || null,
                 });
 
-                /** @type {string[]} */
-                const failedNames = [];
-                for (const r of results) {
-                    if (r.success) {
-                        successCount++;
-                        _subUpdateErrors.delete(r.name);
-                    } else {
-                        failCount++;
-                        failedNames.push(r.name.replace(/\.(yaml|yml)$/i, ''));
-                        setSubUpdateError(r.name, r.error || 'unknown');
-                        rulesLogger.error(`[settings] Failed to update ${r.name}: ${r.error || 'unknown'}`);
-                    }
-                }
+                const { successCount, failCount, failedNames } = recordBatchResults(results);
 
                 invalidateConfigsCache();
 
-                /** @type {any} */
-                const subSettings = await invoke(COMMANDS.GET_SETTINGS);
-                const currentConfig = subSettings.last_config || 'config.yaml';
-                const customArgs = subSettings.custom_args || [];
-                const isCurrentConfigUpdated = results.some(r => r.success && normalizeConfigName(r.name) === normalizeConfigName(currentConfig));
-
-                if (isCurrentConfigUpdated) {
-                    abortLatencyTests();
-                    await restartCore(currentConfig, customArgs);
-                    await postRestartRecovery(currentConfig);
-                }
-
-                void renderConfigs();
-
-                if (failCount === 0) {
-                    showNotification(t.notifUpdateAllComplete.replace('{success}', String(successCount)).replace('{fail}', String(failCount)), 'success');
-                } else if (failedNames.length === 1) {
-                    // Say which one failed and why (the reason used to go only to the log).
-                    const only = results.find(r => !r.success);
-                    showNotification(tr('subUpdateFailedOne', { name: failedNames[0], error: String(only?.error || '') }), 'error');
-                } else {
-                    showNotification(tr('subUpdateFailedMany', { count: String(failedNames.length), names: new Intl.ListFormat(appStore.get('currentLang') || 'en').format(failedNames) }), 'error');
-                }
+                // The files are saved: report them now. The restart may wait
+                // minutes for the network lock (a core update holds it).
+                notifyBatchOutcome(results, successCount, failCount, failedNames);
+                await restartIfCurrentUpdated(results);
             } catch (err) {
                 const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                 showNotification(error.toString(), 'error');
             } finally {
                 if (icon) icon.classList.remove('animate-spin');
                 updateAllSubBtn.classList.remove('opacity-50', 'pointer-events-none');
+                // Also after a failed batch or restart: no card keeps spinning.
+                for (const n of marked) finishSubUpdate(n);
+                if (marked.length) void renderConfigs();
             }
         };
     }
@@ -1048,7 +1328,7 @@ export function initSubscriptionSettings({
 
         // --- "Edit" item ---
         const editItem = document.createElement('div');
-        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
@@ -1065,7 +1345,7 @@ export function initSubscriptionSettings({
 
         // --- "Extract Rules to Library" item ---
         const extractItem = document.createElement('div');
-        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-accent/15 hover:text-accent cursor-pointer transition-colors';
+        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
@@ -1140,7 +1420,7 @@ export function initSubscriptionSettings({
                 // Helper: create a checkbox item for a rule file
                 const createRuleItem = (/** @type {{filename: string, rule_count: number}} */ file) => {
                     const item = document.createElement('label');
-                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-accent/10 hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
@@ -1183,7 +1463,7 @@ export function initSubscriptionSettings({
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
-                        spinner.className = 'animate-spin ms-1 text-[var(--text-muted)]';
+                        spinner.className = 'inline-flex animate-spin ms-1 text-[var(--text-muted)]'; // inline-flex: a plain inline span does not rotate
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
@@ -1253,10 +1533,18 @@ export function initSubscriptionSettings({
                             // new rules — it never removes stale ones. rebuild() resets the
                             // base to the original subscription profile first, so skipped/
                             // disabled patches produce no residual rules.
+                            /** @type {any} */
                             const rebuildResult = await prism.rebuild();
-                            rulesLogger.info(`[rule-toggle] prism.rebuild() OK`, rebuildResult);
                             // Only update visual state after rebuild succeeds
                             checkbox.checked = targetChecked;
+                            if (rebuildResult?.hot_reload_success === false) {
+                                // The rule file is saved and the config rebuilt, but the
+                                // core refused the reload: it is not running yet.
+                                rulesLogger.warn(`[rule-toggle] prism.rebuild(): the core rejected the reload`, rebuildResult);
+                                showNotification(t.requireRestart || 'Changes saved. Restart the core to take effect.', 'warning');
+                                return;
+                            }
+                            rulesLogger.info(`[rule-toggle] prism.rebuild() OK`, rebuildResult);
                             showNotification(
                                 targetChecked
                                     ? `${t.ruleLibraryApplied || 'Applied'}: ${file.filename}`
@@ -1354,9 +1642,13 @@ export function initSubscriptionSettings({
      */
     async function persistOrder(newOrder, revision) {
         try {
-            const s = await invoke(COMMANDS.GET_SETTINGS);
-            s.config_order = newOrder;
-            await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+            // A full settings save: in the switches' write queue, so this snapshot
+            // can't write back an auto-switch value saved between its read and save.
+            await queueSmartConfigWrite(async () => {
+                const s = await invoke(COMMANDS.GET_SETTINGS);
+                s.config_order = newOrder;
+                await invoke(COMMANDS.SAVE_SETTINGS, { settings: s });
+            });
             invalidateSettingsCache();
             if (revision === _orderSaveRev) _pendingOrder = null;
         } catch (err) {
@@ -1428,7 +1720,7 @@ export function initSubscriptionSettings({
         // A newer render or destroy() has superseded this call — bail out.
         if (rev !== _renderRev) return;
 
-        const currentConfig = cfgSettings.last_config || 'config.yaml';
+        const currentConfig = currentProfile(cfgSettings, 'config.yaml');
         const customArgs = cfgSettings.custom_args || [];
         // A move still being saved wins over the order on disk.
         const configOrder = _pendingOrder || cfgSettings.config_order || [];
@@ -1701,6 +1993,11 @@ export function initSubscriptionSettings({
                 e.preventDefault();
 
                 if (isCurrent) return;
+                // A download still running (or a link change queued after it)
+                // would write the subscription back after the delete.
+                const busy = () => _subUpdating.has(name) || _subFollowUp.has(name);
+                const refuseBusy = () => showNotification(t.subDeleteWhileUpdating || 'Wait for the update to finish before deleting.', 'info');
+                if (busy()) { refuseBusy(); return; }
 
                 const confirmed = await showConfirmModal(
                     tr('deleteSubscriptionTitle', { name: displayName }),
@@ -1708,16 +2005,33 @@ export function initSubscriptionSettings({
                     { danger: true, confirmText: t.delete || 'Delete' }
                 );
                 if (!confirmed) return;
+                if (busy()) { refuseBusy(); return; }
 
+                // Busy while it deletes: an update started meanwhile could read
+                // the link first and write the file back afterwards.
+                _subUpdating.add(name);
+                let deleted = false;
                 try {
                     await invoke(COMMANDS.DELETE_CONFIG, { name });
+                    deleted = true;
                     _subUpdateErrors.delete(name);
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
-                    void renderConfigs(true);
                 } catch (err) {
                     const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                     showNotification(`${t.notifDeleteFailed}: ${error}`, 'error');
+                } finally {
+                    if (deleted) {
+                        _subUpdating.delete(name);
+                        // A link saved meanwhile queued a download for it:
+                        // nothing runs that queue now, and a later
+                        // subscription with the same name must not inherit it.
+                        _subFollowUp.delete(name);
+                    } else {
+                        // Still there: a link saved meanwhile downloads now.
+                        finishSubUpdate(name);
+                    }
+                    void renderConfigs();
                 }
             };
 
@@ -1730,24 +2044,39 @@ export function initSubscriptionSettings({
                 updateBtn.innerHTML = SVG_ICONS.refresh; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 updateBtn.title = t.update;
                 updateBtn.setAttribute('aria-label', t?.update || 'Update');
+                // Spin the icon only: the button's hover background stays put.
+                const icon = updateBtn.querySelector('svg');
+                if (_subUpdating.has(configInfo.name)) {
+                    icon?.classList.add('animate-spin');
+                    updateBtn.setAttribute('aria-busy', 'true');
+                }
                 updateBtn.onclick = async (e) => {
                     e.stopPropagation();
-                    updateBtn.classList.add('animate-spin');
+                    // A second click while this one is running would download twice,
+                    // also from a card rendered again meanwhile.
+                    if (_subUpdating.has(configInfo.name)) {
+                        notifyAlreadyUpdating();
+                        return;
+                    }
+                    _subUpdating.add(configInfo.name);
+                    icon?.classList.add('animate-spin');
+                    updateBtn.setAttribute('aria-busy', 'true');
                     try {
                         // Prefer per-subscription UA, fall back to global fake-client UA
                         await downloadSubscription(configInfo.name, configInfo.user_agent || '');
                         _subUpdateErrors.delete(configInfo.name);
                         showNotification(t.notifSubUpdateSuccess || t.notifSubSuccess, 'success');
-                        void renderConfigs();
                     } catch (err) {
                         const error = /** @type {Error} */ (err instanceof Error ? err : new Error(String(err)));
                         // Same card status as a failed "Update all".
                         setSubUpdateError(configInfo.name, error.message || String(err));
                         showNotification(`${t.notifSubFailed}: ${error}`, 'error');
-                        void renderConfigs();
                     } finally {
-                        updateBtn.classList.remove('animate-spin');
+                        finishSubUpdate(configInfo.name);
+                        icon?.classList.remove('animate-spin');
+                        updateBtn.removeAttribute('aria-busy');
                     }
+                    void renderConfigs();
                 };
                 actions.appendChild(updateBtn);
             }
@@ -1944,7 +2273,7 @@ export function initSubscriptionSettings({
             _renderRev++; // Invalidate any in-flight render even when hidden.
             return;
         }
-        void renderConfigs(true);
+        void renderConfigs();
     });
 
     // Set module-level reference for use by showEditPanel

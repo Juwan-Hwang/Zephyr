@@ -148,6 +148,95 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   display: none;
 }
 
+/* ── macOS optical centring (html.is-mac is set in main.js) ──
+   The capsules centre the text's line box, not the glyphs themselves; where
+   the glyphs sit inside the box is the font's business. On macOS the CJK
+   fallback is PingFang SC, whose metrics park the glyphs about a pixel
+   higher than the Windows fonts this UI was tuned against, so every capsule
+   label rides high. Inside the macOS scope only, drop the labels 1px onto
+   their optical centre — the same hand correction .score-badge applies to
+   its digits. The rules below cover every text-bearing pill in the app,
+   grouped by how each control is built:
+   - auto-height capsules rebalance their vertical padding (outer size
+     unchanged);
+   - fixed-height flex capsules take 2px of extra top padding, which moves
+     the centred content down exactly 1px;
+   - the mode-segmented buttons paint no background of their own (it lives
+     on the slider element), so they translate instead.
+   Textless pills — status dots, icon-only round buttons, the switch — carry
+   no glyphs and are left alone. The 1px is a first value, pending a check
+   on a real Mac. Windows is untouched. */
+html.is-mac :is(.btn, .btn-ghost, .btn-accent, .btn-danger, .btn-warning, .btn-success, .btn-primary) {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+/* The group above also catches the icon-only buttons riding the .btn
+   classes; they carry no glyphs, so restore the symmetric padding their
+   icons are centred with. (.plugin-more-btn sets padding: 0 itself, but
+   the group rule's specificity outranks that declaration.) */
+html.is-mac .plugin-more-btn {
+  padding: 0;
+}
+html.is-mac :is(#plugin-script-fullscreen-btn, #fullscreen-editor-close-btn, #btn-back-settings) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+/* Header buttons become icon-only too when header-fit steps a header down
+   to .is-compact and hides their labels; the compact rule only restates
+   their inline padding, so restore the same symmetric vertical padding
+   for them while they carry no visible glyphs. */
+html.is-mac header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+html.is-mac .select-common {
+  padding-top: calc(0.5rem + 1px);
+  padding-bottom: calc(0.5rem - 1px);
+}
+html.is-mac .dz-picker-sub {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+html.is-mac .dz-switch-node-btn {
+  padding-top: 4px;
+  padding-bottom: 2px;
+}
+html.is-mac #node-wheel-trigger,
+html.is-mac #node-wheel-list [role="option"] {
+  padding-top: 7px;
+  padding-bottom: 5px;
+}
+html.is-mac .rl-pill {
+  padding-top: 3px;
+  padding-bottom: 1px;
+}
+html.is-mac :is(#proxy-group-trigger, .home-tun-status, .seg-btn, .seg-tab, #rl-status, .conn-detail-closed-tag, .sub-in-use, .proxy-hidden-chip, .latency-result, .core-error-retry, .home-empty-btn, .row-action, .env-format-chip, .log-jump-latest) {
+  /* fixed-height flex capsules: 2px of extra top padding moves the centred
+     content down exactly 1px */
+  padding-top: 2px;
+}
+/* .latency-result-action sits inside .latency-result, so the parent rule
+   above already moves the whole button (label included) down 1px; giving
+   the button the same padding again would drop its label 1px below the
+   result text beside it. */
+/* The subscription editor's Change button is a fixed-height (28px) flex
+   .btn-ghost, but its own ID-bearing rule resets its vertical padding to
+   0 and outranks the .btn group correction above, so give it the
+   fixed-height treatment under a selector that wins. */
+html.is-mac .edit-url-current button#edit-url-change.btn-ghost {
+  padding-top: 2px;
+  padding-bottom: 0;
+}
+html.is-mac .score-badge {
+  /* the badge already carries this correction at 1px for its digits; the
+     macOS metrics shift applies to them too, so deepen it by the same 1px
+     (top padding 1px → 3px moves the centred digits down 1px) */
+  padding-top: 3px;
+}
+html.is-mac .dz-mode-seg button {
+  transform: translateY(1px);
+}
+
 .btn-ghost {
   background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
@@ -1605,46 +1694,16 @@ button:focus-visible:not(:disabled, [disabled]),
    ============================================ */
 #proxies-list {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    /* .proxy-wrapper reaches 8px past the grid's right edge by design (room
+       for the selection badge); with only overflow-y set, the horizontal axis
+       computes to auto and those 8px surface as a useless horizontal
+       scrollbar. This page never scrolls sideways — clip it. */
+    overflow-x: hidden;
 }
 
 /* ============================================
    Logs Page Styles
    ============================================ */
-
-/* ── Log Level Filter Pills (matches btn-ghost proportions) ── */
-.log-level-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--zephyr-button-gap);
-    min-height: 2rem;
-    padding: 5px var(--zephyr-button-padding-x);
-    border-radius: var(--radius-button);
-    font-size: var(--zephyr-button-font-size);
-    line-height: 1.4;
-    font-weight: var(--zephyr-button-weight);
-    text-transform: var(--zephyr-button-transform);
-    letter-spacing: var(--zephyr-button-tracking);
-    color: var(--zephyr-text-primary);
-    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
-    transition-property: color, background-color, border-color, opacity;
-    transition-timing-function: ease-out;
-    cursor: pointer;
-}
-.log-level-btn:hover {
-    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-    color: var(--zephyr-text-primary);
-}
-.log-level-btn.active {
-    color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-    border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
-}
-.log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.15); border-color: rgba(107, 114, 128, 0.25); }
-.log-level-btn[data-level="info"].active { color: var(--zephyr-color-info); background: color-mix(in srgb, var(--zephyr-color-info) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-info) 25%, transparent); }
-.log-level-btn[data-level="warn"].active { color: var(--zephyr-color-warning); background: color-mix(in srgb, var(--zephyr-color-warning) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-warning) 25%, transparent); }
-.log-level-btn[data-level="error"].active { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 15%, transparent); border-color: color-mix(in srgb, var(--zephyr-color-danger) 25%, transparent); }
-.log-level-btn[data-level="fatal"].active { color: #dc2626; background: rgba(220, 38, 38, 0.20); border-color: rgba(220, 38, 38, 0.35); }
 
 /* ── Log Content Area ── */
 .log-line {
@@ -1698,26 +1757,6 @@ button:focus-visible:not(:disabled, [disabled]),
 /* ============================================
    Logs Page — Light Mode Overrides
    ============================================ */
-
-html:not(.dark) .log-level-btn {
-    color: var(--zephyr-text-primary);
-    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-    border-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
-}
-html:not(.dark) .log-level-btn:hover {
-    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-}
-/* The light base rule above outranks .log-level-btn.active, so "All" needs its own active state */
-html:not(.dark) .log-level-btn.active {
-    color: color-mix(in srgb, var(--color-accent) 80%, black);
-    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-    border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
-}
-html:not(.dark) .log-level-btn[data-level="debug"].active { color: #6b7280; background: rgba(107, 114, 128, 0.12); border-color: rgba(107, 114, 128, 0.20); }
-html:not(.dark) .log-level-btn[data-level="info"].active { color: #2563eb; background: rgba(37, 99, 235, 0.12); border-color: rgba(37, 99, 235, 0.20); }
-html:not(.dark) .log-level-btn[data-level="warn"].active { color: #d97706; background: rgba(217, 119, 6, 0.12); border-color: rgba(217, 119, 6, 0.20); }
-html:not(.dark) .log-level-btn[data-level="error"].active { color: #dc2626; background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.20); }
-html:not(.dark) .log-level-btn[data-level="fatal"].active { color: #991b1b; background: rgba(153, 27, 27, 0.15); border-color: rgba(153, 27, 27, 0.25); }
 
 html:not(.dark) .log-line {
     border-bottom-color: rgba(0, 0, 0, 0.04);
@@ -1843,7 +1882,7 @@ html.dark #fullscreen-editor-output {
    Console Dashboard (dz-* prefix — self-contained layout for the console home page)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.dz-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 32px 32px 0; display: flex; flex-direction: column; gap: 16px; }
+.dz-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 32px 0; display: flex; flex-direction: column; gap: 16px; }
 .dz-content > .dz-header { margin-bottom: 8px; }
 
 /* ── Page header: title + view switch ── */
@@ -1864,12 +1903,12 @@ html.dark #fullscreen-editor-output {
 .dz-kpi-value b { font-size: 24px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1.1; }
 .dz-kpi-value span { font-size: 13px; font-weight: 500; color: var(--zephyr-text-muted); }
 .dz-kpi-foot { font-size: 11px; color: var(--zephyr-text-tertiary); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* Keep footer text clear of the sparkline drawn in the bottom corner */
-.dz-kpi:has(.dz-spark) .dz-kpi-foot { padding-inline-end: 76px; }
 .dz-kpi-label, .dz-kpi-foot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The footer is a flex row: ellipsize its text pieces, not just the row. */
 .dz-kpi-foot > span:not(.latency-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dz-spark { position: absolute; inset-inline-end: 0; bottom: 0; width: 72px; height: 28px; opacity: .55; pointer-events: none; }
+/* The sparkline trails the speed figure, so the peak line below keeps the card's full width */
+.dz-kpi-value b, .dz-kpi-value span { flex-shrink: 0; }
+.dz-spark { flex: 0 1 72px; min-width: 0; height: 24px; margin-inline-start: auto; align-self: center; opacity: .55; pointer-events: none; }
 
 /* ── Main grid ── */
 .dz-grid-main { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
@@ -1900,7 +1939,15 @@ html.dark #fullscreen-editor-output {
 .dz-node-latency { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .dz-latency-num { font-size: 28px; font-weight: 200; color: var(--zephyr-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .dz-latency-num small { font-size: 11px; color: var(--zephyr-text-muted); font-weight: 600; margin-inline-start: 2px; }
-.dz-test-btn { margin-inline-start: auto; }
+/* Latency read-out states (see renderLatency): no dash while a first measurement runs */
+[data-lat-state]:not([data-lat-state="value"]) .dz-lat-unit { display: none; }
+.latency-badge[hidden] { display: none; }
+.dz-lat-num.is-pending::before { content: ''; display: inline-block; width: .5em; height: .5em; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; opacity: .35; vertical-align: middle; animation: dz-lat-spin .9s linear infinite; }
+.dz-lat-num.is-text { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--zephyr-color-danger); }
+@keyframes dz-lat-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dz-lat-num.is-pending::before { animation: none; } }
+.dz-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.dz-test-btn { margin-inline-start: auto; padding: 5px 12px; }
 
 /* Node card */
 .dz-node-wrap { position: relative; }
@@ -1976,7 +2023,11 @@ html:not(.dark) #mode-slider { background: #fff; }
 .dz-conn-list { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; margin: 0 -6px; padding: 0 6px; }
 .dz-conn-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: var(--zephyr-radius-control); transition: background var(--motion-fast) var(--motion-ease-out); min-width: 0; }
 .dz-conn-row:hover { background: var(--zephyr-bg-subtle); }
-.dz-conn-proc { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0; letter-spacing: 0; }
+.dz-conn-proc { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dz-conn-proc img { width: 24px; height: 24px; object-fit: contain; display: block; }
+/* No real icon: a quiet, neutral app glyph rather than a coloured letter tile */
+.dz-conn-proc.is-placeholder { background: color-mix(in srgb, var(--zephyr-text-primary) 6%, transparent); box-shadow: inset 0 0 0 1px var(--zephyr-border-subtle); color: var(--zephyr-text-muted); }
+.dz-conn-proc.is-placeholder svg { width: 14px; height: 14px; }
 .dz-conn-info { flex: 1; min-width: 0; }
 .dz-conn-host { font-size: 12px; font-weight: 600; color: var(--zephyr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dz-conn-chain { font-size: 11px; color: var(--zephyr-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); margin-top: 1px; }
@@ -2162,20 +2213,53 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   text-shadow: 0 1px 12px color-mix(in srgb, var(--zephyr-bg-elevated, #000) 35%, transparent);
 }
 
-/* Segmented control items without a sliding thumb (e.g. UI scale): selected = raised grey, same as the sliders */
-.seg-item {
-  border: 1px solid transparent;
-  border-radius: 0.5rem;
-  color: var(--text-secondary);
-  background: transparent;
-}
-.seg-item:hover { color: var(--text-primary); }
-.seg-item[aria-pressed="true"] {
-  color: var(--text-primary);
+/* Settings segmented controls (theme, UI scale, home-page mode; ui/seg-control.js):
+   one sliding thumb behind the buttons, so every control has the same shape and motion.
+   --seg-count on the container sets the number of equal columns. */
+.seg-control {
+  --seg-count: 2;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--seg-count), minmax(0, 1fr));
+  align-items: stretch;
+  height: 2.25rem;
+  padding: 0.25rem;
   background: var(--zephyr-bg-muted);
-  border-color: var(--zephyr-border-default);
-  box-shadow: var(--zephyr-shadow-sm);
+  border: 1px solid var(--zephyr-border-subtle);
+  border-radius: var(--radius-lg);
 }
+.seg-thumb {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  inset-inline-start: 0.25rem;
+  width: calc((100% - 0.5rem) / var(--seg-count));
+  background: var(--zephyr-bg-muted);
+  border: 1px solid var(--zephyr-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: transform var(--zephyr-time-standard) ease-out, opacity var(--zephyr-time-standard) ease-out;
+  will-change: transform;
+}
+.seg-thumb.is-hidden { opacity: 0; }
+.seg-btn {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-secondary);
+  transition: color var(--zephyr-time-standard) ease-out;
+}
+.seg-btn:hover, .seg-btn[aria-pressed="true"] { color: var(--text-primary); }
+@media (prefers-reduced-motion: reduce) { .seg-thumb { transition: none; } }
 
 /* Subscription card: days left until expiry */
 .sub-expiry { font-variant-numeric: tabular-nums; }
@@ -2250,8 +2334,7 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
 html:not(.dark) { --accent-ink: color-mix(in srgb, var(--accent-primary) 78%, #000); --download-ink: #0062CC; }
 html:not(.dark) .home-status-text.text-accent,
 html:not(.dark) .btn-accent,
-html:not(.dark) .btn-ghost.active,
-html:not(.dark) .log-level-btn.active[data-level="all"] { color: var(--accent-ink); }
+html:not(.dark) .btn-ghost.active { color: var(--accent-ink); }
 .text-download-ink, html:not(.dark) .text-download, html:not(.dark) .conn-rate--down { color: var(--download-ink); }
 .text-upload-ink { color: var(--zephyr-color-upload); }
 
@@ -2838,6 +2921,9 @@ html.dark {
 
 /* Override cards: disabled ones read quieter. */
 #plugin-list .glass-card.is-disabled .text-sm { color: var(--text-tertiary); }
+/* Room for the cards' 4px hover slide: the list clips overflow-x, which cut the slid card's
+   end edge and rounded corners. Same card width, the room sits in the gutter. */
+#plugin-list { padding-inline-end: 4px; margin-inline-end: -4px; }
 
 /* New subscription: brief highlight once its card appears. */
 .sub-card-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s; }
@@ -2845,6 +2931,11 @@ html.dark {
 /* Context menus: opaque so the card underneath (traffic bars) doesn't show through. */
 html.dark .ctx-menu-root.glass-card { background: rgb(30, 30, 34); }
 html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
+/* Context menus (utils/context-menu.js, the subscription menu): options are inset rounded
+   pills like the sort and group menus, never full-bleed squares against the rounded menu. */
+.ctx-menu-root > .menu-scroll { padding: 4px; }
+.ctx-menu-root :is(button, label, .cursor-pointer) { border-radius: var(--radius-dropdown-option); }
+.ctx-menu-root :is(button, label, .cursor-pointer) + :is(button, label, .cursor-pointer) { margin-top: 2px; }
 
 /* .hidden loses to these components' own display rule — keep hidden things hidden. */
 .input-paste-wrapper.hidden, .edit-url-current.hidden { display: none; }
@@ -2993,7 +3084,7 @@ html:not(.dark) .proxy-group-menu { background: rgb(252, 252, 253); }
 
 /* Proxies: sort menu (same surface as the group menu) and a steady-width sort button. */
 header:not(.is-compact) #sort-btn { min-width: 112px; }
-.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; }
+.proxy-sort-menu { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 9999; min-width: 200px; padding: 4px; display: flex; flex-direction: column; gap: 2px; /* hovered and selected pills never merge */ }
 .proxy-sort-menu.is-end { inset-inline-start: auto; inset-inline-end: 0; }
 .proxy-sort-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border-radius: var(--radius-dropdown-option); text-align: start; }
 .proxy-sort-option .proxy-sort-body { flex: 1; min-width: 0; }
@@ -3080,34 +3171,31 @@ header:not(.is-compact) #sort-btn { min-width: 112px; }
 .input-unit > .form-control { width: 100%; padding-inline-end: 3rem; }
 .input-unit-label { position: absolute; inset-inline-end: 1rem; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
 
-/* Advanced page: the section a settings link opened briefly gets an accent ring */
-.adv-flash { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent); transition: box-shadow 0.6s ease-out; }
-
 /* Settings rows: a switch row with a trailing text button keeps the button and switch on one line */
 [data-page="settings"] .ios-switch { flex-shrink: 0; }
 
 /* Dark mode details (settings, advanced, their dialogs) */
 /* Selected thumbs were white-5% on a white-5% track: only a hairline told them apart. */
-html.dark :is(#setting-theme-mode-slider, #setting-home-mode-slider),
-html.dark .seg-item[aria-pressed="true"],
+html.dark .seg-thumb,
 html.dark .seg-tab.active { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.14); }
 /* Row descriptions: #71717a on the dark glass sat near 4:1 at 11px. */
-html.dark :is([data-page="settings"], [data-page="advanced"], #log-settings-modal, #log-export-modal, #smart-config-modal, #port-config-modal) { --text-muted: #8e8e98; }
+html.dark :is([data-page="settings"], [data-page="advanced"], #log-settings-modal, #log-export-modal, #smart-config-modal, #port-config-modal, #update-dialog) { --text-muted: #8e8e98; }
 /* Row dividers a touch firmer so cards keep their rhythm on the dark glass. */
 html.dark [data-page="settings"] .glass-card > .h-px,
 html.dark [data-page="settings"] #uwp-loopback-item > .h-px { background: rgba(255, 255, 255, 0.07); }
 /* Native date pickers and number spinners follow the theme. */
 html.dark :is(#log-export-modal, #port-config-modal, #smart-config-modal, #log-settings-modal) input { color-scheme: dark; }
 /* Light: the same raised white thumb as the header tabs (page-29). */
-html:not(.dark) :is(#setting-theme-mode-slider, #setting-home-mode-slider),
-html:not(.dark) .seg-item[aria-pressed="true"] { background: rgba(255, 255, 255, 0.9); }
+html:not(.dark) .seg-thumb { background: rgba(255, 255, 255, 0.9); }
 
 /* Settings section index (ui/settings-nav.js): short marks in the right gutter, covering
    no rows. Names slide out beside the marks only while the rail is hovered or focused. */
 .settings-rail {
-  position: fixed; top: 50%; inset-inline-end: 10px; z-index: 30; transform: translateY(-50%);
+  position: fixed; top: 50%; inset-inline-end: 6px; z-index: 30; transform: translateY(-50%);
   width: auto; max-width: none; margin: 0; /* not the 800px column rule for settings children on wide windows */
-  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; /* 24px between item centres */
+  /* 24px between item centres; the 4px end padding keeps a hovered item's pill off the
+     expanded panel's rounded edge (the marks stay where they were: inset 6px + 4px) */
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 6px 0; padding-inline-end: 4px;
 }
 .settings-rail-item {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 18px;
@@ -3182,3 +3270,52 @@ html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
   html:not(.kb-nav) :is(.form-control, .select-common):focus,
   :is(input, textarea, select, [contenteditable]):focus { outline: 2px solid Highlight; }
 }
+
+/* Update dialog (ui/update-dialog.js): one card for checking → result → progress → done / retry */
+/* Fits the smallest window at any UI scale: the body scrolls, header and buttons stay put. */
+.upd-card { width: min(460px, calc(100% - 48px)); max-height: calc(100% - 48px); padding: 24px; display: flex; flex-direction: column; gap: 18px; }
+.upd-body { display: flex; flex-direction: column; gap: 14px; min-height: 52px; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+.upd-card > :not(.upd-body) { flex-shrink: 0; }
+.upd-head { display: flex; align-items: center; gap: 14px; }
+.upd-badge {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: var(--radius-full);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); background: var(--zephyr-bg-muted);
+}
+.upd-badge[data-tone="accent"] { color: var(--accent-ink); background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+.upd-badge[data-tone="success"] { color: var(--zephyr-color-success); background: color-mix(in srgb, var(--zephyr-color-success) 14%, transparent); }
+.upd-badge[data-tone="danger"] { color: var(--zephyr-color-danger); background: color-mix(in srgb, var(--zephyr-color-danger) 14%, transparent); }
+.upd-title { font-size: 14px; font-weight: 600; line-height: 20px; color: var(--text-primary); }
+.upd-sub { margin-top: 2px; font-size: 12px; line-height: 18px; color: var(--text-muted); }
+.upd-rows { border: 1px solid var(--zephyr-border-subtle); border-radius: var(--radius-md); background: var(--zephyr-bg-muted); }
+.upd-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px; font-size: 12px; }
+.upd-row + .upd-row { border-top: 1px solid var(--zephyr-border-subtle); }
+.upd-row-label { color: var(--text-secondary); }
+.upd-row-value { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.upd-arrow { color: var(--text-muted); }
+/* The arrow points from the installed version to the new one in RTL too. */
+[dir="rtl"] .upd-arrow { display: inline-block; transform: scaleX(-1); }
+.upd-new { font-weight: 600; color: var(--accent-ink); }
+.upd-notes-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: -6px; }
+.upd-notes {
+  max-height: 220px; overflow-y: auto; padding: 10px 14px; font-size: 12px; line-height: 1.6;
+  color: var(--text-secondary); border: 1px solid var(--zephyr-border-subtle); border-radius: var(--radius-md);
+}
+.upd-notes :is(h1, h2, h3, h4) { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 8px 0 4px; }
+.upd-notes :is(h1, h2, h3, h4):first-child { margin-top: 0; }
+.upd-notes :is(ul, ol) { padding-inline-start: 18px; }
+.upd-notes ul { list-style: disc; }
+.upd-notes ol { list-style: decimal; }
+.upd-notes a { color: var(--accent-ink); }
+.upd-progress { height: 6px; border-radius: var(--radius-full); background: var(--zephyr-bg-muted); overflow: hidden; }
+.upd-progress-bar { height: 100%; border-radius: inherit; background: var(--color-accent); transition: width var(--zephyr-time-standard) ease-out; }
+.upd-progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: -6px; }
+.upd-hint { font-size: 12px; color: var(--text-muted); }
+.upd-error {
+  font-size: 12px; line-height: 18px; color: var(--text-secondary); overflow-wrap: anywhere;
+  padding: 8px 12px; border-radius: var(--radius-md); background: var(--zephyr-bg-muted); max-height: 96px; overflow-y: auto;
+}
+.upd-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.upd-spin { animation: upd-spin 0.9s linear infinite; }
+@keyframes upd-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .upd-progress-bar { transition: none; } }

@@ -20,6 +20,229 @@ afterEach(() => {
     invokeMock.mockClear();
 });
 
+describe('home and settings page switches and theme swatches accessibility', () => {
+    it('app toggles have valid aria-labelledby and aria-describedby references', () => {
+        const doc = parseIndex();
+        const switches = [
+            { toggleId: 'sys-proxy-toggle', titleId: 'sys-proxy-title', descId: 'proxy-status-text' },
+            { toggleId: 'tun-proxy-toggle', titleId: 'home-tun-title', descId: 'tun-status-text' },
+            { toggleId: 'setting-failover', titleId: 'setting-failover-title', descId: 'setting-failover-desc' },
+            { toggleId: 'smart-toggle', titleId: 'smart-toggle-title', descId: 'smart-toggle-desc' },
+            { toggleId: 'smart-auto-test-toggle', titleId: 'smart-auto-test-title', descId: 'smart-auto-test-desc' },
+            { toggleId: 'dns-rewrite-toggle', titleId: 'setting-dns-rewrite-title', descId: 'setting-dns-rewrite-desc' },
+        ];
+        for (const { toggleId, titleId, descId } of switches) {
+            const toggle = doc.getElementById(toggleId);
+            expect(toggle, toggleId).toBeTruthy();
+            expect(toggle?.getAttribute('aria-labelledby')).toBe(titleId);
+            expect(toggle?.getAttribute('aria-describedby')).toBe(descId);
+
+            expect(doc.getElementById(titleId), titleId).toBeTruthy();
+            expect(doc.getElementById(descId), descId).toBeTruthy();
+        }
+    });
+
+    it('settings segmented controls carry role="group" and translatable aria-labels', () => {
+        const doc = parseIndex();
+        const controls = [
+            { id: 'setting-theme-mode-container', key: 'theme' },
+            { id: 'setting-home-mode-container', key: 'homePageMode' },
+        ];
+        for (const { id, key } of controls) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.getAttribute('role')).toBe('group');
+            expect(el?.getAttribute('aria-label')).toBeTruthy();
+            expect(el?.getAttribute('data-i18n-aria-label')).toBe(key);
+        }
+    });
+
+    it('preset and custom theme color swatches carry translatable aria-labels and titles', () => {
+        const doc = parseIndex();
+        const swatches = [
+            { theme: 'blue', key: 'themeColorBlue' },
+            { theme: 'green', key: 'themeColorGreen' },
+            { theme: 'orange', key: 'themeColorOrange' },
+            { theme: 'pink', key: 'themeColorPink' },
+        ];
+        for (const { theme, key } of swatches) {
+            const btn = doc.querySelector(`button.theme-swatch[data-theme="${theme}"]`);
+            expect(btn, theme).toBeTruthy();
+            expect(btn?.getAttribute('aria-label')).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-aria-label')).toBe(key);
+        }
+
+        const customInput = doc.getElementById('custom-theme-color');
+        expect(customInput).toBeTruthy();
+        expect(customInput?.getAttribute('aria-label')).toBe('Custom');
+        expect(customInput?.getAttribute('data-i18n-aria-label')).toBe('themeColorCustom');
+        expect(customInput?.getAttribute('title')).toBe('Custom');
+        expect(customInput?.getAttribute('data-i18n-title')).toBe('themeColorCustom');
+    });
+
+    it('app opacity range slider carries aria-valuetext and aria-label', () => {
+        const doc = parseIndex();
+        const slider = doc.getElementById('setting-opacity');
+        expect(slider).toBeTruthy();
+        expect(slider?.tagName).toBe('INPUT');
+        expect(slider?.getAttribute('type')).toBe('range');
+        expect(slider?.getAttribute('aria-label')).toBeTruthy();
+        expect(slider?.getAttribute('data-i18n-aria-label')).toBe('appOpacity');
+        expect(slider?.getAttribute('aria-valuetext')).toBe('100%');
+    });
+
+    it('opacity init clamps saved values to the slider range and announces them', async () => {
+        const { initThemeSettings } = await import('./settings/theme.js');
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">' +
+            '<span id="opacity-val-text">100%</span>';
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        const valText = document.getElementById('opacity-val-text');
+        const api = initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 5,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider,
+            opacityValText: valText,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        // A saved 5 is below the slider minimum: everything must agree on 10.
+        expect(slider.value).toBe('10');
+        expect(slider.getAttribute('aria-valuetext')).toBe('10%');
+        expect(valText?.textContent).toBe('10%');
+        // A fractional saved value snaps to the slider's whole steps.
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">' +
+            '<span id="opacity-val-text">100%</span>';
+        const slider2 = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        const valText2 = document.getElementById('opacity-val-text');
+        const api2 = initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 55.5,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider2,
+            opacityValText: valText2,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        expect(slider2.value).toBe('56');
+        expect(slider2.getAttribute('aria-valuetext')).toBe('56%');
+        expect(valText2?.textContent).toBe('56%');
+        api2.cancelPendingOpacity();
+        // Dragging the slider updates the announcement.
+        slider.value = '50';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(slider.getAttribute('aria-valuetext')).toBe('50%');
+        expect(valText?.textContent).toBe('50%');
+        api.cancelPendingOpacity();
+    });
+
+    it('a pending opacity save can be cancelled (restore defaults)', async () => {
+        const { initThemeSettings } = await import('./settings/theme.js');
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">';
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        const api = initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 100,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider,
+            opacityValText: null,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        invokeMock.mockClear();
+        slider.value = '30';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        api.cancelPendingOpacity();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        // The debounced save must not fire after cancellation.
+        expect(invokeMock).not.toHaveBeenCalled();
+    });
+
+    it('an uncancelled opacity input schedules a save', async () => {
+        const { initThemeSettings } = await import('./settings/theme.js');
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">';
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 100,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider,
+            opacityValText: null,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        invokeMock.mockClear();
+        slider.value = '30';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        // Without cancellation the debounced save must go through.
+        expect(invokeMock).toHaveBeenCalledWith('patch_settings', { patch: { app_opacity: 30 } });
+    });
+});
+
+describe('modal dialog accessibility', () => {
+    it('modal overlays in index.html carry proper role, aria-modal, and valid aria-labelledby targets', () => {
+        const doc = parseIndex();
+        const modals = [
+            'modal-bg',
+            'plugin-panel',
+            'dns-config-modal',
+            'port-config-modal',
+            'fullscreen-editor-overlay',
+        ];
+
+        for (const id of modals) {
+            const el = doc.getElementById(id);
+            expect(el, id).toBeTruthy();
+            expect(el?.getAttribute('role'), id).toBe('dialog');
+            expect(el?.getAttribute('aria-modal'), id).toBe('true');
+
+            const titleId = el?.getAttribute('aria-labelledby');
+            expect(titleId, `${id} aria-labelledby`).toBeTruthy();
+            if (titleId) {
+                expect(doc.getElementById(titleId), `${id} title element #${titleId}`).toBeTruthy();
+            }
+        }
+    });
+});
+
+describe('menu triggers accessibility', () => {
+    it('index.html dropdown triggers carry aria-haspopup="menu" and aria-expanded attributes', () => {
+        const doc = parseIndex();
+        const triggers = ['proxy-group-trigger', 'sort-btn', 'copy-env-format-btn', 'plugin-new-btn', 'plugin-more-btn'];
+        for (const id of triggers) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('aria-haspopup')).toBe('menu');
+            expect(btn?.getAttribute('aria-expanded')).toBe('false');
+        }
+    });
+});
+
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();

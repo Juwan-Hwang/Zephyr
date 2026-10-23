@@ -4,14 +4,15 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig } from '../api.js';
+import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { translations, currentLang } from '../i18n.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
-import { postRestartRecovery } from './lifecycle.js';
+import { postRestartRecovery, restartedProfile } from './lifecycle.js';
+import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
 
 // Records the TUN preference only, for callers that
@@ -19,6 +20,171 @@ import { renderTunStatus } from './tun-status.js';
 // now rejects a non-null `tun_enabled`, which is the owner-path split this
 // command exists to serve.
 const RECORD_TUN_ENABLED = COMMANDS.RECORD_TUN_ENABLED;
+
+/** Re-syncs every mirrored TUN switch from the home toggle (see `mirrorTunToggle`). */
+/** @type {Set<() => void>} */
+const mirrorSyncs = new Set();
+
+function syncTunMirrors() {
+    for (const sync of mirrorSyncs) sync();
+}
+
+/**
+ * Drive a secondary TUN switch (the console page's) through the home toggle.
+ *
+ * The home toggle owns the whole flow: authorisation, errors, rollback and the
+ * success notice. A secondary switch only forwards the user's click to it and
+ * then follows the settled state. Subscribing to `appStore.isTunEnabled` alone
+ * is not enough: a failed switch rolls back without changing the store (it was
+ * `false` before and is `false` after), so no change event fires and a switch
+ * bound only to the store kept showing TUN as on after a failed start, e.g.
+ * without administrator rights. Hence the explicit re-read once a switch
+ * settles (and on rollback, via `syncTunMirrors`).
+ *
+ * The re-read takes the store, not the home checkbox: once a switch settles the
+ * two agree, but the console is built before startup binds the home checkbox,
+ * which until then reads unchecked even with TUN on.
+ *
+ * @param {HTMLInputElement} toggle
+ * @returns {() => void} Detaches the switch.
+ */
+export function mirrorTunToggle(toggle) {
+    const home = () => /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
+    const sync = () => {
+        toggle.checked = !!appStore.get('isTunEnabled');
+    };
+    const unsubs = [
+        // A store change carries the new state (tray, Restore Defaults) even
+        // before the home toggle has caught up.
+        appStore.subscribe('isTunEnabled', (/** @type {boolean} */ on) => { toggle.checked = !!on; }),
+        // No second click while a switch is in flight; re-read when it settles.
+        appStore.subscribe('isNetworkUpdating', (/** @type {boolean} */ busy) => {
+            toggle.disabled = !!busy;
+            if (!busy) sync();
+        }),
+    ];
+    const onChange = () => {
+        const el = home();
+        // Before initTunToggle has wired the home switch a click there does
+        // nothing: put this one back rather than show a change that never ran.
+        if (!el?.onchange) { sync(); return; }
+        el.checked = toggle.checked;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    toggle.addEventListener('change', onChange);
+    toggle.disabled = !!appStore.get('isNetworkUpdating');
+    mirrorSyncs.add(sync);
+    sync();
+    return () => {
+        toggle.removeEventListener('change', onChange);
+        mirrorSyncs.delete(sync);
+        for (const off of unsubs) off();
+    };
+}
+
+/**
+ * Show the main window before a prompt the user must answer. A switch started
+ * from the tray while the window is closed to the tray would otherwise wait on
+ * an invisible dialog, keeping every later switch blocked until it is opened.
+ *
+ * @returns {Promise<boolean>} False when the window could not be shown and is
+ *   still hidden: the caller must not open a prompt nobody can see.
+ */
+async function revealMainWindow() {
+    // This webview's own window, shown in place: `show_main_window` could
+    // recreate it (stale heartbeat) and drop the flow that is running here.
+    let win;
+    try {
+        win = getCurrentWindow();
+        await win.show();
+    } catch (err) {
+        tunLogger.warn('could not show the window for the TUN prompt', err);
+        // Already on screen (only the show call failed): the prompt is visible.
+        return win ? await win.isVisible().catch(() => false) : false;
+    }
+    try {
+        await win.setFocus();
+    } catch (err) {
+        tunLogger.warn('could not focus the window for the TUN prompt', err);
+    }
+    return true;
+}
+
+/**
+ * Windows: TUN needs an elevated process (the core inherits the app's token).
+ * Offer to relaunch Zephyr as administrator, the counterpart of the macOS root
+ * restart and the Linux permission grant. When the process is already
+ * elevated it reports the failure itself (relaunching would not help).
+ *
+ * @param {Record<string, string>} t
+ * @returns {Promise<boolean>} Whether the failure was reported here: true
+ *   once this told the user something (or the relaunch ran); false when
+ *   elevation could not be checked, the window could not be shown for the
+ *   prompt, or the user declined, so the caller reports the original failure.
+ */
+async function offerWindowsAdminRelaunch(t) {
+    const elevated = await invoke(COMMANDS.IS_PROCESS_ELEVATED).catch(() => null);
+    if (elevated === true) {
+        // Already administrator: "run as administrator" would be wrong advice.
+        showNotification(t.tunFailedElevated || "Couldn't turn on TUN mode. Check the core log for details", 'error');
+        return true;
+    }
+    if (elevated !== false) return false;
+    // A standard account can't elevate as itself: say so instead of offering a restart that fails.
+    if (await invoke(COMMANDS.CAN_ELEVATE_AS_SELF).catch(() => null) === false) {
+        showNotification(t.tunWindowsNotAdmin || 'TUN mode needs administrator rights, and this Windows account is not an administrator', 'error');
+        return true;
+    }
+    // A prompt in a window that stayed hidden would hold the switch forever.
+    if (!(await revealMainWindow())) return false;
+    const relaunch = await showConfirmModal(
+        'TUN',
+        t.tunWindowsAdminPrompt || 'TUN mode needs administrator rights. Restart Zephyr as administrator?'
+    );
+    // Declined: the failure may not be about rights at all, so report it as is.
+    if (!relaunch) return false;
+    try {
+        // On success the app exits and the elevated instance starts with TUN on.
+        await invoke(COMMANDS.RESTART_AS_ADMIN, { enableTun: true });
+    } catch (err) {
+        tunLogger.error('Windows elevated relaunch failed', err);
+        if (err === 'canceled') {
+            showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+        } else if (err === 'not_admin_user') {
+            showNotification(t.tunWindowsNotAdmin || 'TUN mode needs administrator rights, and this Windows account is not an administrator', 'error');
+        } else if (typeof err === 'string' && err.startsWith('pref_save_failed')) {
+            showNotification(t.tunPrefSaveFailedNotEnabled, 'warning');
+        } else {
+            showNotification(t.tunWindowsRelaunchFailed || 'Could not restart as administrator', 'error');
+        }
+    }
+    return true;
+}
+
+/**
+ * Restart the core on the profile it is running, as the other restarts do:
+ * when that file fails to load and the core falls back to another profile
+ * (or the minimal config), keep and report the fallback, and run recovery
+ * for the profile that actually loaded rather than the requested one.
+ * @returns {Promise<any>} what restartCore returned
+ */
+async function restartOnCurrentProfile() {
+    const settings = await invoke(COMMANDS.GET_SETTINGS);
+    const requested = currentProfile(settings, 'config.yaml');
+    const coreResult = await restartCore(requested, settings.custom_args || []);
+    // Imported lazily, as the proxies page restart does, so loading this
+    // module does not load the subscription settings with it.
+    const { keepFallbackProfile } = await import('./settings/subscriptions.js');
+    await keepFallbackProfile(coreResult, requested);
+    const recovery = await postRestartRecovery(restartedProfile(coreResult, requested));
+    // The restart itself worked; say what did not come back, as the other
+    // restarts do.
+    if (recovery?.failed) {
+        const t = /** @type {any} */ (translations)[currentLang] || {};
+        showNotification(t.restartRecoveryWarn || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+    }
+    return coreResult;
+}
 
 export function initTunToggle() {
     const toggle = /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
@@ -31,11 +197,7 @@ export function initTunToggle() {
      */
     async function recoverFromRootStartFailure() {
         try {
-            const settings = await invoke(COMMANDS.GET_SETTINGS);
-            const currentConfig = settings.last_config || 'config.yaml';
-            const customArgs = settings.custom_args || [];
-            await restartCore(currentConfig, customArgs);
-            await postRestartRecovery(currentConfig);
+            await restartOnCurrentProfile();
         } catch (recoverErr) {
             tunLogger.error('recovery failed', recoverErr);
         }
@@ -144,12 +306,8 @@ export function initTunToggle() {
                         }
                         await new Promise(r => setTimeout(r, 1500));
 
-                        const settings = await invoke(COMMANDS.GET_SETTINGS);
-                        const currentConfig = settings.last_config || 'config.yaml';
-                        const customArgs = settings.custom_args || [];
                         await new Promise(r => setTimeout(r, 1000));
-                        await restartCore(currentConfig, customArgs);
-                        await postRestartRecovery(currentConfig);
+                        await restartOnCurrentProfile();
                     } catch (restartErr) {
                         tunLogger.error('failed to disable TUN', restartErr);
                         if (disableCommitted) {
@@ -217,13 +375,20 @@ export function initTunToggle() {
             }
 
             renderTunStatus(statusText, enable);
-        } catch (_err) {
+        } catch (err) {
+            // The prompts below replace this error with their own message: keep it in the log.
+            tunLogger.error(`TUN ${enable ? 'enable' : 'disable'} failed`, err);
             toggle.checked = !enable;
             appStore.set('isTunEnabled', !enable);
             renderTunStatus(statusText, !enable);
+            // The prompts below keep the switch busy; show the rollback now.
+            syncTunMirrors();
 
-            const isLinux = navigator.userAgent.toLowerCase().includes('linux');
-            if (isLinux && enable) {
+            const ua = navigator.userAgent.toLowerCase();
+            const isLinux = ua.includes('linux');
+            const isWindows = ua.includes('windows');
+            // Window still hidden: report the failure below instead of a prompt nobody sees.
+            if (isLinux && enable && await revealMainWindow()) {
                 const grantPermission = await showConfirmModal(
                     'TUN',
                     t.tunLinuxPermissionPrompt ||
@@ -279,11 +444,7 @@ export function initTunToggle() {
                         showNotification(t.tunLinuxPermissionGranted || 'Permission granted. Restarting core...', 'success');
                         try {
                             try { await invoke(COMMANDS.STOP_CORE); } catch (_) {}
-                            const settings = await invoke(COMMANDS.GET_SETTINGS);
-                            const currentConfig = settings.last_config || 'config.yaml';
-                            const customArgs = settings.custom_args || [];
-                            const coreResult = await restartCore(currentConfig, customArgs);
-                            await postRestartRecovery(currentConfig);
+                            const coreResult = await restartOnCurrentProfile();
                             if (coreResult?.secret) {
                                 setSecret(coreResult.secret);
                                 setWsSecret(coreResult.secret);
@@ -316,11 +477,7 @@ export function initTunToggle() {
                                 tunLogger.error('failed to record tun_enabled=false after retry failure', recordErr);
                             }
                             try {
-                                const settings = await invoke(COMMANDS.GET_SETTINGS);
-                                const currentConfig = settings.last_config || 'config.yaml';
-                                const customArgs = settings.custom_args || [];
-                                await restartCore(currentConfig, customArgs);
-                                await postRestartRecovery(currentConfig);
+                                await restartOnCurrentProfile();
                             } catch (restartErr) {
                                 tunLogger.error('Core restart without TUN also failed', restartErr);
                             }
@@ -328,12 +485,21 @@ export function initTunToggle() {
                         }
                     }
                 }
-            } else {
-                showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
+            } else if (!(isWindows && enable && await offerWindowsAdminRelaunch(t).catch((e) => {
+                // The prompt itself failed (window or modal error): still
+                // tell the user TUN did not start.
+                tunLogger.warn('Windows admin relaunch prompt failed', e);
+                return false;
+            }))) {
+                // Both messages are about turning TUN on (and the advice
+                // in them about rights); a failed disable gets its own.
+                if (enable) showNotification(isMac ? t.tunFailedMac : t.tunFailed, 'error');
+                else showNotification(t.tunToggleFailed || 'TUN toggle failed', 'error');
             }
 
         } finally {
             if (spinner) spinner.classList.add('hidden');
+            syncTunMirrors();
             appStore.set('isNetworkUpdating', false);
             invoke(COMMANDS.RELEASE_TUN_TOGGLE).catch(() => {});
         }

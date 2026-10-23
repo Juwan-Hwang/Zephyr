@@ -25,7 +25,9 @@ import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGrou
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
-import { postRestartRecovery } from './lifecycle.js';
+import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
+import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
+import { activeProfile, currentProfile } from './active-profile.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
@@ -63,24 +65,22 @@ export function notifySwitchFailed(err) {
 
 export { switchPage } from './navigation.js';
 
-/** Close open connections after a node switch; false when that failed. */
+/** Close open connections after a node switch so it applies at once. */
 async function closeConnsAfterSwitch() {
     try {
         await closeAllConnections();
-        return true;
     } catch (err) {
         proxyLogger.warn('Failed to close connections after proxy switch', err);
-        return false;
     }
 }
 
 /**
- * Confirm a node switch, mentioning the closed connections only when they were.
+ * Confirm a node switch. Closing the old connections is how a switch takes
+ * effect, not news for the user, so the toast just names the node.
  * @param {string} node
- * @param {boolean} closedConns
  */
-function notifySwitched(node, closedConns) {
-    showNotification(tFmt(closedConns ? 'switchedNodeClosedConns' : 'switchedNode', { node }), 'success');
+function notifySwitched(node) {
+    showNotification(tFmt('switchedNode', { node }), 'success');
 }
 
 // --- Constants ---
@@ -441,14 +441,10 @@ async function backfillSmartScores(container) {
         // Check smart enabled state directly (CSS var may not be set yet due to async init)
         let smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
         if (!smartEnabled) {
-            try {
-                const config = await smartConfig();
-                smartEnabled = !!(/** @type {any} */ (config)).enabled;
-                // Sync CSS variable so badge visibility stays consistent
-                if (smartEnabled) {
-                    document.documentElement.style.setProperty('--smart-enabled', '1');
-                }
-            } catch { /* not enabled */ }
+            // Same path as a config reload: smart.toml without `enabled` uses the
+            // fallback, the fallback follows the engine, scheduled tests left on
+            // without a timer start, and the settings switches show it.
+            try { smartEnabled = await syncSmartFromEngine(); } catch { /* not enabled */ }
         }
         if (!smartEnabled) return;
 
@@ -844,7 +840,7 @@ export function initProxyControls() {
                 const settings = await getSettingsCached();
                 hideTimeoutEnabled = !!settings?.hide_timeout_nodes;
                 // The "switch to fastest" action belongs to this profile only.
-                const testedProfile = settings?.last_config || 'config.yaml';
+                const testedProfile = activeProfile(settings, 'config.yaml');
 
                 // Filter out REJECT, COMPATIBLE, and PASS nodes
                 const validProxiesToTest = proxies.filter((/** @type {string} */ name) => {
@@ -1439,8 +1435,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         // The profile changed since the test: its group and node may exist here too,
         // but the result says nothing about this profile, so neither switch nor save.
         // Read it uncached, as a cached name can lag just after a profile change.
-        const activeProfile = (await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml';
-        if (testedProfile && activeProfile !== testedProfile) {
+        const runningProfile = activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml');
+        if (testedProfile != null && runningProfile !== testedProfile) {
             showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
             return;
         }
@@ -1453,8 +1449,10 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
             : null;
         // Saved for the profile verified above, the one the switch applies to.
         const saveSelection = async (/** @type {string} */ savedGroup) => {
+            // The minimal config runs: no profile to save the choice under.
+            if (!runningProfile) return;
             try {
-                await saveProxySelection(activeProfile, { node, group: savedGroup });
+                await saveProxySelection(runningProfile, { node, group: savedGroup });
             } catch (e) {
                 proxyLogger.warn('Failed to save proxy selection', e);
             }
@@ -1465,14 +1463,14 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
             showNotification(t('consoleSubUpdateBusy'), 'info');
             return;
         }
-        if (((await invoke(COMMANDS.GET_SETTINGS))?.last_config || 'config.yaml') !== activeProfile) {
+        if (activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml') !== runningProfile) {
             showNotification(tr.latencyResultOtherProfile || 'The test was run on a different subscription', 'info');
             return;
         }
         if (group && proxyMap?.[group]?.now === node) {
             // Already in use, but the saved choice for the profile may still differ.
             await saveSelection(group);
-            notifySwitched(node, false);
+            notifySwitched(node);
             return;
         }
         if (!group || !(await switchProxy(group, node))) {
@@ -1481,7 +1479,8 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
         }
         invalidateProxiesCache();
         await saveSelection(group);
-        notifySwitched(node, await closeConnsAfterSwitch());
+        await closeConnsAfterSwitch();
+        notifySwitched(node);
         // The switch already happened: a failed refresh afterwards is not a failed switch.
         await syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after switch failed', e));
         await renderProxies().catch((e) => proxyLogger.warn('Re-render after switch failed', e));
@@ -1834,7 +1833,8 @@ function renderGroupExplanationBar(uiGroupName, effectiveGroupName, observedGrou
                 invalidateRunConfigCache();
                 // Persist group preference for restore after restart
                 const settings = await getSettingsCached();
-                const profileName = settings?.last_config;
+                // No profile (no subscription, the minimal config): nothing to save under.
+                const profileName = activeProfile(settings);
                 if (profileName) {
                     savePrimaryGroupPreference(profileName, targetGroup).catch(() => {});
                 }
@@ -1891,9 +1891,24 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
 
     if (!selector || !trigger || !label) return;
 
-    // Hide if no groups available
+    // Hide if no groups available (and close a menu left over from a
+    // previous render, which would otherwise stay visible and focused)
     if (!groups || groups.length === 0) {
+        // If focus was in the menu, it cannot go back to the trigger (also
+        // being hidden): land it on the search input instead of <body>.
+        const menuHadFocus = !!_groupMenuElement?.contains(document.activeElement);
         selector.classList.add('hidden');
+        if (_groupMenuElement) {
+            _groupMenuElement.classList.add('hidden');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+        }
+        if (menuHadFocus) {
+            const search = document.getElementById('proxy-search');
+            // The empty state can hide the search box too; only use it
+            // as the landing spot while it is actually visible.
+            if (search && search.getClientRects().length > 0) search.focus();
+        }
         return;
     }
 
@@ -1907,6 +1922,7 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     if (!_groupMenuElement) {
         _groupMenuElement = document.createElement('div');
         _groupMenuElement.id = 'proxy-group-menu';
+        _groupMenuElement.setAttribute('role', 'menu');
         _groupMenuElement.className = 'proxy-group-menu hidden fixed border border-[var(--zephyr-border-default)] rounded-lg shadow-2xl';
         _groupMenuElement.style.zIndex = '99999';
         const scrollDiv = document.createElement('div');
@@ -1917,7 +1933,55 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
     const menu = _groupMenuElement;
     const menuScroll = /** @type {HTMLElement} */ (menu.querySelector('.menu-scroll'));
 
-    // Build menu items
+    // Close the menu; when focus was inside it, return focus to the trigger
+    // instead of dropping it to <body> as the menu becomes display:none.
+    const hideGroupMenu = (plainFocusRestore = true) => {
+        if (menu.classList.contains('hidden')) return;
+        const hadFocus = menu.contains(document.activeElement);
+        menu.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+        // Scroll/resize closes restore focus with preventScroll: leaving
+        // focus on a hidden item strands keyboard users, but a plain
+        // focus() would scroll the trigger back into view and undo the
+        // user's scroll.
+        if (hadFocus) trigger.focus(plainFocusRestore ? undefined : { preventScroll: true });
+    };
+
+    // Menu keyboard pattern (mirrors the sort menu): arrows move between
+    // options, Escape closes, Tab closes and continues from the trigger.
+    if (!menu.dataset.keyboardBound) {
+        menu.dataset.keyboardBound = '1';
+        menu.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                hideGroupMenu();
+                return;
+            }
+            if (e.key === 'Tab') {
+                // Same Shift+Tab rule as the override menu: land on the
+                // trigger instead of skipping backward past it.
+                if (e.shiftKey) e.preventDefault();
+                hideGroupMenu();
+                return;
+            }
+            const items = /** @type {HTMLElement[]} */ (Array.from(menu.querySelectorAll('[role="menuitemradio"]')));
+            const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+            /** @type {Record<string, number>} */
+            const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 };
+            if (!(e.key in moves) || items.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            items[(moves[e.key] + items.length) % items.length].focus();
+        });
+    }
+
+    // Build menu items. A re-render while the menu is open must not strand
+    // keyboard focus on a detached item: remember which group had focus
+    // and restore it to the rebuilt item below.
+    const hadMenuFocus = !menu.classList.contains('hidden') && menu.contains(document.activeElement);
+    const focusedGroup = hadMenuFocus ? /** @type {HTMLElement|null} */ (document.activeElement)?.dataset.group : undefined;
 
     menuScroll.replaceChildren();
     groups.forEach(groupName => {
@@ -1926,6 +1990,9 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         btn.className = 'proxy-group-option w-full text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] transition-colors';
         btn.dataset.group = groupName;
         const isCurrent = groupName === currentGroup;
+        btn.setAttribute('role', 'menuitemradio');
+        btn.setAttribute('aria-checked', isCurrent ? 'true' : 'false');
+        btn.tabIndex = -1;
         if (isCurrent) {
             btn.classList.add('active');
             btn.setAttribute('aria-current', 'true');
@@ -1953,9 +2020,8 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
         route.title = route.textContent;
         btn.append(check, nameEl, route);
         btn.onclick = async () => {
-            // Close menu
-            menu.classList.add('hidden');
-            trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+            // Close menu (restores focus to the trigger if it was inside)
+            hideGroupMenu();
 
             // Switch group
             try {
@@ -1965,7 +2031,8 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
 
                 // Persist preference
                 const settings = await getSettingsCached();
-                const profileName = settings?.last_config;
+                // No profile (no subscription, the minimal config): nothing to save under.
+                const profileName = activeProfile(settings);
                 if (profileName) {
                     savePrimaryGroupPreference(profileName, groupName).catch(() => {});
                 }
@@ -1982,6 +2049,17 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
 
     // Store current group for mouseleave restore
     menuScroll.dataset.currentGroup = currentGroup;
+
+    if (hadMenuFocus) {
+        // If the focused group vanished in this render, fall back to the
+        // current group (or the first option) rather than dropping focus.
+        const restored = (focusedGroup
+            ? menuScroll.querySelector(`[data-group="${CSS.escape(focusedGroup)}"]`)
+            : null)
+            || menuScroll.querySelector('[role="menuitemradio"][aria-checked="true"]')
+            || menuScroll.querySelector('[role="menuitemradio"]');
+        if (restored instanceof HTMLElement) restored.focus();
+    }
 
     // Initialize event listeners once
     if (!_groupSelectorInitialized) {
@@ -2010,7 +2088,11 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                 menu.style.top = ((rect.bottom + 6) / uiScale) + 'px';
                 menu.style.width = (Math.max(rect.width, 160) / uiScale) + 'px';
                 menu.classList.remove('hidden');
+                trigger.setAttribute('aria-expanded', 'true');
                 trigger.querySelector('.dropdown-arrow')?.classList.add('rotate-180');
+                // Menus move focus into themselves when opened.
+                const startItem = menuScroll.querySelector('[role="menuitemradio"][aria-checked="true"]') || menuScroll.querySelector('[role="menuitemradio"]');
+                if (startItem instanceof HTMLElement) startItem.focus();
 
                 // Viewport overflow correction (mirrors context-menu.js logic)
                 requestAnimationFrame(() => {
@@ -2024,33 +2106,27 @@ function renderGroupSelector(groups, currentGroup, proxyMap = {}) {
                     }
                 });
             } else {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on outside click
         document.addEventListener('click', (e) => {
             if (!selector.contains(/** @type {Node} */ (e.target)) && !menu.contains(/** @type {Node} */ (e.target))) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
+                hideGroupMenu();
             }
         });
 
         // Close on scroll or resize to prevent menu misalignment
         const closeMenu = () => {
-            if (!menu.classList.contains('hidden')) {
-                menu.classList.add('hidden');
-                trigger.querySelector('.dropdown-arrow')?.classList.remove('rotate-180');
-            }
+            hideGroupMenu(false);
         };
         window.addEventListener('scroll', closeMenu, { passive: true });
         window.addEventListener('resize', closeMenu, { passive: true });
@@ -2178,14 +2254,27 @@ async function handleCoreRestart(btn, context) {
     btn.dataset.i18n = 'restartingCore';
     btn.textContent = t.restartingCore || 'Restarting...';
     try {
-        const settings = await getSettingsCached();
-        const configPath = settings?.last_config || 'config.yaml';
-        const customArgs = settings?.custom_args || [];
-        await restartCore(configPath, customArgs);
-        await postRestartRecovery(configPath);
+        const recovery = await withPageBusy(async () => {
+            // Read under the lock, uncached: a profile switch finishing just
+            // before this restart is the profile it restarts, and one whose
+            // save failed is still the one the core runs.
+            /** @type {any} */
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const configPath = currentProfile(settings, 'config.yaml');
+            const customArgs = settings?.custom_args || [];
+            const coreResult = await restartCore(configPath, customArgs);
+            // A fallback is said and saved, as after the other restarts.
+            const { keepFallbackProfile } = await import('./settings/subscriptions.js');
+            await keepFallbackProfile(coreResult, configPath);
+            return postRestartRecovery(restartedProfile(coreResult, configPath));
+        });
         // Re-read after awaits: user may have switched language during restart.
         const tSuccess = /** @type {any} */ (translations)[currentLang] || {};
-        showNotification(tSuccess.coreRestarted || 'Core restarted', 'success');
+        if (recovery?.failed) {
+            showNotification(tSuccess.restartRecoveryWarn || 'The core restarted, but some proxy choices, patches or overrides couldn’t be restored.', 'warning');
+        } else {
+            showNotification(tSuccess.coreRestarted || 'Core restarted', 'success');
+        }
     } catch (err) {
         proxyLogger.error(`Failed to restart core from ${context}`, err);
         showNotification(String(err), 'error');
@@ -2672,8 +2761,8 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     // Save proxy selection for current profile (use cached settings)
                     try {
                         const settings = await getSettingsCached();
-                        const currentProfile = settings.last_config || 'config.yaml';
-                        await saveProxySelection(currentProfile, { node: name, group: mainGroup });
+                        const currentProfile = activeProfile(settings, 'config.yaml');
+                        if (currentProfile) await saveProxySelection(currentProfile, { node: name, group: mainGroup });
                     } catch (_e) { /* ignore */ }
 
                     if (appStore.get('currentSortMode') === 'smart') {
@@ -2682,10 +2771,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                         applyLatencySortToDom();
                     }
 
-                    // Open connections are closed so the new node applies at once; only
-                    // say so once that actually happened.
-                    const closed = await closeConnsAfterSwitch();
-                    notifySwitched(name, closed);
+                    // Open connections are closed so the new node applies at once.
+                    await closeConnsAfterSwitch();
+                    notifySwitched(name);
                     void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
                     notifySwitchFailed(switchRejection);
@@ -3098,20 +3186,31 @@ export async function renderProxies() {
 
 // --- Smart UI visibility sync ---
 
-/** Sync the --smart-enabled CSS var with backend config. */
-async function syncSmartUiVisibility() {
-    let enabled;
-    try {
-        const config = await smartConfig();
-        // Backend only returns `enabled` if smart.toml has the key.
-        // Fallback to localStorage for migration scenarios.
-        enabled = (/** @type {any} */ (config)).enabled ?? localStorage.getItem('smartEnabled') === 'true';
-    } catch {
-        // Fallback to localStorage on error
-        enabled = localStorage.getItem('smartEnabled') === 'true';
-    }
+/**
+ * Show scoring as the engine has it, in the switches' write queue (a read taken
+ * before a switch's save can't undo it), and tell the settings switches.
+ * @returns {Promise<boolean>} whether scoring shows on
+ */
+function syncSmartFromEngine() {
+    return queueSmartConfigWrite(async () => {
+        const { on, fromEngine } = await syncSmartShown({
+            getSmartConfig: smartConfig,
+            startAutoTest: () => _autoTest.start(),
+            stopAutoTest: () => _autoTest.stop(),
+        });
+        // The settings switches show what the engine has; a localStorage guess
+        // after a failed read is not passed on.
+        if (fromEngine) Bus.emit(Events.SMART_ENABLED_SYNCED, { enabled: on });
+        return on;
+    });
+}
 
-    document.documentElement.style.setProperty('--smart-enabled', enabled ? '1' : '0');
+/**
+ * Sync the --smart-enabled CSS var with backend config. Runs in the switches'
+ * write queue, so a read taken before a switch's save can't undo it.
+ */
+async function syncSmartUiVisibility() {
+    const enabled = await syncSmartFromEngine();
 
     // Reset sort mode to default if smart is disabled but current mode is smart
     if (!enabled && appStore.get('currentSortMode') === 'smart') {
@@ -3248,33 +3347,100 @@ appStore.subscribe('observedGroupName', updateCapsuleDisplay);
 //  Smart Auto-Test Scheduler
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Retry delay for a scheduled pass that found a full test running. */
+const AUTO_TEST_BUSY_RETRY_MS = 60_000;
 /** Shortest gap between automatic latency passes (each one measures every node). */
 const AUTO_TEST_MIN_INTERVAL_SECS = 60;
+
+/**
+ * Seconds until the next automatic pass: adaptive between the engine's bounds,
+ * by the average score of the nodes just tested.
+ * @returns {Promise<number>}
+ */
+async function nextAutoTestSecs() {
+    const config = /** @type {any} */ (await smartConfig().catch(() => null));
+    // smart.toml keeps the intervals under [scheduler]. A pass measures every node,
+    // so never start one more often than once a minute (the old plugin page saved
+    // a 10 s minimum that was never read before).
+    const minInterval = Math.max(AUTO_TEST_MIN_INTERVAL_SECS, Number(config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60) || 60);
+    const maxInterval = Math.max(minInterval, Number(config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600) || 600);
+    // Use average score of all tested nodes as network quality
+    const ranked = await smartRank().catch(() => []);
+    const rankings = Array.isArray(ranked) ? ranked : [];
+    const avgScore = rankings.length > 0
+        ? rankings.reduce((sum, r) => sum + (r.score || 0), 0) / rankings.length
+        : 50;
+    return smartNextInterval(avgScore / 100, minInterval, maxInterval).catch(() => maxInterval);
+}
+
+/**
+ * One node of a scheduled test pass: feeds the score batcher and failover.
+ * @param {string} name
+ * @param {() => boolean} stopped  the pass was stopped (scoring or scheduled tests turned off)
+ * @param {AbortSignal} passSignal  the signal the pass started under
+ * @returns {Promise<boolean>} false when the pass was stopped or aborted meanwhile and its result dropped
+ */
+async function autoTestProbe(name, stopped, passSignal) {
+    try {
+        // testProxy already handles abort internally and returns -1 on cancellation.
+        const delay = await testProxy(name);
+        const success = delay > 0 && delay < 999999;
+        // An aborted test (-1: a manual test or a switch took over) measured
+        // nothing: it must not count as a failure against the node. A test
+        // that replaced the shared controller without aborting this one
+        // (resetLatencyTestController) supersedes the pass just the same.
+        if (stopped() || passSignal.aborted || getLatencyTestSignal() !== passSignal) return false;
+        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
+            _smartBatcher.push(name, success ? delay : 999999, success);
+        }
+        // Report to failover engine if enabled
+        if (appStore.get('failoverEnabled')) {
+            void reportFailover(name, success);
+        }
+    } catch { /* skip individual failures */ }
+    return true;
+}
 
 const _autoTest = {
     /** @type {number|null} */
     _timer: null,
     _running: false,
+    /** Bumped by stop(): a pass already running ends at its next node. */
+    _gen: 0,
 
     /** Check whether auto-test is enabled (setting + smart enabled). */
     _isEnabled() {
-        const autoTest = localStorage.getItem('smartAutoTest');
         const cssEnabled = document.documentElement.style.getPropertyValue('--smart-enabled');
-        const enabled = autoTest === 'true' && cssEnabled === '1';
-        return enabled;
+        return readAutoTestEnabled() && cssEnabled === '1';
     },
 
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
     async _runOnce() {
-        if (!this._isEnabled() || this._running || appStore.get('isTestingLatency')) return;
+        if (!this._isEnabled() || this._running) return;
+        // A full test is running: try again later instead of ending the schedule.
+        if (appStore.get('isTestingLatency')) {
+            this._scheduleNext(AUTO_TEST_BUSY_RETRY_MS);
+            return;
+        }
         resetLatencyTestController();  // Reset controller before starting
+        // This pass's signal, taken before any await: a manual test that
+        // replaces the controller while the groups load supersedes the pass.
+        const passSignal = getLatencyTestSignal();
         this._running = true;
+        const gen = this._gen;
+        const stopped = () => gen !== this._gen;
         try {
             // Pass the user's currently-viewed group (same fix as test button handler)
             const proxyGroupsResult = await fetchProxyGroupsShared({
                 preferredGroupName: appStore.get('uiGroupName') || undefined,
             });
-            if (!proxyGroupsResult) return;
+            // Nothing to test right now (core not answering, an empty group):
+            // keep the schedule, as after an error.
+            // A pass stopped meanwhile leaves the schedule to whoever restarted it.
+            if (!proxyGroupsResult) {
+                if (!stopped()) this._scheduleNext(300_000);
+                return;
+            }
             const { data, proxies } = proxyGroupsResult;
 
             const validProxies = proxies.filter((/** @type {string} */ name) => {
@@ -3282,30 +3448,23 @@ const _autoTest = {
                 const type = node?.type?.toLowerCase() || '';
                 return type !== 'reject' && type !== 'compatible' && type !== 'pass';
             });
-            if (validProxies.length === 0) return;
+            if (validProxies.length === 0) {
+                if (!stopped()) this._scheduleNext(300_000);
+                return;
+            }
 
             // Test all nodes concurrently (respecting mihomo's internal concurrency)
             const concurrency = Math.min(12, validProxies.length);
             let idx = 0;
             const workers = Array.from({ length: concurrency }, async () => {
                 while (idx < validProxies.length) {
-                    if (getLatencyTestSignal().aborted) break;
+                    if (passSignal.aborted || getLatencyTestSignal() !== passSignal || stopped()) break;
                     const name = validProxies[idx++];
-                    try {
-                        // testProxy already handles abort internally and returns -1 on cancellation
-                        const delay = await testProxy(name);
-                        const success = delay > 0 && delay < 999999;
-                        if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
-                            _smartBatcher.push(name, success ? delay : 999999, success);
-                        }
-                        // Report to failover engine if enabled
-                        if (appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
-                            void reportFailover(name, success);
-                        }
-                    } catch { /* skip individual failures */ }
+                    if (!(await autoTestProbe(name, stopped, passSignal))) break;
                 }
             });
             await Promise.all(workers);
+            if (stopped()) return;
 
             // Wait for all pending smart score IPC updates before ranking
             if (document.documentElement.style.getPropertyValue('--smart-enabled') === '1') {
@@ -3313,24 +3472,16 @@ const _autoTest = {
             }
 
             // Schedule next cycle using adaptive interval
-            const config = /** @type {any} */ (await smartConfig().catch(() => null));
-            // smart.toml keeps the intervals under [scheduler]. A pass measures every node,
-            // so never start one more often than once a minute (the old plugin page saved
-            // a 10 s minimum that was never read before).
-            const minInterval = Math.max(AUTO_TEST_MIN_INTERVAL_SECS, Number(config?.scheduler?.min_interval_secs ?? config?.min_interval_secs ?? 60) || 60);
-            const maxInterval = Math.max(minInterval, Number(config?.scheduler?.max_interval_secs ?? config?.max_interval_secs ?? 600) || 600);
-            // Use average score of all tested nodes as network quality
-            const rankings = await smartRank().catch(() => []);
-            const avgScore = rankings.length > 0
-                ? rankings.reduce((sum, r) => sum + (r.score || 0), 0) / rankings.length
-                : 50;
-            const nextSecs = await smartNextInterval(avgScore / 100, minInterval, maxInterval).catch(() => maxInterval);
+            const nextSecs = await nextAutoTestSecs();
+            // Stopped (and maybe restarted) during the reads above: the timer is not ours to set.
+            if (stopped()) return;
             this._scheduleNext(nextSecs * 1000);
         } catch {
             // On error, retry after a longer delay
-            this._scheduleNext(300_000);
+            if (!stopped()) this._scheduleNext(300_000);
         } finally {
-            this._running = false;
+            // A stopped pass leaves the flag to the one that may have started since.
+            if (!stopped()) this._running = false;
         }
     },
 
@@ -3365,6 +3516,7 @@ const _autoTest = {
     /** Stop and disable the auto-test scheduler. */
     stop() {
         this._stop();
+        this._gen++;
         this._running = false;
     },
 };

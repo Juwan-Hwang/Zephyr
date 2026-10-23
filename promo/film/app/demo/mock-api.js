@@ -257,7 +257,11 @@ proxy-groups:
   'update_core': () => null,
   'get_latest_version': () => ({ version: '1.19.0', name: 'Meta' }),
   'get_latest_client_version': () => ({ version: '0.5.0', download_url: '', notes: '' }),
-  'get_latest_client_versions': () => ({ latest: '0.5.0', current: '0.5.0' }),
+  // current UI (settings UA builder) expects { verge, mihomo_party, flclash } version strings
+  'get_latest_client_versions': () => ({ verge: '2.4.3', mihomo_party: '1.9.5', flclash: '0.8.92' }),
+  'set_page_busy': () => null,
+  'take_pending_deep_links': () => [],
+  'get_tray_icon_mode': () => 'default',
   'update_client': () => null,
   'update_geo_data': () => ({ success: true, message: 'Geo data updated' }),
   'is_machine_key_persisted': () => true,

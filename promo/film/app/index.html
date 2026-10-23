@@ -90,7 +90,7 @@ window.__AETHER_DEMO__ = true;
             <!-- Title Bar -->
             <div data-tauri-drag-region class="h-10 min-h-[40px] flex items-center justify-between px-8 select-none cursor-grab active:cursor-grabbing">
                 <div class="flex items-center pointer-events-none">
-                    <img src="app-lockup.svg" id="app-title-icon" alt="Zephyr" class="h-5 w-auto opacity-90 transition-all duration-[var(--zephyr-time-standard)]">
+                    <img src="app-lockup.svg" id="app-title-icon" alt="Zephyr" class="h-6 w-auto opacity-90 transition-all duration-[var(--zephyr-time-standard)]">
                 </div>
                 <div class="flex items-center gap-3">
                     <button id="close-btn" type="button" class="group relative flex items-center justify-center w-3.5 h-3.5 rounded-full bg-close-btn hover:bg-close-btn/80 transition-colors shadow-sm before:absolute before:-inset-1.5 before:content-['']" aria-label="Close window" data-i18n-aria-label="closeWindow" data-i18n-title="closeWindow" title="Close window">
@@ -103,7 +103,7 @@ window.__AETHER_DEMO__ = true;
             </div>
 
             <!-- Dashboard Page -->
-            <div data-page="home" class="flex-1 flex flex-col px-8 pt-8 gap-4 overflow-y-auto custom-scrollbar relative">
+            <div data-page="home" class="flex-1 flex flex-col px-8 pt-4 gap-4 overflow-y-auto custom-scrollbar relative">
 
                 <!-- Hero: live traffic area chart behind the speed read-out -->
                 <section id="home-hero" class="home-hero glass-card relative z-20">
@@ -181,12 +181,12 @@ window.__AETHER_DEMO__ = true;
                             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                         </div>
                         <div class="min-w-0">
-                            <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
+                            <h3 id="sys-proxy-title" class="text-sm font-semibold text-[var(--text-primary)] truncate" data-i18n="sysProxy">System Proxy Control</h3>
                             <p class="home-status-text text-xs text-[var(--text-muted)] font-medium truncate" id="proxy-status-text" data-i18n="proxyStatusReady">Ready to protect your traffic</p>
                         </div>
                     </div>
                     <label class="ios-switch switch-lg shrink-0">
-    <input type="checkbox" id="sys-proxy-toggle">
+    <input type="checkbox" id="sys-proxy-toggle" aria-labelledby="sys-proxy-title" aria-describedby="proxy-status-text">
     <span class="switch-slider"></span>
 </label>
                 </div>
@@ -215,10 +215,10 @@ window.__AETHER_DEMO__ = true;
                                 <div class="w-8 h-8 shrink-0 rounded-[10px] bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
                                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                 </div>
-                                <h3 class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
+                                <h3 id="home-tun-title" class="text-xs font-semibold text-[var(--text-primary)] truncate" data-i18n="tunMode">TUN Mode</h3>
                             </div>
                             <label class="ios-switch shrink-0">
-    <input type="checkbox" id="tun-proxy-toggle">
+    <input type="checkbox" id="tun-proxy-toggle" aria-labelledby="home-tun-title" aria-describedby="tun-status-text">
     <span class="switch-slider"></span>
 </label>
                         </div>
@@ -235,7 +235,7 @@ window.__AETHER_DEMO__ = true;
             <div data-page="console" class="flex-1 hidden flex flex-col overflow-hidden relative min-w-0"></div>
 
             <!-- Subscriptions Page -->
-            <div data-page="subscriptions" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+            <div data-page="subscriptions" class="flex-1 hidden flex flex-col px-8 pt-4 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div>
@@ -262,7 +262,7 @@ window.__AETHER_DEMO__ = true;
                 </div>
 
                 <!-- Plugin Panel (overlay) -->
-                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+                <div id="plugin-panel" class="hidden fixed inset-0 z-[var(--z-modal)] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="plugin-panel-title">
                     <div class="absolute inset-0 bg-[var(--zephyr-bg-overlay)] backdrop-blur-md" id="plugin-panel-backdrop"></div>
                     <div class="plugin-panel relative w-full max-w-2xl min-h-[60vh] max-h-[80vh] flex flex-col p-6 gap-4 overflow-x-hidden">
                         <!-- Panel header: title + close -->
@@ -296,18 +296,18 @@ window.__AETHER_DEMO__ = true;
                             />
                             <!-- New override dropdown -->
                             <div class="relative">
-                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1" aria-haspopup="menu" aria-expanded="false">
                                     <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
-                                <div id="plugin-new-dropdown" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
-                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
-                                    <div class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
-                                    <button type="button" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
+                                <div id="plugin-new-dropdown" role="menu" class="hidden absolute end-0 mt-2 z-50 flex flex-col gap-1 bg-[var(--zephyr-bg-elevated)] border border-[var(--zephyr-border-default)] rounded-lg p-2 shadow-2xl min-w-[160px]">
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-js"><span data-i18n="overrideNewJs">New JS Override</span></button>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="new-prism"><span data-i18n="overrideNewPrism">New Prism YAML</span></button>
+                                    <div role="separator" class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-url"><span data-i18n="overrideImportUrl">Import from URL</span></button>
+                                    <div role="separator" class="h-px bg-[var(--zephyr-border-subtle)] my-1"></div>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="export-all"><span data-i18n="overrideExportAll">Export All</span></button>
+                                    <button type="button" role="menuitem" class="text-xs text-start px-3 py-2 rounded-[var(--radius-dropdown-option)] hover:bg-[var(--zephyr-bg-muted)] text-[var(--text-secondary)]" data-action="import-file"><span data-i18n="overrideImportFile">Import from File</span></button>
                                 </div>
                             </div>
                             <!-- More: bulk enable / disable -->
@@ -357,14 +357,14 @@ window.__AETHER_DEMO__ = true;
             </div>
 
             <!-- Proxies Page -->
-            <div data-page="proxies" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+            <div data-page="proxies" class="flex-1 hidden flex flex-col px-8 pt-4 gap-6 overflow-hidden relative">
 
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-4">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="proxiesTitle">Proxy Nodes</h2>
                         <!-- Group Selector Dropdown -->
                         <div id="proxy-group-selector" class="relative hidden" style="z-index: 9999;">
-                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
+                            <button id="proxy-group-trigger" type="button" class="flex items-center gap-2 h-8 px-3.5 rounded-full text-sm transition-all" aria-haspopup="menu" aria-expanded="false" style="background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--text-primary);">
                                 <span id="proxy-group-label">Auto</span>
                                 <svg aria-hidden="true" class="w-3.5 h-3.5 transition-transform duration-[var(--zephyr-time-micro)] dropdown-arrow" style="color: var(--text-muted, #71717a);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
@@ -403,13 +403,13 @@ window.__AETHER_DEMO__ = true;
             </div>
 
             <!-- Connections Page (HTML injected by connections.js module) -->
-            <div data-page="connections" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="connections" class="flex-1 hidden flex flex-col px-8 pt-4 gap-6 overflow-hidden relative"></div>
 
             <!-- Logs Page (HTML injected by logs.js module) -->
-            <div data-page="logs" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative"></div>
+            <div data-page="logs" class="flex-1 hidden flex flex-col px-8 pt-4 gap-6 overflow-hidden relative"></div>
 
             <!-- Rule Library Page -->
-            <div data-page="rule-library" class="flex-1 hidden flex flex-col px-8 pt-8 gap-6 overflow-hidden relative">
+            <div data-page="rule-library" class="flex-1 hidden flex flex-col px-8 pt-4 gap-6 overflow-hidden relative">
                 <header class="flex items-center justify-between relative z-10 shrink-0">
                     <div class="flex items-center gap-3">
                         <h2 class="text-2xl font-light text-[var(--text-primary)]" data-i18n="ruleLibraryTitle">Rule Library</h2>
@@ -427,13 +427,13 @@ window.__AETHER_DEMO__ = true;
                         </button>
                     </div>
                 </header>
-                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 space-y-4 relative z-10">
+                <div id="rl-content" class="flex-1 overflow-y-auto custom-scrollbar pt-2 -mt-2 px-1 -mx-1 space-y-4 relative z-10">
                     <!-- Rendered by rule-library.js -->
                 </div>
             </div>
 
             <!-- Settings Page -->
-            <div data-page="settings" class="flex-1 hidden flex flex-col px-8 pt-8 pb-10 overflow-y-auto custom-scrollbar relative">
+            <div data-page="settings" class="flex-1 hidden flex flex-col px-8 pt-4 pb-10 overflow-y-auto custom-scrollbar relative">
 
                 <h2 class="text-2xl font-light text-[var(--text-primary)] mb-6 relative z-10" data-i18n="settingsTitle">Settings</h2>
 
@@ -512,11 +512,11 @@ window.__AETHER_DEMO__ = true;
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="themeDesc">Auto / Light / Dark appearance</p>
                                     </div>
                                 </div>
-                                <div id="setting-theme-mode-container" class="relative grid grid-cols-3 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-theme-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/3)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeLight">Light</button>
-                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeAuto">Auto</button>
-                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="themeDark">Dark</button>
+                                <div id="setting-theme-mode-container" class="seg-control w-[180px]" style="--seg-count: 3" role="group" data-i18n-aria-label="theme" aria-label="Theme">
+                                    <div id="setting-theme-mode-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" data-theme-mode="light" aria-pressed="false" class="seg-btn" data-i18n="themeLight">Light</button>
+                                    <button type="button" data-theme-mode="auto" aria-pressed="true" class="seg-btn" data-i18n="themeAuto">Auto</button>
+                                    <button type="button" data-theme-mode="dark" aria-pressed="false" class="seg-btn" data-i18n="themeDark">Dark</button>
                                 </div>
                             </div>
 
@@ -534,12 +534,12 @@ window.__AETHER_DEMO__ = true;
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button type="button" data-theme="blue" aria-label="blue" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="green" aria-label="green" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="orange" aria-label="orange" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
-                                    <button type="button" data-theme="pink" aria-label="pink" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="blue" aria-label="Blue" data-i18n-aria-label="themeColorBlue" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-blue-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="green" aria-label="Green" data-i18n-aria-label="themeColorGreen" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-green-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="orange" aria-label="Orange" data-i18n-aria-label="themeColorOrange" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-orange-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
+                                    <button type="button" data-theme="pink" aria-label="Pink" data-i18n-aria-label="themeColorPink" class="theme-swatch p-0 w-6 h-6 rounded-full bg-[var(--zephyr-color-pink-500)] cursor-pointer ring-2 ring-transparent hover:ring-[var(--zephyr-border-strong)] transition-[transform,box-shadow] border-2 border-[var(--zephyr-bg-elevated)] shadow-lg active:scale-90"></button>
                                     <div class="relative group">
-                                        <input type="color" id="custom-theme-color" aria-label="Theme Color" data-i18n-aria-label="themeColor" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
+                                        <input type="color" id="custom-theme-color" aria-label="Custom" data-i18n-aria-label="themeColorCustom" title="Custom" data-i18n-title="themeColorCustom" class="opacity-0 absolute inset-0 w-6 h-6 cursor-pointer z-10">
                                         <div id="custom-theme-swatch" class="theme-swatch w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 via-emerald-500 to-amber-500 border-2 border-[var(--zephyr-bg-elevated)] shadow-lg group-hover:ring-2 ring-[var(--zephyr-border-strong)] transition-[box-shadow]"></div>
                                     </div>
                                 </div>
@@ -560,7 +560,7 @@ window.__AETHER_DEMO__ = true;
                                 </div>
                                 <div class="flex items-center gap-3">
                                     <span class="text-2xs text-[var(--text-secondary)] w-9 text-end tabular-nums" id="opacity-val-text">100%</span>
-                                    <input type="range" id="setting-opacity" aria-label="App Transparency" data-i18n-aria-label="appOpacity" min="10" max="100" value="100" class="opacity-range w-24 h-1 rounded-full appearance-none cursor-pointer accent-accent">
+                                    <input type="range" id="setting-opacity" aria-label="App Transparency" data-i18n-aria-label="appOpacity" aria-valuetext="100%" min="10" max="100" value="100" class="opacity-range w-24 h-1 rounded-full appearance-none cursor-pointer accent-accent">
                                 </div>
                             </div>
 
@@ -577,11 +577,12 @@ window.__AETHER_DEMO__ = true;
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="uiScaleDesc">Adjust interface zoom level</p>
                                     </div>
                                 </div>
-                                <div class="seg-control relative grid grid-cols-4 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 w-[220px]" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
-                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">100%</button>
-                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">110%</button>
-                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">125%</button>
-                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-item relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 tabular-nums transition-colors">150%</button>
+                                <div id="setting-ui-scale-container" class="seg-control w-[220px]" style="--seg-count: 4" role="group" data-i18n-aria-label="uiScale" aria-label="UI Scale">
+                                    <div id="setting-ui-scale-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" id="ui-scale-100" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">100%</button>
+                                    <button type="button" id="ui-scale-110" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">110%</button>
+                                    <button type="button" id="ui-scale-125" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">125%</button>
+                                    <button type="button" id="ui-scale-150" aria-pressed="false" class="ui-scale-btn seg-btn tabular-nums">150%</button>
                                 </div>
                             </div>
 
@@ -598,10 +599,10 @@ window.__AETHER_DEMO__ = true;
                                         <p class="text-2xs text-[var(--text-muted)]" data-i18n="homePageModeDesc">Switch between minimal and console dashboard</p>
                                     </div>
                                 </div>
-                                <div id="setting-home-mode-container" class="relative grid grid-cols-2 items-stretch p-1 bg-[var(--zephyr-bg-muted)] rounded-lg border border-[var(--zephyr-border-subtle)] h-9 transition-all duration-[var(--zephyr-time-standard)] w-[180px]">
-                                    <div id="setting-home-mode-slider" class="absolute top-1 bottom-1 start-1 w-[calc((100%-8px)/2)] bg-[var(--zephyr-bg-muted)] rounded-lg shadow-sm border border-[var(--zephyr-border-default)] transition-all duration-[var(--zephyr-time-standard)] ease-out will-change-transform"></div>
-                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-primary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageMinimal">Minimal</button>
-                                    <button type="button" data-home-mode="console" aria-pressed="false" class="relative z-10 h-full flex items-center justify-center text-center leading-none text-xs font-semibold px-1.5 min-w-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" data-i18n="homePageConsole">Console</button>
+                                <div id="setting-home-mode-container" class="seg-control w-[180px]" style="--seg-count: 2" role="group" data-i18n-aria-label="homePageMode" aria-label="Home Page Mode">
+                                    <div id="setting-home-mode-slider" class="seg-thumb" aria-hidden="true"></div>
+                                    <button type="button" data-home-mode="minimal" aria-pressed="true" class="seg-btn" data-i18n="homePageMinimal">Minimal</button>
+                                    <button type="button" data-home-mode="console" aria-pressed="false" class="seg-btn" data-i18n="homePageConsole">Console</button>
                                 </div>
                             </div>
                         </div>
@@ -673,7 +674,7 @@ window.__AETHER_DEMO__ = true;
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z"/><path d="M16 8 2 22"/><path d="M17.5 15H9"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4c-7.5 0-13 5-13 13 2.8 0 5.3-.7 7.3-2L12 13l5.8-1.4C19.3 9.5 20 7 20 4z"/><path d="M3 21 16 8"/></svg>
                                     </div>
                                     <div>
                                         <p id="setting-lightweight-mode-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="lightweightMode">Lightweight Mode</p>
@@ -710,23 +711,42 @@ window.__AETHER_DEMO__ = true;
                     <!-- 3. Proxy -->
                     <section id="settings-sec-proxy">
                         <h3 class="settings-section-title" data-i18n="settingsProxyBehavior">Proxy</h3>
-                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">TUN, node switching and latency tests</p>
+                        <p class="settings-section-desc" data-i18n="settingsProxyBehaviorDesc">Node switching and latency tests</p>
                         <div class="glass-card p-5 space-y-4">
-                            <!-- TUN (mirrors the home card) -->
-                            <div id="row-settings-tun" class="flex items-center justify-between gap-4">
+                            <!-- Auto switch nodes (failover) -->
+                            <div id="row-auto-switch" class="flex items-center justify-between gap-4">
                                 <div class="flex items-center gap-4 min-w-0">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-7.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/></svg>
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="tunModeShort">TUN Mode</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="tunModeDesc">Route all system traffic through the core</p>
+                                        <p id="setting-failover-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoSwitchNodes">Auto-Switch Nodes</p>
+                                        <p id="setting-failover-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="autoSwitchNodesDesc">Switch to another node when the current one keeps failing</p>
+                                    </div>
+                                </div>
+                                <label class="ios-switch shrink-0">
+                                    <input type="checkbox" id="setting-failover" aria-labelledby="setting-failover-title" aria-describedby="setting-failover-desc">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
+                            <!-- Node scoring (smart engine) -->
+                            <div id="row-node-scoring" class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p id="smart-toggle-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartProxy">Node Scoring</p>
+                                        <p id="smart-toggle-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="smartProxyDesc">Score nodes by latency, success rate and stability</p>
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0">
-                                    <button type="button" id="settings-tun-config-btn" class="row-action" data-i18n-title="tunConfigOpen" title="TUN settings"><span data-i18n="tunConfigBtn">Settings</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                                    <button type="button" id="smart-config-btn" class="row-action"><span data-i18n="autoSwitchParams">Parameters</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
                                     <label class="ios-switch">
-                                        <input type="checkbox" id="settings-tun-toggle" aria-label="TUN Mode" data-i18n-aria-label="tunModeShort">
+                                        <input type="checkbox" id="smart-toggle" aria-labelledby="smart-toggle-title" aria-describedby="smart-toggle-desc">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
@@ -734,24 +754,21 @@ window.__AETHER_DEMO__ = true;
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
-                            <!-- Auto switch nodes (failover + node scoring + scheduled tests) -->
-                            <div id="row-auto-switch" class="flex items-center justify-between gap-4">
+                            <!-- Scheduled speed test (feeds node scoring; off while scoring is off) -->
+                            <div id="row-smart-auto-test" class="flex items-center justify-between gap-4 transition-opacity duration-[var(--zephyr-time-standard)]">
                                 <div class="flex items-center gap-4 min-w-0">
                                     <div class="text-[var(--text-secondary)]">
-                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-7.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/></svg>
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M10 2h4"/></svg>
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="autoSwitchNodes">Auto-Switch Nodes</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="autoSwitchNodesDesc">Test nodes periodically, score them and leave a failing node</p>
+                                        <p id="smart-auto-test-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="smartAutoTest">Scheduled Speed Test</p>
+                                        <p id="smart-auto-test-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="smartAutoTestDesc">Test all nodes periodically to keep scores current</p>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2 shrink-0">
-                                    <button type="button" id="smart-config-btn" class="row-action"><span data-i18n="autoSwitchParams">Parameters</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
-                                    <label class="ios-switch">
-                                        <input type="checkbox" id="setting-auto-switch" aria-label="Auto-Switch Nodes" data-i18n-aria-label="autoSwitchNodes">
-                                        <span class="switch-slider"></span>
-                                    </label>
-                                </div>
+                                <label class="ios-switch shrink-0">
+                                    <input type="checkbox" id="smart-auto-test-toggle" aria-labelledby="smart-auto-test-title" aria-describedby="smart-auto-test-desc">
+                                    <span class="switch-slider"></span>
+                                </label>
                             </div>
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
@@ -881,14 +898,14 @@ window.__AETHER_DEMO__ = true;
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Leak Protection</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="dnsRewriteDesc">Take over system DNS</p>
+                                        <p id="setting-dns-rewrite-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="dnsRewrite">DNS Leak Protection</p>
+                                        <p id="setting-dns-rewrite-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="dnsRewriteDesc">Take over system DNS</p>
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2 shrink-0">
                                     <button type="button" id="dns-config-btn" class="row-action"><span data-i18n="dnsServersBtn">Servers</span><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
                                     <label class="ios-switch">
-                                        <input type="checkbox" id="dns-rewrite-toggle" aria-label="DNS Leak Protection" data-i18n-aria-label="dnsRewrite">
+                                        <input type="checkbox" id="dns-rewrite-toggle" aria-labelledby="setting-dns-rewrite-title" aria-describedby="setting-dns-rewrite-desc">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
@@ -1212,6 +1229,24 @@ window.__AETHER_DEMO__ = true;
 
                             <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
 
+                            <!-- Third-party Licenses -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="text-[var(--text-secondary)]">
+                                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><path d="M5 7l7-4 7 4"/><path d="M3 13l2-6 2 6a3.5 3.5 0 0 1-4 0Z"/><path d="M17 13l2-6 2 6a3.5 3.5 0 0 1-4 0Z"/><path d="M8 21h8"/><path d="M12 6v15"/></svg>
+                                    </div>
+                                    <div>
+                                    <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="thirdPartyLicenses">Third-party Licenses</p>
+                                    <p class="text-2xs text-[var(--text-muted)]" data-i18n="thirdPartyLicensesDesc">Open-source components in Zephyr and their license texts</p>
+                                    </div>
+                                </div>
+                                <button id="view-licenses-btn" class="row-action" data-i18n="viewLicenses">
+                                    View
+                                </button>
+                            </div>
+
+                            <div class="h-px bg-[var(--zephyr-bg-muted)]"></div>
+
                             <!-- Auto Check Client Update -->
                             <div id="row-client-update" class="flex items-center justify-between">
                                 <div class="flex items-center gap-4">
@@ -1285,7 +1320,7 @@ window.__AETHER_DEMO__ = true;
             </div>
 
             <!-- Advanced Page -->
-            <div data-page="advanced" class="flex-1 flex flex-col px-8 pt-8 pb-10 gap-6 overflow-y-auto hidden custom-scrollbar relative">
+            <div data-page="advanced" class="flex-1 flex flex-col px-8 pt-4 pb-10 gap-6 overflow-y-auto hidden custom-scrollbar relative">
 
                 <header class="flex items-center gap-3 relative z-10">
                     <button type="button" id="btn-back-settings" class="btn-ghost shrink-0" data-i18n-title="backToSettings" title="Back to Settings" data-i18n-aria-label="backToSettings" aria-label="Back to Settings">
@@ -1347,9 +1382,9 @@ window.__AETHER_DEMO__ = true;
     </div>
 
     <!-- DNS Configuration Modal -->
-    <div id="dns-config-modal" role="dialog" aria-modal="true" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
+    <div id="dns-config-modal" role="dialog" aria-modal="true" aria-labelledby="dns-config-title" class="fixed inset-0 z-[var(--z-modal)] hidden items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
         <div class="glass-card w-[400px] p-6 border-accent/20 shadow-2xl shadow-accent/10">
-            <h3 class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
+            <h3 id="dns-config-title" class="dialog-title mb-5" data-i18n="dnsConfigTitle">DNS Server Configuration</h3>
             <p class="text-xs text-[var(--text-secondary)] mb-6" data-i18n="dnsConfigDesc">Customize DNS servers for DNS Rewrite feature</p>
 
             <div class="space-y-4">

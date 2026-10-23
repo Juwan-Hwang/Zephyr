@@ -253,7 +253,11 @@ async function listen(event, handler) {
  * @returns {Promise<void>}
  */
 async function openUrl(url) {
-  return invoke('plugin:opener|open_url', { url });
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new ApiError('openUrl only supports http and https URLs');
+  }
+  return invoke('plugin:opener|open_url', { url: trimmed });
 }
 
 /** Get a lightweight current-window handle (manual IPC wrapper) */
@@ -261,8 +265,8 @@ function getCurrentWindow() {
   const label = _t?.metadata?.currentWindow?.label ?? 'main';
   return {
     label,
-    hide:        () => invoke('plugin:window|set_visible', { label, value: false }),
-    show:        () => invoke('plugin:window|set_visible', { label, value: true }),
+    hide:        () => invoke('plugin:window|hide',             { label }),
+    show:        () => invoke('plugin:window|show',             { label }),
     close:       () => invoke('plugin:window|close',           { label }),
     minimize:    () => invoke('plugin:window|minimize',         { label }),
     maximize:    () => invoke('plugin:window|maximize',         { label }),
@@ -825,7 +829,15 @@ export async function enableAutoStart() {
  */
 export async function disableAutoStart() {
   try {
-    const enabled = await isAutoStartEnabled();
+    // Read here rather than through isAutoStartEnabled, which reports a
+    // failed check as off: an unknown state is disabled anyway, so a reset
+    // never saves autostart as off while the system still starts the app.
+    let enabled = true;
+    try {
+      enabled = await invoke('plugin:autostart|is_enabled');
+    } catch (err) {
+      apiLogger.debug('autostart state unknown, disabling anyway:', err);
+    }
     if (!enabled) return false;
     await invoke('plugin:autostart|disable');
     return true;
@@ -833,6 +845,15 @@ export async function disableAutoStart() {
     if (isMissingAutostartEntryError(err)) return false;
     throw err;
   }
+}
+
+/**
+ * 查询系统开机自启动是否已启用；读取失败时抛出，而不是当作未启用。
+ * @returns {Promise<boolean>}
+ * @throws {Error}
+ */
+export async function readAutoStartEnabled() {
+  return Boolean(await invoke('plugin:autostart|is_enabled'));
 }
 
 /**

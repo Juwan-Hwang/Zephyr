@@ -82,6 +82,11 @@ export const TUN = Object.freeze({
     KILL_ALL_AS_ROOT: "kill_all_mihomo_as_root_cmd",
     DISABLE_CMD: "disable_tun_cmd",
     GRANT_LINUX_PERMISSION: "grant_linux_tun_permission",
+    // Windows: TUN needs an elevated process, so the app relaunches itself
+    // through UAC (the counterpart of the two commands above).
+    IS_PROCESS_ELEVATED: "is_process_elevated",
+    CAN_ELEVATE_AS_SELF: "can_elevate_as_self",
+    RESTART_AS_ADMIN: "restart_as_admin_cmd",
     APPLY_WINDOWS_TCP_OPTIMIZATIONS: "apply_windows_tcp_optimizations",
 });
 
@@ -97,6 +102,7 @@ export const TRAY = Object.freeze({
     UPDATE_TRAY_TOGGLE_STATES: "update_tray_toggle_states",
     GET_TRAY_STATUS: "get_tray_status",
     GET_TRAY_PROXY_STATUS: "get_tray_proxy_status",
+    GET_TRAY_ICON_MODE: "get_tray_icon_mode",
 });
 
 // ---------------------------------------------------------------------------
@@ -109,6 +115,8 @@ export const UPDATER = Object.freeze({
     UPDATE_GEO_DATA: "update_geo_data",
     GET_LATEST_CLIENT_VERSION: "get_latest_client_version",
     UPDATE_CLIENT: "update_client",
+    END_UPDATE_HOLD: "end_update_hold",
+    SET_PAGE_BUSY: "set_page_busy",
     GET_LATEST_CLIENT_VERSIONS: "get_latest_client_versions",
 });
 
@@ -139,6 +147,7 @@ export const SETTINGS = Object.freeze({
     SAVE_SETTINGS: "save_settings",
     PATCH_SETTINGS: "patch_settings",
     SET_UI_SCALE: "set_ui_scale",
+    GET_THIRD_PARTY_LICENSES: "get_third_party_licenses",
 });
 
 // ---------------------------------------------------------------------------
@@ -155,6 +164,9 @@ export const MISC = Object.freeze({
     WRITE_FRONTEND_LOG: "write_frontend_log",
     EXPORT_BACKUP: "export_backup",
     IMPORT_BACKUP: "import_backup",
+    GET_PROCESS_ICON: "get_process_icon",
+    // clash:// links that arrived before the page had its listener.
+    TAKE_PENDING_DEEP_LINKS: "take_pending_deep_links",
 });
 
 // ---------------------------------------------------------------------------

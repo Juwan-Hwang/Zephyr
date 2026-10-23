@@ -25,7 +25,7 @@ RECAPTURE=1 sh reproduce.sh  # 额外从 app/ 快照重新录制 UI、重新渲�
 
 分支内已包含 v3 的全部输入，因此可以完整复现：
 
-- `app/`：录制用的前端快照（Zephyr UI、Argon v9 logo、demo mock 及修复补丁）。
+- `app/`：录制用的前端快照（Zephyr UI、Argon v9 logo、demo mock 及修复补丁）。2026-10-23 已按主仓库 main（135143e，即 v2.5.0 界面）刷新：源码取自 apps/desktop/src，令牌与 UnoCSS 样式按仓库 build:css 步骤重新生成，mock 补齐了现行界面新增的命令。
 - `footage2/`：UI 实录序列，含鼠标轨迹、点击时刻与 DOM 测量。
 - `film/frames/`：3D 开场与结尾帧。
 - `film/fonts/PingFangSF.ttf`、`film/node_modules/three@0.170.0`。

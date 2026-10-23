@@ -6,6 +6,8 @@
 
 import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
 import { switchToConfig } from './lifecycle.js';
+import { activeProfile, currentProfile } from './active-profile.js';
+import { saveProxySelection } from './proxy-memory.js';
 import { t as tFunc } from '../i18n.js';
 import { showNotification } from './notifications.js';
 import { trayLogger } from '../utils/logger.js';
@@ -59,21 +61,51 @@ export async function cleanupTrayEventListeners() {
 
 // --- Tray status ---
 
+/** Sequence of `updateTrayStatus` calls, used to discard stale results. */
+let _trayStatusSeq = 0;
+
 /**
- * Push a tray icon mode: the store's mode, or `modeOverride` when given.
- * The periodic sync passes its expected mode so a stopped core can be
- * shown idle without rewriting the store's TUN / sysproxy preferences.
+ * Push a tray icon mode: the backend-derived mode, or `modeOverride`
+ * when given. The periodic sync passes its expected mode so a stopped
+ * core can be shown idle without rewriting the store's TUN / sysproxy
+ * preferences.
  *
- * @param {string} [modeOverride] - Mode to apply instead of the store's.
+ * Without an override the mode comes from the backend's proxy status —
+ * the same live state the backend's own icon refresh reads. The store
+ * cannot substitute for it: its TUN flag is only realigned with the
+ * backend by the periodic sync, so between an override hot-reload
+ * flipping TUN on the running core and the next sync tick, a
+ * store-driven caller (preference subscriptions, shortcuts, toggles)
+ * would paint the icon the store believes in instead of the one the
+ * core is actually in, and it would stay wrong until that tick. The
+ * store's mode is only the fallback for an unanswered status query.
+ *
+ * @param {string} [modeOverride] - Mode to apply instead of the derived mode.
  */
 export async function updateTrayStatus(modeOverride) {
+    const seq = ++_trayStatusSeq;
     let mode = modeOverride;
     if (!mode) {
-        const isTunEnabled = appStore.get('isTunEnabled');
-        const isSysProxyEnabled = appStore.get('isSysProxyEnabled');
-        if (isTunEnabled) mode = 'tun';
-        else if (isSysProxyEnabled) mode = 'sysproxy';
-        else mode = 'default';
+        const proxyStatus = await invoke(COMMANDS.GET_TRAY_PROXY_STATUS).catch(() => null);
+        // A newer update began while this query was in flight: its mode is
+        // fresher than anything this call can derive from its older sample,
+        // and applying `stopped` here could paint idle over an active icon
+        // the newer call already set, leaving the wrong icon up until the
+        // periodic sync's next tick repairs it.
+        if (seq !== _trayStatusSeq) return;
+        if (proxyStatus === 'tun') {
+            mode = 'tun';
+        } else if (proxyStatus === 'sysproxy') {
+            mode = 'sysproxy';
+        } else if (proxyStatus === 'running' || proxyStatus === 'stopped') {
+            mode = 'default';
+        } else {
+            const isTunEnabled = appStore.get('isTunEnabled');
+            const isSysProxyEnabled = appStore.get('isSysProxyEnabled');
+            if (isTunEnabled) mode = 'tun';
+            else if (isSysProxyEnabled) mode = 'sysproxy';
+            else mode = 'default';
+        }
     }
 
     try {
@@ -118,7 +150,7 @@ export async function updateTrayMenu(forceRefresh = false) {
         currentMode = cfg?.mode || 'rule';
 
         try {
-            const activeConfig = settings.last_config || 'config.yaml';
+            const activeConfig = currentProfile(settings, 'config.yaml');
             /** @type {Array<any>} */
             const cl = configsList;
             configs = cl.map(/** @param {any} c */ (c) => ({
@@ -199,6 +231,40 @@ export async function updateTrayMenu(forceRefresh = false) {
 }
 
 // --- Tray event listeners ---
+
+/**
+ * Remember a node picked in the tray for the running profile, as a pick on
+ * the proxies page is: a later core restart restores this choice instead of
+ * an older one. Skipped while the minimal config runs (no profile).
+ * @param {string} profile - the profile from trayPickProfile
+ * @param {string | null | undefined} group
+ * @param {string} proxy
+ */
+async function rememberTraySelection(profile, group, proxy) {
+    if (!profile) return;
+    try {
+        await saveProxySelection(profile, { node: proxy, group: group || undefined });
+    } catch (err) {
+        trayLogger.warn('Failed to remember the tray proxy choice', err);
+    }
+}
+
+/**
+ * The profile the core runs when a tray pick starts: read before the switch,
+ * so a profile switch finishing meanwhile does not get this pick saved under
+ * the new profile. '' when it cannot be read or the minimal config runs.
+ * @returns {Promise<string>}
+ */
+async function trayPickProfile() {
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        return activeProfile(settings, 'config.yaml') || '';
+    } catch (err) {
+        trayLogger.warn('Failed to read the profile for the tray proxy choice', err);
+        return '';
+    }
+}
 
 export async function initTrayEventListeners() {
     if (_trayEventUnlisteners.length > 0) return;
@@ -281,6 +347,16 @@ export async function initTrayEventListeners() {
         const ev = event;
         const subName = ev.payload;
 
+        // A core update or another switch is restarting the core: starting a
+        // second restart now would race it.
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+            // Forced: the tray already moved its check mark to the clicked
+            // profile, and a cached menu would keep it there.
+            await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+            return;
+        }
+        appStore.set('isNetworkUpdating', true);
         try {
             /** @type {any} */
             const settings = await invoke(COMMANDS.GET_SETTINGS);
@@ -293,13 +369,23 @@ export async function initTrayEventListeners() {
                 showNotification(`${tr('notifSwitchTo', 'Switched to')} ${subName}`, 'info');
             }
 
-            // Sync core config first (updates appStore including TUN state), then update tray
-            const { syncCoreConfig } = await import('./proxies.js');
-            await syncCoreConfig();
-            await updateTrayMenu();
+            // Sync core config first (updates appStore including TUN state), then update tray.
+            // The switch already succeeded: a failed refresh is logged, not
+            // reported as a failed switch.
+            try {
+                const { syncCoreConfig } = await import('./proxies.js');
+                await syncCoreConfig();
+            } catch (refreshErr) {
+                trayLogger.warn('Refreshing after the tray subscription switch failed', refreshErr);
+            }
+            // Forced, and even when the sync failed: a refresh during the
+            // switch cached the old profile's check mark.
+            await updateTrayMenu(true).catch((/** @type {unknown} */ trayErr) => trayLogger.warn('Refreshing the tray after the subscription switch failed', trayErr));
         } catch (err) {
             trayLogger.error('Failed to switch subscription from tray', err);
             showNotification(toError(err).toString(), 'error');
+        } finally {
+            appStore.set('isNetworkUpdating', false);
         }
     });
 
@@ -311,7 +397,24 @@ export async function initTrayEventListeners() {
         const ev = event;
         const { group, proxy } = ev.payload;
 
+        // A switch, mode change or core update holds this guard: the running
+        // profile may change between reading it and switching the node, and
+        // the pick would be saved under the old one (the node cards refuse too).
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+            await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+            return;
+        }
+
         try {
+            const profile = await trayPickProfile();
+            // A change may have taken the guard while the profile was read:
+            // check again right before switching, as the node cards do.
+            if (appStore.get('isNetworkUpdating')) {
+                showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+                await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+                return;
+            }
             const success = await switchProxy(group, proxy);
             if (success) {
                 invalidateProxiesCache();
@@ -321,6 +424,7 @@ export async function initTrayEventListeners() {
                 if (group) {
                     appStore.set('uiGroupName', group);
                 }
+                await rememberTraySelection(profile, group, proxy);
 
                 await closeAllConnections();
                 // Let syncCoreConfig() handle the display update with leaf node resolution
@@ -371,18 +475,68 @@ export async function initTrayEventListeners() {
 let _unifiedSyncInterval = null;
 
 /**
+ * Align the store's TUN flag with the state a stopped core's tray item
+ * displays: the saved preference, or the run config's `tun.enable` when
+ * no preference was recorded — the same fallback the backend's
+ * `tray_tun_shown_enabled` uses.
+ *
+ * While the core runs, the alignment in `alignTunStoreWithBackend`
+ * copies the core's live TUN state into the store, including a live
+ * override an override reload recorded ahead of the preference. That
+ * override is dropped when the core stops, so without this the in-app
+ * switch keeps showing the override's value while the tray item already
+ * shows the preference the next start will apply.
+ *
+ * The toggle guards match the running alignment: skip while a network
+ * update is in flight (checked again after the reads), and drop the
+ * result when a toggle that started and finished during the reads has
+ * already recorded its outcome in the store.
+ */
+async function alignStoreWithStoppedTunPreference() {
+    if (appStore.get('isNetworkUpdating')) return;
+    const tunAtStart = appStore.get('isTunEnabled');
+    const settings = await invoke(COMMANDS.GET_SETTINGS).catch(() => null);
+    if (!settings) return;
+    let shown = settings.tun_enabled;
+    // Windows: an unelevated process starts the core without TUN whatever the
+    // preference says, and the backend reports TUN off (see
+    // `applicable_tun_preference`): show the same, so the switch offers the
+    // administrator relaunch instead of claiming TUN is on.
+    if (navigator.userAgent.toLowerCase().includes('windows')
+        && await invoke(COMMANDS.IS_PROCESS_ELEVATED).catch(() => null) === false) {
+        shown = false;
+    }
+    if (shown === null || shown === undefined) {
+        // Read the config directly, not through the cache: the cache
+        // answers a failed read with its stale entry, while the backend
+        // treats an unreadable run config as TUN off — a stopped core
+        // whose file is gone would otherwise keep showing the cached
+        // state here while the tray item already shows off.
+        const config = await invoke(COMMANDS.CORE.READ_CONFIG).catch(() => null);
+        shown = config?.tun?.enable ?? false;
+    }
+    if (appStore.get('isNetworkUpdating')) return;
+    if (appStore.get('isTunEnabled') !== tunAtStart) return;
+    const shownEnabled = Boolean(shown);
+    if (shownEnabled !== appStore.get('isTunEnabled')) {
+        appStore.set('isTunEnabled', shownEnabled);
+    }
+}
+
+/**
  * Align the store's TUN flag with the backend's live TUN state.
  *
- * `get_tray_status` answers from the backend's live TUN state, while the
- * sync's expected mode is built from this store. If the two disagree
- * about TUN, re-applying the store's mode (the mismatch correction in
- * the sync) can never converge: the status does not read the icon the
- * correction sets, so the sync would re-push the same mode every tick
- * and the backend's own refresh would keep flipping the icon back.
+ * The backend's tray proxy status answers from its live TUN state, while
+ * the store-driven icon writers paint from this store. If the two
+ * disagree about TUN, those writers re-apply the store's mode on every
+ * preference change, and the backend's own refresh keeps flipping the
+ * icon back — the two writers never converge.
  * While the core is running its state is the truth the toggle claims to
  * show, so align the store with it first. When the core is stopped the
- * status carries no TUN information and the store's preference is left
- * alone.
+ * status carries no TUN information, and the store is aligned with the
+ * saved preference instead (see `alignStoreWithStoppedTunPreference`):
+ * the running alignment may have copied a live override into the store,
+ * and that override dies with the core.
  *
  * The alignment does not use the samples the sync took when its tick
  * started: the slowest invoke can take long enough for a TUN toggle to
@@ -393,17 +547,57 @@ let _unifiedSyncInterval = null;
  * one status that reports running state and TUN together, and skips
  * while a network update is in flight, checked again after the
  * re-read: a toggle in progress owns `isTunEnabled` until it has
- * recorded its outcome.
+ * recorded its outcome. A toggle that started and finished during
+ * the re-read is caught the same way, by comparing the store against
+ * the value it held when the re-read began.
  *
  * @param {string} proxyStatus - The proxy status sampled by the sync tick.
+ * @returns {Promise<string | null>} The fresh status the alignment read, or
+ * `null` when it read none (the tick's own sample was already `stopped`, a
+ * network update is in flight, or the re-read failed). The sync builds its
+ * icon decision on this freshest sample when there is one: the core can
+ * stop between the tick's first sample and this re-read, and a decision
+ * built on the first sample would push an active icon for a stopped core.
  */
 async function alignTunStoreWithBackend(proxyStatus) {
-    if (proxyStatus === 'stopped' || appStore.get('isNetworkUpdating')) return;
+    if (appStore.get('isNetworkUpdating')) return null;
+    if (proxyStatus === 'stopped') {
+        await alignStoreWithStoppedTunPreference();
+        return null;
+    }
+    const tunAtStart = appStore.get('isTunEnabled');
     const freshProxyStatus = await invoke(COMMANDS.GET_TRAY_PROXY_STATUS).catch(() => null);
-    if (!freshProxyStatus || freshProxyStatus === 'stopped' || appStore.get('isNetworkUpdating')) return;
+    if (!freshProxyStatus) return null;
+    if (freshProxyStatus === 'stopped') {
+        await alignStoreWithStoppedTunPreference();
+        return freshProxyStatus;
+    }
+    if (appStore.get('isNetworkUpdating')) return null;
+    // A toggle that started and finished while the status request was
+    // in flight has already recorded its outcome in the store, and the
+    // `isNetworkUpdating` check above cannot see it any more. The
+    // response was sampled before that toggle, so writing it would
+    // flip the store back to the pre-toggle value until the next tick.
+    if (appStore.get('isTunEnabled') !== tunAtStart) return freshProxyStatus;
     const backendTunEnabled = freshProxyStatus === 'tun';
     if (backendTunEnabled !== appStore.get('isTunEnabled')) {
         appStore.set('isTunEnabled', backendTunEnabled);
+    }
+    return freshProxyStatus;
+}
+
+/**
+ * Whether the core answers. The system proxy is only put back while it does:
+ * pointing it at a port nobody listens on (the core is still starting, or
+ * stopped) would cut the connection; the periodic check tries again.
+ * @returns {Promise<boolean>}
+ */
+async function coreAnswers() {
+    try {
+        await getConfig();
+        return true;
+    } catch {
+        return false;
     }
 }
 
@@ -425,7 +619,7 @@ export function startUnifiedSync() {
                 invoke(COMMANDS.GET_SYS_PROXY),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
-            if (!sysProxyOn && hasOwnership) {
+            if (!sysProxyOn && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
@@ -437,9 +631,8 @@ export function startUnifiedSync() {
 
     _unifiedSyncInterval = setInterval(async () => {
         try {
-            const [realSysProxyState, actualMode, proxyStatus, hasOwnership] = await Promise.all([
+            const [realSysProxyState, proxyStatus, hasOwnership] = await Promise.all([
                 invoke(COMMANDS.GET_SYS_PROXY),
-                invoke(COMMANDS.GET_TRAY_STATUS),
                 invoke(COMMANDS.GET_TRAY_PROXY_STATUS),
                 invoke(COMMANDS.HAS_SYSPROXY_OWNERSHIP),
             ]);
@@ -450,28 +643,58 @@ export function startUnifiedSync() {
             }
 
             // Guard: if we own the proxy but it was disabled externally, restore it
-            if (!realSysProxyState && hasOwnership) {
+            if (!realSysProxyState && hasOwnership && await coreAnswers()) {
                 // Route through the serialization queue to prevent racing
                 // with a concurrent user-initiated disable.
                 restoreSysProxySafe();
             }
 
-            await alignTunStoreWithBackend(proxyStatus);
+            const freshProxyStatus = await alignTunStoreWithBackend(proxyStatus);
 
-            // A stopped core runs neither TUN nor the system proxy, and
-            // the backend's own tray refresh already shows the idle icon
-            // for it. Expecting the store's mode here would push the
-            // TUN / sysproxy icon straight back, so the two writers
-            // would keep flipping the icon between idle and active
-            // while nothing is running.
-            let expectedMode;
-            if (proxyStatus === 'stopped') expectedMode = 'default';
-            else if (appStore.get('isTunEnabled')) expectedMode = 'tun';
-            else if (realSysProxyState) expectedMode = 'sysproxy';
-            else expectedMode = 'default';
+            // A network update in flight owns `isTunEnabled` and the tray
+            // icon until it records its outcome. A correction pushed from
+            // the store's not-yet-committed flag could paint the pre-toggle
+            // mode over the icon the update flow set, so this tick leaves
+            // the icon to that flow.
+            if (appStore.get('isNetworkUpdating')) return;
 
-            if (actualMode !== expectedMode) {
-                await updateTrayStatus(expectedMode);
+            // The correction compares the icon the tray is actually
+            // showing — the backend records every icon writer's latest
+            // claim — against the mode the freshest proxy status implies.
+            // Deriving both sides from the status itself would agree even
+            // when the icon is wrong: a TUN / sysproxy icon left up after
+            // the core stopped, or an idle icon painted while the core
+            // was mid-restart, would never show up as a mismatch. A
+            // stopped core runs neither TUN nor the system proxy, so its
+            // expected mode is idle regardless of the store's preferences.
+            const effectiveProxyStatus = freshProxyStatus ?? proxyStatus;
+
+            let expectedMode = 'default';
+            if (effectiveProxyStatus === 'tun') expectedMode = 'tun';
+            else if (effectiveProxyStatus === 'sysproxy') expectedMode = 'sysproxy';
+
+            const actualMode = await invoke(COMMANDS.GET_TRAY_ICON_MODE).catch(() => null);
+            if (actualMode === null || actualMode === expectedMode) return;
+
+            // Revalidate before pushing: this tick's samples can predate
+            // a proxy or TUN toggle that finished while they were being
+            // read, and a correction built on them would paint the stale
+            // mode over the icon that toggle just set — with later ticks
+            // then seeing matching states and leaving it there. Only a
+            // mismatch that survives a fresh set of samples is pushed.
+            if (appStore.get('isNetworkUpdating')) return;
+            const [freshStatus, freshIconMode] = await Promise.all([
+                invoke(COMMANDS.GET_TRAY_PROXY_STATUS).catch(() => null),
+                invoke(COMMANDS.GET_TRAY_ICON_MODE).catch(() => null),
+            ]);
+            if (!freshStatus || !freshIconMode || appStore.get('isNetworkUpdating')) return;
+
+            let freshExpectedMode = 'default';
+            if (freshStatus === 'tun') freshExpectedMode = 'tun';
+            else if (freshStatus === 'sysproxy') freshExpectedMode = 'sysproxy';
+
+            if (freshIconMode !== freshExpectedMode) {
+                await updateTrayStatus(freshExpectedMode);
             }
         } catch (e) {
             trayLogger.error('Unified sync error', e);

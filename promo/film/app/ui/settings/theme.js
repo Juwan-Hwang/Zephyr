@@ -13,6 +13,7 @@ import { appStore } from '../state.js';
 import { Bus, Events } from '../events.js';
 import { debounce } from '../../utils/debounce.js';
 import { saveSetting } from '../settings-helpers.js';
+import { selectSegment } from '../seg-control.js';
 import { t } from '../../i18n.js';
 
 /** i18n keys naming each preset accent. */
@@ -53,7 +54,6 @@ let languageListenerBound = false;
  * @param {HTMLInputElement|null} opts.opacitySlider - The opacity slider input.
  * @param {HTMLElement|null} opts.opacityValText - The opacity value display text.
  * @param {HTMLElement|null} opts.themeModeContainer - The theme mode toggle container.
- * @param {HTMLElement|null} opts.themeModeSlider - The theme mode slider indicator.
  * @param {HTMLElement[]} opts.themeModeButtons - The [data-theme-mode] button elements.
  * @param {() => Promise<void>} opts.save - Callback to persist settings to backend.
  */
@@ -68,7 +68,6 @@ export function initThemeSettings({
     opacitySlider,
     opacityValText,
     themeModeContainer,
-    themeModeSlider,
     themeModeButtons,
     save,
 }) {
@@ -144,20 +143,7 @@ export function initThemeSettings({
      * @param {string} mode
      */
     const updateThemeModeUI = (mode) => {
-        const idx = themeModeMap.indexOf(mode);
-        if (themeModeSlider && idx !== -1) {
-            themeModeSlider.style.transform = `translateX(calc(var(--rtl-sign, 1) * ${idx * 100}%))`;
-        }
-        themeModeButtons.forEach((btn, btnIdx) => {
-            btn.setAttribute('aria-pressed', String(btnIdx === idx));
-            if (btnIdx === idx) {
-                btn.classList.add('text-[var(--text-primary)]');
-                btn.classList.remove('text-[var(--text-secondary)]');
-            } else {
-                btn.classList.remove('text-[var(--text-primary)]');
-                btn.classList.add('text-[var(--text-secondary)]');
-            }
-        });
+        selectSegment(themeModeContainer, themeModeMap.indexOf(mode));
     };
 
     /**
@@ -278,21 +264,30 @@ export function initThemeSettings({
     // ---- Opacity slider (with debounce) ----
     // Use synchronously passed value to avoid UI flicker
     const rawOpacity = savedOpacity != null ? Number(savedOpacity) : 100;
-    const opacityVal = Number.isFinite(rawOpacity) ? String(Math.min(100, Math.max(0, rawOpacity))) : '100';
+    // Clamp to the slider's real range [10, 100] and whole steps so the thumb
+    // position, the visible text and aria-valuetext always agree.
+    const opacityVal = Number.isFinite(rawOpacity)
+        ? String(Math.min(100, Math.max(10, Math.round(rawOpacity))))
+        : '100';
     document.documentElement.style.setProperty('--app-opacity', String(Number(opacityVal) / 100));
+    /** Cancel a pending debounced opacity save (used by Restore Defaults). */
+    let cancelPendingOpacity = () => {};
     if (opacitySlider) {
         opacitySlider.value = opacityVal;
+        opacitySlider.setAttribute('aria-valuetext', `${opacityVal}%`);
         if (opacityValText) opacityValText.textContent = `${opacityVal}%`;
 
         const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
             document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
             void saveSetting('app_opacity', Number(val));
         }, 50);
+        cancelPendingOpacity = () => debouncedOpacity.cancel();
 
         opacitySlider.addEventListener('input', (e) => {
             const target = /** @type {HTMLInputElement} */ (e.target);
             const val = target.value;
             if (opacityValText) opacityValText.textContent = `${val}%`;
+            opacitySlider.setAttribute('aria-valuetext', `${val}%`);
             debouncedOpacity(val);
         });
     }
@@ -301,5 +296,6 @@ export function initThemeSettings({
     return {
         setThemeMode,
         applyColorTheme,
+        cancelPendingOpacity,
     };
 }

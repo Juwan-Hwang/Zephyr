@@ -14,6 +14,9 @@
 // These tests import REAL source modules and cross-check them against each other.
 // A failure here means a "silent" integration bug that unit tests cannot catch.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { COMMANDS, PRISM, RULE } from '@zephyr/shared';
 import { translations } from './i18n.js';
@@ -125,7 +128,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         'COMMANDS.DISABLE_SYSPROXY', 'COMMANDS.RELEASE_TUN_TOGGLE',
         'COMMANDS.GET_TRAY_STATUS',
         // deep-link.js
-        'COMMANDS.DOWNLOAD_SUB',
+        'COMMANDS.DOWNLOAD_SUB', 'COMMANDS.TAKE_PENDING_DEEP_LINKS',
         // advanced.js
         'COMMANDS.READ_CONFIG_FILE', 'COMMANDS.LIST_CONFIGS',
         // global-shortcut.js
@@ -443,7 +446,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'tray-tun-changed',      // tray.rs:302
         'tray-proxy-changed',    // tray.rs:252
         'global-shortcut',       // global_shortcut.rs:82
-        'core-download-status',  // updater.rs:95
+        'core-download-status',  // updater.rs:562
         'backend-event',         // backend_event.rs:136 (infrastructure event)
         'network-state-changed', // network_coordinator.rs:108
     ];
@@ -460,7 +463,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'global-shortcut',           // ui/global-shortcut.js:474
         'profiles-imported',         // ui/settings.js:1035
         'prism-event',               // ui/logs.js:371
-        'core-download-status',      // ui/client-updater.js:48
+        'core-download-status',      // ui/update-dialog.js
         'backend-event',             // ui/logs.js:445 (prism logs via backend_event.rs)
         'network-state-changed',      // main.js (network coordinator UI updates)
     ];
@@ -475,6 +478,35 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
                 ? `Backend emits these events but no frontend listens:\n  ${orphanEmits.join('\n  ')}`
                 : 'all backend events have frontend listeners'
         ).toEqual([]);
+    });
+
+    // The lists above are kept by hand: check each entry against the code, so
+    // a listener or emitter that is removed or renamed fails here.
+    const sourceFiles = (/** @type {string} */ dir, /** @type {RegExp} */ ext) => {
+        /** @type {string[]} */
+        const out = [];
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name !== 'node_modules' && entry.name !== 'src-tauri') out.push(...sourceFiles(full, ext));
+            } else if (ext.test(entry.name) && !/\.test\.js$/.test(entry.name)) {
+                out.push(fs.readFileSync(full, 'utf8'));
+            }
+        }
+        return out;
+    };
+    const srcDir = path.dirname(fileURLToPath(import.meta.url));
+
+    it('every listed frontend event is still listened to in the frontend code', () => {
+        const code = sourceFiles(srcDir, /\.js$/).join('\n');
+        const missing = frontendListenedEvents.filter((e) => !new RegExp(`listen\\(\\s*['"\`]${e}['"\`]`).test(code));
+        expect(missing).toEqual([]);
+    });
+
+    it('every listed backend event is still emitted by the backend code', () => {
+        const code = sourceFiles(path.join(srcDir, '..', 'src-tauri', 'src'), /\.rs$/).join('\n');
+        const missing = backendEmittedEvents.filter((e) => !code.includes(`"${e}"`));
+        expect(missing).toEqual([]);
     });
 
     it('every frontend-listened event has a backend emitter', () => {
@@ -507,7 +539,8 @@ describe('Tauri plugin permission contract', () => {
         'plugin:event|listen',
         'plugin:event|unlisten',
         'plugin:opener|open_url',
-        'plugin:window|set_visible',
+        'plugin:window|show',
+        'plugin:window|hide',
         'plugin:window|close',
         'plugin:window|minimize',
         'plugin:window|maximize',
@@ -520,41 +553,21 @@ describe('Tauri plugin permission contract', () => {
         'plugin:autostart|is_enabled',
     ];
 
-    // Permissions declared in capabilities/default.json
-    // Source: apps/desktop/src-tauri/capabilities/default.json
-    const declaredPermissions = [
-        'opener:default',
-        'autostart:allow-enable',
-        'autostart:allow-disable',
-        'autostart:allow-is-enabled',
-        'core:window:allow-close',
-        'core:window:allow-start-dragging',
-        'core:window:allow-minimize',
-        'core:window:allow-maximize',
-        'core:window:allow-hide',
-        'core:window:allow-show',
-        'core:window:allow-set-focus',
-        'core:window:allow-is-visible',
-        'core:window:allow-set-title',
-        'core:window:allow-is-maximized',
-        'core:event:allow-listen',
-        'core:event:allow-unlisten',
-        'core:image:default',
-        'core:menu:default',
-        'core:tray:default',
-        'core:resources:default',
-        'core:app:default',
-        'dialog:allow-message',
-        'notification:allow-notify',
-        'global-shortcut:allow-register',
-        'global-shortcut:allow-unregister',
-    ];
+    // Permissions declared in capabilities/default.json, read from the file
+    // itself so removing one there fails this test.
+    const capabilitiesPath = path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../src-tauri/capabilities/default.json',
+    );
+    /** @type {string[]} */
+    const declaredPermissions = JSON.parse(fs.readFileSync(capabilitiesPath, 'utf8')).permissions
+        .map((/** @type {string | { identifier: string }} */ p) => (typeof p === 'string' ? p : p.identifier));
 
     /**
      * Convert a plugin command like "plugin:window|set_title" to the
      * corresponding permission like "core:window:allow-set-title".
      * Note: Tauri v2 permission names use hyphens, but command names use
-     * underscores (e.g., set_visible → allow-set-visible).
+     * underscores (e.g., set_title → allow-set-title).
      */
     function commandToPermission(cmd) {
         const [pluginPart, action] = cmd.split('|');
@@ -576,9 +589,12 @@ describe('Tauri plugin permission contract', () => {
     // simple "allow-{action}" pattern.
     const permissionOverrides = {
         'plugin:opener|open_url': 'opener:default',
-        // set_visible is covered by allow-hide + allow-show (no single allow-set-visible)
-        'plugin:window|set_visible': 'core:window:allow-hide+core:window:allow-show',
     };
+
+    it('reads the declared permissions from capabilities/default.json', () => {
+        expect(declaredPermissions).toContain('core:window:allow-show');
+        expect(declaredPermissions).toContain('core:window:allow-hide');
+    });
 
     it('every used plugin command has a declared permission', () => {
         const permissionSet = new Set(declaredPermissions);
@@ -614,9 +630,8 @@ describe('Tauri plugin permission contract', () => {
             'core:resources:default',
             'core:app:default',
             'dialog:allow-message',
-            'notification:allow-notify',
-            'global-shortcut:allow-register',
-            'global-shortcut:allow-unregister',
+            'notification:default',
+            'window-state:default',
             'core:window:allow-start-dragging',
             'core:window:allow-hide',
             'core:window:allow-show',

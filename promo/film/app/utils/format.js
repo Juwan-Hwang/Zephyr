@@ -26,6 +26,10 @@ export function getDelayColorClass(delay) {
     return 'text-rose-400';
 }
 
+const _FILE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+// Precomputed powers of 1024 to avoid repeated Math.pow(1024, i) calculations
+const _FILE_DIVISORS = [1, 1024, 1_048_576, 1_073_741_824, 1_099_511_627_776];
+
 /**
  * Format file size for subscription usage display (binary, base-1024).
  *
@@ -37,18 +41,37 @@ export function getDelayColorClass(delay) {
  * formatFileSize(0);          // "0 B"
  */
 export function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
+    // Coerce first: some callers pass numeric strings (e.g. values parsed from
+    // subscription headers), which the legacy Math.log implementation accepted
+    // implicitly. Number.isFinite alone would reject them. Number() throws on
+    // Symbols, so guard it the same way formatBytes does.
+    let n;
+    try {
+        n = Number(bytes);
+    } catch {
+        return 'NaN undefined';
+    }
+    if (n === 0) return '0 B';
+    // Edge case guard for negative or non-finite values (matches legacy Math.log behavior)
+    if (n < 0 || !Number.isFinite(n)) {
+        return 'NaN undefined';
+    }
 
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    // Performance optimization: Fast threshold branches replace floating-point Math.log
+    let i = 0;
+    if (n >= 1_099_511_627_776) i = 4;
+    else if (n >= 1_073_741_824) i = 3;
+    else if (n >= 1_048_576) i = 2;
+    else if (n >= 1024) i = 1;
 
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+    return `${(n / _FILE_DIVISORS[i]).toFixed(2)} ${_FILE_UNITS[i]}`;
 }
 
 // ── Network-traffic helpers (decimal, base-1000) ──────────────────────
 
 const _NET_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+// Precomputed powers of 1000 to avoid repeated Math.pow(1000, i) calculations
+const _NET_DIVISORS = [1, 1000, 1_000_000, 1_000_000_000, 1_000_000_000_000];
 
 /**
  * Format a byte count using decimal (base-1000) units.
@@ -74,12 +97,14 @@ export function formatBytes(bytes) {
     }
     if (!Number.isFinite(num) || num <= 0) return '0 B';
 
-    const i = Math.min(
-        Math.max(0, Math.floor(Math.log(num) / Math.log(1000))),
-        _NET_UNITS.length - 1,
-    );
+    // Performance optimization: Fast threshold branches replace floating-point Math.log
+    let i = 0;
+    if (num >= 1_000_000_000_000) i = 4;
+    else if (num >= 1_000_000_000) i = 3;
+    else if (num >= 1_000_000) i = 2;
+    else if (num >= 1000) i = 1;
 
-    return `${(num / Math.pow(1000, i)).toFixed(2)} ${_NET_UNITS[i]}`;
+    return `${(num / _NET_DIVISORS[i]).toFixed(2)} ${_NET_UNITS[i]}`;
 }
 
 /**

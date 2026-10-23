@@ -200,6 +200,17 @@ describe('chart rendering', () => {
         expect(upEnd.args).toEqual([WIDTH, 60]); // half the peak → middle
     });
 
+    it('scales to a finite series even when the other series in the sample is NaN', () => {
+        chart.updateTrafficData(sample(NaN, 100000));
+        flushRaf();
+        const [downEnd, upEnd] = curveEnds();
+        // download is finite, so it sets the scale and its peak touches the top padding,
+        // even though the same sample's upload value is NaN
+        expect(downEnd.args).toEqual([WIDTH, 10]);
+        // upload NaN is normalised to zero → baseline
+        expect(upEnd.args).toEqual([WIDTH, 110]);
+    });
+
     it('treats NaN samples as zero instead of breaking the chart', () => {
         chart.updateTrafficData(sample(NaN, NaN));
         chart.updateTrafficData(sample(2048, 2048));
