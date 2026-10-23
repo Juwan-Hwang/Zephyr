@@ -39,7 +39,7 @@ body{font-family:var(--sans);-webkit-font-smoothing:antialiased}
 #burst{position:absolute;inset:0;opacity:0}
 #bw{position:absolute;left:0;top:0;width:1920px;text-align:center;color:#F3F5F9}
 #bw .k{font-family:var(--mono);font-size:22px;color:#7D8798;letter-spacing:3px}
-#bw .w{font-size:150px;font-weight:650;letter-spacing:-1px;line-height:1.15;margin-top:18px}
+#bw .w{font-size:150px;font-weight:650;letter-spacing:-1px;line-height:1.15;margin-top:18px;white-space:nowrap}
 #bw .d{font-size:26px;color:#8D97A8;margin-top:22px;letter-spacing:.6px}
 #plat{position:absolute;inset:0;opacity:0;color:#F3F5F9}
 #plat .row{position:absolute;left:0;width:1920px;text-align:center;overflow:hidden}
@@ -302,7 +302,7 @@ function drawBurst(t) {
   if (t < SEC0) { $('bk').textContent = ''; $('bww').textContent = ''; $('bd').textContent = ''; }
   else if (k < SEC.length) {
     const [key, w, d] = SEC[k];
-    $('bk').textContent = `${String(k + 1).padStart(2, '0')} / ${SEC.length} · ${key}`; $('bww').textContent = w; $('bd').textContent = d; $('bww').style.fontSize = '150px';
+    $('bk').textContent = `${String(k + 1).padStart(2, '0')} / ${SEC.length} · ${key}`; $('bww').textContent = w; $('bd').textContent = d; $('bww').style.fontSize = '150px'; const sw = $('bww').scrollWidth; if (sw > 1760) $('bww').style.fontSize = Math.floor(150 * 1760 / sw) + 'px';
     sc = 1.07 - 0.07 * E.expoOut(clamp((t - SEC0 - k * SEC_DT) / SEC_DT * 2.2));
   } else {
     $('bk').textContent = 'DEFENSE IN DEPTH'; $('bww').textContent = 'Thirteen layers deep'; $('bd').textContent = 'Every entry point, explicitly constrained'; $('bww').style.fontSize = '132px';
