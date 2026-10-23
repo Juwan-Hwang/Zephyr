@@ -264,21 +264,30 @@ export function initThemeSettings({
     // ---- Opacity slider (with debounce) ----
     // Use synchronously passed value to avoid UI flicker
     const rawOpacity = savedOpacity != null ? Number(savedOpacity) : 100;
-    const opacityVal = Number.isFinite(rawOpacity) ? String(Math.min(100, Math.max(0, rawOpacity))) : '100';
+    // Clamp to the slider's real range [10, 100] and whole steps so the thumb
+    // position, the visible text and aria-valuetext always agree.
+    const opacityVal = Number.isFinite(rawOpacity)
+        ? String(Math.min(100, Math.max(10, Math.round(rawOpacity))))
+        : '100';
     document.documentElement.style.setProperty('--app-opacity', String(Number(opacityVal) / 100));
+    /** Cancel a pending debounced opacity save (used by Restore Defaults). */
+    let cancelPendingOpacity = () => {};
     if (opacitySlider) {
         opacitySlider.value = opacityVal;
+        opacitySlider.setAttribute('aria-valuetext', `${opacityVal}%`);
         if (opacityValText) opacityValText.textContent = `${opacityVal}%`;
 
         const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
             document.documentElement.style.setProperty('--app-opacity', String(Number(val) / 100));
             void saveSetting('app_opacity', Number(val));
         }, 50);
+        cancelPendingOpacity = () => debouncedOpacity.cancel();
 
         opacitySlider.addEventListener('input', (e) => {
             const target = /** @type {HTMLInputElement} */ (e.target);
             const val = target.value;
             if (opacityValText) opacityValText.textContent = `${val}%`;
+            opacitySlider.setAttribute('aria-valuetext', `${val}%`);
             debouncedOpacity(val);
         });
     }
@@ -287,5 +296,6 @@ export function initThemeSettings({
     return {
         setThemeMode,
         applyColorTheme,
+        cancelPendingOpacity,
     };
 }
