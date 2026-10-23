@@ -45,18 +45,9 @@
 
 ---
 
-## 截图
+## 演示视频
 
-![Zephyr 主页 - macOS 浅色模式 Mihomo 代理客户端界面](apps/desktop/assets/screenshot-home.png)
-
-<details>
-<summary>更多截图</summary>
-
-| 深色模式 | 设置页面 |
-|:---:|:---:|
-| ![Zephyr 深色模式 - 代理节点管理界面](apps/desktop/assets/screenshot-dark.png) | ![Zephyr 设置页面 - 系统代理与 TUN 配置](apps/desktop/assets/screenshot-settings.png) |
-
-</details>
+https://github.com/user-attachments/assets/443aa7f8-88fa-4640-a508-107f56646b1f
 
 ---
 
