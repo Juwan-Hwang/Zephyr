@@ -80,8 +80,7 @@ body{font-family:var(--sans);-webkit-font-smoothing:antialiased}
   <div id="bar"></div>
   <div id="plat">
     <div class="row" id="r1" style="top:350px"><span class="big" id="p1">Windows · macOS · Linux</span></div>
-    <div class="row" id="r2" style="top:498px"><span class="mid" id="p2">x64 与 ARM64 · 便携版即解即用</span></div>
-    <div class="row" id="r3" style="top:600px"><span class="mid" id="p3">Rust × Tauri 2 · 内置 Mihomo 内核管理</span></div>
+    <div class="row" id="r2" style="top:498px"><span class="mid" id="p2">x64 与 ARM64 · 一台设备都不落下</span></div>
   </div>
   <div id="lock"><img id="lsym" src="symbol-white.svg"><div id="wordwrap"><img id="lword" src="wordmark-white.svg"></div></div>
   <div id="tagline">安全至上 · 极简美学 · 轻量高效</div>
@@ -458,7 +457,7 @@ function drawPlat(t) {
   op(el, 1);
   const push = 1 + 0.045 * E.appleInOut(seg(t, T.plat, T.end - 0.38));
   el.style.transform = `scale(${push.toFixed(4)})`; el.style.transformOrigin = '960px 540px';
-  const rows = [['p1', 'r1', T.plat + 0.0], ['p2', 'r2', T.plat + BT * 1.5], ['p3', 'r3', T.plat + BT * 2.5]];
+  const rows = [['p1', 'r1', T.plat + 0.0], ['p2', 'r2', T.plat + BT * 1.5]];
   const col = E.whip(seg(t, T.end - 0.38, T.end));
   for (const [id, rid, t0] of rows) {
     const u = t - t0, y = u <= 0 ? 110 : (1 - Math.min(1, springE(0.55, 0)(u))) * 110;
