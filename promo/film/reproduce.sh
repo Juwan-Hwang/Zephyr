@@ -24,3 +24,8 @@ ffmpeg -y -v error -framerate 30 -i film/out2/frames/%05d.jpg -i film/audio/mix2
   -c:v libx264 -preset fast -crf 16 -pix_fmt yuv420p -profile:v high -tune film \
   -c:a aac -b:a 256k -af "loudnorm=I=-14:TP=-1:LRA=9" -shortest -movflags +faststart deliver/Zephyr-promo-v3.rebuild.mp4
 echo "done → deliver/Zephyr-promo-v3.rebuild.mp4"
+
+# English cut:
+#   python3 render_film.py --comp comp2-en.html --out film/out2-en/frames --workers 3
+#   (cd film && python3 sound2-en.py)   # writes audio/mix2-en.wav
+#   ffmpeg ... -i film/audio/mix2-en.wav ... deliver/Zephyr-promo-v3-en.mp4  (same flags as above)
