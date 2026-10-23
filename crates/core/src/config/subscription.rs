@@ -949,13 +949,17 @@ pub fn select_global_candidate(
         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
         .unwrap_or_default();
 
+    // Fast O(1) set for candidate checking in `is_valid_global_candidate`.
+    let global_all_set: std::collections::HashSet<&str> =
+        global_all.iter().copied().collect();
+
     // 递归解析候选节点/策略组，确保最终生效的叶子节点存在于 proxies 中且不是 DIRECT / REJECT 等特殊目标。
-    // 使用 visited 集合检测当前路径上的循环依赖，使用 memo 共享已完成的验证结果，避免多分支指数级重复计算。
-    fn check_node_resolves_to_proxy(
-        name: &str,
-        proxies: &serde_json::Map<String, serde_json::Value>,
-        visited: &mut std::collections::HashSet<String>,
-        memo: &mut std::collections::HashMap<String, bool>,
+    // 使用 visited 集合（零内存分配 &'a str）检测当前路径上的循环依赖，使用 memo 共享已完成的验证结果。
+    fn check_node_resolves_to_proxy<'a>(
+        name: &'a str,
+        proxies: &'a serde_json::Map<String, serde_json::Value>,
+        visited: &mut std::collections::HashSet<&'a str>,
+        memo: &mut std::collections::HashMap<&'a str, bool>,
         depth: usize,
     ) -> (bool, bool) {
         if let Some(&cached) = memo.get(name) {
@@ -965,14 +969,14 @@ pub fn select_global_candidate(
             return (false, true);
         }
         if is_special_target(name) {
-            memo.insert(name.to_owned(), false);
+            memo.insert(name, false);
             return (false, false);
         }
         if visited.contains(name) {
             return (false, true);
         }
         let Some(p_obj) = proxies.get(name) else {
-            memo.insert(name.to_owned(), false);
+            memo.insert(name, false);
             return (false, false);
         };
         let p_type = p_obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -988,7 +992,7 @@ pub fn select_global_candidate(
             || p_type.eq_ignore_ascii_case("LoadBalance")
             || p_type.eq_ignore_ascii_case("Relay")
         {
-            visited.insert(name.to_owned());
+            visited.insert(name);
             // Every entry of `all` must resolve, for LoadBalance as well as Relay, even
             // when `now` points at a live member. A Relay's chain is only as
             // strong as its weakest member, and a LoadBalance member that
@@ -1027,7 +1031,7 @@ pub fn select_global_candidate(
                         }
                         visited.remove(name);
                         if !any_cycle || all_ok {
-                            memo.insert(name.to_owned(), all_ok);
+                            memo.insert(name, all_ok);
                         }
                         return (all_ok, any_cycle);
                     }
@@ -1038,12 +1042,12 @@ pub fn select_global_candidate(
                     check_node_resolves_to_proxy(next_now, proxies, visited, memo, depth + 1);
                 visited.remove(name);
                 if !cycle || res {
-                    memo.insert(name.to_owned(), res);
+                    memo.insert(name, res);
                 }
                 return (res, cycle);
             }
             visited.remove(name);
-            memo.insert(name.to_owned(), false);
+            memo.insert(name, false);
             return (false, false);
         }
         if p_type.is_empty()
@@ -1054,22 +1058,28 @@ pub fn select_global_candidate(
             || p_type.eq_ignore_ascii_case("Pass-Rule")
             || p_type.eq_ignore_ascii_case("Compatible")
         {
-            memo.insert(name.to_owned(), false);
+            memo.insert(name, false);
             return (false, false);
         }
         let alive = p_obj.get("alive").and_then(serde_json::Value::as_bool) != Some(false);
-        memo.insert(name.to_owned(), alive);
+        memo.insert(name, alive);
         (alive, false)
     }
 
     let mut memo = std::collections::HashMap::new();
     let mut resolves_to_effective_proxy = |start_name: &str| -> bool {
         let mut visited = std::collections::HashSet::new();
-        check_node_resolves_to_proxy(start_name, proxies, &mut visited, &mut memo, 0).0
+        // Look up `start_name` in `proxies` to get a slice with lifetime matching `proxies`.
+        // If it doesn't exist in `proxies`, `check_node_resolves_to_proxy` would return false anyway.
+        if let Some((k, _)) = proxies.get_key_value(start_name) {
+            check_node_resolves_to_proxy(k.as_str(), proxies, &mut visited, &mut memo, 0).0
+        } else {
+            false
+        }
     };
 
     let mut is_valid_global_candidate = |s: &str| {
-        !global_all.is_empty() && global_all.contains(&s) && resolves_to_effective_proxy(s)
+        global_all_set.contains(s) && resolves_to_effective_proxy(s)
     };
 
     let active_node = global_now
