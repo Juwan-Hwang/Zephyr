@@ -175,6 +175,22 @@ describe('connections page list rendering', () => {
         expect(rows()).toHaveLength(2);
     });
 
+    it('does not match a query spanning two fields', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const input = /** @type {HTMLInputElement} */ (document.getElementById('connections-search-input'));
+        // 'a.example 1.1' spans the host/destinationIP boundary: no single
+        // field contains it, so the connection must not match.
+        input.value = 'a.example 1.1';
+        input.dispatchEvent(new Event('input'));
+        expect(rows()).toHaveLength(0);
+        // Sanity: a query inside one field still matches.
+        input.value = 'a.example';
+        input.dispatchEvent(new Event('input'));
+        expect(rows()).toHaveLength(1);
+    });
+
     it('exposes every sort control as a toggle before the first sort pass', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [] });
         initConnectionsPage();
