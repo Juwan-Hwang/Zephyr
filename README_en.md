@@ -44,18 +44,9 @@ That's it. Your traffic is now routed through the selected proxy.
 
 ---
 
-## Screenshots
+## Demo Video
 
-![Zephyr Home - macOS Light Mode Mihomo Proxy Client Interface](apps/desktop/assets/screenshot-home.png)
-
-<details>
-<summary>More Screenshots</summary>
-
-| Dark Mode | Settings |
-|:---:|:---:|
-| ![Zephyr Dark Mode - Proxy Node Management Interface](apps/desktop/assets/screenshot-dark.png) | ![Zephyr Settings - System Proxy & TUN Configuration](apps/desktop/assets/screenshot-settings.png) |
-
-</details>
+https://github.com/user-attachments/assets/a809b160-488e-4b87-a222-3a8dfffe085d
 
 ---
 
