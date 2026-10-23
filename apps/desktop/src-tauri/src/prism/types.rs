@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use zephyr_core::config::sanitizer::{sanitize_base_filename, url_decode_complete};
+use zephyr_core::config::sanitizer::sanitize_base_filename;
 
 /// Maximum allowed size for user-supplied text inputs (10 MB).
 pub const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
