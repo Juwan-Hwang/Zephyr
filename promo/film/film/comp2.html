@@ -268,7 +268,7 @@ function drawCaps(t) {
     ln.firstChild.style.transform = (y < 0.01 && out === 0) ? 'none' : `translateY(${(y - E.expoIn(out) * 30).toFixed(2)}%)`;
   });
 }
-const THESIS = [['一个代理客户端，', 2.2], ['应当是<b>设计</b>出来的。', 2.62]];
+const THESIS = [['介绍 <b>Zephyr</b>', 2.2], ['一款 Mihomo GUI', 2.62]];
 function drawThesis(t) {
   const el = $('thesis');
   if (!el.dataset.b) { el.dataset.b = 1; el.innerHTML = THESIS.map(([s]) => `<span class="ln h1"><span>${s}</span></span>`).join(''); }
