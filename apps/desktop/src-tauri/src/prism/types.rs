@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use zephyr_core::config::sanitizer::{sanitize_base_filename, url_decode_complete};
+use zephyr_core::config::sanitizer::sanitize_base_filename;
 
 /// Maximum allowed size for user-supplied text inputs (10 MB).
 pub const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
@@ -70,21 +70,7 @@ pub fn check_name_size(input: &str, label: &str) -> Result<(), String> {
 
 /// Validate that a plugin ID is a simple name (no path traversal).
 pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
-    const MAX_PLUGIN_ID_LEN: usize = 128;
-    // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
-    let decoded = url_decode_complete(plugin_id);
-    if decoded.is_empty()
-        || decoded.len() > MAX_PLUGIN_ID_LEN
-        || decoded.contains('/')
-        || decoded.contains('\\')
-        || decoded.contains("..")
-        || decoded.contains('\0')
-    {
-        return Err(String::from(
-            "Invalid plugin ID: contains unsafe characters or exceeds length limit",
-        ));
-    }
-    Ok(())
+    zephyr_core::config::prism_types::validate_plugin_id(plugin_id).map_err(|e| e.to_string())
 }
 
 /// Sanitize a user-supplied filename to prevent path traversal and injection attacks.
