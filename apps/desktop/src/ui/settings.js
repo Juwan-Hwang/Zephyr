@@ -1394,7 +1394,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     if (settings.app_opacity != null) {
         const opacity = Number(settings.app_opacity);
         if (Number.isFinite(opacity)) {
-            const clamped = Math.min(100, Math.max(0, opacity)) / 100;
+            // Match the slider's real range [10, 100] and whole steps so the
+            // startup paint agrees with the settings panel (see initThemeSettings).
+            const clamped = Math.min(100, Math.max(10, Math.round(opacity))) / 100;
             document.documentElement.style.setProperty('--app-opacity', String(clamped));
         }
     }
@@ -1642,7 +1644,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 }
 
                 if (opacitySlider) {
+                    // Drop any in-flight slider save so it can't overwrite the reset.
+                    _themeApi.cancelPendingOpacity();
                     opacitySlider.value = '100';
+                    opacitySlider.setAttribute('aria-valuetext', '100%');
                     resetTo('app_opacity', 100);
                     if (opacityValText) opacityValText.textContent = '100%';
                     document.documentElement.style.setProperty('--app-opacity', '1');
