@@ -14,9 +14,6 @@ use crate::prism::types::{
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt as _;
-
 /// A rule file name is taken by the file itself or by its disabled copy
 /// (`<name>.disabled`), which the library lists under the same name.
 fn name_taken(path: &std::path::Path) -> bool {
@@ -32,30 +29,8 @@ fn name_taken(path: &std::path::Path) -> bool {
 pub fn open_prism_folder(state: State<PrismState>) -> Result<String, String> {
     let prism_dir = state.get_prism_workspace()?;
 
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&prism_dir)
-            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-            .spawn()
-            .map_err(|e| format!("Failed to open prism folder: {e}"))?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&prism_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open prism folder: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&prism_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open prism folder: {e}"))?;
-    }
+    tauri_plugin_opener::open_path(&prism_dir, None::<&str>)
+        .map_err(|e| format!("Failed to open prism folder: {e}"))?;
 
     Ok(prism_dir.to_string_lossy().into_owned())
 }

@@ -2,7 +2,6 @@ use crate::core_manager::MihomoState;
 use crate::{persist_settings, SettingsState};
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::process::Command;
 use tauri::{AppHandle, Manager as _};
 use tauri_plugin_dialog::DialogExt as _;
 
@@ -559,29 +558,8 @@ pub fn open_config_folder(app: AppHandle) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
     let target = paths.profiles_dir;
 
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("explorer")
-            .arg(&target)
-            .spawn()
-            .map_err(|e| format!("Failed to open config folder: {e}"))?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .arg(&target)
-            .spawn()
-            .map_err(|e| format!("Failed to open config folder: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open")
-            .arg(&target)
-            .spawn()
-            .map_err(|e| format!("Failed to open config folder: {e}"))?;
-    }
+    tauri_plugin_opener::open_path(&target, None::<&str>)
+        .map_err(|e| format!("Failed to open config folder: {e}"))?;
 
     Ok(target.to_string_lossy().into_owned())
 }
