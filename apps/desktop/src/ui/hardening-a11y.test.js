@@ -57,7 +57,7 @@ describe('home and settings page switches and theme swatches accessibility', () 
         }
     });
 
-    it('preset theme color swatches carry translatable aria-labels', () => {
+    it('preset and custom theme color swatches carry translatable aria-labels and titles', () => {
         const doc = parseIndex();
         const swatches = [
             { theme: 'blue', key: 'themeColorBlue' },
@@ -71,6 +71,13 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(btn?.getAttribute('aria-label')).toBeTruthy();
             expect(btn?.getAttribute('data-i18n-aria-label')).toBe(key);
         }
+
+        const customInput = doc.getElementById('custom-theme-color');
+        expect(customInput).toBeTruthy();
+        expect(customInput?.getAttribute('aria-label')).toBe('Custom');
+        expect(customInput?.getAttribute('data-i18n-aria-label')).toBe('themeColorCustom');
+        expect(customInput?.getAttribute('title')).toBe('Custom');
+        expect(customInput?.getAttribute('data-i18n-title')).toBe('themeColorCustom');
     });
 });
 
