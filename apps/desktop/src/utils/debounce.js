@@ -6,7 +6,7 @@
  * @param {Function} fn - Function to debounce
  * @param {number} delayMs - Delay in milliseconds
  * @param {boolean} [immediate=false] - Trigger on leading edge instead of trailing
- * @returns {Function} Debounced function with an attached .cancel() method
+ * @returns {Function & {cancel: () => void}} Debounced function with an attached .cancel() method
  *
  * @example
  * const onSave = debounce(saveHandler, 300);

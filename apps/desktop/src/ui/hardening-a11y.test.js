@@ -79,6 +79,76 @@ describe('home and settings page switches and theme swatches accessibility', () 
         expect(customInput?.getAttribute('title')).toBe('Custom');
         expect(customInput?.getAttribute('data-i18n-title')).toBe('themeColorCustom');
     });
+
+    it('app opacity range slider carries aria-valuetext and aria-label', () => {
+        const doc = parseIndex();
+        const slider = doc.getElementById('setting-opacity');
+        expect(slider).toBeTruthy();
+        expect(slider?.getAttribute('aria-label')).toBeTruthy();
+        expect(slider?.getAttribute('data-i18n-aria-label')).toBe('appOpacity');
+        expect(slider?.getAttribute('aria-valuetext')).toBe('100%');
+    });
+
+    it('opacity init clamps saved values to the slider range and announces them', async () => {
+        const { initThemeSettings } = await import('./settings/theme.js');
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">' +
+            '<span id="opacity-val-text">100%</span>';
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        const valText = document.getElementById('opacity-val-text');
+        const api = initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 5,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider,
+            opacityValText: valText,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        // A saved 5 is below the slider minimum: everything must agree on 10.
+        expect(slider.value).toBe('10');
+        expect(slider.getAttribute('aria-valuetext')).toBe('10%');
+        expect(valText?.textContent).toBe('10%');
+        // Dragging the slider updates the announcement.
+        slider.value = '50';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(slider.getAttribute('aria-valuetext')).toBe('50%');
+        expect(valText?.textContent).toBe('50%');
+        api.cancelPendingOpacity();
+    });
+
+    it('a pending opacity save can be cancelled (restore defaults)', async () => {
+        const { initThemeSettings } = await import('./settings/theme.js');
+        document.body.innerHTML =
+            '<input type="range" id="setting-opacity" min="10" max="100" value="100">';
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('setting-opacity'));
+        const api = initThemeSettings({
+            savedTheme: null,
+            savedThemeMode: null,
+            savedOpacity: 100,
+            appMainContainer: null,
+            appTitleIcon: null,
+            themeCircles: [],
+            customColorInput: null,
+            opacitySlider: slider,
+            opacityValText: null,
+            themeModeContainer: null,
+            themeModeButtons: [],
+            save: () => {},
+        });
+        invokeMock.mockClear();
+        slider.value = '30';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        api.cancelPendingOpacity();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        // The debounced save must not fire after cancellation.
+        expect(invokeMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('modal dialog accessibility', () => {
