@@ -72,6 +72,15 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(btn?.getAttribute('data-i18n-aria-label')).toBe(key);
         }
     });
+
+    it('app opacity range slider carries aria-valuetext and aria-label', () => {
+        const doc = parseIndex();
+        const slider = doc.getElementById('setting-opacity');
+        expect(slider).toBeTruthy();
+        expect(slider?.getAttribute('aria-label')).toBeTruthy();
+        expect(slider?.getAttribute('data-i18n-aria-label')).toBe('appOpacity');
+        expect(slider?.getAttribute('aria-valuetext')).toBe('100%');
+    });
 });
 
 describe('modal dialog accessibility', () => {

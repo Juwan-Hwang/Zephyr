@@ -1643,6 +1643,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
                 if (opacitySlider) {
                     opacitySlider.value = '100';
+                    opacitySlider.setAttribute('aria-valuetext', '100%');
                     resetTo('app_opacity', 100);
                     if (opacityValText) opacityValText.textContent = '100%';
                     document.documentElement.style.setProperty('--app-opacity', '1');

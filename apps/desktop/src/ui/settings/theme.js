@@ -268,6 +268,7 @@ export function initThemeSettings({
     document.documentElement.style.setProperty('--app-opacity', String(Number(opacityVal) / 100));
     if (opacitySlider) {
         opacitySlider.value = opacityVal;
+        opacitySlider.setAttribute('aria-valuetext', `${opacityVal}%`);
         if (opacityValText) opacityValText.textContent = `${opacityVal}%`;
 
         const debouncedOpacity = debounce(/** @param {string} val */ (val) => {
@@ -279,6 +280,7 @@ export function initThemeSettings({
             const target = /** @type {HTMLInputElement} */ (e.target);
             const val = target.value;
             if (opacityValText) opacityValText.textContent = `${val}%`;
+            opacitySlider.setAttribute('aria-valuetext', `${val}%`);
             debouncedOpacity(val);
         });
     }
