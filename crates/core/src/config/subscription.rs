@@ -950,8 +950,7 @@ pub fn select_global_candidate(
         .unwrap_or_default();
 
     // Fast O(1) set for candidate checking in `is_valid_global_candidate`.
-    let global_all_set: std::collections::HashSet<&str> =
-        global_all.iter().copied().collect();
+    let global_all_set: std::collections::HashSet<&str> = global_all.iter().copied().collect();
 
     // 递归解析候选节点/策略组，确保最终生效的叶子节点存在于 proxies 中且不是 DIRECT / REJECT 等特殊目标。
     // 使用 visited 集合（零内存分配 &'a str）检测当前路径上的循环依赖，使用 memo 共享已完成的验证结果。
@@ -1078,9 +1077,8 @@ pub fn select_global_candidate(
         }
     };
 
-    let mut is_valid_global_candidate = |s: &str| {
-        global_all_set.contains(s) && resolves_to_effective_proxy(s)
-    };
+    let mut is_valid_global_candidate =
+        |s: &str| global_all_set.contains(s) && resolves_to_effective_proxy(s);
 
     let active_node = global_now
         .as_deref()
