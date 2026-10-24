@@ -445,8 +445,10 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
 
                     if entry.path.starts_with("profiles/") {
                         let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
-                        zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned())
-                            .map_err(|e| format!("Invalid profile filename in backup: {e}"))?;
+                        zephyr_core::config::sanitizer::sanitize_config_file_name(
+                            file_name.to_owned(),
+                        )
+                        .map_err(|e| format!("Invalid profile filename in backup: {e}"))?;
                     }
 
                     // Find the entry in the ZIP by name — use by_name for O(1) lookup
@@ -514,8 +516,13 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                     // Sanitize YAML content for profile YAMLs and run_config.yaml
                     if entry.path.starts_with("profiles/") || entry.path == "run_config.yaml" {
                         if let Ok(content) = fs::read_to_string(&dest_path) {
-                            if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                                zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut yaml_value, false);
+                            if let Ok(mut yaml_value) =
+                                serde_yaml::from_str::<serde_yaml::Value>(&content)
+                            {
+                                zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(
+                                    &mut yaml_value,
+                                    false,
+                                );
                                 if let Ok(sanitized_content) = serde_yaml::to_string(&yaml_value) {
                                     let _ = fs::write(&dest_path, sanitized_content);
                                 }
@@ -720,7 +727,9 @@ fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, P
         .filter_map(|entry| {
             let dest = if entry.path.starts_with("profiles/") {
                 let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
-                let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned()).ok()?;
+                let safe_name =
+                    zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned())
+                        .ok()?;
                 paths.profiles_dir.join(safe_name)
             } else if entry.path == "settings.json" {
                 paths.app_data_dir.join("settings.json")
@@ -804,6 +813,25 @@ fn restore_rollback(backup_dir: &Path, paths: &AppPaths) -> Result<(), String> {
     }
 }
 
+/// Map a relative path (from backup dir) to its absolute destination.
+///
+/// Uses `Path` methods instead of string matching to be platform-agnostic
+/// (Windows uses backslash separators).
+fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
+    if rel.starts_with("profiles") {
+        let file_name = rel.strip_prefix("profiles").unwrap_or(rel);
+        Some(paths.profiles_dir.join(file_name))
+    } else if rel == Path::new("settings.json") {
+        Some(paths.app_data_dir.join("settings.json"))
+    } else if rel == Path::new("run_config.yaml") {
+        Some(paths.core_dir.join("run_config.yaml"))
+    } else if rel == Path::new("metadata.json") {
+        Some(paths.profiles_dir.join("metadata.json"))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -855,24 +883,5 @@ mod tests {
         };
         let dest_map_invalid = build_dest_map(&paths, &manifest_invalid);
         assert_eq!(dest_map_invalid.len(), 0);
-    }
-}
-
-/// Map a relative path (from backup dir) to its absolute destination.
-///
-/// Uses `Path` methods instead of string matching to be platform-agnostic
-/// (Windows uses backslash separators).
-fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
-    if rel.starts_with("profiles") {
-        let file_name = rel.strip_prefix("profiles").unwrap_or(rel);
-        Some(paths.profiles_dir.join(file_name))
-    } else if rel == Path::new("settings.json") {
-        Some(paths.app_data_dir.join("settings.json"))
-    } else if rel == Path::new("run_config.yaml") {
-        Some(paths.core_dir.join("run_config.yaml"))
-    } else if rel == Path::new("metadata.json") {
-        Some(paths.profiles_dir.join("metadata.json"))
-    } else {
-        None
     }
 }
