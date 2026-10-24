@@ -47,9 +47,8 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
 
                 let val_raw = after_colon.trim();
 
-                let val_trimmed = if val_raw.starts_with('"') {
+                let val_trimmed = if let Some(rest_q) = val_raw.strip_prefix('"') {
                     // Double-quoted string
-                    let rest_q = &val_raw[1..];
                     if let Some(close_idx) = rest_q.find('"') {
                         let inner = &rest_q[..close_idx];
                         if inner.contains('\\') {
@@ -63,9 +62,8 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
                     } else {
                         return None;
                     }
-                } else if val_raw.starts_with('\'') {
+                } else if let Some(rest_q) = val_raw.strip_prefix('\'') {
                     // Single-quoted string
-                    let rest_q = &val_raw[1..];
                     if let Some(close_idx) = rest_q.find('\'') {
                         let inner = &rest_q[..close_idx];
                         if inner.contains('\'') {
