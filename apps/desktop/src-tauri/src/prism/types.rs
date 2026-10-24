@@ -239,6 +239,7 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
     // pre-allocated String buffer to eliminate intermediate Vec<String> allocations and .join("\n").
     let mut output = String::with_capacity(trimmed.len() + 32);
     output.push_str("rules:\n  $append:\n");
+    let header_len = output.len();
 
     if source == "surge" {
         for line in trimmed.lines() {
@@ -268,6 +269,10 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
         }
     }
 
+    if output.len() == header_len {
+        output.push('\n');
+    }
+
     output
 }
 
@@ -287,8 +292,8 @@ fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
     };
 
     let p0_trimmed = p0.trim();
-    let is_match_final = p0_trimmed.eq_ignore_ascii_case("MATCH")
-        || p0_trimmed.eq_ignore_ascii_case("FINAL");
+    let is_match_final =
+        p0_trimmed.eq_ignore_ascii_case("MATCH") || p0_trimmed.eq_ignore_ascii_case("FINAL");
 
     let p1 = match iter.next() {
         Some(p) => p,
