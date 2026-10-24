@@ -2313,13 +2313,14 @@ third-party/chromium/LICENSE.
 ISC License (SPDX: ISC)
 ----------------------------------------------------------------------
 
-ISC License
+ISC License:
 
-Copyright <year> <owner>
+Copyright (c) 2004-2010 by Internet Systems Consortium, Inc. ("ISC")
+Copyright (c) 1995-2003 by Internet Software Consortium
 
 Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
 
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 ----------------------------------------------------------------------
@@ -11377,7 +11378,7 @@ MIT License (SPDX: MIT):
   * zvariant_derive 5.12.0 — https://github.com/z-galaxy/zbus/
 
 MIT License (SPDX: MIT):
-  * ctutils 0.4.5 — https://github.com/RustCrypto/utils
+  * ctutils 0.4.2 — https://github.com/RustCrypto/utils
 
 MIT License (SPDX: MIT):
   * anstyle 1.0.14 — https://github.com/rust-cli/anstyle.git
@@ -11690,7 +11691,6 @@ MIT License (SPDX: MIT):
   * windows-strings 0.5.1 — https://github.com/microsoft/windows-rs
   * windows-sys 0.45.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.48.0 — https://github.com/microsoft/windows-rs
-  * windows-sys 0.52.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.59.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.60.2 — https://github.com/microsoft/windows-rs
   * windows-sys 0.61.2 — https://github.com/microsoft/windows-rs
@@ -11736,7 +11736,7 @@ MIT License (SPDX: MIT):
 
 MIT License (SPDX: MIT):
   * tokio-util 0.7.18 — https://github.com/tokio-rs/tokio
-  * tokio 1.54.1 — https://github.com/tokio-rs/tokio
+  * tokio 1.52.3 — https://github.com/tokio-rs/tokio
 
 MIT License (SPDX: MIT):
   * simd-adler32 0.3.9 — https://github.com/mcountryman/simd-adler32
