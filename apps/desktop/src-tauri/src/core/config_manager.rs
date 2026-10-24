@@ -533,9 +533,21 @@ fn write_config_file_inner(
 
     validate_path_within_dir(&resolved_path, &base_dir).map_err(|e| e.to_string())?;
 
+    // Parse and sanitize YAML content before writing to disk
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(&content).map_err(|e| format!("Invalid YAML: {e}"))?;
+    let mut sanitized = value.clone();
+    zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut sanitized, false);
+    let final_content = if sanitized == value {
+        content
+    } else {
+        serde_yaml::to_string(&sanitized)
+            .map_err(|e| format!("Failed to serialize sanitized YAML: {e}"))?
+    };
+
     // run_config.yaml is always plaintext; profile files may be encrypted
     if config_file_name == "run_config.yaml" {
-        write_file_secure(&resolved_path, &content)?;
+        write_file_secure(&resolved_path, &final_content)?;
     } else {
         // Reading the flag and writing the file under the same guard is what
         // makes the save safe: `patch_settings`' encryption batch holds this
@@ -546,7 +558,7 @@ fn write_config_file_inner(
         // Taken *before* the settings lock, matching `patch_settings`, which
         // reads the authoritative value under that lock while holding this one.
         // The reverse order would deadlock the two.
-        save_profile_file(&app, &resolved_path, &content)?;
+        save_profile_file(&app, &resolved_path, &final_content)?;
     }
 
     Ok("Config saved".to_owned())
@@ -922,6 +934,37 @@ rule-providers:
 
         let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
         assert!(providers.contains_key(serde_yaml::Value::String("my-rules".to_owned())));
+    }
+
+    #[test]
+    fn test_write_config_file_sanitizes_yaml_content() {
+        let dirty_yaml = r"
+script: evil.js
+external-controller-unix: /tmp/evil.sock
+proxy-providers:
+  p:
+    type: http
+    url: https://example.com/p.yaml
+    path: /etc/passwd
+port: 7890
+";
+        let value: serde_yaml::Value = serde_yaml::from_str(dirty_yaml).unwrap();
+        let mut sanitized = value.clone();
+        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut sanitized, false);
+        assert_ne!(value, sanitized);
+
+        let sanitized_str = serde_yaml::to_string(&sanitized).unwrap();
+        assert!(!sanitized_str.contains("evil.js"));
+        assert!(!sanitized_str.contains("/tmp/evil.sock"));
+        assert!(!sanitized_str.contains("/etc/passwd"));
+        assert!(sanitized_str.contains("7890"));
+    }
+
+    #[test]
+    fn test_write_config_file_rejects_invalid_yaml() {
+        let invalid_yaml = "rules: [unclosed sequence";
+        let result: Result<serde_yaml::Value, _> = serde_yaml::from_str(invalid_yaml);
+        assert!(result.is_err());
     }
 }
 

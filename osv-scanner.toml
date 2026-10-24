@@ -117,3 +117,13 @@ reason = "unic-ucd-ident unmaintained; transitive dep"
 id = "RUSTSEC-2026-0258"
 ignoreUntil = 2027-12-31
 reason = "h2 unbounded empty DATA frames; transitive via hyper/h2 (Tauri reqwest stack), upgrade blocked"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0385"
+ignoreUntil = 2027-12-31
+reason = "ctutils Non-constant-time mask generation; transitive dep"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0386"
+ignoreUntil = 2027-12-31
+reason = "tokio AsyncFd constructors violate I/O safety; transitive dep"
