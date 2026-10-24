@@ -11378,7 +11378,7 @@ MIT License (SPDX: MIT):
   * zvariant_derive 5.12.0 — https://github.com/z-galaxy/zbus/
 
 MIT License (SPDX: MIT):
-  * ctutils 0.4.2 — https://github.com/RustCrypto/utils
+  * ctutils 0.4.5 — https://github.com/RustCrypto/utils
 
 MIT License (SPDX: MIT):
   * anstyle 1.0.14 — https://github.com/rust-cli/anstyle.git
