@@ -31,6 +31,9 @@ ignore = [
   # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
   # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
   "RUSTSEC-2026-0258",
+  # ctutils non-constant-time mask generation (RUSTSEC-2026-0385)
+  # Transitive via aes-gcm / zip
+  "RUSTSEC-2026-0385",
   # Unmaintained-only advisories (bincode, proc-macro-error, paste, unic-*)
   # are NOT listed here — `unmaintained = "workspace"` below handles them:
   # transitive unmaintained deps are allowed (non-failing) automatically.
