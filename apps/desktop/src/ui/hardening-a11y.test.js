@@ -241,6 +241,25 @@ describe('menu triggers accessibility', () => {
             expect(btn?.getAttribute('aria-expanded')).toBe('false');
         }
     });
+
+    it('proxy toolbar buttons carry translatable tooltips and aria-labels', () => {
+        const doc = parseIndex();
+        const buttons = [
+            { id: 'proxy-group-trigger', titleKey: 'consoleNodePicker', labelKey: 'consoleNodePicker' },
+            { id: 'sort-btn', titleKey: 'consoleSortHint', labelKey: 'consoleSortHint' },
+            { id: 'test-all-btn', titleKey: 'testLatency', labelKey: null },
+        ];
+        for (const { id, titleKey, labelKey } of buttons) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-title')).toBe(titleKey);
+            expect(btn?.getAttribute('title')).toBeTruthy();
+            if (labelKey) {
+                expect(btn?.getAttribute('data-i18n-aria-label')).toBe(labelKey);
+                expect(btn?.getAttribute('aria-label')).toBeTruthy();
+            }
+        }
+    });
 });
 
 describe('icon-only close and back buttons', () => {
