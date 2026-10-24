@@ -823,11 +823,11 @@
                                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="portSettings">Port Settings</p>
-                                        <p class="text-2xs text-[var(--text-muted)]" data-i18n="portSettingsDesc">Configure proxy and DNS ports</p>
+                                        <p id="setting-port-title" class="text-sm font-semibold text-[var(--text-primary)]" data-i18n="portSettings">Port Settings</p>
+                                        <p id="setting-port-desc" class="text-2xs text-[var(--text-muted)]" data-i18n="portSettingsDesc">Configure proxy and DNS ports</p>
                                     </div>
                                 </div>
-                                <button id="port-config-btn" class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
+                                <button type="button" id="port-config-btn" class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1" aria-labelledby="setting-port-title current-port-display" aria-describedby="setting-port-desc">
                                     <span id="current-port-display">7890</span>
                                     <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
                                 </button>

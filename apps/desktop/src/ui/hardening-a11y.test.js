@@ -40,6 +40,11 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(doc.getElementById(titleId), titleId).toBeTruthy();
             expect(doc.getElementById(descId), descId).toBeTruthy();
         }
+
+        const portBtn = doc.getElementById('port-config-btn');
+        expect(portBtn).toBeTruthy();
+        expect(portBtn?.getAttribute('aria-labelledby')).toBe('setting-port-title current-port-display');
+        expect(portBtn?.getAttribute('aria-describedby')).toBe('setting-port-desc');
     });
 
     it('settings segmented controls carry role="group" and translatable aria-labels', () => {
