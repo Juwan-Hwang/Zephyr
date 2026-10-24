@@ -443,6 +443,12 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         return Err(format!("Unsafe path in backup archive: {}", entry.path));
                     }
 
+                    if entry.path.starts_with("profiles/") {
+                        let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
+                        zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned())
+                            .map_err(|e| format!("Invalid profile filename in backup: {e}"))?;
+                    }
+
                     // Find the entry in the ZIP by name — use by_name for O(1) lookup
                     let zip_entry = archive.by_name(&entry.path).map_err(|_zip| {
                         format!(
@@ -504,6 +510,18 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
 
                     // Verify checksum
                     verify_sha256(&dest_path, &entry.sha256)?;
+
+                    // Sanitize YAML content for profile YAMLs and run_config.yaml
+                    if entry.path.starts_with("profiles/") || entry.path == "run_config.yaml" {
+                        if let Ok(content) = fs::read_to_string(&dest_path) {
+                            if let Ok(mut yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                                zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut yaml_value, false);
+                                if let Ok(sanitized_content) = serde_yaml::to_string(&yaml_value) {
+                                    let _ = fs::write(&dest_path, sanitized_content);
+                                }
+                            }
+                        }
+                    }
 
                     // Validate settings.json structure before commit so a
                     // corrupt archive doesn't overwrite the user's working
@@ -702,7 +720,8 @@ fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, P
         .filter_map(|entry| {
             let dest = if entry.path.starts_with("profiles/") {
                 let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
-                paths.profiles_dir.join(file_name)
+                let safe_name = zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned()).ok()?;
+                paths.profiles_dir.join(safe_name)
             } else if entry.path == "settings.json" {
                 paths.app_data_dir.join("settings.json")
             } else if entry.path == "run_config.yaml" {
@@ -782,6 +801,60 @@ fn restore_rollback(backup_dir: &Path, paths: &AppPaths) -> Result<(), String> {
             errors.len(),
             errors.join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_safe_archive_path() {
+        assert!(is_safe_archive_path("settings.json"));
+        assert!(is_safe_archive_path("profiles/my-sub.yaml"));
+        assert!(!is_safe_archive_path("../settings.json"));
+        assert!(!is_safe_archive_path("profiles/../settings.json"));
+        assert!(!is_safe_archive_path("/etc/passwd"));
+        assert!(!is_safe_archive_path("C:\\Windows\\system32"));
+        assert!(!is_safe_archive_path("profiles\\sub.yaml"));
+        assert!(!is_safe_archive_path("profiles/\0sub.yaml"));
+    }
+
+    #[test]
+    fn test_backup_profile_filename_validation() {
+        let paths = AppPaths {
+            app_data_dir: PathBuf::from("/app_data"),
+            core_dir: PathBuf::from("/core"),
+            profiles_dir: PathBuf::from("/profiles"),
+        };
+
+        // Valid profile name
+        let manifest = BackupManifest {
+            version: 1,
+            app_version: "1.0.0".to_owned(),
+            created_at: "".to_owned(),
+            files: vec![ManifestEntry {
+                path: "profiles/valid-sub.yaml".to_owned(),
+                sha256: "abc".to_owned(),
+                size: 10,
+            }],
+        };
+        let dest_map = build_dest_map(&paths, &manifest);
+        assert_eq!(dest_map.len(), 1);
+
+        // Invalid profile name (e.g. non-yaml or reserved name)
+        let manifest_invalid = BackupManifest {
+            version: 1,
+            app_version: "1.0.0".to_owned(),
+            created_at: "".to_owned(),
+            files: vec![ManifestEntry {
+                path: "profiles/invalid_ext.txt".to_owned(),
+                sha256: "abc".to_owned(),
+                size: 10,
+            }],
+        };
+        let dest_map_invalid = build_dest_map(&paths, &manifest_invalid);
+        assert_eq!(dest_map_invalid.len(), 0);
     }
 }
 
