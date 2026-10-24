@@ -169,22 +169,26 @@ pub fn detect_source(content: &str) -> String {
     if trimmed.is_empty() {
         return "empty".to_owned();
     }
-    // Surge / S-R format: lines like "DOMAIN,example.com,REJECT"
-    let surge_count = trimmed
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            !t.is_empty() && !t.starts_with('#') && t.contains(',') && !t.starts_with('-')
-        })
-        .count();
-    // Clash format: lines like "- DOMAIN,example.com,REJECT"
-    let clash_count = trimmed
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            t.starts_with("- ") && t.contains(',')
-        })
-        .count();
+
+    // Performance optimization: Count both Surge and Clash format rule lines
+    // in a single pass over lines to avoid iterating over rule text twice.
+    let mut surge_count = 0usize;
+    let mut clash_count = 0usize;
+
+    for line in trimmed.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if t.contains(',') {
+            if t.starts_with("- ") {
+                clash_count += 1;
+            } else if !t.starts_with('-') {
+                surge_count += 1;
+            }
+        }
+    }
+
     if clash_count > surge_count {
         "clash".to_owned()
     } else if surge_count > 0 {
@@ -206,63 +210,106 @@ pub fn normalize_to_prism_yaml(raw: &str) -> String {
 
     const BUILTIN_POLICIES: &[&str] = &["DIRECT", "REJECT", "PASS"];
 
-    let rules: Vec<String> = match source.as_str() {
-        "surge" => trimmed
-            .lines()
-            .filter(|l| {
-                let t = l.trim();
-                !t.is_empty() && !t.starts_with('#')
-            })
-            .map(|l| {
-                format!(
-                    "  - {}",
-                    replace_policy_with_template(l.trim(), BUILTIN_POLICIES)
-                )
-            })
-            .collect(),
-        _ => trimmed
-            .lines()
-            .filter(|l| {
-                let t = l.trim();
-                !t.is_empty() && !t.starts_with('#')
-            })
-            .map(|l| {
-                let t = l.trim();
-                let processed = replace_policy_with_template(t, BUILTIN_POLICIES);
-                if processed.starts_with("- ") {
-                    format!("  {processed}")
-                } else {
-                    format!("  - {processed}")
-                }
-            })
-            .collect(),
-    };
-    format!("rules:\n  $append:\n{}\n", rules.join("\n"))
+    // Performance optimization: Format normalized rule lines directly into a single
+    // pre-allocated String buffer to eliminate intermediate Vec<String> allocations and .join("\n").
+    let mut output = String::with_capacity(trimmed.len() + 32);
+    output.push_str("rules:\n  $append:\n");
+    let header_len = output.len();
+
+    if source == "surge" {
+        for line in trimmed.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            output.push_str("  - ");
+            let processed = replace_policy_with_template(t, BUILTIN_POLICIES);
+            output.push_str(&processed);
+            output.push('\n');
+        }
+    } else {
+        for line in trimmed.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            let processed = replace_policy_with_template(t, BUILTIN_POLICIES);
+            if processed.starts_with("- ") {
+                output.push_str("  ");
+            } else {
+                output.push_str("  - ");
+            }
+            output.push_str(&processed);
+            output.push('\n');
+        }
+    }
+
+    if output.len() == header_len {
+        output.push('\n');
+    }
+
+    output
 }
 
 /// Replace the policy field in a rule line with {{proxy}} if it's not a built-in policy.
+/// Performance optimization: Uses zero-allocation iterator slicing from splitn(4, ',')
+/// and direct String building instead of Vec<&str> heap allocations and array joining.
 fn replace_policy_with_template(rule: &str, builtin: &[&str]) -> String {
-    let parts: Vec<&str> = rule.splitn(4, ',').collect();
-    let is_match_final = parts
-        .first()
-        .is_some_and(|t| t.eq_ignore_ascii_case("MATCH") || t.eq_ignore_ascii_case("FINAL"));
-    let policy_index = if is_match_final {
-        1
-    } else if parts.len() >= 3 {
-        2
-    } else {
-        return rule.to_owned();
+    let mut iter = rule.splitn(4, ',');
+    let p0 = match iter.next() {
+        Some(p) => p,
+        None => return rule.to_owned(),
     };
-    let policy = parts.get(policy_index).map(|p| p.trim()).unwrap_or("");
-    if builtin.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
-        return rule.to_owned();
+
+    let p0_trimmed = p0.trim();
+    let is_match_final =
+        p0_trimmed.eq_ignore_ascii_case("MATCH") || p0_trimmed.eq_ignore_ascii_case("FINAL");
+
+    let p1 = match iter.next() {
+        Some(p) => p,
+        None => return rule.to_owned(),
+    };
+
+    if is_match_final {
+        let policy = p1.trim();
+        if builtin.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
+            return rule.to_owned();
+        }
+        let p2 = iter.next();
+        let p3 = iter.next();
+        let mut res = String::with_capacity(rule.len() + 8);
+        res.push_str(p0);
+        res.push_str(",{{proxy}}");
+        if let Some(rest2) = p2 {
+            res.push(',');
+            res.push_str(rest2);
+            if let Some(rest3) = p3 {
+                res.push(',');
+                res.push_str(rest3);
+            }
+        }
+        res
+    } else {
+        let p2 = match iter.next() {
+            Some(p) => p,
+            None => return rule.to_owned(),
+        };
+        let policy = p2.trim();
+        if builtin.iter().any(|b| b.eq_ignore_ascii_case(policy)) {
+            return rule.to_owned();
+        }
+        let p3 = iter.next();
+        let mut res = String::with_capacity(rule.len() + 8);
+        res.push_str(p0);
+        res.push(',');
+        res.push_str(p1);
+        res.push_str(",{{proxy}}");
+        if let Some(rest3) = p3 {
+            res.push(',');
+            res.push_str(rest3);
+        }
+        res
     }
-    parts
-        .iter()
-        .enumerate()
-        .map(|(i, part)| if i == policy_index { "{{proxy}}" } else { part })
-        .collect::<Vec<_>>()
-        .join(",")
 }
 
 #[cfg(test)]

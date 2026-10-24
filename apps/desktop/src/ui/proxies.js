@@ -807,12 +807,20 @@ export function initProxyControls() {
             // putting the static "Test Latency" back over it (restored in finally).
             const testLabelKey = testLabel?.dataset.i18n;
             if (testLabel && testLabelKey) delete testLabel.dataset.i18n;
+            // The tooltip must describe the Stop action while testing: keep a
+            // language change from putting "Test Latency" back over it
+            // (restored in finally).
+            const testBtnTitleKey = testBtn.dataset.i18nTitle;
+            if (testBtnTitleKey) delete testBtn.dataset.i18nTitle;
+            testBtn.title = _t.latencyStop || 'Stop';
             let testedCount = 0;
             _testRunResults.clear();
             let totalCount = 0;
             const showProgress = () => {
                 const tr = /** @type {any} */ (translations)[currentLang] || {};
                 if (testLabel) testLabel.textContent = totalCount > 0 ? `${tr.latencyStop || 'Stop'} · ${testedCount}/${totalCount}` : (tr.latencyStop || 'Stop');
+                // Keep the tooltip in sync with language changes during the test.
+                testBtn.title = tr.latencyStop || 'Stop';
                 testBtn.style.setProperty('--test-progress', totalCount > 0 ? `${Math.round((testedCount / totalCount) * 100)}%` : '0%');
             };
             testBtn.classList.add('is-testing');
@@ -971,6 +979,8 @@ export function initProxyControls() {
                 testBtn.style.removeProperty('--test-progress');
                 if (testLabel) testLabel.textContent = /** @type {any} */ (translations)[currentLang]?.testLatency || 'Test Latency';
                 if (testLabel && testLabelKey) testLabel.dataset.i18n = testLabelKey;
+                testBtn.title = /** @type {any} */ (translations)[currentLang]?.testLatency || 'Test Latency';
+                if (testBtnTitleKey) testBtn.dataset.i18nTitle = testBtnTitleKey;
                 // Safety net: clear stuck pending state and re-render BEFORE
                 // sorting — the sort must not gate or block this cleanup.
                 let hadStuckPending = false;
