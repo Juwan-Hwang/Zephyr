@@ -24,7 +24,7 @@
     "@unocss/preset-wind4": "^66.11.0",
     "eslint": "10.12.0",
     "globals": "^17.13.0",
-    "happy-dom": "^20.11.15",
+    "happy-dom": "^21.0.0",
     "husky": "^9.1.7",
     "style-dictionary": "^5.6.1",
     "typescript": "^7.0.2",
