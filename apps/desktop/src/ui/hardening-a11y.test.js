@@ -40,6 +40,19 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(doc.getElementById(titleId), titleId).toBeTruthy();
             expect(doc.getElementById(descId), descId).toBeTruthy();
         }
+
+        const portBtn = doc.getElementById('port-config-btn');
+        expect(portBtn).toBeTruthy();
+        expect(portBtn?.getAttribute('aria-labelledby')).toBe('setting-port-title current-port-display');
+        expect(portBtn?.getAttribute('aria-describedby')).toBe('setting-port-desc');
+        // The referenced IDs must resolve to real elements, otherwise the
+        // association silently does nothing for screen readers.
+        for (const id of (portBtn?.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)) {
+            expect(doc.getElementById(id), id).toBeTruthy();
+        }
+        for (const id of (portBtn?.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)) {
+            expect(doc.getElementById(id), id).toBeTruthy();
+        }
     });
 
     it('settings segmented controls carry role="group" and translatable aria-labels', () => {
@@ -239,6 +252,25 @@ describe('menu triggers accessibility', () => {
             expect(btn, id).toBeTruthy();
             expect(btn?.getAttribute('aria-haspopup')).toBe('menu');
             expect(btn?.getAttribute('aria-expanded')).toBe('false');
+        }
+    });
+
+    it('proxy toolbar buttons carry translatable tooltips without overriding accessible names', () => {
+        const doc = parseIndex();
+        const buttons = [
+            { id: 'proxy-group-trigger', titleKey: 'consoleNodePicker' },
+            { id: 'sort-btn', titleKey: 'consoleSortHint' },
+            { id: 'test-all-btn', titleKey: 'testLatency' },
+        ];
+        for (const { id, titleKey } of buttons) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-title')).toBe(titleKey);
+            expect(btn?.getAttribute('title')).toBeTruthy();
+            // The accessible name must keep coming from the button's visible
+            // content (selected group / current sort mode); a static
+            // aria-label would hide it from screen readers.
+            expect(btn?.getAttribute('aria-label')).toBeNull();
         }
     });
 });
