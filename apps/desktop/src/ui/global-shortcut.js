@@ -202,9 +202,9 @@ function openShortcutModal() {
                 </button>
             </div>
             <div class="flex items-center justify-between py-2">
-                <span class="text-xs text-[var(--text-tertiary)]">${escapeHtml(t.enableGlobalShortcuts || 'Enable Global Shortcuts')}</span>
+                <span id="shortcut-enable-label" class="text-xs text-[var(--text-tertiary)]">${escapeHtml(t.enableGlobalShortcuts || 'Enable Global Shortcuts')}</span>
                 <label class="ios-switch">
-                    <input type="checkbox" id="shortcut-enable-toggle" ${enabled ? 'checked' : ''} />
+                    <input type="checkbox" id="shortcut-enable-toggle" ${enabled ? 'checked' : ''} aria-labelledby="shortcut-enable-label" />
                     <span class="switch-slider"></span>
                 </label>
             </div>

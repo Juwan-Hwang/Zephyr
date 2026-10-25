@@ -440,16 +440,16 @@ function initLogSettingsModal() {
 
                 <div class="space-y-3">
                     <label class="flex items-center justify-between gap-4 cursor-pointer">
-                        <span class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logAppEnabled || 'Save app logs')}</span>
+                        <span id="log-app-label" class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logAppEnabled || 'Save app logs')}</span>
                         <span class="ios-switch">
-                            <input type="checkbox" id="log-app-toggle" ${logAppEnabled ? 'checked' : ''}>
+                            <input type="checkbox" id="log-app-toggle" ${logAppEnabled ? 'checked' : ''} aria-labelledby="log-app-label">
                             <span class="switch-slider"></span>
                         </span>
                     </label>
                     <label class="flex items-center justify-between gap-4 cursor-pointer">
-                        <span class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logCoreEnabled || 'Save core logs')}</span>
+                        <span id="log-core-label" class="text-sm text-[var(--text-primary)]">${escapeHtml(t.logCoreEnabled || 'Save core logs')}</span>
                         <span class="ios-switch">
-                            <input type="checkbox" id="log-core-toggle" ${logCoreEnabled ? 'checked' : ''}>
+                            <input type="checkbox" id="log-core-toggle" ${logCoreEnabled ? 'checked' : ''} aria-labelledby="log-core-label">
                             <span class="switch-slider"></span>
                         </span>
                     </label>
