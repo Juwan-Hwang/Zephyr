@@ -96,6 +96,9 @@ pub fn plugin_delete(state: State<PrismState>, plugin_id: String) -> Result<(), 
     }
     let dir = plugins_dir(&state)?;
     let plugin_path = dir.join(&plugin_id);
+    // Security: ensure the resolved plugin path is strictly inside the plugins directory
+    zephyr_core::config::sanitizer::validate_path_within_dir(&plugin_path, &dir)
+        .map_err(|e| format!("Delete failed: {e}"))?;
     if plugin_path.exists() {
         std::fs::remove_dir_all(&plugin_path).map_err(|e| format!("Delete failed: {e}"))?;
     }

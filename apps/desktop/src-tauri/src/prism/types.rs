@@ -71,19 +71,36 @@ pub fn check_name_size(input: &str, label: &str) -> Result<(), String> {
 /// Validate that a plugin ID is a simple name (no path traversal).
 pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     const MAX_PLUGIN_ID_LEN: usize = 128;
+    const RESERVED_NAMES: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
     let decoded = url_decode_complete(plugin_id);
-    if decoded.is_empty()
+    let trimmed = decoded.trim_end_matches([' ', '.']);
+
+    if trimmed.is_empty()
+        || decoded != trimmed
         || decoded.len() > MAX_PLUGIN_ID_LEN
         || decoded.contains('/')
         || decoded.contains('\\')
+        || decoded.contains(':')
         || decoded.contains("..")
         || decoded.contains('\0')
+        || decoded.chars().any(char::is_control)
     {
         return Err(String::from(
             "Invalid plugin ID: contains unsafe characters or exceeds length limit",
         ));
     }
+
+    if RESERVED_NAMES.contains(&trimmed.to_ascii_uppercase().as_str()) {
+        return Err(format!(
+            "Invalid plugin ID: '{plugin_id}' is a reserved Windows device name"
+        ));
+    }
+
     Ok(())
 }
 
@@ -395,4 +412,26 @@ pub fn write_prism_settings(
     settings: &PrismSettings,
 ) -> Result<(), String> {
     write_json(prism_dir, "settings.json", settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_plugin_id_ok() {
+        assert!(validate_plugin_id("my-plugin").is_ok());
+        assert!(validate_plugin_id("plugin_123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_plugin_id_unsafe_chars() {
+        assert!(validate_plugin_id("../etc/passwd").is_err());
+        assert!(validate_plugin_id("plugin:stream").is_err());
+        assert!(validate_plugin_id("plugin\r\n").is_err());
+        assert!(validate_plugin_id("CON").is_err());
+        assert!(validate_plugin_id("nul").is_err());
+        assert!(validate_plugin_id("C:").is_err());
+        assert!(validate_plugin_id("plugin. ").is_err());
+    }
 }
